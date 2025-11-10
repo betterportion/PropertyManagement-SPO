@@ -1,10 +1,20 @@
 import { useState } from "react";
 import ContactsInvoices from "@/components/ContactsInvoices";
 import RegionSelector from "@/components/RegionSelector";
+import BuildingSelector from "@/components/BuildingSelector";
 
 export default function Contacts() {
   //todo: remove mock functionality
   const [selectedRegion, setSelectedRegion] = useState("all");
+  const [selectedBuilding, setSelectedBuilding] = useState("all");
+
+  const buildings = [
+    { id: "1", address: "123 Main St, Austin, TX" },
+    { id: "2", address: "456 Oak Ave, Austin, TX" },
+    { id: "3", address: "789 River Rd, Austin, TX" },
+    { id: "4", address: "321 Park Blvd, Austin, TX" },
+    { id: "5", address: "654 Elm St, Austin, TX" },
+  ];
 
   const allContacts = [
     {
@@ -15,6 +25,7 @@ export default function Contacts() {
       phone: "(512) 555-0123",
       email: "john@abcplumbing.com",
       region: "west-central" as const,
+      buildingId: "1",
     },
     {
       id: "2",
@@ -24,6 +35,7 @@ export default function Contacts() {
       phone: "(512) 555-0456",
       email: "sarah@elitehvac.com",
       region: "east-central" as const,
+      buildingId: "2",
     },
     {
       id: "3",
@@ -33,6 +45,7 @@ export default function Contacts() {
       phone: "(512) 555-0789",
       email: "david@brightelectric.com",
       region: "north-west" as const,
+      buildingId: "3",
     },
     {
       id: "4",
@@ -42,6 +55,7 @@ export default function Contacts() {
       phone: "(512) 555-0321",
       email: "lisa@premierlandscape.com",
       region: "south-west" as const,
+      buildingId: "4",
     },
     {
       id: "5",
@@ -51,6 +65,7 @@ export default function Contacts() {
       phone: "(512) 555-0998",
       email: "robert@quickfix.com",
       region: "north-east" as const,
+      buildingId: "5",
     },
     {
       id: "6",
@@ -60,6 +75,7 @@ export default function Contacts() {
       phone: "(512) 555-0775",
       email: "jennifer@acecarp.com",
       region: "south-east" as const,
+      buildingId: "1",
     },
   ];
 
@@ -73,6 +89,7 @@ export default function Contacts() {
       status: "pending" as const,
       invoiceNumber: "INV-2025-001",
       region: "west-central" as const,
+      buildingId: "1",
     },
     {
       id: "2",
@@ -83,6 +100,7 @@ export default function Contacts() {
       status: "paid" as const,
       invoiceNumber: "INV-2025-002",
       region: "east-central" as const,
+      buildingId: "2",
     },
     {
       id: "3",
@@ -93,6 +111,7 @@ export default function Contacts() {
       status: "pending" as const,
       invoiceNumber: "INV-2025-003",
       region: "north-west" as const,
+      buildingId: "3",
     },
     {
       id: "4",
@@ -103,6 +122,7 @@ export default function Contacts() {
       status: "overdue" as const,
       invoiceNumber: "INV-2025-004",
       region: "south-west" as const,
+      buildingId: "4",
     },
     {
       id: "5",
@@ -113,6 +133,7 @@ export default function Contacts() {
       status: "pending" as const,
       invoiceNumber: "INV-2025-005",
       region: "north-east" as const,
+      buildingId: "5",
     },
     {
       id: "6",
@@ -123,16 +144,21 @@ export default function Contacts() {
       status: "paid" as const,
       invoiceNumber: "INV-2025-006",
       region: "south-east" as const,
+      buildingId: "1",
     },
   ];
 
-  const contacts = selectedRegion === "all"
-    ? allContacts
-    : allContacts.filter(contact => contact.region === selectedRegion);
+  const contacts = allContacts.filter((contact) => {
+    const matchesRegion = selectedRegion === "all" || contact.region === selectedRegion;
+    const matchesBuilding = selectedBuilding === "all" || contact.buildingId === selectedBuilding;
+    return matchesRegion && matchesBuilding;
+  });
 
-  const invoices = selectedRegion === "all"
-    ? allInvoices
-    : allInvoices.filter(invoice => invoice.region === selectedRegion);
+  const invoices = allInvoices.filter((invoice) => {
+    const matchesRegion = selectedRegion === "all" || invoice.region === selectedRegion;
+    const matchesBuilding = selectedBuilding === "all" || invoice.buildingId === selectedBuilding;
+    return matchesRegion && matchesBuilding;
+  });
 
   return (
     <div className="space-y-6">
@@ -141,10 +167,17 @@ export default function Contacts() {
         <p className="text-muted-foreground mt-1">Manage maintenance contacts and track invoices</p>
       </div>
 
-      <RegionSelector
-        selectedRegion={selectedRegion}
-        onRegionChange={setSelectedRegion}
-      />
+      <div className="flex flex-wrap gap-4">
+        <RegionSelector
+          selectedRegion={selectedRegion}
+          onRegionChange={setSelectedRegion}
+        />
+        <BuildingSelector
+          selectedBuilding={selectedBuilding}
+          onBuildingChange={setSelectedBuilding}
+          buildings={buildings}
+        />
+      </div>
 
       <ContactsInvoices
         contacts={contacts}

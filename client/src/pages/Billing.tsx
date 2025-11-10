@@ -1,10 +1,20 @@
 import { useState } from "react";
 import ResidentBilling from "@/components/ResidentBilling";
 import RegionSelector from "@/components/RegionSelector";
+import BuildingSelector from "@/components/BuildingSelector";
 
 export default function Billing() {
   //todo: remove mock functionality
   const [selectedRegion, setSelectedRegion] = useState("all");
+  const [selectedBuilding, setSelectedBuilding] = useState("all");
+
+  const buildings = [
+    { id: "1", address: "123 Main St, Austin, TX" },
+    { id: "2", address: "456 Oak Ave, Austin, TX" },
+    { id: "3", address: "789 River Rd, Austin, TX" },
+    { id: "4", address: "321 Park Blvd, Austin, TX" },
+    { id: "5", address: "654 Elm St, Austin, TX" },
+  ];
 
   const allResidents = [
     {
@@ -16,6 +26,7 @@ export default function Billing() {
       moveInDate: new Date(2024, 5, 1),
       rentAmount: 1850,
       region: "west-central" as const,
+      buildingId: "1",
     },
     {
       id: "2",
@@ -26,6 +37,7 @@ export default function Billing() {
       moveInDate: new Date(2024, 2, 15),
       rentAmount: 2100,
       region: "east-central" as const,
+      buildingId: "2",
     },
     {
       id: "3",
@@ -36,6 +48,7 @@ export default function Billing() {
       moveInDate: new Date(2024, 8, 1),
       rentAmount: 1950,
       region: "north-west" as const,
+      buildingId: "3",
     },
     {
       id: "4",
@@ -46,6 +59,7 @@ export default function Billing() {
       moveInDate: new Date(2024, 3, 10),
       rentAmount: 2200,
       region: "south-west" as const,
+      buildingId: "4",
     },
     {
       id: "5",
@@ -56,6 +70,7 @@ export default function Billing() {
       moveInDate: new Date(2024, 7, 20),
       rentAmount: 1900,
       region: "north-east" as const,
+      buildingId: "5",
     },
     {
       id: "6",
@@ -66,6 +81,7 @@ export default function Billing() {
       moveInDate: new Date(2024, 1, 5),
       rentAmount: 2050,
       region: "south-east" as const,
+      buildingId: "1",
     },
   ];
 
@@ -120,9 +136,11 @@ export default function Billing() {
     },
   ];
 
-  const residents = selectedRegion === "all" 
-    ? allResidents 
-    : allResidents.filter(resident => resident.region === selectedRegion);
+  const residents = allResidents.filter((resident) => {
+    const matchesRegion = selectedRegion === "all" || resident.region === selectedRegion;
+    const matchesBuilding = selectedBuilding === "all" || resident.buildingId === selectedBuilding;
+    return matchesRegion && matchesBuilding;
+  });
 
   return (
     <div className="space-y-6">
@@ -131,10 +149,17 @@ export default function Billing() {
         <p className="text-muted-foreground mt-1">Manage resident information and billing records</p>
       </div>
 
-      <RegionSelector
-        selectedRegion={selectedRegion}
-        onRegionChange={setSelectedRegion}
-      />
+      <div className="flex flex-wrap gap-4">
+        <RegionSelector
+          selectedRegion={selectedRegion}
+          onRegionChange={setSelectedRegion}
+        />
+        <BuildingSelector
+          selectedBuilding={selectedBuilding}
+          onBuildingChange={setSelectedBuilding}
+          buildings={buildings}
+        />
+      </div>
 
       <ResidentBilling
         residents={residents}

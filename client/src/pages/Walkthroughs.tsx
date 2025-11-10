@@ -1,10 +1,20 @@
 import { useState } from "react";
 import WalkthroughGallery from "@/components/WalkthroughGallery";
 import RegionSelector from "@/components/RegionSelector";
+import BuildingSelector from "@/components/BuildingSelector";
 
 export default function Walkthroughs() {
   //todo: remove mock functionality
   const [selectedRegion, setSelectedRegion] = useState("all");
+  const [selectedBuilding, setSelectedBuilding] = useState("all");
+
+  const buildings = [
+    { id: "1", address: "123 Main St, Austin, TX" },
+    { id: "2", address: "456 Oak Ave, Austin, TX" },
+    { id: "3", address: "789 River Rd, Austin, TX" },
+    { id: "4", address: "321 Park Blvd, Austin, TX" },
+    { id: "5", address: "654 Elm St, Austin, TX" },
+  ];
 
   const allImages = [
     {
@@ -15,6 +25,7 @@ export default function Walkthroughs() {
       propertyName: "West Central Property",
       location: "Unit 204 - Living Room",
       region: "west-central" as const,
+      buildingId: "1",
     },
     {
       id: "2",
@@ -24,6 +35,7 @@ export default function Walkthroughs() {
       propertyName: "East Central Property",
       location: "Unit 305 - Kitchen",
       region: "east-central" as const,
+      buildingId: "2",
     },
     {
       id: "3",
@@ -33,6 +45,7 @@ export default function Walkthroughs() {
       propertyName: "North West Property",
       location: "Unit 101 - Bathroom",
       region: "north-west" as const,
+      buildingId: "3",
     },
     {
       id: "4",
@@ -42,6 +55,7 @@ export default function Walkthroughs() {
       propertyName: "South West Property",
       location: "Unit 402 - Bedroom",
       region: "south-west" as const,
+      buildingId: "4",
     },
     {
       id: "5",
@@ -51,6 +65,7 @@ export default function Walkthroughs() {
       propertyName: "North East Property",
       location: "Building A - Lobby",
       region: "north-east" as const,
+      buildingId: "5",
     },
     {
       id: "6",
@@ -60,12 +75,15 @@ export default function Walkthroughs() {
       propertyName: "South East Property",
       location: "Building A - Gym",
       region: "south-east" as const,
+      buildingId: "1",
     },
   ];
 
-  const images = selectedRegion === "all" 
-    ? allImages 
-    : allImages.filter(img => img.region === selectedRegion);
+  const images = allImages.filter((img) => {
+    const matchesRegion = selectedRegion === "all" || img.region === selectedRegion;
+    const matchesBuilding = selectedBuilding === "all" || img.buildingId === selectedBuilding;
+    return matchesRegion && matchesBuilding;
+  });
 
   return (
     <div className="space-y-6">
@@ -74,10 +92,17 @@ export default function Walkthroughs() {
         <p className="text-muted-foreground mt-1">Property inspection and walkthrough documentation</p>
       </div>
 
-      <RegionSelector
-        selectedRegion={selectedRegion}
-        onRegionChange={setSelectedRegion}
-      />
+      <div className="flex flex-wrap gap-4">
+        <RegionSelector
+          selectedRegion={selectedRegion}
+          onRegionChange={setSelectedRegion}
+        />
+        <BuildingSelector
+          selectedBuilding={selectedBuilding}
+          onBuildingChange={setSelectedBuilding}
+          buildings={buildings}
+        />
+      </div>
 
       <WalkthroughGallery
         images={images}

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import MaintenanceRequestCard from "@/components/MaintenanceRequestCard";
 import RegionSelector from "@/components/RegionSelector";
+import BuildingSelector from "@/components/BuildingSelector";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { Search } from "lucide-react";
@@ -9,6 +10,16 @@ export default function Maintenance() {
   //todo: remove mock functionality
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedRegion, setSelectedRegion] = useState("all");
+  const [selectedBuilding, setSelectedBuilding] = useState("all");
+
+  const buildings = [
+    { id: "1", address: "123 Main St, Austin, TX" },
+    { id: "2", address: "456 Oak Ave, Austin, TX" },
+    { id: "3", address: "789 River Rd, Austin, TX" },
+    { id: "4", address: "321 Park Blvd, Austin, TX" },
+    { id: "5", address: "654 Elm St, Austin, TX" },
+  ];
+
   const [requests, setRequests] = useState([
     {
       id: "1",
@@ -21,6 +32,7 @@ export default function Maintenance() {
       submittedDate: new Date(2025, 10, 5),
       location: "Unit 204",
       region: "west-central" as const,
+      buildingId: "1",
     },
     {
       id: "2",
@@ -33,6 +45,7 @@ export default function Maintenance() {
       submittedDate: new Date(2025, 10, 6),
       location: "Unit 305",
       region: "east-central" as const,
+      buildingId: "2",
     },
     {
       id: "3",
@@ -45,6 +58,7 @@ export default function Maintenance() {
       submittedDate: new Date(2025, 10, 1),
       location: "Unit 101",
       region: "north-west" as const,
+      buildingId: "3",
     },
     {
       id: "4",
@@ -57,6 +71,7 @@ export default function Maintenance() {
       submittedDate: new Date(2025, 10, 7),
       location: "Unit 402",
       region: "south-west" as const,
+      buildingId: "4",
     },
     {
       id: "5",
@@ -69,6 +84,7 @@ export default function Maintenance() {
       submittedDate: new Date(2025, 10, 8),
       location: "Unit 501",
       region: "north-east" as const,
+      buildingId: "5",
     },
     {
       id: "6",
@@ -81,6 +97,7 @@ export default function Maintenance() {
       submittedDate: new Date(2025, 10, 9),
       location: "Unit 603",
       region: "south-east" as const,
+      buildingId: "1",
     },
   ]);
 
@@ -93,7 +110,8 @@ export default function Maintenance() {
     const matchesSearch = r.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       r.location.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesRegion = selectedRegion === "all" || r.region === selectedRegion;
-    return matchesSearch && matchesRegion;
+    const matchesBuilding = selectedBuilding === "all" || r.buildingId === selectedBuilding;
+    return matchesSearch && matchesRegion && matchesBuilding;
   });
 
   const pendingRequests = filteredRequests.filter((r) => r.status === "pending");
@@ -107,12 +125,17 @@ export default function Maintenance() {
         <p className="text-muted-foreground mt-1">Manage all property maintenance requests</p>
       </div>
 
-      <div className="flex gap-4">
+      <div className="flex flex-wrap gap-4">
         <RegionSelector 
           selectedRegion={selectedRegion}
           onRegionChange={setSelectedRegion}
         />
-        <div className="relative flex-1">
+        <BuildingSelector
+          selectedBuilding={selectedBuilding}
+          onBuildingChange={setSelectedBuilding}
+          buildings={buildings}
+        />
+        <div className="relative flex-1 min-w-64">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
             placeholder="Search by title or location..."
