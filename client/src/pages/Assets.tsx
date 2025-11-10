@@ -1,20 +1,14 @@
 import { useState } from "react";
 import AssetTracker from "@/components/AssetTracker";
-import PropertySelector from "@/components/PropertySelector";
+import RegionSelector from "@/components/RegionSelector";
 import { Button } from "@/components/ui/button";
 import { Plus } from "lucide-react";
 
 export default function Assets() {
   //todo: remove mock functionality
-  const [selectedProperty, setSelectedProperty] = useState("1");
+  const [selectedRegion, setSelectedRegion] = useState("all");
 
-  const properties = [
-    { id: "1", name: "Sunset Apartments", address: "123 Main St, Austin, TX" },
-    { id: "2", name: "Oak Ridge Complex", address: "456 Oak Ave, Austin, TX" },
-    { id: "3", name: "River View Condos", address: "789 River Rd, Austin, TX" },
-  ];
-
-  const assets = [
+  const allAssets = [
     {
       id: "1",
       name: "Central HVAC System",
@@ -24,6 +18,7 @@ export default function Assets() {
       lastServiced: new Date(2025, 9, 15),
       serialNumber: "HVAC-2024-001",
       location: "Building A - Roof",
+      region: "west-central" as const,
     },
     {
       id: "2",
@@ -34,6 +29,7 @@ export default function Assets() {
       lastServiced: new Date(2025, 8, 20),
       serialNumber: "WM-204-2020",
       location: "Unit 204 - Laundry",
+      region: "east-central" as const,
     },
     {
       id: "3",
@@ -44,6 +40,7 @@ export default function Assets() {
       lastServiced: new Date(2025, 10, 1),
       serialNumber: "WH-A-2023",
       location: "Building A - Utility Room",
+      region: "north-west" as const,
     },
     {
       id: "4",
@@ -54,6 +51,7 @@ export default function Assets() {
       lastServiced: new Date(2025, 7, 10),
       serialNumber: "OV-305-2021",
       location: "Unit 305 - Kitchen",
+      region: "south-west" as const,
     },
     {
       id: "5",
@@ -62,6 +60,7 @@ export default function Assets() {
       type: "movable" as const,
       condition: "excellent" as const,
       location: "Unit 101 - Living Room",
+      region: "north-east" as const,
     },
     {
       id: "6",
@@ -71,6 +70,7 @@ export default function Assets() {
       condition: "good" as const,
       serialNumber: "TV-2023-042",
       location: "Unit 305 - Living Room",
+      region: "south-east" as const,
     },
     {
       id: "7",
@@ -79,6 +79,7 @@ export default function Assets() {
       type: "movable" as const,
       condition: "good" as const,
       location: "Unit 204 - Dining Room",
+      region: "west-central" as const,
     },
     {
       id: "8",
@@ -88,8 +89,13 @@ export default function Assets() {
       condition: "excellent" as const,
       serialNumber: "SS-2024-015",
       location: "Common Area - Entertainment Room",
+      region: "east-central" as const,
     },
   ];
+
+  const assets = selectedRegion === "all" 
+    ? allAssets 
+    : allAssets.filter(asset => asset.region === selectedRegion);
 
   return (
     <div className="space-y-6">
@@ -99,10 +105,9 @@ export default function Assets() {
       </div>
 
       <div className="flex items-center justify-between gap-4">
-        <PropertySelector
-          selectedProperty={selectedProperty}
-          onPropertyChange={setSelectedProperty}
-          properties={properties}
+        <RegionSelector
+          selectedRegion={selectedRegion}
+          onRegionChange={setSelectedRegion}
         />
         <Button data-testid="button-add-asset">
           <Plus className="h-4 w-4 mr-2" />

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import MaintenanceRequestCard from "@/components/MaintenanceRequestCard";
+import RegionSelector from "@/components/RegionSelector";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { Search } from "lucide-react";
@@ -7,6 +8,7 @@ import { Search } from "lucide-react";
 export default function Maintenance() {
   //todo: remove mock functionality
   const [searchQuery, setSearchQuery] = useState("");
+  const [selectedRegion, setSelectedRegion] = useState("all");
   const [requests, setRequests] = useState([
     {
       id: "1",
@@ -18,6 +20,7 @@ export default function Maintenance() {
       submittedBy: "Sarah Johnson",
       submittedDate: new Date(2025, 10, 5),
       location: "Unit 204",
+      region: "west-central" as const,
     },
     {
       id: "2",
@@ -29,6 +32,7 @@ export default function Maintenance() {
       submittedBy: "Michael Chen",
       submittedDate: new Date(2025, 10, 6),
       location: "Unit 305",
+      region: "east-central" as const,
     },
     {
       id: "3",
@@ -40,6 +44,7 @@ export default function Maintenance() {
       submittedBy: "Emma Wilson",
       submittedDate: new Date(2025, 10, 1),
       location: "Unit 101",
+      region: "north-west" as const,
     },
     {
       id: "4",
@@ -51,6 +56,31 @@ export default function Maintenance() {
       submittedBy: "David Brown",
       submittedDate: new Date(2025, 10, 7),
       location: "Unit 402",
+      region: "south-west" as const,
+    },
+    {
+      id: "5",
+      title: "Water heater issue",
+      description: "Hot water not staying hot for very long.",
+      category: "Plumbing",
+      priority: "high" as const,
+      status: "pending" as const,
+      submittedBy: "Lisa Martinez",
+      submittedDate: new Date(2025, 10, 8),
+      location: "Unit 501",
+      region: "north-east" as const,
+    },
+    {
+      id: "6",
+      title: "Balcony door stuck",
+      description: "The sliding door to the balcony is difficult to open and close.",
+      category: "Structural",
+      priority: "low" as const,
+      status: "pending" as const,
+      submittedBy: "Tom Anderson",
+      submittedDate: new Date(2025, 10, 9),
+      location: "Unit 603",
+      region: "south-east" as const,
     },
   ]);
 
@@ -59,10 +89,12 @@ export default function Maintenance() {
     console.log(`Updated request ${id} to ${status}`);
   };
 
-  const filteredRequests = requests.filter((r) =>
-    r.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    r.location.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredRequests = requests.filter((r) => {
+    const matchesSearch = r.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      r.location.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesRegion = selectedRegion === "all" || r.region === selectedRegion;
+    return matchesSearch && matchesRegion;
+  });
 
   const pendingRequests = filteredRequests.filter((r) => r.status === "pending");
   const inProgressRequests = filteredRequests.filter((r) => r.status === "in_progress");
@@ -75,15 +107,21 @@ export default function Maintenance() {
         <p className="text-muted-foreground mt-1">Manage all property maintenance requests</p>
       </div>
 
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-        <Input
-          placeholder="Search by title or location..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          className="pl-10"
-          data-testid="input-search-requests"
+      <div className="flex gap-4">
+        <RegionSelector 
+          selectedRegion={selectedRegion}
+          onRegionChange={setSelectedRegion}
         />
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Search by title or location..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="pl-10"
+            data-testid="input-search-requests"
+          />
+        </div>
       </div>
 
       <Tabs defaultValue="all" data-testid="tabs-request-status">
