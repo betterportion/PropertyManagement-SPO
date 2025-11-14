@@ -1,15 +1,44 @@
 import {
   users,
   userPermissions,
+  maintenanceRequests,
+  walkthroughRooms,
+  walkthroughPhotos,
+  assets,
+  maintenanceContacts,
+  invoices,
+  billingRecords,
   type User,
   type UpsertUser,
   type UserPermissions,
   type InsertUserPermissions,
+  type MaintenanceRequest,
+  type InsertMaintenanceRequest,
+  type WalkthroughRoom,
+  type InsertWalkthroughRoom,
+  type WalkthroughPhoto,
+  type InsertWalkthroughPhoto,
+  type Asset,
+  type InsertAsset,
+  type MaintenanceContact,
+  type InsertMaintenanceContact,
+  type Invoice,
+  type InsertInvoice,
+  type BillingRecord,
+  type InsertBillingRecord,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq } from "drizzle-orm";
+import { eq, and, desc } from "drizzle-orm";
+
+// Helper function to filter out undefined values from partial updates
+function filterUndefined<T extends Record<string, any>>(obj: T): Partial<T> {
+  return Object.fromEntries(
+    Object.entries(obj).filter(([_, value]) => value !== undefined)
+  ) as Partial<T>;
+}
 
 export interface IStorage {
+  // User Management
   getUser(id: string): Promise<User | undefined>;
   upsertUser(user: UpsertUser): Promise<User>;
   getAllUsers(): Promise<User[]>;
@@ -18,6 +47,57 @@ export interface IStorage {
   getUserPermissions(userId: string): Promise<UserPermissions | undefined>;
   upsertUserPermissions(permissions: InsertUserPermissions): Promise<UserPermissions>;
   deleteUser(id: string): Promise<void>;
+
+  // Maintenance Requests
+  createMaintenanceRequest(request: InsertMaintenanceRequest): Promise<MaintenanceRequest>;
+  getMaintenanceRequest(id: string): Promise<MaintenanceRequest | undefined>;
+  getAllMaintenanceRequests(): Promise<MaintenanceRequest[]>;
+  updateMaintenanceRequest(id: string, data: Partial<InsertMaintenanceRequest>): Promise<MaintenanceRequest>;
+  deleteMaintenanceRequest(id: string): Promise<void>;
+
+  // Walkthrough Rooms
+  createWalkthroughRoom(room: InsertWalkthroughRoom): Promise<WalkthroughRoom>;
+  getWalkthroughRoom(id: string): Promise<WalkthroughRoom | undefined>;
+  getAllWalkthroughRooms(): Promise<WalkthroughRoom[]>;
+  getWalkthroughRoomsByBuilding(buildingAddress: string): Promise<WalkthroughRoom[]>;
+  updateWalkthroughRoom(id: string, data: Partial<InsertWalkthroughRoom>): Promise<WalkthroughRoom>;
+  deleteWalkthroughRoom(id: string): Promise<void>;
+
+  // Walkthrough Photos
+  createWalkthroughPhoto(photo: InsertWalkthroughPhoto): Promise<WalkthroughPhoto>;
+  getWalkthroughPhoto(id: string): Promise<WalkthroughPhoto | undefined>;
+  getAllWalkthroughPhotos(): Promise<WalkthroughPhoto[]>;
+  getWalkthroughPhotosByRoom(roomId: string): Promise<WalkthroughPhoto[]>;
+  updateWalkthroughPhoto(id: string, data: Partial<InsertWalkthroughPhoto>): Promise<WalkthroughPhoto>;
+  deleteWalkthroughPhoto(id: string): Promise<void>;
+
+  // Assets
+  createAsset(asset: InsertAsset): Promise<Asset>;
+  getAsset(id: string): Promise<Asset | undefined>;
+  getAllAssets(): Promise<Asset[]>;
+  updateAsset(id: string, data: Partial<InsertAsset>): Promise<Asset>;
+  deleteAsset(id: string): Promise<void>;
+
+  // Maintenance Contacts
+  createMaintenanceContact(contact: InsertMaintenanceContact): Promise<MaintenanceContact>;
+  getMaintenanceContact(id: string): Promise<MaintenanceContact | undefined>;
+  getAllMaintenanceContacts(): Promise<MaintenanceContact[]>;
+  updateMaintenanceContact(id: string, data: Partial<InsertMaintenanceContact>): Promise<MaintenanceContact>;
+  deleteMaintenanceContact(id: string): Promise<void>;
+
+  // Invoices
+  createInvoice(invoice: InsertInvoice): Promise<Invoice>;
+  getInvoice(id: string): Promise<Invoice | undefined>;
+  getAllInvoices(): Promise<Invoice[]>;
+  updateInvoice(id: string, data: Partial<InsertInvoice>): Promise<Invoice>;
+  deleteInvoice(id: string): Promise<void>;
+
+  // Billing Records
+  createBillingRecord(record: InsertBillingRecord): Promise<BillingRecord>;
+  getBillingRecord(id: string): Promise<BillingRecord | undefined>;
+  getAllBillingRecords(): Promise<BillingRecord[]>;
+  updateBillingRecord(id: string, data: Partial<InsertBillingRecord>): Promise<BillingRecord>;
+  deleteBillingRecord(id: string): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -108,6 +188,218 @@ export class DatabaseStorage implements IStorage {
 
   async deleteUser(id: string): Promise<void> {
     await db.delete(users).where(eq(users.id, id));
+  }
+
+  // Maintenance Requests Implementation
+  async createMaintenanceRequest(requestData: InsertMaintenanceRequest): Promise<MaintenanceRequest> {
+    const [request] = await db.insert(maintenanceRequests).values(requestData).returning();
+    return request;
+  }
+
+  async getMaintenanceRequest(id: string): Promise<MaintenanceRequest | undefined> {
+    const [request] = await db.select().from(maintenanceRequests).where(eq(maintenanceRequests.id, id));
+    return request;
+  }
+
+  async getAllMaintenanceRequests(): Promise<MaintenanceRequest[]> {
+    return await db.select().from(maintenanceRequests).orderBy(desc(maintenanceRequests.submittedDate));
+  }
+
+  async updateMaintenanceRequest(id: string, data: Partial<InsertMaintenanceRequest>): Promise<MaintenanceRequest> {
+    const [request] = await db
+      .update(maintenanceRequests)
+      .set({ ...filterUndefined(data), updatedAt: new Date() })
+      .where(eq(maintenanceRequests.id, id))
+      .returning();
+    return request;
+  }
+
+  async deleteMaintenanceRequest(id: string): Promise<void> {
+    await db.delete(maintenanceRequests).where(eq(maintenanceRequests.id, id));
+  }
+
+  // Walkthrough Rooms Implementation
+  async createWalkthroughRoom(roomData: InsertWalkthroughRoom): Promise<WalkthroughRoom> {
+    const [room] = await db.insert(walkthroughRooms).values(roomData).returning();
+    return room;
+  }
+
+  async getWalkthroughRoom(id: string): Promise<WalkthroughRoom | undefined> {
+    const [room] = await db.select().from(walkthroughRooms).where(eq(walkthroughRooms.id, id));
+    return room;
+  }
+
+  async getAllWalkthroughRooms(): Promise<WalkthroughRoom[]> {
+    return await db.select().from(walkthroughRooms).orderBy(walkthroughRooms.displayOrder);
+  }
+
+  async getWalkthroughRoomsByBuilding(buildingAddress: string): Promise<WalkthroughRoom[]> {
+    return await db
+      .select()
+      .from(walkthroughRooms)
+      .where(eq(walkthroughRooms.buildingAddress, buildingAddress))
+      .orderBy(walkthroughRooms.displayOrder);
+  }
+
+  async updateWalkthroughRoom(id: string, data: Partial<InsertWalkthroughRoom>): Promise<WalkthroughRoom> {
+    const [room] = await db
+      .update(walkthroughRooms)
+      .set({ ...filterUndefined(data), updatedAt: new Date() })
+      .where(eq(walkthroughRooms.id, id))
+      .returning();
+    return room;
+  }
+
+  async deleteWalkthroughRoom(id: string): Promise<void> {
+    await db.delete(walkthroughRooms).where(eq(walkthroughRooms.id, id));
+  }
+
+  // Walkthrough Photos Implementation
+  async createWalkthroughPhoto(photoData: InsertWalkthroughPhoto): Promise<WalkthroughPhoto> {
+    const [photo] = await db.insert(walkthroughPhotos).values(photoData).returning();
+    return photo;
+  }
+
+  async getWalkthroughPhoto(id: string): Promise<WalkthroughPhoto | undefined> {
+    const [photo] = await db.select().from(walkthroughPhotos).where(eq(walkthroughPhotos.id, id));
+    return photo;
+  }
+
+  async getAllWalkthroughPhotos(): Promise<WalkthroughPhoto[]> {
+    return await db.select().from(walkthroughPhotos).orderBy(desc(walkthroughPhotos.uploadedDate));
+  }
+
+  async getWalkthroughPhotosByRoom(roomId: string): Promise<WalkthroughPhoto[]> {
+    return await db
+      .select()
+      .from(walkthroughPhotos)
+      .where(eq(walkthroughPhotos.roomId, roomId))
+      .orderBy(desc(walkthroughPhotos.uploadedDate));
+  }
+
+  async updateWalkthroughPhoto(id: string, data: Partial<InsertWalkthroughPhoto>): Promise<WalkthroughPhoto> {
+    const [photo] = await db
+      .update(walkthroughPhotos)
+      .set({ ...filterUndefined(data), updatedAt: new Date() })
+      .where(eq(walkthroughPhotos.id, id))
+      .returning();
+    return photo;
+  }
+
+  async deleteWalkthroughPhoto(id: string): Promise<void> {
+    await db.delete(walkthroughPhotos).where(eq(walkthroughPhotos.id, id));
+  }
+
+  // Assets Implementation
+  async createAsset(assetData: InsertAsset): Promise<Asset> {
+    const [asset] = await db.insert(assets).values(assetData).returning();
+    return asset;
+  }
+
+  async getAsset(id: string): Promise<Asset | undefined> {
+    const [asset] = await db.select().from(assets).where(eq(assets.id, id));
+    return asset;
+  }
+
+  async getAllAssets(): Promise<Asset[]> {
+    return await db.select().from(assets);
+  }
+
+  async updateAsset(id: string, data: Partial<InsertAsset>): Promise<Asset> {
+    const [asset] = await db
+      .update(assets)
+      .set({ ...filterUndefined(data), updatedAt: new Date() })
+      .where(eq(assets.id, id))
+      .returning();
+    return asset;
+  }
+
+  async deleteAsset(id: string): Promise<void> {
+    await db.delete(assets).where(eq(assets.id, id));
+  }
+
+  // Maintenance Contacts Implementation
+  async createMaintenanceContact(contactData: InsertMaintenanceContact): Promise<MaintenanceContact> {
+    const [contact] = await db.insert(maintenanceContacts).values(contactData).returning();
+    return contact;
+  }
+
+  async getMaintenanceContact(id: string): Promise<MaintenanceContact | undefined> {
+    const [contact] = await db.select().from(maintenanceContacts).where(eq(maintenanceContacts.id, id));
+    return contact;
+  }
+
+  async getAllMaintenanceContacts(): Promise<MaintenanceContact[]> {
+    return await db.select().from(maintenanceContacts);
+  }
+
+  async updateMaintenanceContact(id: string, data: Partial<InsertMaintenanceContact>): Promise<MaintenanceContact> {
+    const [contact] = await db
+      .update(maintenanceContacts)
+      .set({ ...filterUndefined(data), updatedAt: new Date() })
+      .where(eq(maintenanceContacts.id, id))
+      .returning();
+    return contact;
+  }
+
+  async deleteMaintenanceContact(id: string): Promise<void> {
+    await db.delete(maintenanceContacts).where(eq(maintenanceContacts.id, id));
+  }
+
+  // Invoices Implementation
+  async createInvoice(invoiceData: InsertInvoice): Promise<Invoice> {
+    const [invoice] = await db.insert(invoices).values(invoiceData).returning();
+    return invoice;
+  }
+
+  async getInvoice(id: string): Promise<Invoice | undefined> {
+    const [invoice] = await db.select().from(invoices).where(eq(invoices.id, id));
+    return invoice;
+  }
+
+  async getAllInvoices(): Promise<Invoice[]> {
+    return await db.select().from(invoices).orderBy(desc(invoices.dueDate));
+  }
+
+  async updateInvoice(id: string, data: Partial<InsertInvoice>): Promise<Invoice> {
+    const [invoice] = await db
+      .update(invoices)
+      .set({ ...filterUndefined(data), updatedAt: new Date() })
+      .where(eq(invoices.id, id))
+      .returning();
+    return invoice;
+  }
+
+  async deleteInvoice(id: string): Promise<void> {
+    await db.delete(invoices).where(eq(invoices.id, id));
+  }
+
+  // Billing Records Implementation
+  async createBillingRecord(recordData: InsertBillingRecord): Promise<BillingRecord> {
+    const [record] = await db.insert(billingRecords).values(recordData).returning();
+    return record;
+  }
+
+  async getBillingRecord(id: string): Promise<BillingRecord | undefined> {
+    const [record] = await db.select().from(billingRecords).where(eq(billingRecords.id, id));
+    return record;
+  }
+
+  async getAllBillingRecords(): Promise<BillingRecord[]> {
+    return await db.select().from(billingRecords);
+  }
+
+  async updateBillingRecord(id: string, data: Partial<InsertBillingRecord>): Promise<BillingRecord> {
+    const [record] = await db
+      .update(billingRecords)
+      .set({ ...filterUndefined(data), updatedAt: new Date() })
+      .where(eq(billingRecords.id, id))
+      .returning();
+    return record;
+  }
+
+  async deleteBillingRecord(id: string): Promise<void> {
+    await db.delete(billingRecords).where(eq(billingRecords.id, id));
   }
 }
 
