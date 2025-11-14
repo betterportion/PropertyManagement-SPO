@@ -8,6 +8,45 @@ The system is designed as a role-based dashboard with distinct admin and residen
 
 ## Recent Changes
 
+### November 14, 2025 - Maintenance Frontend Implementation
+- **Page Architecture:**
+  - Card-based design displaying all maintenance requests
+  - Region and building filtering with client-side filtering logic
+  - Tab-based status filtering (All, Pending, In Progress, Completed)
+  - Search functionality across title and description
+  - Grid layout of request cards showing title, category, priority, status, location
+- **Components Created:**
+  - **MaintenanceRequestCard**: Information-dense card with color-coded priority badges
+  - **MaintenanceEditDialog**: Comprehensive edit form for all request fields
+  - **Maintenance Page**: Main page with filters, tabs, and request grid
+- **Edit Functionality:**
+  - Full editing of title, description, category, priority, status
+  - Location details (location, region, building)
+  - Cost estimate, completion date tracking
+  - Notes field for additional details
+  - Contact linking - displays available maintenance contacts
+  - Invoice linking - shows related invoices with create option
+- **Wishlist Priority:**
+  - Gold/yellow color coding (bg-yellow-500) for wishlist priority
+  - Displays throughout UI in badges and edit form
+  - All 5 priority levels supported (low, medium, high, urgent, wishlist)
+- **Data Flow:**
+  - React Query for data fetching from `/api/maintenance-requests`
+  - Permissions fetched from `/api/users/:id/permissions` endpoint
+  - PATCH mutations to update requests
+  - Automatic cache invalidation after updates
+- **Permission Integration:**
+  - `canManageMaintenance` controls edit/delete actions
+  - Read-only view for users without manage permissions
+  - Admins have full management access
+- **E2E Testing:**
+  - Verified OIDC authentication flow
+  - Tested maintenance request CRUD operations
+  - Validated wishlist priority displays with gold color
+  - Confirmed edit dialog updates priority and status correctly
+- **Route Fix:**
+  - Standardized on `/api/maintenance-requests` endpoint naming (was `/api/maintenance`)
+
 ### November 14, 2025 - Walkthroughs Frontend Implementation
 - **Page Architecture:**
   - Room-centric design: browse rooms first, then view photos for each room
