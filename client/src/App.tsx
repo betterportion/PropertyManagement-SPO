@@ -34,7 +34,7 @@ function Router() {
 
   const role = (user as any)?.role || "resident";
 
-  if (role === "admin") {
+  if (role === "admin" || role === "regional_administrator") {
     return (
       <Switch>
         <Route path="/" component={AdminDashboard} />

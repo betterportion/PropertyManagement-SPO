@@ -8,6 +8,34 @@ The system is designed as a role-based dashboard with distinct admin and residen
 
 ## Recent Changes
 
+### November 14, 2025 - Regional Administrator Role Implementation
+- **New Role Added:**
+  - Created "regional_administrator" role alongside "admin" and "resident"
+  - Display name in UI: "Regional Admin"
+  - Grants access to most admin features except user management
+- **Permission System:**
+  - Created `computeDefaultPermissions()` helper for consistent permission assignment
+  - Regional admins automatically receive:
+    - ✅ View and manage: Maintenance, Walkthroughs, Assets, Contacts
+    - ✅ View only: Billing (cannot manage billing records)
+    - ❌ No access: User management, billing management
+  - Permissions auto-sync when roles change via `updateUserRole()`
+- **Frontend Changes:**
+  - Updated App.tsx routing to grant admin routes to regional_administrator
+  - Settings page access restricted to admin role only (shows Access Denied to regional admins)
+  - Sidebar updated to hide Settings menu item from regional administrators
+  - Badge displays "Regional Admin" for regional_administrator role
+- **Backend Changes:**
+  - Added Zod validation for role enum in role update endpoint
+  - User management routes remain admin-only
+  - Billing mutation routes enforce canManageBilling permission
+  - All routes properly check permissions before granting access
+- **Security:**
+  - Fixed hooks violation in Settings page (moved useQuery before conditional return)
+  - Regional administrators cannot access Settings page or API
+  - Billing mutations properly blocked for regional administrators
+  - All permission checks enforce least-privilege access
+
 ### November 14, 2025 - Maintenance Frontend Implementation
 - **Page Architecture:**
   - Card-based design displaying all maintenance requests

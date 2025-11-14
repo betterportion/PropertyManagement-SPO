@@ -31,6 +31,10 @@ export default function Settings() {
   const { toast } = useToast();
   const { user: currentUser } = useAuth();
 
+  const { data: users, isLoading } = useQuery({
+    queryKey: ["/api/users"],
+  });
+
   if ((currentUser as any)?.role !== "admin") {
     return (
       <div className="flex flex-col items-center justify-center h-full">
@@ -40,10 +44,6 @@ export default function Settings() {
       </div>
     );
   }
-
-  const { data: users, isLoading } = useQuery({
-    queryKey: ["/api/users"],
-  });
 
   const updateRoleMutation = useMutation({
     mutationFn: async ({ id, role }: { id: string; role: "admin" | "regional_administrator" | "resident" }) => {

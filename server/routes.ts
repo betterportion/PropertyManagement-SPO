@@ -2,6 +2,7 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { setupAuth, isAuthenticated } from "./replitAuth";
+import { z } from "zod";
 import {
   insertMaintenanceRequestSchema,
   insertWalkthroughRoomSchema,
@@ -11,6 +12,10 @@ import {
   insertInvoiceSchema,
   insertBillingRecordSchema,
 } from "@shared/schema";
+
+const roleUpdateSchema = z.object({
+  role: z.enum(["admin", "regional_administrator", "resident"]),
+});
 
 export async function registerRoutes(app: Express): Promise<Server> {
   await setupAuth(app);
@@ -52,8 +57,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (currentUser?.role !== "admin") {
         return res.status(403).json({ message: "Forbidden" });
       }
-      const { role } = req.body;
-      const user = await storage.updateUserRole(req.params.id, role);
+      const validatedData = roleUpdateSchema.parse(req.body);
+      const user = await storage.updateUserRole(req.params.id, validatedData.role);
       res.json(user);
     } catch (error) {
       console.error("Error updating user role:", error);

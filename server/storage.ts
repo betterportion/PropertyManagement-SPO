@@ -37,12 +37,30 @@ function filterUndefined<T extends Record<string, any>>(obj: T): Partial<T> {
   ) as Partial<T>;
 }
 
+// Helper function to compute default permissions for a given role
+function computeDefaultPermissions(userId: string, role: "admin" | "regional_administrator" | "resident"): InsertUserPermissions {
+  return {
+    userId,
+    canViewMaintenance: true,  // All roles can view maintenance
+    canManageMaintenance: role === "admin" || role === "regional_administrator",
+    canViewWalkthroughs: role !== "resident",
+    canManageWalkthroughs: role === "admin" || role === "regional_administrator",
+    canViewAssets: role !== "resident",
+    canManageAssets: role === "admin" || role === "regional_administrator",
+    canViewBilling: role !== "resident",
+    canManageBilling: role === "admin",
+    canViewContacts: role !== "resident",
+    canManageContacts: role === "admin" || role === "regional_administrator",
+    canManageUsers: role === "admin",
+  };
+}
+
 export interface IStorage {
   // User Management
   getUser(id: string): Promise<User | undefined>;
   upsertUser(user: UpsertUser): Promise<User>;
   getAllUsers(): Promise<User[]>;
-  updateUserRole(id: string, role: "admin" | "resident"): Promise<User>;
+  updateUserRole(id: string, role: "admin" | "regional_administrator" | "resident"): Promise<User>;
   updateUserActiveStatus(id: string, isActive: boolean): Promise<User>;
   getUserPermissions(userId: string): Promise<UserPermissions | undefined>;
   upsertUserPermissions(permissions: InsertUserPermissions): Promise<UserPermissions>;
@@ -121,20 +139,7 @@ export class DatabaseStorage implements IStorage {
     
     const existingPermissions = await this.getUserPermissions(user.id);
     if (!existingPermissions) {
-      const defaultPermissions: InsertUserPermissions = {
-        userId: user.id,
-        canViewMaintenance: user.role === "resident",
-        canManageMaintenance: user.role === "admin",
-        canViewWalkthroughs: user.role === "admin",
-        canManageWalkthroughs: user.role === "admin",
-        canViewAssets: user.role === "admin",
-        canManageAssets: user.role === "admin",
-        canViewBilling: user.role === "admin",
-        canManageBilling: user.role === "admin",
-        canViewContacts: user.role === "admin",
-        canManageContacts: user.role === "admin",
-        canManageUsers: user.role === "admin",
-      };
+      const defaultPermissions = computeDefaultPermissions(user.id, user.role);
       await this.upsertUserPermissions(defaultPermissions);
     }
     
@@ -145,12 +150,17 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(users);
   }
 
-  async updateUserRole(id: string, role: "admin" | "resident"): Promise<User> {
+  async updateUserRole(id: string, role: "admin" | "regional_administrator" | "resident"): Promise<User> {
     const [user] = await db
       .update(users)
       .set({ role, updatedAt: new Date() })
       .where(eq(users.id, id))
       .returning();
+    
+    // Update permissions to match the new role
+    const newDefaultPermissions = computeDefaultPermissions(id, role);
+    await this.upsertUserPermissions(newDefaultPermissions);
+    
     return user;
   }
 

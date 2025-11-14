@@ -14,7 +14,7 @@ import { Badge } from "@/components/ui/badge";
 import spoLogo from "@assets/SPO Logo under 600x600px_SPO Vertical - Ocean_1763138801065.png";
 
 interface AppSidebarProps {
-  role: "admin" | "resident";
+  role: "admin" | "regional_administrator" | "resident";
   currentPath: string;
 }
 
@@ -75,7 +75,12 @@ const residentMenuItems = [
 ];
 
 export function AppSidebar({ role, currentPath }: AppSidebarProps) {
-  const menuItems = role === "admin" ? adminMenuItems : residentMenuItems;
+  let menuItems = (role === "admin" || role === "regional_administrator") ? adminMenuItems : residentMenuItems;
+  
+  // Regional administrators cannot access Settings
+  if (role === "regional_administrator") {
+    menuItems = menuItems.filter(item => item.title !== "Settings");
+  }
 
   return (
     <Sidebar>
@@ -118,7 +123,7 @@ export function AppSidebar({ role, currentPath }: AppSidebarProps) {
 
         <div className="mt-auto p-4 border-t border-sidebar-border">
           <Badge variant="secondary" className="w-full justify-center">
-            {role === "admin" ? "Admin Account" : "Resident Account"}
+            {role === "admin" ? "Admin Account" : role === "regional_administrator" ? "Regional Admin" : "Resident Account"}
           </Badge>
         </div>
       </SidebarContent>
