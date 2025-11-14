@@ -1,0 +1,121 @@
+# Property Management Dashboard
+
+## Overview
+
+This is a comprehensive property management system built for Saint Paul's Outreach, Inc. (SPO). The application enables administrators to manage multiple properties, track maintenance requests, conduct property walkthroughs, manage assets, handle billing for residents, and maintain vendor contacts. Residents have a simplified view where they can submit and track their own maintenance requests.
+
+The system is designed as a role-based dashboard with distinct admin and resident experiences, emphasizing efficiency, data density, and professional trustworthiness appropriate for property management operations.
+
+## User Preferences
+
+Preferred communication style: Simple, everyday language.
+
+## System Architecture
+
+### Frontend Architecture
+
+**Framework & Build Tools:**
+- React with TypeScript for type safety
+- Vite as the build tool and development server
+- Wouter for client-side routing (lightweight alternative to React Router)
+- TanStack Query (React Query) for server state management and caching
+
+**UI Component System:**
+- Shadcn/ui component library (New York style variant) for consistent, accessible UI components
+- Radix UI primitives as the foundation for interactive components
+- Tailwind CSS for utility-first styling
+- Custom design system inspired by Linear/Notion with focus on productivity and data density
+- Inter font family from Google Fonts for typography
+- Dark mode support with theme toggle functionality
+
+**State Management Approach:**
+- Server state handled via TanStack Query with conservative caching (staleTime: Infinity)
+- Local component state using React hooks
+- Authentication state derived from `/api/auth/user` endpoint query
+- Form state managed with React Hook Form and Zod validation
+
+**Design Principles:**
+- Role-based navigation (separate admin and resident views)
+- Information-dense layouts optimized for scanning
+- Consistent spacing using Tailwind primitives (2, 4, 6, 8, 12)
+- Responsive grid layouts with mobile-first approach
+- Hover and active state elevation effects for interactive feedback
+
+### Backend Architecture
+
+**Server Framework:**
+- Express.js running on Node.js
+- TypeScript for type safety across the stack
+- ESM module system throughout
+
+**API Design:**
+- RESTful API endpoints under `/api` prefix
+- Session-based authentication (no token-based auth)
+- JSON request/response format
+- Centralized error handling with status codes
+
+**Authentication & Authorization:**
+- OpenID Connect (OIDC) integration with Replit's authentication service
+- Passport.js for authentication middleware
+- Session management using express-session with PostgreSQL session store (connect-pg-simple)
+- Role-based access control (admin vs resident roles)
+- Fine-grained permissions system stored in database (userPermissions table)
+- Session cookies with httpOnly and secure flags, 7-day TTL
+
+**Database Layer:**
+- Drizzle ORM for type-safe database operations
+- PostgreSQL database via Neon serverless driver
+- WebSocket support for Neon's serverless connections
+- Schema-first approach with shared types between client and server
+- Database migrations managed through Drizzle Kit
+
+### Data Storage Solutions
+
+**Database Schema:**
+- `sessions` table for server-side session storage with automatic expiration
+- `users` table with fields: id, email, firstName, lastName, profileImageUrl, role (admin/resident), isActive flag
+- `userPermissions` table for granular permission control with foreign key to users (cascade delete)
+- Permissions include: view/manage maintenance, walkthroughs, assets, billing, contacts, users
+
+**ORM Strategy:**
+- Drizzle ORM chosen for type safety and performance
+- Schema definitions in TypeScript generate both runtime validators and types
+- Zod schemas derived from Drizzle schemas for validation
+- Storage abstraction layer (IStorage interface) for potential future database migrations
+
+**Connection Management:**
+- Connection pooling via Neon's Pool
+- Environment-based DATABASE_URL configuration
+- WebSocket constructor override for serverless compatibility
+
+### External Dependencies
+
+**Third-Party Services:**
+- Replit OIDC for authentication (discovery URL: https://replit.com/oidc)
+- Neon Serverless PostgreSQL for database hosting
+- Google Fonts CDN for Inter font family
+
+**Key NPM Packages:**
+- `@neondatabase/serverless` - Serverless PostgreSQL client
+- `drizzle-orm` & `drizzle-kit` - ORM and migration tools
+- `express` & `express-session` - Server framework and session management
+- `passport` & `openid-client` - Authentication
+- `react`, `react-dom` - Frontend framework
+- `@tanstack/react-query` - Server state management
+- `wouter` - Lightweight routing
+- `@radix-ui/*` - Accessible component primitives
+- `tailwindcss` - Utility-first CSS
+- `zod` - Runtime validation
+- `react-hook-form` - Form management
+- `date-fns` - Date utilities
+
+**Development Tools:**
+- TypeScript for static typing
+- ESBuild for production server bundling
+- Vite plugins for Replit integration (runtime error overlay, cartographer, dev banner)
+- PostCSS with Autoprefixer for CSS processing
+
+**Asset Management:**
+- Static assets served from `/attached_assets` directory
+- Vite handles client-side asset bundling
+- SPO logo included as primary branding element

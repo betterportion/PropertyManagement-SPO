@@ -21,13 +21,25 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { Search, UserCog, Shield } from "lucide-react";
+import { Search, UserCog, Shield, AlertCircle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/useAuth";
 import type { User } from "@shared/schema";
 
 export default function Settings() {
   const [searchQuery, setSearchQuery] = useState("");
   const { toast } = useToast();
+  const { user: currentUser } = useAuth();
+
+  if ((currentUser as any)?.role !== "admin") {
+    return (
+      <div className="flex flex-col items-center justify-center h-full">
+        <AlertCircle className="h-12 w-12 text-destructive mb-4" />
+        <h2 className="text-2xl font-semibold mb-2">Access Denied</h2>
+        <p className="text-muted-foreground">You do not have permission to access this page.</p>
+      </div>
+    );
+  }
 
   const { data: users, isLoading } = useQuery({
     queryKey: ["/api/users"],
@@ -37,8 +49,11 @@ export default function Settings() {
     mutationFn: async ({ id, role }: { id: string; role: "admin" | "resident" }) => {
       await apiRequest("PATCH", `/api/users/${id}/role`, { role });
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/users"] });
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["/api/users"] }),
+        queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] })
+      ]);
       toast({
         title: "Success",
         description: "User role updated successfully",
