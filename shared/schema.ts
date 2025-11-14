@@ -27,7 +27,7 @@ export const users = pgTable("users", {
 
 export const userPermissions = pgTable("user_permissions", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  userId: varchar("user_id").notNull().unique().references(() => users.id, { onDelete: "cascade" }),
   canViewMaintenance: boolean("can_view_maintenance").notNull().default(true),
   canManageMaintenance: boolean("can_manage_maintenance").notNull().default(false),
   canViewWalkthroughs: boolean("can_view_walkthroughs").notNull().default(false),
