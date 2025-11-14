@@ -8,6 +8,32 @@ The system is designed as a role-based dashboard with distinct admin and residen
 
 ## Recent Changes
 
+### November 14, 2025 - Walkthroughs Frontend Implementation
+- **Page Architecture:**
+  - Room-centric design: browse rooms first, then view photos for each room
+  - Region and building filtering with client-side filtering logic
+  - Grid layout of room cards showing name, building address, and required question count
+  - Click room to open detail drawer with lazy-loaded photos
+- **Components Created:**
+  - **PhotoGallery**: Reusable photo viewer/editor with permission-gated upload/delete/edit operations
+  - **RoomCard**: Information-dense card showing room summary with click to expand
+  - **RoomDetailDrawer**: Sheet component displaying required questions list and photo gallery with notes editing
+  - **Walkthroughs Page**: Main page with region/building selectors and room grid display
+- **Data Flow:**
+  - React Query for data fetching with lazy loading of photos per room
+  - Permissions fetched from `/api/users/:id/permissions` endpoint
+  - Region filtering works by checking photo regions (since rooms lack region field in schema)
+  - Building filtering uses buildingAddress as unique identifier
+- **Permission Integration:**
+  - `canManageWalkthroughs` controls upload/edit/delete actions
+  - Read-only view for users without manage permissions
+  - Admin and steward roles have full management access
+- **E2E Testing:**
+  - Verified OIDC authentication flow
+  - Tested room and photo CRUD operations
+  - Validated filtering by region and building
+  - Confirmed photo notes editing persists correctly
+
 ### November 14, 2025 - Complete Backend API Implementation
 - **API Routes:**
   - Comprehensive RESTful routes for maintenance requests, walkthroughs (rooms + photos), appliances/assets, contacts, invoices, and billing
