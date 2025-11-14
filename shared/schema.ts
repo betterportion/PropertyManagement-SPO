@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, timestamp, jsonb, index, boolean } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, timestamp, jsonb, index, boolean, integer, numeric } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -60,3 +60,174 @@ export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
 export type UserPermissions = typeof userPermissions.$inferSelect;
 export type InsertUserPermissions = z.infer<typeof insertUserPermissionsSchema>;
+
+// Maintenance Requests
+export const maintenanceRequests = pgTable("maintenance_requests", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  title: varchar("title").notNull(),
+  description: text("description").notNull(),
+  category: varchar("category").notNull(),
+  priority: varchar("priority", { enum: ["low", "medium", "high", "urgent", "wishlist"] }).notNull(),
+  status: varchar("status", { enum: ["pending", "in_progress", "completed", "cancelled"] }).notNull().default("pending"),
+  location: varchar("location").notNull(),
+  region: varchar("region").notNull(),
+  buildingAddress: varchar("building_address").notNull(),
+  submittedBy: varchar("submitted_by").notNull(),
+  submittedDate: timestamp("submitted_date").defaultNow(),
+  completedDate: timestamp("completed_date"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertMaintenanceRequestSchema = createInsertSchema(maintenanceRequests).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type MaintenanceRequest = typeof maintenanceRequests.$inferSelect;
+export type InsertMaintenanceRequest = z.infer<typeof insertMaintenanceRequestSchema>;
+
+// Walkthrough Rooms (templates)
+export const walkthroughRooms = pgTable("walkthrough_rooms", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: varchar("name").notNull(),
+  buildingAddress: varchar("building_address").notNull(),
+  requiredQuestions: text("required_questions").array(),
+  displayOrder: integer("display_order").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertWalkthroughRoomSchema = createInsertSchema(walkthroughRooms).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type WalkthroughRoom = typeof walkthroughRooms.$inferSelect;
+export type InsertWalkthroughRoom = z.infer<typeof insertWalkthroughRoomSchema>;
+
+// Walkthrough Photos
+export const walkthroughPhotos = pgTable("walkthrough_photos", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  roomId: varchar("room_id").notNull().references(() => walkthroughRooms.id, { onDelete: "cascade" }),
+  imageUrl: varchar("image_url").notNull(),
+  condition: varchar("condition", { enum: ["excellent", "good", "fair", "poor", "damaged"] }).notNull(),
+  notes: text("notes"),
+  region: varchar("region").notNull(),
+  buildingAddress: varchar("building_address").notNull(),
+  location: varchar("location").notNull(),
+  questionAnswers: jsonb("question_answers"),
+  uploadedBy: varchar("uploaded_by").notNull(),
+  uploadedDate: timestamp("uploaded_date").defaultNow(),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertWalkthroughPhotoSchema = createInsertSchema(walkthroughPhotos).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type WalkthroughPhoto = typeof walkthroughPhotos.$inferSelect;
+export type InsertWalkthroughPhoto = z.infer<typeof insertWalkthroughPhotoSchema>;
+
+// Appliances/Fixed Assets (renamed from Fixed Assets)
+export const assets = pgTable("assets", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: varchar("name").notNull(),
+  category: varchar("category").notNull(),
+  type: varchar("type", { enum: ["fixed", "movable"] }).notNull(),
+  ageInYears: integer("age_in_years").notNull(),
+  lastServiced: timestamp("last_serviced"),
+  serialNumber: varchar("serial_number"),
+  location: varchar("location").notNull(),
+  region: varchar("region").notNull(),
+  buildingAddress: varchar("building_address").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertAssetSchema = createInsertSchema(assets).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type Asset = typeof assets.$inferSelect;
+export type InsertAsset = z.infer<typeof insertAssetSchema>;
+
+// Maintenance Contacts
+export const maintenanceContacts = pgTable("maintenance_contacts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: varchar("name").notNull(),
+  company: varchar("company").notNull(),
+  service: varchar("service").notNull(),
+  phone: varchar("phone").notNull(),
+  email: varchar("email").notNull(),
+  region: varchar("region").notNull(),
+  buildingAddress: varchar("building_address").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertMaintenanceContactSchema = createInsertSchema(maintenanceContacts).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type MaintenanceContact = typeof maintenanceContacts.$inferSelect;
+export type InsertMaintenanceContact = z.infer<typeof insertMaintenanceContactSchema>;
+
+// Invoices (separated from contacts)
+export const invoices = pgTable("invoices", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  invoiceNumber: varchar("invoice_number").notNull(),
+  contactId: varchar("contact_id").references(() => maintenanceContacts.id, { onDelete: "set null" }),
+  maintenanceRequestId: varchar("maintenance_request_id").references(() => maintenanceRequests.id, { onDelete: "set null" }),
+  service: varchar("service").notNull(),
+  amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),
+  status: varchar("status", { enum: ["pending", "paid", "overdue", "cancelled"] }).notNull().default("pending"),
+  dueDate: timestamp("due_date").notNull(),
+  paidDate: timestamp("paid_date"),
+  region: varchar("region").notNull(),
+  buildingAddress: varchar("building_address").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertInvoiceSchema = createInsertSchema(invoices).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type Invoice = typeof invoices.$inferSelect;
+export type InsertInvoice = z.infer<typeof insertInvoiceSchema>;
+
+// Billing Records
+export const billingRecords = pgTable("billing_records", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  residentName: varchar("resident_name").notNull(),
+  unit: varchar("unit").notNull(),
+  email: varchar("email").notNull(),
+  phone: varchar("phone").notNull(),
+  moveInDate: timestamp("move_in_date").notNull(),
+  rentAmount: numeric("rent_amount", { precision: 12, scale: 2 }).notNull(),
+  region: varchar("region").notNull(),
+  buildingAddress: varchar("building_address").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertBillingRecordSchema = createInsertSchema(billingRecords).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type BillingRecord = typeof billingRecords.$inferSelect;
+export type InsertBillingRecord = z.infer<typeof insertBillingRecordSchema>;
