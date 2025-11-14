@@ -74,13 +74,15 @@ export function AppSidebar({ role, currentPath }: AppSidebarProps) {
   return (
     <Sidebar>
       <SidebarHeader className="p-4 border-b border-sidebar-border">
-        <div className="flex items-center gap-2">
-          <div className="p-2 bg-primary rounded-md">
-            <Building2 className="h-5 w-5 text-primary-foreground" />
+        <div className="flex items-center gap-3">
+          <div className="flex-shrink-0">
+            <div className="p-2 bg-primary rounded-md">
+              <Building2 className="h-5 w-5 text-primary-foreground" />
+            </div>
           </div>
-          <div>
-            <h2 className="font-semibold text-base">PropertyHub</h2>
-            <p className="text-xs text-muted-foreground">Management System</p>
+          <div className="min-w-0">
+            <h2 className="font-semibold text-sm leading-tight">SPO Property Management Portal</h2>
+            <p className="text-xs text-muted-foreground">Saint Paul's Outreach, Inc.</p>
           </div>
         </div>
       </SidebarHeader>
