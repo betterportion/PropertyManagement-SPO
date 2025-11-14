@@ -6,6 +6,30 @@ This is a comprehensive property management system built for Saint Paul's Outrea
 
 The system is designed as a role-based dashboard with distinct admin and resident experiences, emphasizing efficiency, data density, and professional trustworthiness appropriate for property management operations.
 
+## Recent Changes
+
+### November 14, 2025 - Authentication System Implementation
+- **Replit Auth Integration:** Implemented OpenID Connect authentication with Replit Auth, supporting Google, GitHub, X, Apple, and email/password login methods
+- **Database Schema Updates:**
+  - Added `sessions` table for server-side session storage with automatic expiration
+  - Added `users` table with role-based access (admin/resident)
+  - Added `userPermissions` table for fine-grained permission control
+- **Frontend Changes:**
+  - Created landing page for unauthenticated users featuring SPO branding and feature showcase
+  - Implemented `useAuth` hook with proper 401 handling for logged-out state
+  - Added role-based routing (admin vs resident views)
+  - Built Settings page for admin user management
+- **Backend Changes:**
+  - Implemented protected API routes with `isAuthenticated` middleware
+  - Created user management endpoints (role updates, status control, permissions)
+  - Configured session cookies to work in development environment
+  - Added route guards to protect admin-only endpoints
+- **Security Improvements:**
+  - Session cookies with httpOnly flag and 7-day TTL
+  - Secure cookies in production, non-secure in development for local testing
+  - Role-based access control for all admin features
+  - Cascade deletion of user permissions when users are deleted
+
 ## User Preferences
 
 Preferred communication style: Simple, everyday language.
