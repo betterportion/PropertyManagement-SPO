@@ -111,7 +111,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Maintenance Requests Routes
-  app.get('/api/maintenance', isAuthenticated, async (req: any, res) => {
+  app.get('/api/maintenance-requests', isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
       const currentUser = await storage.getUser(userId);
@@ -129,7 +129,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get('/api/maintenance/:id', isAuthenticated, async (req: any, res) => {
+  app.get('/api/maintenance-requests/:id', isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
       const currentUser = await storage.getUser(userId);
@@ -150,7 +150,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post('/api/maintenance', isAuthenticated, async (req: any, res) => {
+  app.post('/api/maintenance-requests', isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
       const currentUser = await storage.getUser(userId);
@@ -172,7 +172,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch('/api/maintenance/:id', isAuthenticated, async (req: any, res) => {
+  app.patch('/api/maintenance-requests/:id', isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
       const currentUser = await storage.getUser(userId);
@@ -191,7 +191,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete('/api/maintenance/:id', isAuthenticated, async (req: any, res) => {
+  app.delete('/api/maintenance-requests/:id', isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
       const currentUser = await storage.getUser(userId);
