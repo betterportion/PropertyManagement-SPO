@@ -1,4 +1,4 @@
-import { Home, Wrench, Camera, Package, DollarSign, Users, Building2 } from "lucide-react";
+import { Home, Wrench, Camera, Package, DollarSign, Users } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -11,6 +11,7 @@ import {
   SidebarHeader,
 } from "@/components/ui/sidebar";
 import { Badge } from "@/components/ui/badge";
+import spoLogo from "@assets/SPO Logo under 600x600px_SPO Vertical - Ocean_1763138801065.png";
 
 interface AppSidebarProps {
   role: "admin" | "resident";
@@ -76,9 +77,7 @@ export function AppSidebar({ role, currentPath }: AppSidebarProps) {
       <SidebarHeader className="p-4 border-b border-sidebar-border">
         <div className="flex items-center gap-3">
           <div className="flex-shrink-0">
-            <div className="p-2 bg-primary rounded-md">
-              <Building2 className="h-5 w-5 text-primary-foreground" />
-            </div>
+            <img src={spoLogo} alt="SPO Logo" className="h-10 w-10 object-contain" />
           </div>
           <div className="min-w-0">
             <h2 className="font-semibold text-sm leading-tight">SPO Property Management Portal</h2>
