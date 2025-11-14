@@ -10,9 +10,7 @@ export default function Landing() {
         <div className="flex flex-col items-center justify-center min-h-screen -mt-12">
           <div className="text-center mb-12">
             <img src={spoLogo} alt="SPO Logo" className="h-24 w-24 mx-auto mb-6 object-contain" />
-            <h1 className="text-4xl md:text-5xl font-bold mb-4">
-              SPO Property Management Portal
-            </h1>
+            <h1 className="text-4xl md:text-5xl font-bold mb-4">Property Management Portal</h1>
             <p className="text-xl text-muted-foreground mb-2">
               Saint Paul's Outreach, Inc.
             </p>
