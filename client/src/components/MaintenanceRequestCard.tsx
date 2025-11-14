@@ -4,21 +4,11 @@ import { Button } from "@/components/ui/button";
 import { Calendar, MapPin, User } from "lucide-react";
 import { format } from "date-fns";
 
-interface MaintenanceRequest {
-  id: string;
-  title: string;
-  description: string;
-  category: string;
-  priority: "low" | "medium" | "high" | "urgent";
-  status: "pending" | "in_progress" | "completed";
-  submittedBy: string;
-  submittedDate: Date;
-  location: string;
-}
+import type { MaintenanceRequest as MaintenanceRequestType } from "@shared/schema";
 
 interface MaintenanceRequestCardProps {
-  request: MaintenanceRequest;
-  onStatusChange?: (id: string, status: string) => void;
+  request: MaintenanceRequestType;
+  onEdit?: () => void;
   isAdmin?: boolean;
 }
 
@@ -27,15 +17,17 @@ const priorityColors = {
   medium: "bg-chart-4 text-white",
   high: "bg-chart-5 text-white",
   urgent: "bg-destructive text-destructive-foreground",
+  wishlist: "bg-yellow-500 text-yellow-950 dark:bg-yellow-600 dark:text-yellow-50",
 };
 
 const statusColors = {
   pending: "bg-muted text-muted-foreground",
   in_progress: "bg-chart-1 text-white",
   completed: "bg-chart-2 text-white",
+  cancelled: "bg-muted text-muted-foreground",
 };
 
-export default function MaintenanceRequestCard({ request, onStatusChange, isAdmin = false }: MaintenanceRequestCardProps) {
+export default function MaintenanceRequestCard({ request, onEdit, isAdmin = false }: MaintenanceRequestCardProps) {
   return (
     <Card className="hover-elevate" data-testid={`card-request-${request.id}`}>
       <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
@@ -67,17 +59,17 @@ export default function MaintenanceRequestCard({ request, onStatusChange, isAdmi
             </div>
             <div className="flex items-center gap-1">
               <Calendar className="h-3 w-3" />
-              <span>{format(request.submittedDate, "MMM d, yyyy")}</span>
+              <span>{request.submittedDate ? format(new Date(request.submittedDate), "MMM d, yyyy") : "N/A"}</span>
             </div>
           </div>
-          {isAdmin && request.status !== "completed" && (
+          {isAdmin && (
             <Button 
               size="sm" 
               variant="outline"
-              onClick={() => onStatusChange?.(request.id, request.status === "pending" ? "in_progress" : "completed")}
-              data-testid={`button-update-status-${request.id}`}
+              onClick={() => onEdit?.()}
+              data-testid={`button-edit-request-${request.id}`}
             >
-              {request.status === "pending" ? "Start" : "Complete"}
+              Edit
             </Button>
           )}
         </div>
