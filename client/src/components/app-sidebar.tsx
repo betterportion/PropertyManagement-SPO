@@ -80,7 +80,7 @@ export function AppSidebar({ role, currentPath }: AppSidebarProps) {
             <img src={spoLogo} alt="SPO Logo" className="h-10 w-10 object-contain" />
           </div>
           <div className="min-w-0">
-            <h2 className="font-semibold text-sm leading-tight">SPO Property Management Portal</h2>
+            <h2 className="font-semibold text-sm leading-tight">Property Management Portal</h2>
             <p className="text-xs text-muted-foreground">Saint Paul's Outreach, Inc.</p>
           </div>
         </div>
