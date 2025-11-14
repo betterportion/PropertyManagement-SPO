@@ -46,7 +46,7 @@ export default function Settings() {
   });
 
   const updateRoleMutation = useMutation({
-    mutationFn: async ({ id, role }: { id: string; role: "admin" | "resident" }) => {
+    mutationFn: async ({ id, role }: { id: string; role: "admin" | "regional_administrator" | "resident" }) => {
       await apiRequest("PATCH", `/api/users/${id}/role`, { role });
     },
     onSuccess: async () => {
@@ -165,7 +165,7 @@ export default function Settings() {
                     <Select
                       value={user.role}
                       onValueChange={(value) =>
-                        updateRoleMutation.mutate({ id: user.id, role: value as "admin" | "resident" })
+                        updateRoleMutation.mutate({ id: user.id, role: value as "admin" | "regional_administrator" | "resident" })
                       }
                       disabled={updateRoleMutation.isPending}
                     >
@@ -177,6 +177,12 @@ export default function Settings() {
                           <div className="flex items-center gap-2">
                             <Shield className="h-3 w-3" />
                             Admin
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="regional_administrator">
+                          <div className="flex items-center gap-2">
+                            <UserCog className="h-3 w-3" />
+                            Regional Admin
                           </div>
                         </SelectItem>
                         <SelectItem value="resident">
