@@ -8,6 +8,19 @@ The system is designed as a role-based dashboard with distinct admin and residen
 
 ## Recent Changes
 
+### November 14, 2025 - Complete Backend API Implementation
+- **API Routes:**
+  - Comprehensive RESTful routes for maintenance requests, walkthroughs (rooms + photos), appliances/assets, contacts, invoices, and billing
+  - All routes protected with isAuthenticated middleware and role-based permissions
+  - Request validation using Zod schemas with .partial() for PATCH operations
+  - Proper 403 Forbidden and 404 Not Found responses
+  - filterUndefined helper prevents NULL overwrites on partial updates
+- **Permission Model:**
+  - View permissions for GET operations (canViewMaintenance, canViewWalkthroughs, canViewAssets, canViewContacts, canViewBilling)
+  - Manage permissions for write operations (canManageMaintenance, canManageWalkthroughs, canManageAssets, canManageContacts, canManageBilling)
+  - Stewards granted canManageWalkthroughs to enable photo note-taking capability
+  - All routes validate isActive status before granting access
+
 ### November 14, 2025 - Authentication System Implementation
 - **Replit Auth Integration:** Implemented OpenID Connect authentication with Replit Auth, supporting Google, GitHub, X, Apple, and email/password login methods
 - **Database Schema Updates:**
@@ -99,7 +112,13 @@ Preferred communication style: Simple, everyday language.
 - `sessions` table for server-side session storage with automatic expiration
 - `users` table with fields: id, email, firstName, lastName, profileImageUrl, role (admin/resident), isActive flag
 - `userPermissions` table for granular permission control with foreign key to users (cascade delete)
-- Permissions include: view/manage maintenance, walkthroughs, assets, billing, contacts, users
+- `maintenanceRequests` table with wishlist priority option (color-coded gold), status tracking, cost, submittedBy email
+- `walkthroughRooms` table with region, building address, room name, required questions array, condition dropdown, optional notes
+- `walkthroughPhotos` table with photoUrl, captions, linked to rooms for visual documentation
+- `assets` table (Appliances/Fixed Assets) with ageInYears stored as integer for age-based tracking
+- `maintenanceContacts` table for vendor management with company name, contact person, specialty, phone, email
+- `invoices` table with separate section, linked to contacts (contactId) and maintenance requests (maintenanceRequestId optional)
+- `billingRecords` table for resident billing with amount, description, resident email, payment status
 
 **ORM Strategy:**
 - Drizzle ORM chosen for type safety and performance
