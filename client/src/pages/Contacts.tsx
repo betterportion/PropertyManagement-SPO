@@ -1,164 +1,97 @@
 import { useState } from "react";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useAuth } from "@/hooks/useAuth";
+import { useToast } from "@/hooks/use-toast";
 import ContactsInvoices from "@/components/ContactsInvoices";
 import RegionSelector from "@/components/RegionSelector";
 import BuildingSelector from "@/components/BuildingSelector";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Plus } from "lucide-react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { insertMaintenanceContactSchema, type MaintenanceContact } from "@shared/schema";
+import type { z } from "zod";
 
 export default function Contacts() {
-  //todo: remove mock functionality
   const [selectedRegion, setSelectedRegion] = useState("all");
   const [selectedBuilding, setSelectedBuilding] = useState("all");
+  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+  const { toast } = useToast();
+  const { user } = useAuth();
 
-  const buildings = [
-    { id: "1", address: "123 Main St, Austin, TX" },
-    { id: "2", address: "456 Oak Ave, Austin, TX" },
-    { id: "3", address: "789 River Rd, Austin, TX" },
-    { id: "4", address: "321 Park Blvd, Austin, TX" },
-    { id: "5", address: "654 Elm St, Austin, TX" },
-  ];
+  const { data: contactsData, isLoading } = useQuery<MaintenanceContact[]>({
+    queryKey: ["/api/contacts"],
+  });
 
-  const allContacts = [
-    {
-      id: "1",
-      name: "John Smith",
-      company: "ABC Plumbing Services",
-      service: "Plumbing",
-      phone: "(512) 555-0123",
-      email: "john@abcplumbing.com",
-      region: "west-central" as const,
-      buildingId: "1",
+  const { data: permissionsData } = useQuery<{canManageContacts?: boolean} | null>({
+    queryKey: ["/api/users", (user as any)?.id, "/permissions"],
+    queryFn: async () => {
+      const userId = (user as any)?.id;
+      if (!userId) return null;
+      const response = await fetch(`/api/users/${userId}/permissions`);
+      if (!response.ok) return null;
+      return response.json();
     },
-    {
-      id: "2",
-      name: "Sarah Williams",
-      company: "Elite HVAC",
-      service: "HVAC",
-      phone: "(512) 555-0456",
-      email: "sarah@elitehvac.com",
-      region: "east-central" as const,
-      buildingId: "2",
-    },
-    {
-      id: "3",
-      name: "David Martinez",
-      company: "Bright Electric Co.",
-      service: "Electrical",
-      phone: "(512) 555-0789",
-      email: "david@brightelectric.com",
-      region: "north-west" as const,
-      buildingId: "3",
-    },
-    {
-      id: "4",
-      name: "Lisa Anderson",
-      company: "Premier Landscaping",
-      service: "Landscaping",
-      phone: "(512) 555-0321",
-      email: "lisa@premierlandscape.com",
-      region: "south-west" as const,
-      buildingId: "4",
-    },
-    {
-      id: "5",
-      name: "Robert Taylor",
-      company: "Quick Fix Appliances",
-      service: "Appliance Repair",
-      phone: "(512) 555-0998",
-      email: "robert@quickfix.com",
-      region: "north-east" as const,
-      buildingId: "5",
-    },
-    {
-      id: "6",
-      name: "Jennifer Lee",
-      company: "Ace Carpentry",
-      service: "Carpentry",
-      phone: "(512) 555-0775",
-      email: "jennifer@acecarp.com",
-      region: "south-east" as const,
-      buildingId: "1",
-    },
-  ];
+    enabled: !!(user as any)?.id,
+  });
 
-  const allInvoices = [
-    {
-      id: "1",
-      vendor: "ABC Plumbing Services",
-      service: "Emergency pipe repair",
-      amount: 850,
-      dueDate: new Date(2025, 10, 20),
-      status: "pending" as const,
-      invoiceNumber: "INV-2025-001",
-      region: "west-central" as const,
-      buildingId: "1",
-    },
-    {
-      id: "2",
-      vendor: "Elite HVAC",
-      service: "Annual maintenance",
-      amount: 1200,
-      dueDate: new Date(2025, 10, 1),
-      status: "paid" as const,
-      invoiceNumber: "INV-2025-002",
-      region: "east-central" as const,
-      buildingId: "2",
-    },
-    {
-      id: "3",
-      vendor: "Bright Electric Co.",
-      service: "Outlet installation",
-      amount: 450,
-      dueDate: new Date(2025, 10, 15),
-      status: "pending" as const,
-      invoiceNumber: "INV-2025-003",
-      region: "north-west" as const,
-      buildingId: "3",
-    },
-    {
-      id: "4",
-      vendor: "Premier Landscaping",
-      service: "Monthly service",
-      amount: 600,
-      dueDate: new Date(2025, 9, 30),
-      status: "overdue" as const,
-      invoiceNumber: "INV-2025-004",
-      region: "south-west" as const,
-      buildingId: "4",
-    },
-    {
-      id: "5",
-      vendor: "Quick Fix Appliances",
-      service: "Refrigerator repair",
-      amount: 325,
-      dueDate: new Date(2025, 10, 18),
-      status: "pending" as const,
-      invoiceNumber: "INV-2025-005",
-      region: "north-east" as const,
-      buildingId: "5",
-    },
-    {
-      id: "6",
-      vendor: "Ace Carpentry",
-      service: "Door installation",
-      amount: 950,
-      dueDate: new Date(2025, 10, 5),
-      status: "paid" as const,
-      invoiceNumber: "INV-2025-006",
-      region: "south-east" as const,
-      buildingId: "1",
-    },
-  ];
+  const canManage = permissionsData?.canManageContacts || false;
 
-  const contacts = allContacts.filter((contact) => {
+  const createContactMutation = useMutation({
+    mutationFn: async (data: z.infer<typeof insertMaintenanceContactSchema>) => {
+      return await apiRequest("POST", "/api/contacts", data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/contacts"] });
+      setIsAddDialogOpen(false);
+      form.reset();
+      toast({
+        title: "Success",
+        description: "Contact created successfully",
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to create contact",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const form = useForm<z.infer<typeof insertMaintenanceContactSchema>>({
+    resolver: zodResolver(insertMaintenanceContactSchema),
+    defaultValues: {
+      name: "",
+      company: "",
+      service: "",
+      phone: "",
+      email: "",
+      region: "",
+      buildingAddress: "",
+    },
+  });
+
+  const onSubmit = (data: z.infer<typeof insertMaintenanceContactSchema>) => {
+    createContactMutation.mutate(data);
+  };
+
+  const contacts = (contactsData || []).filter((contact) => {
     const matchesRegion = selectedRegion === "all" || contact.region === selectedRegion;
-    const matchesBuilding = selectedBuilding === "all" || contact.buildingId === selectedBuilding;
+    const matchesBuilding = selectedBuilding === "all" || contact.buildingAddress === selectedBuilding;
     return matchesRegion && matchesBuilding;
   });
 
-  const invoices = allInvoices.filter((invoice) => {
-    const matchesRegion = selectedRegion === "all" || invoice.region === selectedRegion;
-    const matchesBuilding = selectedBuilding === "all" || invoice.buildingId === selectedBuilding;
-    return matchesRegion && matchesBuilding;
-  });
+  const buildings = Array.from(new Set((contactsData || []).map(c => c.buildingAddress))).map(addr => ({
+    id: addr,
+    address: addr,
+  }));
+
+  const allInvoices: any[] = [];
 
   return (
     <div className="space-y-6">
@@ -167,25 +100,158 @@ export default function Contacts() {
         <p className="text-muted-foreground mt-1">Manage maintenance contacts and track invoices</p>
       </div>
 
-      <div className="flex flex-wrap gap-4">
-        <RegionSelector
-          selectedRegion={selectedRegion}
-          onRegionChange={setSelectedRegion}
-        />
-        <BuildingSelector
-          selectedBuilding={selectedBuilding}
-          onBuildingChange={setSelectedBuilding}
-          buildings={buildings}
-        />
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="flex flex-wrap gap-4">
+          <RegionSelector
+            selectedRegion={selectedRegion}
+            onRegionChange={setSelectedRegion}
+          />
+          <BuildingSelector
+            selectedBuilding={selectedBuilding}
+            onBuildingChange={setSelectedBuilding}
+            buildings={buildings}
+          />
+        </div>
+
+        <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+          <DialogTrigger asChild>
+            <Button data-testid="button-add-contact" disabled={!canManage}>
+              <Plus className="h-4 w-4 mr-2" />
+              Add Contact
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>Add New Contact</DialogTitle>
+            </DialogHeader>
+            <Form {...form}>
+              <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <FormField
+                    control={form.control}
+                    name="name"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Contact Name</FormLabel>
+                        <FormControl>
+                          <Input {...field} data-testid="input-contact-name" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="company"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Company</FormLabel>
+                        <FormControl>
+                          <Input {...field} data-testid="input-contact-company" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+
+                <FormField
+                  control={form.control}
+                  name="service"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Service/Specialty</FormLabel>
+                      <FormControl>
+                        <Input {...field} placeholder="Plumbing, HVAC, Electrical, etc." data-testid="input-contact-service" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <div className="grid grid-cols-2 gap-4">
+                  <FormField
+                    control={form.control}
+                    name="phone"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Phone</FormLabel>
+                        <FormControl>
+                          <Input {...field} placeholder="(512) 555-0123" data-testid="input-contact-phone" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="email"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Email</FormLabel>
+                        <FormControl>
+                          <Input {...field} type="email" data-testid="input-contact-email" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <FormField
+                    control={form.control}
+                    name="region"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Region</FormLabel>
+                        <FormControl>
+                          <Input {...field} placeholder="west-central, north-east, etc." data-testid="input-contact-region" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="buildingAddress"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Building Address</FormLabel>
+                        <FormControl>
+                          <Input {...field} placeholder="123 Main St, Austin, TX" data-testid="input-contact-building" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+
+                <DialogFooter>
+                  <Button type="button" variant="outline" onClick={() => setIsAddDialogOpen(false)}>
+                    Cancel
+                  </Button>
+                  <Button type="submit" disabled={createContactMutation.isPending} data-testid="button-submit-contact">
+                    {createContactMutation.isPending ? "Creating..." : "Create Contact"}
+                  </Button>
+                </DialogFooter>
+              </form>
+            </Form>
+          </DialogContent>
+        </Dialog>
       </div>
 
-      <ContactsInvoices
-        contacts={contacts}
-        invoices={invoices}
-        onAddContact={() => console.log("Add contact")}
-        onAddInvoice={() => console.log("Add invoice")}
-        onViewInvoice={(id) => console.log("View invoice:", id)}
-      />
+      {isLoading ? (
+        <div className="text-center py-8">Loading contacts...</div>
+      ) : (
+        <ContactsInvoices
+          contacts={contacts}
+          invoices={allInvoices}
+          onAddContact={() => setIsAddDialogOpen(true)}
+          onAddInvoice={() => console.log("Add invoice")}
+          onViewInvoice={(id) => console.log("View invoice:", id)}
+        />
+      )}
     </div>
   );
 }

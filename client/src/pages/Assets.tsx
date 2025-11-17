@@ -1,121 +1,180 @@
 import { useState } from "react";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useAuth } from "@/hooks/useAuth";
+import { useToast } from "@/hooks/use-toast";
 import AssetTracker from "@/components/AssetTracker";
 import RegionSelector from "@/components/RegionSelector";
 import BuildingSelector from "@/components/BuildingSelector";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Plus } from "lucide-react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { insertAssetSchema, type Asset, type InsertAsset } from "@shared/schema";
+import { z } from "zod";
+
+const assetFormSchema = insertAssetSchema.extend({
+  ageInYears: z.coerce.number().min(0),
+});
 
 export default function Assets() {
-  //todo: remove mock functionality
   const [selectedRegion, setSelectedRegion] = useState("all");
   const [selectedBuilding, setSelectedBuilding] = useState("all");
+  const [editingAsset, setEditingAsset] = useState<Asset | null>(null);
+  const [deletingAssetId, setDeletingAssetId] = useState<string | null>(null);
+  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const { toast } = useToast();
+  const { user } = useAuth();
 
-  const buildings = [
-    { id: "1", address: "123 Main St, Austin, TX" },
-    { id: "2", address: "456 Oak Ave, Austin, TX" },
-    { id: "3", address: "789 River Rd, Austin, TX" },
-    { id: "4", address: "321 Park Blvd, Austin, TX" },
-    { id: "5", address: "654 Elm St, Austin, TX" },
-  ];
+  const { data: assetsData, isLoading } = useQuery<Asset[]>({
+    queryKey: ["/api/assets"],
+  });
 
-  const allAssets = [
-    {
-      id: "1",
-      name: "Central HVAC System",
-      category: "HVAC",
-      type: "fixed" as const,
-      condition: "good" as const,
-      lastServiced: new Date(2025, 9, 15),
-      serialNumber: "HVAC-2024-001",
-      location: "Building A - Roof",
-      region: "west-central" as const,
-      buildingId: "1",
+  const { data: permissionsData } = useQuery<{canManageAssets?: boolean} | null>({
+    queryKey: ["/api/users", (user as any)?.id, "/permissions"],
+    queryFn: async () => {
+      const userId = (user as any)?.id;
+      if (!userId) return null;
+      const response = await fetch(`/api/users/${userId}/permissions`);
+      if (!response.ok) return null;
+      return response.json();
     },
-    {
-      id: "2",
-      name: "Washing Machine - Unit 204",
-      category: "Appliance",
-      type: "fixed" as const,
-      condition: "fair" as const,
-      lastServiced: new Date(2025, 8, 20),
-      serialNumber: "WM-204-2020",
-      location: "Unit 204 - Laundry",
-      region: "east-central" as const,
-      buildingId: "2",
-    },
-    {
-      id: "3",
-      name: "Water Heater - Building A",
-      category: "Plumbing",
-      type: "fixed" as const,
-      condition: "excellent" as const,
-      lastServiced: new Date(2025, 10, 1),
-      serialNumber: "WH-A-2023",
-      location: "Building A - Utility Room",
-      region: "north-west" as const,
-      buildingId: "3",
-    },
-    {
-      id: "4",
-      name: "Oven - Unit 305",
-      category: "Appliance",
-      type: "fixed" as const,
-      condition: "good" as const,
-      lastServiced: new Date(2025, 7, 10),
-      serialNumber: "OV-305-2021",
-      location: "Unit 305 - Kitchen",
-      region: "south-west" as const,
-      buildingId: "4",
-    },
-    {
-      id: "5",
-      name: "Living Room Sofa Set",
-      category: "Furniture",
-      type: "movable" as const,
-      condition: "excellent" as const,
-      location: "Unit 101 - Living Room",
-      region: "north-east" as const,
-      buildingId: "5",
-    },
-    {
-      id: "6",
-      name: "55'' Smart TV",
-      category: "Electronics",
-      type: "movable" as const,
-      condition: "good" as const,
-      serialNumber: "TV-2023-042",
-      location: "Unit 305 - Living Room",
-      region: "south-east" as const,
-      buildingId: "1",
-    },
-    {
-      id: "7",
-      name: "Dining Table & Chairs",
-      category: "Furniture",
-      type: "movable" as const,
-      condition: "good" as const,
-      location: "Unit 204 - Dining Room",
-      region: "west-central" as const,
-      buildingId: "2",
-    },
-    {
-      id: "8",
-      name: "Sound System",
-      category: "Electronics",
-      type: "movable" as const,
-      condition: "excellent" as const,
-      serialNumber: "SS-2024-015",
-      location: "Common Area - Entertainment Room",
-      region: "east-central" as const,
-      buildingId: "3",
-    },
-  ];
+    enabled: !!(user as any)?.id,
+  });
 
-  const assets = allAssets.filter((asset) => {
+  const canManage = permissionsData?.canManageAssets || false;
+
+  const createAssetMutation = useMutation({
+    mutationFn: async (data: InsertAsset) => {
+      return await apiRequest("POST", "/api/assets", data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/assets"] });
+      setIsAddDialogOpen(false);
+      toast({
+        title: "Success",
+        description: "Asset created successfully",
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to create asset",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const updateAssetMutation = useMutation({
+    mutationFn: async ({ id, data }: { id: string; data: Partial<InsertAsset> }) => {
+      return await apiRequest("PATCH", `/api/assets/${id}`, data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/assets"] });
+      setIsEditDialogOpen(false);
+      setEditingAsset(null);
+      toast({
+        title: "Success",
+        description: "Asset updated successfully",
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to update asset",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const deleteAssetMutation = useMutation({
+    mutationFn: async (id: string) => {
+      return await apiRequest("DELETE", `/api/assets/${id}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/assets"] });
+      setDeletingAssetId(null);
+      toast({
+        title: "Success",
+        description: "Asset deleted successfully",
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to delete asset",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const addForm = useForm<z.infer<typeof assetFormSchema>>({
+    resolver: zodResolver(assetFormSchema),
+    defaultValues: {
+      name: "",
+      category: "",
+      type: "fixed",
+      ageInYears: 0,
+      location: "",
+      region: "",
+      buildingAddress: "",
+      serialNumber: "",
+    },
+  });
+
+  const editForm = useForm<z.infer<typeof assetFormSchema>>({
+    resolver: zodResolver(assetFormSchema),
+  });
+
+  const handleEdit = (id: string) => {
+    const asset = assetsData?.find((a) => a.id === id);
+    if (asset) {
+      setEditingAsset(asset);
+      editForm.reset({
+        name: asset.name,
+        category: asset.category,
+        type: asset.type,
+        ageInYears: asset.ageInYears,
+        location: asset.location,
+        region: asset.region,
+        buildingAddress: asset.buildingAddress,
+        serialNumber: asset.serialNumber || "",
+        lastServiced: asset.lastServiced ? new Date(asset.lastServiced).toISOString().split('T')[0] : "",
+      });
+      setIsEditDialogOpen(true);
+    }
+  };
+
+  const handleDelete = (id: string) => {
+    setDeletingAssetId(id);
+  };
+
+  const onSubmitAdd = (data: z.infer<typeof assetFormSchema>) => {
+    createAssetMutation.mutate(data);
+  };
+
+  const onSubmitEdit = (data: z.infer<typeof assetFormSchema>) => {
+    if (editingAsset) {
+      updateAssetMutation.mutate({ id: editingAsset.id, data });
+    }
+  };
+
+  const assets = (assetsData || []).filter((asset) => {
     const matchesRegion = selectedRegion === "all" || asset.region === selectedRegion;
-    const matchesBuilding = selectedBuilding === "all" || asset.buildingId === selectedBuilding;
+    const matchesBuilding = selectedBuilding === "all" || asset.buildingAddress === selectedBuilding;
     return matchesRegion && matchesBuilding;
   });
+
+  const buildings = Array.from(new Set((assetsData || []).map(a => a.buildingAddress))).map(addr => ({
+    id: addr,
+    address: addr,
+  }));
 
   return (
     <div className="space-y-6">
@@ -136,17 +195,357 @@ export default function Assets() {
             buildings={buildings}
           />
         </div>
-        <Button data-testid="button-add-asset">
-          <Plus className="h-4 w-4 mr-2" />
-          Add Asset
-        </Button>
+
+        <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+          <DialogTrigger asChild>
+            <Button data-testid="button-add-asset" disabled={!canManage}>
+              <Plus className="h-4 w-4 mr-2" />
+              Add Asset
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Add New Asset</DialogTitle>
+            </DialogHeader>
+            <Form {...addForm}>
+              <form onSubmit={addForm.handleSubmit(onSubmitAdd)} className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <FormField
+                    control={addForm.control}
+                    name="name"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Asset Name</FormLabel>
+                        <FormControl>
+                          <Input {...field} data-testid="input-asset-name" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={addForm.control}
+                    name="category"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Category</FormLabel>
+                        <FormControl>
+                          <Input {...field} placeholder="HVAC, Appliance, etc." data-testid="input-asset-category" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <FormField
+                    control={addForm.control}
+                    name="type"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Type</FormLabel>
+                        <Select onValueChange={field.onChange} value={field.value}>
+                          <FormControl>
+                            <SelectTrigger data-testid="select-asset-type">
+                              <SelectValue />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            <SelectItem value="fixed">Fixed</SelectItem>
+                            <SelectItem value="movable">Movable</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={addForm.control}
+                    name="ageInYears"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Age (Years)</FormLabel>
+                        <FormControl>
+                          <Input type="number" {...field} data-testid="input-asset-age" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+
+                <FormField
+                  control={addForm.control}
+                  name="serialNumber"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Serial Number (Optional)</FormLabel>
+                      <FormControl>
+                        <Input {...field} value={field.value || ""} data-testid="input-asset-serial" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={addForm.control}
+                  name="location"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Location</FormLabel>
+                      <FormControl>
+                        <Input {...field} placeholder="Unit 101, Building A, etc." data-testid="input-asset-location" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <div className="grid grid-cols-2 gap-4">
+                  <FormField
+                    control={addForm.control}
+                    name="region"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Region</FormLabel>
+                        <FormControl>
+                          <Input {...field} placeholder="west-central, north-east, etc." data-testid="input-asset-region" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={addForm.control}
+                    name="buildingAddress"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Building Address</FormLabel>
+                        <FormControl>
+                          <Input {...field} placeholder="123 Main St, Austin, TX" data-testid="input-asset-building" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+
+                <FormField
+                  control={addForm.control}
+                  name="lastServiced"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Last Serviced (Optional)</FormLabel>
+                      <FormControl>
+                        <Input type="date" {...field} value={field.value || ""} data-testid="input-asset-serviced" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <DialogFooter>
+                  <Button type="button" variant="outline" onClick={() => setIsAddDialogOpen(false)}>
+                    Cancel
+                  </Button>
+                  <Button type="submit" disabled={createAssetMutation.isPending} data-testid="button-submit-asset">
+                    {createAssetMutation.isPending ? "Creating..." : "Create Asset"}
+                  </Button>
+                </DialogFooter>
+              </form>
+            </Form>
+          </DialogContent>
+        </Dialog>
       </div>
 
-      <AssetTracker
-        assets={assets}
-        onEdit={(id) => console.log("Edit asset:", id)}
-        onDelete={(id) => console.log("Delete asset:", id)}
-      />
+      {isLoading ? (
+        <div className="text-center py-8">Loading assets...</div>
+      ) : (
+        <AssetTracker
+          assets={assets}
+          onEdit={canManage ? handleEdit : undefined}
+          onDelete={canManage ? handleDelete : undefined}
+        />
+      )}
+
+      <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Edit Asset</DialogTitle>
+          </DialogHeader>
+          <Form {...editForm}>
+            <form onSubmit={editForm.handleSubmit(onSubmitEdit)} className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <FormField
+                  control={editForm.control}
+                  name="name"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Asset Name</FormLabel>
+                      <FormControl>
+                        <Input {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={editForm.control}
+                  name="category"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Category</FormLabel>
+                      <FormControl>
+                        <Input {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <FormField
+                  control={editForm.control}
+                  name="type"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Type</FormLabel>
+                      <Select onValueChange={field.onChange} value={field.value}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="fixed">Fixed</SelectItem>
+                          <SelectItem value="movable">Movable</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={editForm.control}
+                  name="ageInYears"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Age (Years)</FormLabel>
+                      <FormControl>
+                        <Input type="number" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+
+              <FormField
+                control={editForm.control}
+                name="serialNumber"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Serial Number (Optional)</FormLabel>
+                    <FormControl>
+                      <Input {...field} value={field.value || ""} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={editForm.control}
+                name="location"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Location</FormLabel>
+                    <FormControl>
+                      <Input {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <div className="grid grid-cols-2 gap-4">
+                <FormField
+                  control={editForm.control}
+                  name="region"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Region</FormLabel>
+                      <FormControl>
+                        <Input {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={editForm.control}
+                  name="buildingAddress"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Building Address</FormLabel>
+                      <FormControl>
+                        <Input {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+
+              <FormField
+                control={editForm.control}
+                name="lastServiced"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Last Serviced (Optional)</FormLabel>
+                    <FormControl>
+                      <Input type="date" {...field} value={field.value || ""} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <DialogFooter>
+                <Button type="button" variant="outline" onClick={() => setIsEditDialogOpen(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={updateAssetMutation.isPending}>
+                  {updateAssetMutation.isPending ? "Updating..." : "Update Asset"}
+                </Button>
+              </DialogFooter>
+            </form>
+          </Form>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog open={!!deletingAssetId} onOpenChange={() => setDeletingAssetId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Asset</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this asset? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => deletingAssetId && deleteAssetMutation.mutate(deletingAssetId)}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

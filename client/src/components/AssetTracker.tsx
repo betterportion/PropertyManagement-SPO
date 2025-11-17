@@ -9,30 +9,13 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-
-interface Asset {
-  id: string;
-  name: string;
-  category: string;
-  type: "fixed" | "movable";
-  condition: "excellent" | "good" | "fair" | "poor";
-  lastServiced?: Date;
-  serialNumber?: string;
-  location: string;
-}
+import type { Asset } from "@shared/schema";
 
 interface AssetTrackerProps {
   assets: Asset[];
   onEdit?: (id: string) => void;
   onDelete?: (id: string) => void;
 }
-
-const conditionColors = {
-  excellent: "bg-chart-2 text-white",
-  good: "bg-chart-1 text-white",
-  fair: "bg-chart-4 text-white",
-  poor: "bg-destructive text-destructive-foreground",
-};
 
 const assetIcons = {
   HVAC: Wind,
@@ -76,8 +59,8 @@ export default function AssetTracker({ assets, onEdit, onDelete }: AssetTrackerP
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Badge className={conditionColors[asset.condition]} data-testid={`badge-condition-${asset.id}`}>
-                    {asset.condition}
+                  <Badge variant="secondary" data-testid={`badge-age-${asset.id}`}>
+                    {asset.ageInYears} {asset.ageInYears === 1 ? 'year' : 'years'}
                   </Badge>
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>

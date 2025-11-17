@@ -11,6 +11,8 @@ import {
   insertMaintenanceContactSchema,
   insertInvoiceSchema,
   insertBillingRecordSchema,
+  insertPropertySchema,
+  insertUserSchema,
 } from "@shared/schema";
 
 const roleUpdateSchema = z.object({
@@ -82,6 +84,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get('/api/users/:id/permissions', isAuthenticated, async (req: any, res) => {
+    try {
+      const permissions = await storage.getUserPermissions(req.params.id);
+      if (!permissions) {
+        return res.status(404).json({ message: "Permissions not found" });
+      }
+      res.json(permissions);
+    } catch (error) {
+      console.error("Error fetching permissions:", error);
+      res.status(500).json({ message: "Failed to fetch permissions" });
+    }
+  });
+
   app.patch('/api/users/:id/permissions', isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
@@ -97,6 +112,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error updating permissions:", error);
       res.status(500).json({ message: "Failed to update permissions" });
+    }
+  });
+
+  app.post('/api/users', isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const currentUser = await storage.getUser(userId);
+      if (currentUser?.role !== "admin") {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+      const validatedData = insertUserSchema.parse(req.body);
+      const user = await storage.upsertUser({
+        id: req.body.id || undefined,
+        ...validatedData,
+      });
+      res.json(user);
+    } catch (error) {
+      console.error("Error creating user:", error);
+      res.status(500).json({ message: "Failed to create user" });
     }
   });
 
@@ -679,6 +713,77 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error deleting billing record:", error);
       res.status(500).json({ message: "Failed to delete billing record" });
+    }
+  });
+
+  // Properties Routes
+  app.get('/api/properties', isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const currentUser = await storage.getUser(userId);
+      
+      if (!currentUser?.isActive) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+
+      const properties = await storage.getAllProperties();
+      res.json(properties);
+    } catch (error) {
+      console.error("Error fetching properties:", error);
+      res.status(500).json({ message: "Failed to fetch properties" });
+    }
+  });
+
+  app.post('/api/properties', isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const currentUser = await storage.getUser(userId);
+      
+      if (!currentUser?.isActive || currentUser?.role === "resident") {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+
+      const validatedData = insertPropertySchema.parse(req.body);
+      const property = await storage.createProperty(validatedData);
+      res.json(property);
+    } catch (error) {
+      console.error("Error creating property:", error);
+      res.status(500).json({ message: "Failed to create property" });
+    }
+  });
+
+  app.patch('/api/properties/:id', isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const currentUser = await storage.getUser(userId);
+      
+      if (!currentUser?.isActive || currentUser?.role === "resident") {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+
+      const validatedData = insertPropertySchema.partial().parse(req.body);
+      const property = await storage.updateProperty(req.params.id, validatedData);
+      res.json(property);
+    } catch (error) {
+      console.error("Error updating property:", error);
+      res.status(500).json({ message: "Failed to update property" });
+    }
+  });
+
+  app.delete('/api/properties/:id', isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const currentUser = await storage.getUser(userId);
+      
+      if (!currentUser?.isActive || currentUser?.role === "resident") {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+
+      await storage.deleteProperty(req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error deleting property:", error);
+      res.status(500).json({ message: "Failed to delete property" });
     }
   });
 

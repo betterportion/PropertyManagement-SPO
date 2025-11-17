@@ -15,6 +15,7 @@ import Walkthroughs from "@/pages/Walkthroughs";
 import Assets from "@/pages/Assets";
 import Billing from "@/pages/Billing";
 import Contacts from "@/pages/Contacts";
+import Properties from "@/pages/Properties";
 import ResidentDashboard from "@/pages/ResidentDashboard";
 import SubmitRequest from "@/pages/SubmitRequest";
 import MyRequests from "@/pages/MyRequests";
@@ -38,6 +39,7 @@ function Router() {
     return (
       <Switch>
         <Route path="/" component={AdminDashboard} />
+        <Route path="/properties" component={Properties} />
         <Route path="/maintenance" component={Maintenance} />
         <Route path="/walkthroughs" component={Walkthroughs} />
         <Route path="/assets" component={Assets} />

@@ -1,4 +1,4 @@
-import { Home, Wrench, Camera, Package, DollarSign, Users, Settings } from "lucide-react";
+import { Home, Wrench, Camera, Package, DollarSign, Users, Settings, Building2 } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -23,6 +23,11 @@ const adminMenuItems = [
     title: "Dashboard",
     url: "/",
     icon: Home,
+  },
+  {
+    title: "Properties",
+    url: "/properties",
+    icon: Building2,
   },
   {
     title: "Maintenance",

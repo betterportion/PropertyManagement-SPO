@@ -8,6 +8,7 @@ import {
   maintenanceContacts,
   invoices,
   billingRecords,
+  properties,
   type User,
   type UpsertUser,
   type UserPermissions,
@@ -26,6 +27,8 @@ import {
   type InsertInvoice,
   type BillingRecord,
   type InsertBillingRecord,
+  type Property,
+  type InsertProperty,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, desc } from "drizzle-orm";
@@ -116,6 +119,13 @@ export interface IStorage {
   getAllBillingRecords(): Promise<BillingRecord[]>;
   updateBillingRecord(id: string, data: Partial<InsertBillingRecord>): Promise<BillingRecord>;
   deleteBillingRecord(id: string): Promise<void>;
+
+  // Properties
+  createProperty(property: InsertProperty): Promise<Property>;
+  getProperty(id: string): Promise<Property | undefined>;
+  getAllProperties(): Promise<Property[]>;
+  updateProperty(id: string, data: Partial<InsertProperty>): Promise<Property>;
+  deleteProperty(id: string): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -410,6 +420,34 @@ export class DatabaseStorage implements IStorage {
 
   async deleteBillingRecord(id: string): Promise<void> {
     await db.delete(billingRecords).where(eq(billingRecords.id, id));
+  }
+
+  // Properties Implementation
+  async createProperty(propertyData: InsertProperty): Promise<Property> {
+    const [property] = await db.insert(properties).values(propertyData).returning();
+    return property;
+  }
+
+  async getProperty(id: string): Promise<Property | undefined> {
+    const [property] = await db.select().from(properties).where(eq(properties.id, id));
+    return property;
+  }
+
+  async getAllProperties(): Promise<Property[]> {
+    return await db.select().from(properties);
+  }
+
+  async updateProperty(id: string, data: Partial<InsertProperty>): Promise<Property> {
+    const [property] = await db
+      .update(properties)
+      .set({ ...filterUndefined(data), updatedAt: new Date() })
+      .where(eq(properties.id, id))
+      .returning();
+    return property;
+  }
+
+  async deleteProperty(id: string): Promise<void> {
+    await db.delete(properties).where(eq(properties.id, id));
   }
 }
 

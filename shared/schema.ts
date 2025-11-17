@@ -231,3 +231,24 @@ export const insertBillingRecordSchema = createInsertSchema(billingRecords).omit
 
 export type BillingRecord = typeof billingRecords.$inferSelect;
 export type InsertBillingRecord = z.infer<typeof insertBillingRecordSchema>;
+
+// Properties
+export const properties = pgTable("properties", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: varchar("name").notNull(),
+  address: varchar("address").notNull().unique(),
+  region: varchar("region").notNull(),
+  propertyManager: varchar("property_manager"),
+  totalUnits: integer("total_units"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertPropertySchema = createInsertSchema(properties).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type Property = typeof properties.$inferSelect;
+export type InsertProperty = z.infer<typeof insertPropertySchema>;
