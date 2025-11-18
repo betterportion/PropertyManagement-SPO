@@ -57,6 +57,7 @@ export default function Assets() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/assets"] });
       setIsAddDialogOpen(false);
+      addForm.reset();
       toast({
         title: "Success",
         description: "Asset created successfully",
@@ -145,7 +146,7 @@ export default function Assets() {
         region: asset.region,
         buildingAddress: asset.buildingAddress,
         serialNumber: asset.serialNumber || "",
-        lastServiced: asset.lastServiced ? new Date(asset.lastServiced).toISOString().split('T')[0] : "",
+        lastServiced: asset.lastServiced ? asset.lastServiced : undefined,
       });
       setIsEditDialogOpen(true);
     }
@@ -339,7 +340,12 @@ export default function Assets() {
                     <FormItem>
                       <FormLabel>Last Serviced (Optional)</FormLabel>
                       <FormControl>
-                        <Input type="date" {...field} value={field.value || ""} data-testid="input-asset-serviced" />
+                        <Input 
+                          type="date" 
+                          value={field.value ? String(field.value).split('T')[0] : ""} 
+                          onChange={(e) => field.onChange(e.target.value || undefined)}
+                          data-testid="input-asset-serviced" 
+                        />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -507,7 +513,11 @@ export default function Assets() {
                   <FormItem>
                     <FormLabel>Last Serviced (Optional)</FormLabel>
                     <FormControl>
-                      <Input type="date" {...field} value={field.value || ""} />
+                      <Input 
+                        type="date" 
+                        value={field.value ? String(field.value).split('T')[0] : ""} 
+                        onChange={(e) => field.onChange(e.target.value || undefined)}
+                      />
                     </FormControl>
                     <FormMessage />
                   </FormItem>

@@ -1,13 +1,21 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Plus } from "lucide-react";
 import RegionSelector from "@/components/RegionSelector";
 import BuildingSelector from "@/components/BuildingSelector";
 import RoomCard from "@/components/RoomCard";
 import RoomDetailDrawer from "@/components/RoomDetailDrawer";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import { Input } from "@/components/ui/input";
 import { useAuth } from "@/hooks/useAuth";
-import type { WalkthroughRoom, WalkthroughPhoto, UserPermissions } from "@shared/schema";
+import { useToast } from "@/hooks/use-toast";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import { insertWalkthroughRoomSchema, type WalkthroughRoom, type WalkthroughPhoto, type UserPermissions } from "@shared/schema";
+import { z } from "zod";
 
 interface User {
   id: string;
@@ -22,8 +30,10 @@ export default function Walkthroughs() {
   const [selectedBuilding, setSelectedBuilding] = useState("all");
   const [selectedRoom, setSelectedRoom] = useState<WalkthroughRoom | null>(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [isAddRoomDialogOpen, setIsAddRoomDialogOpen] = useState(false);
 
   const { user, isAuthenticated } = useAuth();
+  const { toast } = useToast();
   
   const typedUser = user as User | null;
   
@@ -78,8 +88,43 @@ export default function Walkthroughs() {
     setIsDrawerOpen(true);
   };
 
+  const createRoomMutation = useMutation({
+    mutationFn: async (data: z.infer<typeof insertWalkthroughRoomSchema>) => {
+      return await apiRequest("POST", "/api/walkthrough-rooms", data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/walkthrough-rooms"] });
+      setIsAddRoomDialogOpen(false);
+      addRoomForm.reset();
+      toast({
+        title: "Success",
+        description: "Room created successfully",
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to create room",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const addRoomForm = useForm<z.infer<typeof insertWalkthroughRoomSchema>>({
+    resolver: zodResolver(insertWalkthroughRoomSchema),
+    defaultValues: {
+      name: "",
+      buildingAddress: "",
+      displayOrder: 0,
+    },
+  });
+
   const handleAddRoom = () => {
-    console.log("Add new room - will implement form");
+    setIsAddRoomDialogOpen(true);
+  };
+
+  const onSubmitRoom = (data: z.infer<typeof insertWalkthroughRoomSchema>) => {
+    createRoomMutation.mutate(data);
   };
 
   return (
@@ -139,6 +184,68 @@ export default function Walkthroughs() {
         onOpenChange={setIsDrawerOpen}
         canManage={canManage}
       />
+
+      <Dialog open={isAddRoomDialogOpen} onOpenChange={setIsAddRoomDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add New Room</DialogTitle>
+          </DialogHeader>
+          <Form {...addRoomForm}>
+            <form onSubmit={addRoomForm.handleSubmit(onSubmitRoom)} className="space-y-4">
+              <FormField
+                control={addRoomForm.control}
+                name="name"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Room Name</FormLabel>
+                    <FormControl>
+                      <Input {...field} placeholder="Living Room, Bedroom, etc." data-testid="input-room-name" />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={addRoomForm.control}
+                name="buildingAddress"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Building Address</FormLabel>
+                    <FormControl>
+                      <Input {...field} placeholder="123 Main St, Austin, TX" data-testid="input-room-building" />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={addRoomForm.control}
+                name="displayOrder"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Display Order</FormLabel>
+                    <FormControl>
+                      <Input type="number" {...field} value={field.value ?? 0} onChange={e => field.onChange(parseInt(e.target.value))} data-testid="input-room-order" />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <DialogFooter>
+                <Button type="button" variant="outline" onClick={() => setIsAddRoomDialogOpen(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={createRoomMutation.isPending} data-testid="button-submit-room">
+                  {createRoomMutation.isPending ? "Creating..." : "Create Room"}
+                </Button>
+              </DialogFooter>
+            </form>
+          </Form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
