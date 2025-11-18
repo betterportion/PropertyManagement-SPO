@@ -239,7 +239,8 @@ export const properties = pgTable("properties", {
   address: varchar("address").notNull().unique(),
   region: varchar("region").notNull(),
   propertyManager: varchar("property_manager"),
-  totalUnits: integer("total_units"),
+  bedrooms: integer("bedrooms"),
+  bathrooms: numeric("bathrooms", { precision: 3, scale: 1 }),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });

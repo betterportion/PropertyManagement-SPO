@@ -105,7 +105,8 @@ export default function Properties() {
       address: "",
       region: "",
       propertyManager: "",
-      totalUnits: undefined,
+      bedrooms: undefined,
+      bathrooms: undefined,
     },
   });
 
@@ -120,7 +121,8 @@ export default function Properties() {
       address: property.address,
       region: property.region,
       propertyManager: property.propertyManager || "",
-      totalUnits: property.totalUnits || undefined,
+      bedrooms: property.bedrooms || undefined,
+      bathrooms: property.bathrooms ? parseFloat(property.bathrooms) : undefined,
     });
     setIsEditDialogOpen(true);
   };
@@ -198,15 +200,29 @@ export default function Properties() {
                   )}
                 />
 
+                <FormField
+                  control={addForm.control}
+                  name="propertyManager"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Property Manager (Optional)</FormLabel>
+                      <FormControl>
+                        <Input {...field} value={field.value || ""} data-testid="input-property-manager" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
                 <div className="grid grid-cols-2 gap-4">
                   <FormField
                     control={addForm.control}
-                    name="propertyManager"
+                    name="bedrooms"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Property Manager (Optional)</FormLabel>
+                        <FormLabel>Bedrooms (Optional)</FormLabel>
                         <FormControl>
-                          <Input {...field} value={field.value || ""} data-testid="input-property-manager" />
+                          <Input type="number" {...field} value={field.value ?? ""} onChange={e => field.onChange(e.target.value ? parseInt(e.target.value) : undefined)} data-testid="input-property-bedrooms" />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -214,12 +230,12 @@ export default function Properties() {
                   />
                   <FormField
                     control={addForm.control}
-                    name="totalUnits"
+                    name="bathrooms"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Total Units (Optional)</FormLabel>
+                        <FormLabel>Bathrooms (Optional)</FormLabel>
                         <FormControl>
-                          <Input type="number" {...field} value={field.value ?? ""} onChange={e => field.onChange(e.target.value ? parseInt(e.target.value) : undefined)} data-testid="input-property-units" />
+                          <Input type="number" step="0.5" {...field} value={field.value ?? ""} onChange={e => field.onChange(e.target.value ? parseFloat(e.target.value) : undefined)} data-testid="input-property-bathrooms" />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -267,8 +283,10 @@ export default function Properties() {
                       </p>
                       <div className="flex items-center gap-2 mt-2">
                         <Badge variant="secondary">{property.region}</Badge>
-                        {property.totalUnits && (
-                          <Badge variant="outline">{property.totalUnits} units</Badge>
+                        {(property.bedrooms || property.bathrooms) && (
+                          <Badge variant="outline">
+                            {property.bedrooms ? `${property.bedrooms} bed` : ''}{property.bedrooms && property.bathrooms ? ', ' : ''}{property.bathrooms ? `${property.bathrooms} bath` : ''}
+                          </Badge>
                         )}
                       </div>
                       {property.propertyManager && (
@@ -349,15 +367,29 @@ export default function Properties() {
                 )}
               />
 
+              <FormField
+                control={editForm.control}
+                name="propertyManager"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Property Manager (Optional)</FormLabel>
+                    <FormControl>
+                      <Input {...field} value={field.value || ""} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
               <div className="grid grid-cols-2 gap-4">
                 <FormField
                   control={editForm.control}
-                  name="propertyManager"
+                  name="bedrooms"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Property Manager (Optional)</FormLabel>
+                      <FormLabel>Bedrooms (Optional)</FormLabel>
                       <FormControl>
-                        <Input {...field} value={field.value || ""} />
+                        <Input type="number" {...field} value={field.value ?? ""} onChange={e => field.onChange(e.target.value ? parseInt(e.target.value) : undefined)} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -365,12 +397,12 @@ export default function Properties() {
                 />
                 <FormField
                   control={editForm.control}
-                  name="totalUnits"
+                  name="bathrooms"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Total Units (Optional)</FormLabel>
+                      <FormLabel>Bathrooms (Optional)</FormLabel>
                       <FormControl>
-                        <Input type="number" {...field} value={field.value ?? ""} onChange={e => field.onChange(e.target.value ? parseInt(e.target.value) : undefined)} />
+                        <Input type="number" step="0.5" {...field} value={field.value ?? ""} onChange={e => field.onChange(e.target.value ? parseFloat(e.target.value) : undefined)} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
