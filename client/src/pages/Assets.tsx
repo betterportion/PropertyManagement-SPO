@@ -174,7 +174,7 @@ export default function Assets() {
     return matchesRegion && matchesBuilding;
   });
 
-  const buildings = Array.from(new Set((assetsData || []).map(a => a.buildingAddress))).map(addr => ({
+  const buildings = Array.from(new Set((assetsData || []).map(a => a.buildingAddress).filter(addr => addr && addr.trim() !== ""))).map(addr => ({
     id: addr,
     address: addr,
   }));

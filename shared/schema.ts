@@ -81,6 +81,8 @@ export const maintenanceRequests = pgTable("maintenance_requests", {
 
 export const insertMaintenanceRequestSchema = createInsertSchema(maintenanceRequests).omit({
   id: true,
+  submittedDate: true,
+  completedDate: true,
   createdAt: true,
   updatedAt: true,
 });
