@@ -15,8 +15,8 @@ interface MaintenanceRequestCardProps {
 const priorityColors = {
   low: "bg-secondary text-secondary-foreground",
   medium: "bg-chart-4 text-white",
-  high: "bg-chart-5 text-white",
-  urgent: "bg-destructive text-destructive-foreground",
+  high: "bg-destructive text-destructive-foreground",
+  urgent: "bg-red-600 text-white dark:bg-red-500",
   wishlist: "bg-yellow-500 text-yellow-950 dark:bg-yellow-600 dark:text-yellow-50",
 };
 

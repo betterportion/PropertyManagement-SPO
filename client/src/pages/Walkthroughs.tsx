@@ -6,15 +6,17 @@ import RegionSelector from "@/components/RegionSelector";
 import BuildingSelector from "@/components/BuildingSelector";
 import RoomCard from "@/components/RoomCard";
 import RoomDetailDrawer from "@/components/RoomDetailDrawer";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { insertWalkthroughRoomSchema, type WalkthroughRoom, type WalkthroughPhoto, type UserPermissions } from "@shared/schema";
+import { insertWalkthroughRoomSchema, insertWalkthroughPhotoSchema, type WalkthroughRoom, type WalkthroughPhoto, type UserPermissions } from "@shared/schema";
 import { z } from "zod";
 
 interface User {
@@ -31,6 +33,8 @@ export default function Walkthroughs() {
   const [selectedRoom, setSelectedRoom] = useState<WalkthroughRoom | null>(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [isAddRoomDialogOpen, setIsAddRoomDialogOpen] = useState(false);
+  const [createdRoom, setCreatedRoom] = useState<WalkthroughRoom | null>(null);
+  const [isPhotoUploadDialogOpen, setIsPhotoUploadDialogOpen] = useState(false);
 
   const { user, isAuthenticated } = useAuth();
   const { toast } = useToast();
@@ -88,17 +92,19 @@ export default function Walkthroughs() {
     setIsDrawerOpen(true);
   };
 
-  const createRoomMutation = useMutation({
+  const createRoomMutation = useMutation<WalkthroughRoom, Error, z.infer<typeof insertWalkthroughRoomSchema>>({
     mutationFn: async (data: z.infer<typeof insertWalkthroughRoomSchema>) => {
       return await apiRequest("POST", "/api/walkthrough-rooms", data);
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["/api/walkthrough-rooms"] });
       setIsAddRoomDialogOpen(false);
       addRoomForm.reset();
+      setCreatedRoom(data);
+      setIsPhotoUploadDialogOpen(true);
       toast({
         title: "Success",
-        description: "Room created successfully",
+        description: "Room created successfully. Now add a photo!",
       });
     },
     onError: () => {
@@ -107,6 +113,43 @@ export default function Walkthroughs() {
         description: "Failed to create room",
         variant: "destructive",
       });
+    },
+  });
+
+  const createPhotoMutation = useMutation({
+    mutationFn: async (data: z.infer<typeof insertWalkthroughPhotoSchema>) => {
+      return await apiRequest("POST", "/api/walkthrough-photos", data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/walkthrough-photos"] });
+      setIsPhotoUploadDialogOpen(false);
+      setCreatedRoom(null);
+      photoForm.reset();
+      toast({
+        title: "Success",
+        description: "Photo uploaded successfully",
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to upload photo",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const photoForm = useForm<z.infer<typeof insertWalkthroughPhotoSchema>>({
+    resolver: zodResolver(insertWalkthroughPhotoSchema),
+    defaultValues: {
+      roomId: "",
+      imageUrl: "",
+      condition: "good",
+      notes: "",
+      region: "",
+      buildingAddress: "",
+      location: "",
+      uploadedBy: typedUser?.email || "",
     },
   });
 
@@ -125,6 +168,15 @@ export default function Walkthroughs() {
 
   const onSubmitRoom = (data: z.infer<typeof insertWalkthroughRoomSchema>) => {
     createRoomMutation.mutate(data);
+  };
+
+  const onSubmitPhoto = (data: z.infer<typeof insertWalkthroughPhotoSchema>) => {
+    if (createdRoom) {
+      createPhotoMutation.mutate({
+        ...data,
+        roomId: createdRoom.id,
+      });
+    }
   };
 
   return (
@@ -184,6 +236,125 @@ export default function Walkthroughs() {
         onOpenChange={setIsDrawerOpen}
         canManage={canManage}
       />
+
+      <Dialog open={isPhotoUploadDialogOpen} onOpenChange={setIsPhotoUploadDialogOpen}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Add Photo for {createdRoom?.name}</DialogTitle>
+            <DialogDescription>Upload a photo and add notes for this room</DialogDescription>
+          </DialogHeader>
+          <Form {...photoForm}>
+            <form onSubmit={photoForm.handleSubmit(onSubmitPhoto)} className="space-y-4">
+              <FormField
+                control={photoForm.control}
+                name="imageUrl"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Photo URL</FormLabel>
+                    <FormControl>
+                      <Input {...field} placeholder="https://example.com/photo.jpg" data-testid="input-photo-url" />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={photoForm.control}
+                name="condition"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Condition</FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value}>
+                      <FormControl>
+                        <SelectTrigger data-testid="select-condition">
+                          <SelectValue />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="excellent">Excellent</SelectItem>
+                        <SelectItem value="good">Good</SelectItem>
+                        <SelectItem value="fair">Fair</SelectItem>
+                        <SelectItem value="poor">Poor</SelectItem>
+                        <SelectItem value="damaged">Damaged</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={photoForm.control}
+                name="notes"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Notes (Optional)</FormLabel>
+                    <FormControl>
+                      <Textarea {...field} value={field.value || ""} placeholder="Add any relevant notes" data-testid="input-photo-notes" />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={photoForm.control}
+                name="region"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Region</FormLabel>
+                    <FormControl>
+                      <Input {...field} placeholder="west-central, north-east, etc." data-testid="input-photo-region" />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={photoForm.control}
+                name="buildingAddress"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Building Address</FormLabel>
+                    <FormControl>
+                      <Input {...field} placeholder="123 Main St, Austin, TX" data-testid="input-photo-building" />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={photoForm.control}
+                name="location"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Location/Unit</FormLabel>
+                    <FormControl>
+                      <Input {...field} placeholder="Unit 101, Room 5, etc." data-testid="input-photo-location" />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <DialogFooter>
+                <Button type="button" variant="outline" onClick={() => {
+                  setIsPhotoUploadDialogOpen(false);
+                  setCreatedRoom(null);
+                }}>
+                  Skip for Now
+                </Button>
+                <Button type="submit" disabled={createPhotoMutation.isPending} data-testid="button-submit-photo">
+                  {createPhotoMutation.isPending ? "Uploading..." : "Upload Photo"}
+                </Button>
+              </DialogFooter>
+            </form>
+          </Form>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={isAddRoomDialogOpen} onOpenChange={setIsAddRoomDialogOpen}>
         <DialogContent>

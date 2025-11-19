@@ -143,6 +143,7 @@ export const assets = pgTable("assets", {
   ageInYears: integer("age_in_years").notNull(),
   lastServiced: timestamp("last_serviced"),
   serialNumber: varchar("serial_number"),
+  purchasePrice: numeric("purchase_price", { precision: 12, scale: 2 }),
   location: varchar("location").notNull(),
   region: varchar("region").notNull(),
   buildingAddress: varchar("building_address").notNull(),

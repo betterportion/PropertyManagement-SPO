@@ -126,6 +126,7 @@ export default function Assets() {
       region: "",
       buildingAddress: "",
       serialNumber: "",
+      purchasePrice: null,
     },
   });
 
@@ -147,6 +148,7 @@ export default function Assets() {
         buildingAddress: asset.buildingAddress,
         serialNumber: asset.serialNumber || "",
         lastServiced: asset.lastServiced ? asset.lastServiced : undefined,
+        purchasePrice: asset.purchasePrice || null,
       });
       setIsEditDialogOpen(true);
     }
@@ -276,19 +278,41 @@ export default function Assets() {
                   />
                 </div>
 
-                <FormField
-                  control={addForm.control}
-                  name="serialNumber"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Serial Number (Optional)</FormLabel>
-                      <FormControl>
-                        <Input {...field} value={field.value || ""} data-testid="input-asset-serial" />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
+                <div className="grid grid-cols-2 gap-4">
+                  <FormField
+                    control={addForm.control}
+                    name="serialNumber"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Serial Number (Optional)</FormLabel>
+                        <FormControl>
+                          <Input {...field} value={field.value || ""} data-testid="input-asset-serial" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={addForm.control}
+                    name="purchasePrice"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Purchase Price (Optional)</FormLabel>
+                        <FormControl>
+                          <Input 
+                            type="number" 
+                            step="0.01"
+                            placeholder="0.00"
+                            value={field.value ?? ""} 
+                            onChange={(e) => field.onChange(e.target.value || null)}
+                            data-testid="input-asset-price" 
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
 
                 <FormField
                   control={addForm.control}
@@ -449,19 +473,40 @@ export default function Assets() {
                 />
               </div>
 
-              <FormField
-                control={editForm.control}
-                name="serialNumber"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Serial Number (Optional)</FormLabel>
-                    <FormControl>
-                      <Input {...field} value={field.value || ""} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+              <div className="grid grid-cols-2 gap-4">
+                <FormField
+                  control={editForm.control}
+                  name="serialNumber"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Serial Number (Optional)</FormLabel>
+                      <FormControl>
+                        <Input {...field} value={field.value || ""} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={editForm.control}
+                  name="purchasePrice"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Purchase Price (Optional)</FormLabel>
+                      <FormControl>
+                        <Input 
+                          type="number" 
+                          step="0.01"
+                          placeholder="0.00"
+                          value={field.value ?? ""} 
+                          onChange={(e) => field.onChange(e.target.value || null)}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
 
               <FormField
                 control={editForm.control}

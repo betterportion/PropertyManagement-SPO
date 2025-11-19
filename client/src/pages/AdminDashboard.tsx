@@ -1,47 +1,20 @@
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import DashboardStats from "@/components/DashboardStats";
 import MaintenanceRequestCard from "@/components/MaintenanceRequestCard";
+import MaintenanceEditDialog from "@/components/MaintenanceEditDialog";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "lucide-react";
+import type { MaintenanceRequest } from "@shared/schema";
 
 export default function AdminDashboard() {
-  //todo: remove mock functionality
-  const [requests, setRequests] = useState([
-    {
-      id: "1",
-      title: "Leaking kitchen faucet",
-      description: "The kitchen faucet has been dripping constantly for the past week.",
-      category: "Plumbing",
-      priority: "high" as const,
-      status: "pending" as const,
-      submittedBy: "Sarah Johnson",
-      submittedDate: new Date(2025, 10, 5),
-      location: "Unit 204",
-    },
-    {
-      id: "2",
-      title: "AC not cooling properly",
-      description: "The air conditioning system is running but not cooling effectively.",
-      category: "HVAC",
-      priority: "urgent" as const,
-      status: "in_progress" as const,
-      submittedBy: "Michael Chen",
-      submittedDate: new Date(2025, 10, 6),
-      location: "Unit 305",
-    },
-    {
-      id: "3",
-      title: "Broken light fixture",
-      description: "Living room ceiling light fixture is not working.",
-      category: "Electrical",
-      priority: "medium" as const,
-      status: "pending" as const,
-      submittedBy: "Emma Wilson",
-      submittedDate: new Date(2025, 10, 7),
-      location: "Unit 101",
-    },
-  ]);
+  const [selectedRequest, setSelectedRequest] = useState<MaintenanceRequest | null>(null);
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+
+  const { data: requests = [] } = useQuery<MaintenanceRequest[]>({
+    queryKey: ['/api/maintenance-requests'],
+  });
 
   const stats = {
     totalProperties: 3,
@@ -50,9 +23,14 @@ export default function AdminDashboard() {
     totalAssets: 48,
   };
 
-  const handleStatusChange = (id: string, status: string) => {
-    setRequests(requests.map((r) => (r.id === id ? { ...r, status: status as any } : r)));
-    console.log(`Updated request ${id} to ${status}`);
+  const handleEditRequest = (request: MaintenanceRequest) => {
+    setSelectedRequest(request);
+    setIsEditDialogOpen(true);
+  };
+
+  const handleCloseDialog = () => {
+    setIsEditDialogOpen(false);
+    setSelectedRequest(null);
   };
 
   return (
@@ -78,9 +56,12 @@ export default function AdminDashboard() {
                 key={request.id}
                 request={request}
                 isAdmin={true}
-                onStatusChange={handleStatusChange}
+                onEdit={() => handleEditRequest(request)}
               />
             ))}
+            {requests.length === 0 && (
+              <p className="text-center text-muted-foreground py-4">No recent requests</p>
+            )}
           </div>
         </div>
 
@@ -119,6 +100,14 @@ export default function AdminDashboard() {
           </Card>
         </div>
       </div>
+
+      {selectedRequest && (
+        <MaintenanceEditDialog
+          request={selectedRequest}
+          open={isEditDialogOpen}
+          onClose={handleCloseDialog}
+        />
+      )}
     </div>
   );
 }

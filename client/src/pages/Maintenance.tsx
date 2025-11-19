@@ -1,14 +1,24 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import MaintenanceRequestCard from "@/components/MaintenanceRequestCard";
 import RegionSelector from "@/components/RegionSelector";
 import BuildingSelector from "@/components/BuildingSelector";
 import MaintenanceEditDialog from "@/components/MaintenanceEditDialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
-import { Search } from "lucide-react";
-import type { MaintenanceRequest } from "@shared/schema";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Search, Plus } from "lucide-react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { insertMaintenanceRequestSchema, type MaintenanceRequest } from "@shared/schema";
 import { useAuth } from "@/hooks/useAuth";
+import { useToast } from "@/hooks/use-toast";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import { z } from "zod";
 
 interface User {
   id: string;
@@ -22,9 +32,11 @@ export default function Maintenance() {
   const [selectedBuilding, setSelectedBuilding] = useState("all");
   const [selectedRequest, setSelectedRequest] = useState<MaintenanceRequest | null>(null);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
 
   const { user } = useAuth();
   const typedUser = user as User | null;
+  const { toast } = useToast();
 
   const { data: requests = [], isLoading } = useQuery<MaintenanceRequest[]>({
     queryKey: ['/api/maintenance-requests'],
@@ -61,6 +73,49 @@ export default function Maintenance() {
     setSelectedRequest(null);
   };
 
+  const createForm = useForm<z.infer<typeof insertMaintenanceRequestSchema>>({
+    resolver: zodResolver(insertMaintenanceRequestSchema),
+    defaultValues: {
+      title: "",
+      description: "",
+      category: "",
+      priority: "medium",
+      status: "pending",
+      location: "",
+      region: "",
+      buildingAddress: "",
+      submittedBy: typedUser?.email || "",
+      submittedDate: new Date(),
+      completedDate: undefined,
+    },
+  });
+
+  const createMutation = useMutation({
+    mutationFn: async (data: z.infer<typeof insertMaintenanceRequestSchema>) => {
+      return apiRequest('POST', '/api/maintenance-requests', data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/maintenance-requests'] });
+      toast({
+        title: "Success",
+        description: "Maintenance request created successfully",
+      });
+      createForm.reset();
+      setIsCreateDialogOpen(false);
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to create maintenance request",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const onSubmitCreate = (data: z.infer<typeof insertMaintenanceRequestSchema>) => {
+    createMutation.mutate(data);
+  };
+
   if (isLoading) {
     return (
       <div className="space-y-6">
@@ -74,9 +129,143 @@ export default function Maintenance() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-semibold">Maintenance Requests</h1>
-        <p className="text-muted-foreground mt-1">Manage all property maintenance requests</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-semibold">Maintenance Requests</h1>
+          <p className="text-muted-foreground mt-1">Manage all property maintenance requests</p>
+        </div>
+        <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+          <DialogTrigger asChild>
+            <Button data-testid="button-create-maintenance-request">
+              <Plus className="h-4 w-4 mr-2" />
+              Create Request
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Create Maintenance Request</DialogTitle>
+            </DialogHeader>
+            <Form {...createForm}>
+              <form onSubmit={createForm.handleSubmit(onSubmitCreate)} className="space-y-4">
+                <FormField
+                  control={createForm.control}
+                  name="title"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Title</FormLabel>
+                      <FormControl>
+                        <Input placeholder="Brief description of the issue" {...field} data-testid="input-title" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={createForm.control}
+                  name="description"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Description</FormLabel>
+                      <FormControl>
+                        <Textarea placeholder="Detailed description" {...field} data-testid="input-description" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={createForm.control}
+                  name="category"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Category</FormLabel>
+                      <FormControl>
+                        <Input placeholder="e.g., Plumbing, Electrical" {...field} data-testid="input-category" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={createForm.control}
+                  name="priority"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Priority</FormLabel>
+                      <Select onValueChange={field.onChange} defaultValue={field.value}>
+                        <FormControl>
+                          <SelectTrigger data-testid="select-priority">
+                            <SelectValue placeholder="Select priority" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="low">Low</SelectItem>
+                          <SelectItem value="medium">Medium</SelectItem>
+                          <SelectItem value="high">High</SelectItem>
+                          <SelectItem value="urgent">Urgent</SelectItem>
+                          <SelectItem value="wishlist">Wishlist</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={createForm.control}
+                  name="location"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Location</FormLabel>
+                      <FormControl>
+                        <Input placeholder="Unit/Room number" {...field} data-testid="input-location" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={createForm.control}
+                  name="region"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Region</FormLabel>
+                      <FormControl>
+                        <Input placeholder="Region" {...field} data-testid="input-region" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={createForm.control}
+                  name="buildingAddress"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Building Address</FormLabel>
+                      <FormControl>
+                        <Input placeholder="Building address" {...field} data-testid="input-building-address" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <div className="flex gap-2 justify-end pt-4">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setIsCreateDialogOpen(false)}
+                    data-testid="button-cancel-create"
+                  >
+                    Cancel
+                  </Button>
+                  <Button type="submit" disabled={createMutation.isPending} data-testid="button-submit-create">
+                    {createMutation.isPending ? "Creating..." : "Create Request"}
+                  </Button>
+                </div>
+              </form>
+            </Form>
+          </DialogContent>
+        </Dialog>
       </div>
 
       <div className="flex flex-wrap gap-4">
