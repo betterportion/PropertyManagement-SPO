@@ -122,7 +122,7 @@ export default function Properties() {
       region: property.region,
       propertyManager: property.propertyManager || "",
       bedrooms: property.bedrooms || undefined,
-      bathrooms: property.bathrooms ? parseFloat(property.bathrooms) : undefined,
+      bathrooms: property.bathrooms || undefined,
     });
     setIsEditDialogOpen(true);
   };
@@ -235,7 +235,7 @@ export default function Properties() {
                       <FormItem>
                         <FormLabel>Bathrooms (Optional)</FormLabel>
                         <FormControl>
-                          <Input type="number" step="0.5" {...field} value={field.value ?? ""} onChange={e => field.onChange(e.target.value ? parseFloat(e.target.value) : undefined)} data-testid="input-property-bathrooms" />
+                          <Input type="number" step="0.5" {...field} value={field.value ?? ""} onChange={e => field.onChange(e.target.value || undefined)} data-testid="input-property-bathrooms" />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -402,7 +402,7 @@ export default function Properties() {
                     <FormItem>
                       <FormLabel>Bathrooms (Optional)</FormLabel>
                       <FormControl>
-                        <Input type="number" step="0.5" {...field} value={field.value ?? ""} onChange={e => field.onChange(e.target.value ? parseFloat(e.target.value) : undefined)} />
+                        <Input type="number" step="0.5" {...field} value={field.value ?? ""} onChange={e => field.onChange(e.target.value || undefined)} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
