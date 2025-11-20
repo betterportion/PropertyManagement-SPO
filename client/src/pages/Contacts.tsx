@@ -86,7 +86,7 @@ export default function Contacts() {
     return matchesRegion && matchesBuilding;
   });
 
-  const buildings = Array.from(new Set((contactsData || []).map(c => c.buildingAddress))).map(addr => ({
+  const buildings = Array.from(new Set((contactsData || []).map(c => c.buildingAddress).filter(addr => addr && addr.trim() !== ""))).map(addr => ({
     id: addr,
     address: addr,
   }));
