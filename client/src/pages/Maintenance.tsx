@@ -14,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Search, Plus } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { insertMaintenanceRequestSchema, type MaintenanceRequest } from "@shared/schema";
+import { insertMaintenanceRequestSchema, type MaintenanceRequest, type Property } from "@shared/schema";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -40,6 +40,10 @@ export default function Maintenance() {
 
   const { data: requests = [], isLoading } = useQuery<MaintenanceRequest[]>({
     queryKey: ['/api/maintenance-requests'],
+  });
+
+  const { data: properties = [] } = useQuery<Property[]>({
+    queryKey: ['/api/properties'],
   });
 
   const uniqueBuildings = requests
@@ -85,8 +89,6 @@ export default function Maintenance() {
       region: "",
       buildingAddress: "",
       submittedBy: typedUser?.email || "",
-      submittedDate: new Date(),
-      completedDate: undefined,
     },
   });
 
@@ -215,10 +217,21 @@ export default function Maintenance() {
                   name="location"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Location</FormLabel>
-                      <FormControl>
-                        <Input placeholder="Unit/Room number" {...field} data-testid="input-location" />
-                      </FormControl>
+                      <FormLabel>Location (Property)</FormLabel>
+                      <Select onValueChange={field.onChange} value={field.value}>
+                        <FormControl>
+                          <SelectTrigger data-testid="select-location">
+                            <SelectValue placeholder="Select property" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {properties.filter(p => p.address).map((property) => (
+                            <SelectItem key={property.id} value={property.address!}>
+                              {property.address}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                       <FormMessage />
                     </FormItem>
                   )}

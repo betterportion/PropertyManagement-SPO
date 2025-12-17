@@ -14,7 +14,7 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import type { MaintenanceRequest, MaintenanceContact, Invoice } from "@shared/schema";
+import type { MaintenanceRequest, MaintenanceContact, Invoice, Property } from "@shared/schema";
 import { DollarSign, Link2, FileText, Plus } from "lucide-react";
 import { format } from "date-fns";
 
@@ -46,6 +46,11 @@ export default function MaintenanceEditDialog({ request, open, onClose }: Mainte
 
   const { data: invoices = [] } = useQuery<Invoice[]>({
     queryKey: ['/api/invoices'],
+    enabled: open,
+  });
+
+  const { data: properties = [] } = useQuery<Property[]>({
+    queryKey: ['/api/properties'],
     enabled: open,
   });
 
@@ -148,10 +153,21 @@ export default function MaintenanceEditDialog({ request, open, onClose }: Mainte
                 name="location"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Location</FormLabel>
-                    <FormControl>
-                      <Input {...field} data-testid="input-location" />
-                    </FormControl>
+                    <FormLabel>Location (Property)</FormLabel>
+                    <Select value={field.value} onValueChange={field.onChange}>
+                      <FormControl>
+                        <SelectTrigger data-testid="select-location">
+                          <SelectValue placeholder="Select property" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {properties.filter(p => p.address).map((property) => (
+                          <SelectItem key={property.id} value={property.address!}>
+                            {property.address}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                     <FormMessage />
                   </FormItem>
                 )}
