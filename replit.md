@@ -8,6 +8,7 @@ This is a comprehensive property management system for Saint Paul's Outreach, In
 - **Properties**: Server automatically computes full address from components for display
 - **Walkthroughs**: Building address dropdown now populated from Properties table instead of room data
 - **Maintenance**: Location field converted from text input to dropdown showing current properties
+- **Assets**: Removed location field; region and building address now use dropdowns (regions list and Properties table)
 - **Schema**: Added InsertPropertyWithAddress type for proper type safety in property CRUD operations
 
 ## Previous Changes (November 19, 2025)

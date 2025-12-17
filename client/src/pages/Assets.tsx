@@ -15,12 +15,21 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Plus } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { insertAssetSchema, type Asset, type InsertAsset } from "@shared/schema";
+import { insertAssetSchema, type Asset, type InsertAsset, type Property } from "@shared/schema";
 import { z } from "zod";
 
 const assetFormSchema = insertAssetSchema.extend({
   ageInYears: z.coerce.number().min(0),
 });
+
+const regions = [
+  { id: "west-central", name: "West Central" },
+  { id: "east-central", name: "East Central" },
+  { id: "north-west", name: "North West" },
+  { id: "south-west", name: "South West" },
+  { id: "north-east", name: "North East" },
+  { id: "south-east", name: "South East" },
+];
 
 export default function Assets() {
   const [selectedRegion, setSelectedRegion] = useState("all");
@@ -34,6 +43,10 @@ export default function Assets() {
 
   const { data: assetsData, isLoading } = useQuery<Asset[]>({
     queryKey: ["/api/assets"],
+  });
+
+  const { data: properties = [] } = useQuery<Property[]>({
+    queryKey: ["/api/properties"],
   });
 
   const { data: permissionsData } = useQuery<{canManageAssets?: boolean} | null>({
@@ -122,7 +135,6 @@ export default function Assets() {
       category: "",
       type: "fixed",
       ageInYears: 0,
-      location: "",
       region: "",
       buildingAddress: "",
       serialNumber: "",
@@ -143,7 +155,6 @@ export default function Assets() {
         category: asset.category,
         type: asset.type,
         ageInYears: asset.ageInYears,
-        location: asset.location,
         region: asset.region,
         buildingAddress: asset.buildingAddress,
         serialNumber: asset.serialNumber || "",
@@ -314,20 +325,6 @@ export default function Assets() {
                   />
                 </div>
 
-                <FormField
-                  control={addForm.control}
-                  name="location"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Location</FormLabel>
-                      <FormControl>
-                        <Input {...field} placeholder="Unit 101, Building A, etc." data-testid="input-asset-location" />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
                 <div className="grid grid-cols-2 gap-4">
                   <FormField
                     control={addForm.control}
@@ -335,9 +332,20 @@ export default function Assets() {
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>Region</FormLabel>
-                        <FormControl>
-                          <Input {...field} placeholder="west-central, north-east, etc." data-testid="input-asset-region" />
-                        </FormControl>
+                        <Select onValueChange={field.onChange} value={field.value}>
+                          <FormControl>
+                            <SelectTrigger data-testid="select-asset-region">
+                              <SelectValue placeholder="Select region" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {regions.map((region) => (
+                              <SelectItem key={region.id} value={region.id}>
+                                {region.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                         <FormMessage />
                       </FormItem>
                     )}
@@ -347,10 +355,21 @@ export default function Assets() {
                     name="buildingAddress"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Building Address</FormLabel>
-                        <FormControl>
-                          <Input {...field} placeholder="123 Main St, Austin, TX" data-testid="input-asset-building" />
-                        </FormControl>
+                        <FormLabel>Property Address</FormLabel>
+                        <Select onValueChange={field.onChange} value={field.value}>
+                          <FormControl>
+                            <SelectTrigger data-testid="select-asset-building">
+                              <SelectValue placeholder="Select property" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {properties.filter(p => p.address).map((property) => (
+                              <SelectItem key={property.id} value={property.address!}>
+                                {property.address}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                         <FormMessage />
                       </FormItem>
                     )}
@@ -508,20 +527,6 @@ export default function Assets() {
                 />
               </div>
 
-              <FormField
-                control={editForm.control}
-                name="location"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Location</FormLabel>
-                    <FormControl>
-                      <Input {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
               <div className="grid grid-cols-2 gap-4">
                 <FormField
                   control={editForm.control}
@@ -529,9 +534,20 @@ export default function Assets() {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Region</FormLabel>
-                      <FormControl>
-                        <Input {...field} />
-                      </FormControl>
+                      <Select onValueChange={field.onChange} value={field.value}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select region" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {regions.map((region) => (
+                            <SelectItem key={region.id} value={region.id}>
+                              {region.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                       <FormMessage />
                     </FormItem>
                   )}
@@ -541,10 +557,21 @@ export default function Assets() {
                   name="buildingAddress"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Building Address</FormLabel>
-                      <FormControl>
-                        <Input {...field} />
-                      </FormControl>
+                      <FormLabel>Property Address</FormLabel>
+                      <Select onValueChange={field.onChange} value={field.value}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select property" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {properties.filter(p => p.address).map((property) => (
+                            <SelectItem key={property.id} value={property.address!}>
+                              {property.address}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                       <FormMessage />
                     </FormItem>
                   )}
