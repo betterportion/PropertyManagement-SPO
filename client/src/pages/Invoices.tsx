@@ -3,7 +3,7 @@ import ResidentBilling from "@/components/ResidentBilling";
 import RegionSelector from "@/components/RegionSelector";
 import BuildingSelector from "@/components/BuildingSelector";
 
-export default function Billing() {
+export default function Invoices() {
   //todo: remove mock functionality
   const [selectedRegion, setSelectedRegion] = useState("all");
   const [selectedBuilding, setSelectedBuilding] = useState("all");
@@ -145,8 +145,8 @@ export default function Billing() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-semibold">Resident Billing</h1>
-        <p className="text-muted-foreground mt-1">Manage resident information and billing records</p>
+        <h1 className="text-3xl font-semibold">Invoices</h1>
+        <p className="text-muted-foreground mt-1">Manage invoices and billing records</p>
       </div>
 
       <div className="flex flex-wrap gap-4">

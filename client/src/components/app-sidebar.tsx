@@ -45,8 +45,8 @@ const adminMenuItems = [
     icon: Package,
   },
   {
-    title: "Billing",
-    url: "/billing",
+    title: "Invoices",
+    url: "/invoices",
     icon: DollarSign,
   },
   {

@@ -10,6 +10,7 @@ This is a comprehensive property management system for Saint Paul's Outreach, In
 - **Maintenance**: Location field converted from text input to dropdown showing current properties
 - **Assets**: Removed location field; region and building address now use dropdowns (regions list and Properties table)
 - **Contacts**: Removed duplicate "Add Contact" button; added Edit button with full edit dialog for updating contact info
+- **Invoices**: Renamed "Billing" section to "Invoices" throughout navigation, routes, and page title
 - **Schema**: Added InsertPropertyWithAddress type for proper type safety in property CRUD operations
 
 ## Previous Changes (November 19, 2025)
