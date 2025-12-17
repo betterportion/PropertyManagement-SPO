@@ -16,7 +16,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { insertWalkthroughRoomSchema, insertWalkthroughPhotoSchema, type WalkthroughRoom, type WalkthroughPhoto, type UserPermissions } from "@shared/schema";
+import { insertWalkthroughRoomSchema, insertWalkthroughPhotoSchema, type WalkthroughRoom, type WalkthroughPhoto, type UserPermissions, type Property } from "@shared/schema";
 import { z } from "zod";
 
 interface User {
@@ -57,13 +57,15 @@ export default function Walkthroughs() {
     enabled: selectedRegion !== "all",
   });
 
-  const uniqueBuildings = allRooms
-    .filter(room => room.buildingAddress)
-    .map(room => room.buildingAddress)
-    .filter((address, index, arr) => arr.indexOf(address) === index)
-    .map(address => ({
-      id: address,
-      address,
+  const { data: properties = [] } = useQuery<Property[]>({
+    queryKey: ['/api/properties'],
+  });
+
+  const uniqueBuildings = properties
+    .filter(property => property.address && property.address.trim() !== "")
+    .map(property => ({
+      id: property.address,
+      address: property.address,
     }));
 
   const rooms = allRooms.filter((room) => {
@@ -318,9 +320,20 @@ export default function Walkthroughs() {
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Building Address</FormLabel>
-                    <FormControl>
-                      <Input {...field} placeholder="123 Main St, Austin, TX" data-testid="input-photo-building" />
-                    </FormControl>
+                    <Select onValueChange={field.onChange} value={field.value}>
+                      <FormControl>
+                        <SelectTrigger data-testid="select-photo-building">
+                          <SelectValue placeholder="Select a property" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {uniqueBuildings.map((building) => (
+                          <SelectItem key={building.id} value={building.address}>
+                            {building.address}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -383,9 +396,20 @@ export default function Walkthroughs() {
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Building Address</FormLabel>
-                    <FormControl>
-                      <Input {...field} placeholder="123 Main St, Austin, TX" data-testid="input-room-building" />
-                    </FormControl>
+                    <Select onValueChange={field.onChange} value={field.value}>
+                      <FormControl>
+                        <SelectTrigger data-testid="select-room-building">
+                          <SelectValue placeholder="Select a property" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {uniqueBuildings.map((building) => (
+                          <SelectItem key={building.id} value={building.address}>
+                            {building.address}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                     <FormMessage />
                   </FormItem>
                 )}
