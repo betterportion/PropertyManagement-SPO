@@ -3,7 +3,13 @@
 ## Overview
 This is a comprehensive property management system for Saint Paul's Outreach, Inc. (SPO), designed to streamline administrative tasks and resident interactions. The application provides role-based dashboards for administrators and residents, enabling admins to manage properties, maintenance, assets, billing, and vendors, while residents can submit and track maintenance requests. The system emphasizes efficiency, data density, and professional trustworthiness crucial for property management operations.
 
-## Recent Changes (November 19, 2025)
+## Recent Changes (December 17, 2025)
+- **Properties**: Separated address into components: streetAddress, city, state, zipCode
+- **Properties**: Server automatically computes full address from components for display
+- **Walkthroughs**: Building address dropdown now populated from Properties table instead of room data
+- **Schema**: Added InsertPropertyWithAddress type for proper type safety in property CRUD operations
+
+## Previous Changes (November 19, 2025)
 - **Maintenance**: Added admin "Create Request" button and dialog with full form validation
 - **Priority Colors**: Updated badge colors - "high" uses destructive red, "urgent" uses bright red-600
 - **Assets**: Added purchasePrice field (numeric 12,2) to schema, forms, and CRUD operations
