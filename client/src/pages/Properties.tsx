@@ -102,7 +102,10 @@ export default function Properties() {
     resolver: zodResolver(insertPropertySchema),
     defaultValues: {
       name: "",
-      address: "",
+      streetAddress: "",
+      city: "",
+      state: "",
+      zipCode: "",
       region: "",
       propertyManager: "",
       bedrooms: undefined,
@@ -118,7 +121,10 @@ export default function Properties() {
     setEditingProperty(property);
     editForm.reset({
       name: property.name,
-      address: property.address,
+      streetAddress: property.streetAddress,
+      city: property.city,
+      state: property.state,
+      zipCode: property.zipCode,
       region: property.region,
       propertyManager: property.propertyManager || "",
       bedrooms: property.bedrooms || undefined,
@@ -174,17 +180,59 @@ export default function Properties() {
 
                 <FormField
                   control={addForm.control}
-                  name="address"
+                  name="streetAddress"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Address</FormLabel>
+                      <FormLabel>Street Address</FormLabel>
                       <FormControl>
-                        <Input {...field} placeholder="123 Main St, Austin, TX 78701" data-testid="input-property-address" />
+                        <Input {...field} placeholder="123 Main St" data-testid="input-property-street-address" />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
                   )}
                 />
+
+                <div className="grid grid-cols-3 gap-4">
+                  <FormField
+                    control={addForm.control}
+                    name="city"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>City</FormLabel>
+                        <FormControl>
+                          <Input {...field} placeholder="Austin" data-testid="input-property-city" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={addForm.control}
+                    name="state"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>State</FormLabel>
+                        <FormControl>
+                          <Input {...field} placeholder="TX" data-testid="input-property-state" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={addForm.control}
+                    name="zipCode"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Zip Code</FormLabel>
+                        <FormControl>
+                          <Input {...field} placeholder="78701" data-testid="input-property-zip" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
 
                 <FormField
                   control={addForm.control}
@@ -341,10 +389,10 @@ export default function Properties() {
 
               <FormField
                 control={editForm.control}
-                name="address"
+                name="streetAddress"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Address</FormLabel>
+                    <FormLabel>Street Address</FormLabel>
                     <FormControl>
                       <Input {...field} />
                     </FormControl>
@@ -352,6 +400,48 @@ export default function Properties() {
                   </FormItem>
                 )}
               />
+
+              <div className="grid grid-cols-3 gap-4">
+                <FormField
+                  control={editForm.control}
+                  name="city"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>City</FormLabel>
+                      <FormControl>
+                        <Input {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={editForm.control}
+                  name="state"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>State</FormLabel>
+                      <FormControl>
+                        <Input {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={editForm.control}
+                  name="zipCode"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Zip Code</FormLabel>
+                      <FormControl>
+                        <Input {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
 
               <FormField
                 control={editForm.control}

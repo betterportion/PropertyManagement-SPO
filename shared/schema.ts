@@ -239,7 +239,11 @@ export type InsertBillingRecord = z.infer<typeof insertBillingRecordSchema>;
 export const properties = pgTable("properties", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   name: varchar("name").notNull(),
-  address: varchar("address").notNull().unique(),
+  streetAddress: varchar("street_address").notNull(),
+  city: varchar("city").notNull(),
+  state: varchar("state").notNull(),
+  zipCode: varchar("zip_code").notNull(),
+  address: varchar("address").notNull().unique(), // Computed: streetAddress, city, state zipCode
   region: varchar("region").notNull(),
   propertyManager: varchar("property_manager"),
   bedrooms: integer("bedrooms"),
@@ -250,9 +254,12 @@ export const properties = pgTable("properties", {
 
 export const insertPropertySchema = createInsertSchema(properties).omit({
   id: true,
+  address: true, // Computed from streetAddress, city, state, zipCode
   createdAt: true,
   updatedAt: true,
 });
 
 export type Property = typeof properties.$inferSelect;
 export type InsertProperty = z.infer<typeof insertPropertySchema>;
+// Type for creating/updating properties with computed address
+export type InsertPropertyWithAddress = InsertProperty & { address: string };

@@ -29,6 +29,7 @@ import {
   type InsertBillingRecord,
   type Property,
   type InsertProperty,
+  type InsertPropertyWithAddress,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, desc } from "drizzle-orm";
@@ -121,10 +122,10 @@ export interface IStorage {
   deleteBillingRecord(id: string): Promise<void>;
 
   // Properties
-  createProperty(property: InsertProperty): Promise<Property>;
+  createProperty(property: InsertPropertyWithAddress): Promise<Property>;
   getProperty(id: string): Promise<Property | undefined>;
   getAllProperties(): Promise<Property[]>;
-  updateProperty(id: string, data: Partial<InsertProperty>): Promise<Property>;
+  updateProperty(id: string, data: Partial<InsertPropertyWithAddress>): Promise<Property>;
   deleteProperty(id: string): Promise<void>;
 }
 
@@ -423,7 +424,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Properties Implementation
-  async createProperty(propertyData: InsertProperty): Promise<Property> {
+  async createProperty(propertyData: InsertPropertyWithAddress): Promise<Property> {
     const [property] = await db.insert(properties).values(propertyData).returning();
     return property;
   }
@@ -437,7 +438,7 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(properties);
   }
 
-  async updateProperty(id: string, data: Partial<InsertProperty>): Promise<Property> {
+  async updateProperty(id: string, data: Partial<InsertPropertyWithAddress>): Promise<Property> {
     const [property] = await db
       .update(properties)
       .set({ ...filterUndefined(data), updatedAt: new Date() })

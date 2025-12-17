@@ -13,6 +13,7 @@ import {
   insertBillingRecordSchema,
   insertPropertySchema,
   insertUserSchema,
+  type InsertPropertyWithAddress,
 } from "@shared/schema";
 
 const roleUpdateSchema = z.object({
@@ -744,7 +745,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const validatedData = insertPropertySchema.parse(req.body);
-      const property = await storage.createProperty(validatedData);
+      // Compute full address from components
+      const address = `${validatedData.streetAddress}, ${validatedData.city}, ${validatedData.state} ${validatedData.zipCode}`;
+      const property = await storage.createProperty({ ...validatedData, address });
       res.json(property);
     } catch (error) {
       console.error("Error creating property:", error);
@@ -762,7 +765,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const validatedData = insertPropertySchema.partial().parse(req.body);
-      const property = await storage.updateProperty(req.params.id, validatedData);
+      
+      // If address components are being updated, recompute the full address
+      let updateData: Partial<InsertPropertyWithAddress> = { ...validatedData };
+      if (validatedData.streetAddress || validatedData.city || validatedData.state || validatedData.zipCode) {
+        const existingProperty = await storage.getProperty(req.params.id);
+        if (existingProperty) {
+          const streetAddress = validatedData.streetAddress || existingProperty.streetAddress;
+          const city = validatedData.city || existingProperty.city;
+          const state = validatedData.state || existingProperty.state;
+          const zipCode = validatedData.zipCode || existingProperty.zipCode;
+          updateData.address = `${streetAddress}, ${city}, ${state} ${zipCode}`;
+        }
+      }
+      
+      const property = await storage.updateProperty(req.params.id, updateData);
       res.json(property);
     } catch (error) {
       console.error("Error updating property:", error);
