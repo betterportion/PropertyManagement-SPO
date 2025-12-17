@@ -6,16 +6,17 @@ import { useToast } from "@/hooks/use-toast";
 import AssetTracker from "@/components/AssetTracker";
 import RegionSelector from "@/components/RegionSelector";
 import BuildingSelector from "@/components/BuildingSelector";
+import { PhotoUpload } from "@/components/PhotoUpload";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { Plus } from "lucide-react";
+import { Plus, Trash2, X, Image } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { insertAssetSchema, type Asset, type InsertAsset, type Property } from "@shared/schema";
+import { insertAssetSchema, type Asset, type InsertAsset, type Property, type AssetPhoto } from "@shared/schema";
 import { z } from "zod";
 
 const assetFormSchema = insertAssetSchema.extend({
@@ -38,6 +39,8 @@ export default function Assets() {
   const [deletingAssetId, setDeletingAssetId] = useState<string | null>(null);
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [isPhotosDialogOpen, setIsPhotosDialogOpen] = useState(false);
+  const [selectedAssetForPhotos, setSelectedAssetForPhotos] = useState<Asset | null>(null);
   const { toast } = useToast();
   const { user } = useAuth();
 
@@ -128,6 +131,57 @@ export default function Assets() {
     },
   });
 
+  const { data: assetPhotos = [], refetch: refetchPhotos } = useQuery<AssetPhoto[]>({
+    queryKey: ["/api/asset-photos/asset", selectedAssetForPhotos?.id],
+    queryFn: async () => {
+      if (!selectedAssetForPhotos?.id) return [];
+      const response = await fetch(`/api/asset-photos/asset/${selectedAssetForPhotos.id}`, { credentials: "include" });
+      if (!response.ok) return [];
+      return response.json();
+    },
+    enabled: !!selectedAssetForPhotos?.id,
+  });
+
+  const createAssetPhotoMutation = useMutation({
+    mutationFn: async (data: { assetId: string; imageUrl: string; caption?: string; uploadedBy: string }) => {
+      return await apiRequest("POST", "/api/asset-photos", data);
+    },
+    onSuccess: () => {
+      refetchPhotos();
+      toast({
+        title: "Success",
+        description: "Photo uploaded successfully",
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to upload photo",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const deleteAssetPhotoMutation = useMutation({
+    mutationFn: async (id: string) => {
+      return await apiRequest("DELETE", `/api/asset-photos/${id}`);
+    },
+    onSuccess: () => {
+      refetchPhotos();
+      toast({
+        title: "Success",
+        description: "Photo deleted successfully",
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to delete photo",
+        variant: "destructive",
+      });
+    },
+  });
+
   const addForm = useForm<z.infer<typeof assetFormSchema>>({
     resolver: zodResolver(assetFormSchema),
     defaultValues: {
@@ -167,6 +221,25 @@ export default function Assets() {
 
   const handleDelete = (id: string) => {
     setDeletingAssetId(id);
+  };
+
+  const handlePhotos = (id: string) => {
+    const asset = assetsData?.find((a) => a.id === id);
+    if (asset) {
+      setSelectedAssetForPhotos(asset);
+      setIsPhotosDialogOpen(true);
+    }
+  };
+
+  const handlePhotoUpload = (url: string) => {
+    if (selectedAssetForPhotos) {
+      const typedUser = user as { email?: string } | null;
+      createAssetPhotoMutation.mutate({
+        assetId: selectedAssetForPhotos.id,
+        imageUrl: url,
+        uploadedBy: typedUser?.email || "Unknown",
+      });
+    }
   };
 
   const onSubmitAdd = (data: z.infer<typeof assetFormSchema>) => {
@@ -416,6 +489,7 @@ export default function Assets() {
           assets={assets}
           onEdit={canManage ? handleEdit : undefined}
           onDelete={canManage ? handleDelete : undefined}
+          onPhotos={handlePhotos}
         />
       )}
 
@@ -628,6 +702,77 @@ export default function Assets() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <Dialog open={isPhotosDialogOpen} onOpenChange={(open) => {
+        setIsPhotosDialogOpen(open);
+        if (!open) setSelectedAssetForPhotos(null);
+      }}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Photos for {selectedAssetForPhotos?.name}</DialogTitle>
+            <DialogDescription>
+              Upload and manage photos for this asset
+            </DialogDescription>
+          </DialogHeader>
+
+          {canManage && (
+            <div className="space-y-4">
+              <h4 className="font-medium text-sm">Upload New Photo</h4>
+              <PhotoUpload
+                onUpload={handlePhotoUpload}
+                onError={(error) => toast({ title: "Error", description: error, variant: "destructive" })}
+                disabled={createAssetPhotoMutation.isPending}
+              />
+            </div>
+          )}
+
+          <div className="space-y-4">
+            <h4 className="font-medium text-sm">Existing Photos ({assetPhotos.length})</h4>
+            {assetPhotos.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                <Image className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                <p>No photos yet</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-4">
+                {assetPhotos.map((photo) => (
+                  <div key={photo.id} className="relative group rounded-lg overflow-hidden border" data-testid={`photo-${photo.id}`}>
+                    <img
+                      src={photo.imageUrl}
+                      alt={photo.caption || "Asset photo"}
+                      className="w-full h-40 object-cover"
+                    />
+                    {canManage && (
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="destructive"
+                        className="absolute top-2 right-2 h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
+                        onClick={() => deleteAssetPhotoMutation.mutate(photo.id)}
+                        disabled={deleteAssetPhotoMutation.isPending}
+                        data-testid={`button-delete-photo-${photo.id}`}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    )}
+                    {photo.caption && (
+                      <div className="absolute bottom-0 left-0 right-0 bg-black/50 text-white text-xs p-2">
+                        {photo.caption}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setIsPhotosDialogOpen(false)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

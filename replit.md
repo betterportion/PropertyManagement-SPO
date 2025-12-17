@@ -4,6 +4,10 @@
 This is a comprehensive property management system for Saint Paul's Outreach, Inc. (SPO), designed to streamline administrative tasks and resident interactions. The application provides role-based dashboards for administrators and residents, enabling admins to manage properties, maintenance, assets, billing, and vendors, while residents can submit and track maintenance requests. The system emphasizes efficiency, data density, and professional trustworthiness crucial for property management operations.
 
 ## Recent Changes (December 17, 2025)
+- **Photo Upload**: Added drag-and-drop photo upload component for Assets and Walkthroughs pages
+- **Assets Photos**: New assetPhotos table with CRUD operations; Photos dialog accessible from asset menu
+- **File Upload**: Server endpoint at /api/upload handles image files (JPEG, PNG, GIF, WebP) up to 10MB
+- **Walkthroughs**: Photo upload dialog now uses file upload instead of URL input
 - **Properties**: Separated address into components: streetAddress, city, state, zipCode
 - **Properties**: Server automatically computes full address from components for display
 - **Walkthroughs**: Building address dropdown now populated from Properties table instead of room data
@@ -50,9 +54,11 @@ Preferred communication style: Simple, everyday language.
     - `walkthroughRooms`: Details rooms with region, building, questions, condition, notes.
     - `walkthroughPhotos`: Stores photo URLs, captions, linked to rooms.
     - `assets`: Appliances/fixed assets with age tracking.
+    - `assetPhotos`: Photos linked to assets, stores image URLs and captions.
     - `maintenanceContacts`: Vendor details.
     - `invoices`: Linked to contacts and maintenance requests.
     - `billingRecords`: Resident billing with amount, description, payment status.
+    - `properties`: Property records with address components.
 - **ORM Strategy**: Drizzle ORM for type safety and performance, Zod schemas for validation.
 - **Connection Management**: Neon's Pool for connection pooling, environment-based `DATABASE_URL`.
 

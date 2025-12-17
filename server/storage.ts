@@ -5,6 +5,7 @@ import {
   walkthroughRooms,
   walkthroughPhotos,
   assets,
+  assetPhotos,
   maintenanceContacts,
   invoices,
   billingRecords,
@@ -21,6 +22,8 @@ import {
   type InsertWalkthroughPhoto,
   type Asset,
   type InsertAsset,
+  type AssetPhoto,
+  type InsertAssetPhoto,
   type MaintenanceContact,
   type InsertMaintenanceContact,
   type Invoice,
@@ -99,6 +102,13 @@ export interface IStorage {
   getAllAssets(): Promise<Asset[]>;
   updateAsset(id: string, data: Partial<InsertAsset>): Promise<Asset>;
   deleteAsset(id: string): Promise<void>;
+
+  // Asset Photos
+  createAssetPhoto(photo: InsertAssetPhoto): Promise<AssetPhoto>;
+  getAssetPhoto(id: string): Promise<AssetPhoto | undefined>;
+  getAssetPhotosByAsset(assetId: string): Promise<AssetPhoto[]>;
+  getAllAssetPhotos(): Promise<AssetPhoto[]>;
+  deleteAssetPhoto(id: string): Promise<void>;
 
   // Maintenance Contacts
   createMaintenanceContact(contact: InsertMaintenanceContact): Promise<MaintenanceContact>;
@@ -337,6 +347,33 @@ export class DatabaseStorage implements IStorage {
 
   async deleteAsset(id: string): Promise<void> {
     await db.delete(assets).where(eq(assets.id, id));
+  }
+
+  // Asset Photos Implementation
+  async createAssetPhoto(photoData: InsertAssetPhoto): Promise<AssetPhoto> {
+    const [photo] = await db.insert(assetPhotos).values(photoData).returning();
+    return photo;
+  }
+
+  async getAssetPhoto(id: string): Promise<AssetPhoto | undefined> {
+    const [photo] = await db.select().from(assetPhotos).where(eq(assetPhotos.id, id));
+    return photo;
+  }
+
+  async getAssetPhotosByAsset(assetId: string): Promise<AssetPhoto[]> {
+    return await db
+      .select()
+      .from(assetPhotos)
+      .where(eq(assetPhotos.assetId, assetId))
+      .orderBy(desc(assetPhotos.uploadedDate));
+  }
+
+  async getAllAssetPhotos(): Promise<AssetPhoto[]> {
+    return await db.select().from(assetPhotos).orderBy(desc(assetPhotos.uploadedDate));
+  }
+
+  async deleteAssetPhoto(id: string): Promise<void> {
+    await db.delete(assetPhotos).where(eq(assetPhotos.id, id));
   }
 
   // Maintenance Contacts Implementation

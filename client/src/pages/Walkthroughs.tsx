@@ -6,6 +6,7 @@ import RegionSelector from "@/components/RegionSelector";
 import BuildingSelector from "@/components/BuildingSelector";
 import RoomCard from "@/components/RoomCard";
 import RoomDetailDrawer from "@/components/RoomDetailDrawer";
+import { PhotoUpload } from "@/components/PhotoUpload";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
@@ -96,7 +97,8 @@ export default function Walkthroughs() {
 
   const createRoomMutation = useMutation<WalkthroughRoom, Error, z.infer<typeof insertWalkthroughRoomSchema>>({
     mutationFn: async (data: z.infer<typeof insertWalkthroughRoomSchema>) => {
-      return await apiRequest("POST", "/api/walkthrough-rooms", data);
+      const response = await apiRequest("POST", "/api/walkthrough-rooms", data);
+      return response.json() as Promise<WalkthroughRoom>;
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["/api/walkthrough-rooms"] });
@@ -252,10 +254,17 @@ export default function Walkthroughs() {
                 name="imageUrl"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Photo URL</FormLabel>
+                    <FormLabel>Photo</FormLabel>
                     <FormControl>
-                      <Input {...field} placeholder="https://example.com/photo.jpg" data-testid="input-photo-url" />
+                      <PhotoUpload
+                        onUpload={(url) => field.onChange(url)}
+                        onError={(error) => toast({ title: "Error", description: error, variant: "destructive" })}
+                        disabled={createPhotoMutation.isPending}
+                      />
                     </FormControl>
+                    {field.value && (
+                      <p className="text-xs text-muted-foreground mt-1">Photo uploaded successfully</p>
+                    )}
                     <FormMessage />
                   </FormItem>
                 )}

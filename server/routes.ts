@@ -1,13 +1,18 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
+import express from "express";
 import { storage } from "./storage";
 import { setupAuth, isAuthenticated } from "./replitAuth";
 import { z } from "zod";
+import multer from "multer";
+import path from "path";
+import fs from "fs";
 import {
   insertMaintenanceRequestSchema,
   insertWalkthroughRoomSchema,
   insertWalkthroughPhotoSchema,
   insertAssetSchema,
+  insertAssetPhotoSchema,
   insertMaintenanceContactSchema,
   insertInvoiceSchema,
   insertBillingRecordSchema,
@@ -15,6 +20,35 @@ import {
   insertUserSchema,
   type InsertPropertyWithAddress,
 } from "@shared/schema";
+
+const uploadDir = path.join(process.cwd(), "uploads");
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+}
+
+const fileStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, uploadDir);
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+    cb(null, uniqueSuffix + path.extname(file.originalname));
+  },
+});
+
+const upload = multer({
+  storage: fileStorage,
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = /jpeg|jpg|png|gif|webp/;
+    const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+    const mimetype = allowedTypes.test(file.mimetype);
+    if (extname && mimetype) {
+      return cb(null, true);
+    }
+    cb(new Error("Only image files are allowed"));
+  },
+});
 
 const roleUpdateSchema = z.object({
   role: z.enum(["admin", "regional_administrator", "resident"]),
@@ -492,6 +526,94 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // File Upload Route
+  app.post('/api/upload', isAuthenticated, upload.single('file'), async (req: any, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ message: "No file uploaded" });
+      }
+      const fileUrl = `/uploads/${req.file.filename}`;
+      res.json({ url: fileUrl, filename: req.file.filename });
+    } catch (error) {
+      console.error("Error uploading file:", error);
+      res.status(500).json({ message: "Failed to upload file" });
+    }
+  });
+
+  // Asset Photos Routes
+  app.get('/api/asset-photos', isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const currentUser = await storage.getUser(userId);
+      const permissions = await storage.getUserPermissions(userId);
+      
+      if (!currentUser?.isActive || (!permissions?.canViewAssets && !permissions?.canManageAssets)) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+
+      const photos = await storage.getAllAssetPhotos();
+      res.json(photos);
+    } catch (error) {
+      console.error("Error fetching asset photos:", error);
+      res.status(500).json({ message: "Failed to fetch asset photos" });
+    }
+  });
+
+  app.get('/api/asset-photos/asset/:assetId', isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const currentUser = await storage.getUser(userId);
+      const permissions = await storage.getUserPermissions(userId);
+      
+      if (!currentUser?.isActive || (!permissions?.canViewAssets && !permissions?.canManageAssets)) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+
+      const photos = await storage.getAssetPhotosByAsset(req.params.assetId);
+      res.json(photos);
+    } catch (error) {
+      console.error("Error fetching asset photos:", error);
+      res.status(500).json({ message: "Failed to fetch asset photos" });
+    }
+  });
+
+  app.post('/api/asset-photos', isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const currentUser = await storage.getUser(userId);
+      const permissions = await storage.getUserPermissions(userId);
+      
+      if (!currentUser?.isActive || !permissions?.canManageAssets) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+
+      const validatedData = insertAssetPhotoSchema.parse(req.body);
+      const photo = await storage.createAssetPhoto(validatedData);
+      res.json(photo);
+    } catch (error) {
+      console.error("Error creating asset photo:", error);
+      res.status(500).json({ message: "Failed to create asset photo" });
+    }
+  });
+
+  app.delete('/api/asset-photos/:id', isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const currentUser = await storage.getUser(userId);
+      const permissions = await storage.getUserPermissions(userId);
+      
+      if (!currentUser?.isActive || !permissions?.canManageAssets) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+
+      await storage.deleteAssetPhoto(req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error deleting asset photo:", error);
+      res.status(500).json({ message: "Failed to delete asset photo" });
+    }
+  });
+
   // Maintenance Contacts Routes
   app.get('/api/contacts', isAuthenticated, async (req: any, res) => {
     try {
@@ -803,6 +925,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ message: "Failed to delete property" });
     }
   });
+
+  // Serve uploaded files
+  app.use('/uploads', express.static(uploadDir));
 
   const httpServer = createServer(app);
   return httpServer;

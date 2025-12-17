@@ -2,7 +2,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Wind, Tv, Sofa, Refrigerator, Droplet, MoreVertical } from "lucide-react";
+import { Wind, Tv, Sofa, Refrigerator, Droplet, MoreVertical, Camera } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -15,6 +15,7 @@ interface AssetTrackerProps {
   assets: Asset[];
   onEdit?: (id: string) => void;
   onDelete?: (id: string) => void;
+  onPhotos?: (id: string) => void;
 }
 
 const assetIcons = {
@@ -25,7 +26,7 @@ const assetIcons = {
   Furniture: Sofa,
 };
 
-export default function AssetTracker({ assets, onEdit, onDelete }: AssetTrackerProps) {
+export default function AssetTracker({ assets, onEdit, onDelete, onPhotos }: AssetTrackerProps) {
   const fixedAssets = assets.filter((a) => a.type === "fixed");
   const movableAssets = assets.filter((a) => a.type === "movable");
 
@@ -69,6 +70,10 @@ export default function AssetTracker({ assets, onEdit, onDelete }: AssetTrackerP
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
+                      <DropdownMenuItem onClick={() => onPhotos?.(asset.id)}>
+                        <Camera className="h-4 w-4 mr-2" />
+                        Photos
+                      </DropdownMenuItem>
                       <DropdownMenuItem onClick={() => onEdit?.(asset.id)}>
                         Edit
                       </DropdownMenuItem>

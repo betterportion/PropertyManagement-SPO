@@ -162,6 +162,27 @@ export const insertAssetSchema = createInsertSchema(assets).omit({
 export type Asset = typeof assets.$inferSelect;
 export type InsertAsset = z.infer<typeof insertAssetSchema>;
 
+// Asset Photos
+export const assetPhotos = pgTable("asset_photos", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  assetId: varchar("asset_id").notNull().references(() => assets.id, { onDelete: "cascade" }),
+  imageUrl: varchar("image_url").notNull(),
+  caption: text("caption"),
+  uploadedBy: varchar("uploaded_by").notNull(),
+  uploadedDate: timestamp("uploaded_date").defaultNow(),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertAssetPhotoSchema = createInsertSchema(assetPhotos).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type AssetPhoto = typeof assetPhotos.$inferSelect;
+export type InsertAssetPhoto = z.infer<typeof insertAssetPhotoSchema>;
+
 // Maintenance Contacts
 export const maintenanceContacts = pgTable("maintenance_contacts", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
