@@ -20,6 +20,8 @@ export default function Contacts() {
   const [selectedRegion, setSelectedRegion] = useState("all");
   const [selectedBuilding, setSelectedBuilding] = useState("all");
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [editingContact, setEditingContact] = useState<MaintenanceContact | null>(null);
   const { toast } = useToast();
   const { user } = useAuth();
 
@@ -76,8 +78,58 @@ export default function Contacts() {
     },
   });
 
+  const editForm = useForm<z.infer<typeof insertMaintenanceContactSchema>>({
+    resolver: zodResolver(insertMaintenanceContactSchema),
+  });
+
+  const updateContactMutation = useMutation({
+    mutationFn: async (data: z.infer<typeof insertMaintenanceContactSchema> & { id: string }) => {
+      const { id, ...rest } = data;
+      return await apiRequest("PATCH", `/api/contacts/${id}`, rest);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/contacts"] });
+      setIsEditDialogOpen(false);
+      setEditingContact(null);
+      toast({
+        title: "Success",
+        description: "Contact updated successfully",
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to update contact",
+        variant: "destructive",
+      });
+    },
+  });
+
   const onSubmit = (data: z.infer<typeof insertMaintenanceContactSchema>) => {
     createContactMutation.mutate(data);
+  };
+
+  const onEditSubmit = (data: z.infer<typeof insertMaintenanceContactSchema>) => {
+    if (editingContact) {
+      updateContactMutation.mutate({ ...data, id: editingContact.id });
+    }
+  };
+
+  const handleEditContact = (id: string) => {
+    const contact = contactsData?.find((c) => c.id === id);
+    if (contact) {
+      setEditingContact(contact);
+      editForm.reset({
+        name: contact.name,
+        company: contact.company,
+        service: contact.service,
+        phone: contact.phone,
+        email: contact.email,
+        region: contact.region,
+        buildingAddress: contact.buildingAddress,
+      });
+      setIsEditDialogOpen(true);
+    }
   };
 
   const contacts = (contactsData || []).filter((contact) => {
@@ -248,10 +300,133 @@ export default function Contacts() {
           contacts={contacts}
           invoices={allInvoices}
           onAddContact={() => setIsAddDialogOpen(true)}
+          onEditContact={handleEditContact}
           onAddInvoice={() => console.log("Add invoice")}
           onViewInvoice={(id) => console.log("View invoice:", id)}
         />
       )}
+
+      {/* Edit Contact Dialog */}
+      <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Edit Contact</DialogTitle>
+          </DialogHeader>
+          <Form {...editForm}>
+            <form onSubmit={editForm.handleSubmit(onEditSubmit)} className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <FormField
+                  control={editForm.control}
+                  name="name"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Contact Name</FormLabel>
+                      <FormControl>
+                        <Input {...field} data-testid="input-edit-contact-name" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={editForm.control}
+                  name="company"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Company</FormLabel>
+                      <FormControl>
+                        <Input {...field} data-testid="input-edit-contact-company" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+
+              <FormField
+                control={editForm.control}
+                name="service"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Service/Specialty</FormLabel>
+                    <FormControl>
+                      <Input {...field} placeholder="Plumbing, HVAC, Electrical, etc." data-testid="input-edit-contact-service" />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <div className="grid grid-cols-2 gap-4">
+                <FormField
+                  control={editForm.control}
+                  name="phone"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Phone</FormLabel>
+                      <FormControl>
+                        <Input {...field} placeholder="(512) 555-0123" data-testid="input-edit-contact-phone" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={editForm.control}
+                  name="email"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Email</FormLabel>
+                      <FormControl>
+                        <Input {...field} type="email" data-testid="input-edit-contact-email" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <FormField
+                  control={editForm.control}
+                  name="region"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Region</FormLabel>
+                      <FormControl>
+                        <Input {...field} placeholder="west-central, north-east, etc." data-testid="input-edit-contact-region" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={editForm.control}
+                  name="buildingAddress"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Building Address</FormLabel>
+                      <FormControl>
+                        <Input {...field} placeholder="123 Main St, Austin, TX" data-testid="input-edit-contact-building" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+
+              <DialogFooter>
+                <Button type="button" variant="outline" onClick={() => setIsEditDialogOpen(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={updateContactMutation.isPending} data-testid="button-update-contact">
+                  {updateContactMutation.isPending ? "Updating..." : "Update Contact"}
+                </Button>
+              </DialogFooter>
+            </form>
+          </Form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

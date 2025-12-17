@@ -2,7 +2,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Phone, Mail, DollarSign, Calendar, FileText } from "lucide-react";
+import { Phone, Mail, DollarSign, Calendar, FileText, Pencil } from "lucide-react";
 
 interface Contact {
   id: string;
@@ -27,6 +27,7 @@ interface ContactsInvoicesProps {
   contacts: Contact[];
   invoices: Invoice[];
   onAddContact?: () => void;
+  onEditContact?: (id: string) => void;
   onAddInvoice?: () => void;
   onViewInvoice?: (id: string) => void;
 }
@@ -37,7 +38,7 @@ const statusColors = {
   overdue: "bg-destructive text-destructive-foreground",
 };
 
-export default function ContactsInvoices({ contacts, invoices, onAddContact, onAddInvoice, onViewInvoice }: ContactsInvoicesProps) {
+export default function ContactsInvoices({ contacts, invoices, onAddContact, onEditContact, onAddInvoice, onViewInvoice }: ContactsInvoicesProps) {
   return (
     <Tabs defaultValue="contacts" className="w-full">
       <TabsList className="grid w-full grid-cols-2" data-testid="tabs-contacts-invoices">
@@ -50,11 +51,6 @@ export default function ContactsInvoices({ contacts, invoices, onAddContact, onA
       </TabsList>
 
       <TabsContent value="contacts" className="mt-6">
-        <div className="flex justify-end mb-4">
-          <Button onClick={onAddContact} data-testid="button-add-contact">
-            Add Contact
-          </Button>
-        </div>
         <div className="space-y-4">
           {contacts.map((contact) => (
             <Card key={contact.id} className="hover-elevate" data-testid={`card-contact-${contact.id}`}>
@@ -85,6 +81,14 @@ export default function ContactsInvoices({ contacts, invoices, onAddContact, onA
                       </a>
                     </div>
                   </div>
+                  <Button 
+                    variant="ghost" 
+                    size="icon"
+                    onClick={() => onEditContact?.(contact.id)}
+                    data-testid={`button-edit-contact-${contact.id}`}
+                  >
+                    <Pencil className="h-4 w-4" />
+                  </Button>
                 </div>
               </CardContent>
             </Card>
