@@ -45,10 +45,12 @@ function filterUndefined<T extends Record<string, any>>(obj: T): Partial<T> {
 }
 
 // Helper function to compute default permissions for a given role
+const ALL_REGIONS = ["west-central", "east-central", "north-west", "south-west", "north-east", "south-east"];
+
 function computeDefaultPermissions(userId: string, role: "admin" | "regional_administrator" | "resident"): InsertUserPermissions {
   return {
     userId,
-    canViewMaintenance: true,  // All roles can view maintenance
+    canViewMaintenance: true,
     canManageMaintenance: role === "admin" || role === "regional_administrator",
     canViewWalkthroughs: role !== "resident",
     canManageWalkthroughs: role === "admin" || role === "regional_administrator",
@@ -59,6 +61,9 @@ function computeDefaultPermissions(userId: string, role: "admin" | "regional_adm
     canViewContacts: role !== "resident",
     canManageContacts: role === "admin" || role === "regional_administrator",
     canManageUsers: role === "admin",
+    canViewProperties: role !== "resident",
+    canManageProperties: role === "admin" || role === "regional_administrator",
+    allowedRegions: role === "admin" ? ALL_REGIONS : [],
   };
 }
 

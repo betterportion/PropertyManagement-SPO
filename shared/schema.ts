@@ -39,6 +39,9 @@ export const userPermissions = pgTable("user_permissions", {
   canViewContacts: boolean("can_view_contacts").notNull().default(false),
   canManageContacts: boolean("can_manage_contacts").notNull().default(false),
   canManageUsers: boolean("can_manage_users").notNull().default(false),
+  canViewProperties: boolean("can_view_properties").notNull().default(false),
+  canManageProperties: boolean("can_manage_properties").notNull().default(false),
+  allowedRegions: text("allowed_regions").array().default([]),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
