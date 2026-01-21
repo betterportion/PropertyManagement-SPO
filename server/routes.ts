@@ -54,6 +54,33 @@ const roleUpdateSchema = z.object({
   role: z.enum(["admin", "regional_administrator", "resident"]),
 });
 
+const permissionsUpdateSchema = z.object({
+  canViewMaintenance: z.boolean().optional(),
+  canManageMaintenance: z.boolean().optional(),
+  canViewWalkthroughs: z.boolean().optional(),
+  canManageWalkthroughs: z.boolean().optional(),
+  canViewAssets: z.boolean().optional(),
+  canManageAssets: z.boolean().optional(),
+  canViewBilling: z.boolean().optional(),
+  canManageBilling: z.boolean().optional(),
+  canViewContacts: z.boolean().optional(),
+  canManageContacts: z.boolean().optional(),
+  canManageUsers: z.boolean().optional(),
+  canViewProperties: z.boolean().optional(),
+  canManageProperties: z.boolean().optional(),
+  allowedRegions: z.array(z.string()).optional(),
+});
+
+function filterByRegion<T extends { region?: string | null }>(items: T[], allowedRegions: string[] | null): T[] {
+  if (!allowedRegions || allowedRegions.length === 0) {
+    return [];
+  }
+  if (allowedRegions.includes("all")) {
+    return items;
+  }
+  return items.filter(item => item.region && allowedRegions.includes(item.region));
+}
+
 export async function registerRoutes(app: Express): Promise<Server> {
   await setupAuth(app);
 
@@ -139,9 +166,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (currentUser?.role !== "admin") {
         return res.status(403).json({ message: "Forbidden" });
       }
+      const validatedData = permissionsUpdateSchema.parse(req.body);
+      const filteredData = Object.fromEntries(
+        Object.entries(validatedData).filter(([_, v]) => v !== undefined)
+      );
       const permissions = await storage.upsertUserPermissions({
         userId: req.params.id,
-        ...req.body,
+        ...filteredData,
       });
       res.json(permissions);
     } catch (error) {
@@ -196,7 +227,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const requests = await storage.getAllMaintenanceRequests();
-      res.json(requests);
+      const allowedRegions = permissions?.allowedRegions || [];
+      const isAdmin = currentUser?.role === "admin";
+      const filteredRequests = isAdmin ? requests : filterByRegion(requests, allowedRegions);
+      res.json(filteredRequests);
     } catch (error) {
       console.error("Error fetching maintenance requests:", error);
       res.status(500).json({ message: "Failed to fetch maintenance requests" });
@@ -295,7 +329,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const rooms = await storage.getAllWalkthroughRooms();
-      res.json(rooms);
+      const properties = await storage.getAllProperties();
+      const allowedRegions = permissions?.allowedRegions || [];
+      const isAdmin = currentUser?.role === "admin";
+      
+      const filteredRooms = isAdmin ? rooms : rooms.filter(room => {
+        const property = properties.find(p => p.id === room.propertyId);
+        return property && allowedRegions.includes(property.region);
+      });
+      res.json(filteredRooms);
     } catch (error) {
       console.error("Error fetching walkthrough rooms:", error);
       res.status(500).json({ message: "Failed to fetch walkthrough rooms" });
@@ -463,7 +505,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const assets = await storage.getAllAssets();
-      res.json(assets);
+      const allowedRegions = permissions?.allowedRegions || [];
+      const isAdmin = currentUser?.role === "admin";
+      const filteredAssets = isAdmin ? assets : filterByRegion(assets, allowedRegions);
+      res.json(filteredAssets);
     } catch (error) {
       console.error("Error fetching assets:", error);
       res.status(500).json({ message: "Failed to fetch assets" });
@@ -844,13 +889,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const userId = req.user.claims.sub;
       const currentUser = await storage.getUser(userId);
+      const permissions = await storage.getUserPermissions(userId);
       
       if (!currentUser?.isActive) {
         return res.status(403).json({ message: "Forbidden" });
       }
 
       const properties = await storage.getAllProperties();
-      res.json(properties);
+      const allowedRegions = permissions?.allowedRegions || [];
+      const isAdmin = currentUser?.role === "admin";
+      const filteredProperties = isAdmin ? properties : filterByRegion(properties, allowedRegions);
+      res.json(filteredProperties);
     } catch (error) {
       console.error("Error fetching properties:", error);
       res.status(500).json({ message: "Failed to fetch properties" });
