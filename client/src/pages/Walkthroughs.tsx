@@ -164,10 +164,26 @@ export default function Walkthroughs() {
     resolver: zodResolver(insertWalkthroughRoomSchema),
     defaultValues: {
       name: "",
+      propertyId: "",
       buildingAddress: "",
       displayOrder: 0,
     },
   });
+
+  const handlePropertyChange = (propertyId: string) => {
+    const property = properties.find(p => p.id === propertyId);
+    if (property) {
+      addRoomForm.setValue("propertyId", propertyId);
+      addRoomForm.setValue("buildingAddress", property.address);
+    }
+  };
+
+  const getPropertyForRoom = (room: WalkthroughRoom) => {
+    if (room.propertyId) {
+      return properties.find(p => p.id === room.propertyId) || null;
+    }
+    return properties.find(p => p.address === room.buildingAddress) || null;
+  };
 
   const handleAddRoom = () => {
     setIsAddRoomDialogOpen(true);
@@ -232,6 +248,7 @@ export default function Walkthroughs() {
               key={room.id}
               room={room}
               photo={getFirstPhotoForRoom(room.id)}
+              property={getPropertyForRoom(room)}
               onClick={() => handleOpenRoom(room)}
             />
           ))}
@@ -405,20 +422,23 @@ export default function Walkthroughs() {
 
               <FormField
                 control={addRoomForm.control}
-                name="buildingAddress"
+                name="propertyId"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Building Address</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value}>
+                    <FormLabel>Property</FormLabel>
+                    <Select onValueChange={handlePropertyChange} value={field.value || ""}>
                       <FormControl>
-                        <SelectTrigger data-testid="select-room-building">
+                        <SelectTrigger data-testid="select-room-property">
                           <SelectValue placeholder="Select a property" />
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        {uniqueBuildings.map((building) => (
-                          <SelectItem key={building.id} value={building.address}>
-                            {building.address}
+                        {properties.map((property) => (
+                          <SelectItem key={property.id} value={property.id}>
+                            <div className="flex flex-col">
+                              <span>{property.name}</span>
+                              <span className="text-xs text-muted-foreground">{property.address} ({property.region})</span>
+                            </div>
                           </SelectItem>
                         ))}
                       </SelectContent>

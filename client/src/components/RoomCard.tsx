@@ -1,14 +1,16 @@
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { Building2, DoorOpen, ListChecks, ImageIcon } from "lucide-react";
-import type { WalkthroughRoom, WalkthroughPhoto } from "@shared/schema";
+import { Building2, DoorOpen, ListChecks, ImageIcon, MapPin } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import type { WalkthroughRoom, WalkthroughPhoto, Property } from "@shared/schema";
 
 interface RoomCardProps {
   room: WalkthroughRoom;
   photo?: WalkthroughPhoto | null;
+  property?: Property | null;
   onClick: () => void;
 }
 
-export default function RoomCard({ room, photo, onClick }: RoomCardProps) {
+export default function RoomCard({ room, photo, property, onClick }: RoomCardProps) {
   const questionCount = room.requiredQuestions?.length || 0;
 
   return (
@@ -40,10 +42,26 @@ export default function RoomCard({ room, photo, onClick }: RoomCardProps) {
             </div>
           </CardHeader>
           <CardContent className="space-y-1 pt-0 pb-3">
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Building2 className="h-4 w-4 flex-shrink-0" />
-              <span className="truncate">{room.buildingAddress}</span>
-            </div>
+            {property ? (
+              <>
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Building2 className="h-4 w-4 flex-shrink-0" />
+                  <span className="truncate font-medium">{property.name}</span>
+                </div>
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <MapPin className="h-4 w-4 flex-shrink-0" />
+                  <span className="truncate">{property.address}</span>
+                </div>
+                <Badge variant="secondary" className="text-xs" data-testid={`badge-region-${room.id}`}>
+                  {property.region}
+                </Badge>
+              </>
+            ) : (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Building2 className="h-4 w-4 flex-shrink-0" />
+                <span className="truncate">{room.buildingAddress}</span>
+              </div>
+            )}
             {questionCount > 0 && (
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <ListChecks className="h-4 w-4 flex-shrink-0" />

@@ -94,7 +94,8 @@ export type InsertMaintenanceRequest = z.infer<typeof insertMaintenanceRequestSc
 export const walkthroughRooms = pgTable("walkthrough_rooms", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   name: varchar("name").notNull(),
-  buildingAddress: varchar("building_address").notNull(),
+  propertyId: varchar("property_id"), // References properties table
+  buildingAddress: varchar("building_address").notNull(), // Kept for backward compatibility
   requiredQuestions: text("required_questions").array(),
   displayOrder: integer("display_order").notNull(),
   createdAt: timestamp("created_at").defaultNow(),
