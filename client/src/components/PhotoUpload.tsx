@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback } from "react";
-import { Upload, X, Image, Loader2 } from "lucide-react";
+import { Upload, X, Image, Loader2, Camera, ImageIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -167,15 +167,23 @@ export function PhotoUpload({ onUpload, onError, className, disabled }: PhotoUpl
           </div>
         ) : (
           <>
-            <div className="rounded-full bg-muted p-3">
-              <Upload className="h-6 w-6 text-muted-foreground" />
+            <div className="flex items-center gap-3">
+              <div className="rounded-full bg-muted p-3">
+                <Camera className="h-5 w-5 text-muted-foreground" />
+              </div>
+              <div className="rounded-full bg-muted p-3">
+                <ImageIcon className="h-5 w-5 text-muted-foreground" />
+              </div>
+              <div className="rounded-full bg-muted p-3">
+                <Upload className="h-5 w-5 text-muted-foreground" />
+              </div>
             </div>
-            <div className="text-center">
+            <div className="text-center mt-2">
               <p className="text-sm font-medium">
-                Drag and drop an image here
+                Take a photo or choose from library
               </p>
               <p className="text-xs text-muted-foreground mt-1">
-                or click to browse
+                Tap to open camera, photos, or files
               </p>
             </div>
             <div className="flex items-center gap-2 text-xs text-muted-foreground mt-2">
