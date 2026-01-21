@@ -55,8 +55,11 @@ export default function Walkthroughs() {
 
   const { data: allPhotos = [] } = useQuery<WalkthroughPhoto[]>({
     queryKey: ['/api/walkthrough-photos'],
-    enabled: selectedRegion !== "all",
   });
+
+  const getFirstPhotoForRoom = (roomId: string) => {
+    return allPhotos.find(photo => photo.roomId === roomId) || null;
+  };
 
   const { data: properties = [] } = useQuery<Property[]>({
     queryKey: ['/api/properties'],
@@ -228,6 +231,7 @@ export default function Walkthroughs() {
             <RoomCard
               key={room.id}
               room={room}
+              photo={getFirstPhotoForRoom(room.id)}
               onClick={() => handleOpenRoom(room)}
             />
           ))}
