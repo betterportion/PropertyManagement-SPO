@@ -2,17 +2,18 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Wind, Tv, Sofa, Refrigerator, Droplet, MoreVertical, Camera } from "lucide-react";
+import { Wind, Tv, Sofa, Refrigerator, Droplet, MoreVertical, Camera, Building2, MapPin } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import type { Asset } from "@shared/schema";
+import type { Asset, Property } from "@shared/schema";
 
 interface AssetTrackerProps {
   assets: Asset[];
+  properties: Property[];
   onEdit?: (id: string) => void;
   onDelete?: (id: string) => void;
   onPhotos?: (id: string) => void;
@@ -26,14 +27,22 @@ const assetIcons = {
   Furniture: Sofa,
 };
 
-export default function AssetTracker({ assets, onEdit, onDelete, onPhotos }: AssetTrackerProps) {
+export default function AssetTracker({ assets, properties, onEdit, onDelete, onPhotos }: AssetTrackerProps) {
   const fixedAssets = assets.filter((a) => a.type === "fixed");
   const movableAssets = assets.filter((a) => a.type === "movable");
+
+  const getPropertyForAsset = (asset: Asset) => {
+    if (asset.propertyId) {
+      return properties.find(p => p.id === asset.propertyId) || null;
+    }
+    return properties.find(p => p.address === asset.buildingAddress) || null;
+  };
 
   const AssetList = ({ items }: { items: Asset[] }) => (
     <div className="space-y-4">
       {items.map((asset) => {
         const Icon = assetIcons[asset.category as keyof typeof assetIcons] || Sofa;
+        const property = getPropertyForAsset(asset);
         return (
           <Card key={asset.id} className="hover-elevate" data-testid={`card-asset-${asset.id}`}>
             <CardContent className="p-4">
@@ -46,7 +55,26 @@ export default function AssetTracker({ assets, onEdit, onDelete, onPhotos }: Ass
                     <h4 className="font-medium text-sm" data-testid={`text-asset-name-${asset.id}`}>
                       {asset.name}
                     </h4>
-                    <p className="text-xs text-muted-foreground mt-1">{asset.location}</p>
+                    {property ? (
+                      <>
+                        <div className="flex items-center gap-1 text-xs text-muted-foreground mt-1">
+                          <Building2 className="h-3 w-3" />
+                          <span className="font-medium">{property.name}</span>
+                        </div>
+                        <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                          <MapPin className="h-3 w-3" />
+                          <span>{property.address}</span>
+                        </div>
+                        <Badge variant="secondary" className="text-xs mt-1" data-testid={`badge-region-${asset.id}`}>
+                          {property.region}
+                        </Badge>
+                      </>
+                    ) : (
+                      <p className="text-xs text-muted-foreground mt-1">{asset.buildingAddress}</p>
+                    )}
+                    {asset.location && (
+                      <p className="text-xs text-muted-foreground mt-0.5">Location: {asset.location}</p>
+                    )}
                     {asset.serialNumber && (
                       <p className="text-xs text-muted-foreground mt-0.5">
                         SN: {asset.serialNumber}
