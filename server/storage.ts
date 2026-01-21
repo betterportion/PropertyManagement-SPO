@@ -183,9 +183,15 @@ export class DatabaseStorage implements IStorage {
       .where(eq(users.id, id))
       .returning();
     
-    // Update permissions to match the new role
+    const existingPermissions = await this.getUserPermissions(id);
     const newDefaultPermissions = computeDefaultPermissions(id, role);
-    await this.upsertUserPermissions(newDefaultPermissions);
+    
+    await this.upsertUserPermissions({
+      ...newDefaultPermissions,
+      allowedRegions: role === "admin" 
+        ? ALL_REGIONS 
+        : (existingPermissions?.allowedRegions || []),
+    });
     
     return user;
   }
