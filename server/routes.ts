@@ -1210,9 +1210,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const address = `${validatedData.streetAddress}, ${validatedData.city}, ${validatedData.state} ${validatedData.zipCode}`;
       const property = await storage.createProperty({ ...validatedData, address });
       res.json(property);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error creating property:", error);
-      res.status(500).json({ message: "Failed to create property" });
+      if (error.name === 'ZodError') {
+        return res.status(400).json({ message: "Validation error", errors: error.errors });
+      }
+      res.status(500).json({ message: "Failed to create property", error: error.message });
     }
   });
 
