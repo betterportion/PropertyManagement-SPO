@@ -274,6 +274,7 @@ export const properties = pgTable("properties", {
   propertyManager: varchar("property_manager"),
   bedrooms: integer("bedrooms"),
   bathrooms: numeric("bathrooms", { precision: 3, scale: 1 }),
+  squareFootage: integer("square_footage"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });

@@ -110,6 +110,7 @@ export default function Properties() {
       propertyManager: "",
       bedrooms: undefined,
       bathrooms: undefined,
+      squareFootage: undefined,
     },
   });
 
@@ -129,6 +130,7 @@ export default function Properties() {
       propertyManager: property.propertyManager || "",
       bedrooms: property.bedrooms || undefined,
       bathrooms: property.bathrooms || undefined,
+      squareFootage: property.squareFootage || undefined,
     });
     setIsEditDialogOpen(true);
   };
@@ -291,6 +293,20 @@ export default function Properties() {
                   />
                 </div>
 
+                <FormField
+                  control={addForm.control}
+                  name="squareFootage"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Square Footage (Optional)</FormLabel>
+                      <FormControl>
+                        <Input type="number" {...field} value={field.value ?? ""} onChange={e => field.onChange(e.target.value ? parseInt(e.target.value) : undefined)} placeholder="e.g. 1200" data-testid="input-property-sqft" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
                 <DialogFooter>
                   <Button type="button" variant="outline" onClick={() => setIsAddDialogOpen(false)}>
                     Cancel
@@ -329,12 +345,15 @@ export default function Properties() {
                         <MapPin className="h-3 w-3" />
                         {property.address}
                       </p>
-                      <div className="flex items-center gap-2 mt-2">
+                      <div className="flex items-center gap-2 mt-2 flex-wrap">
                         <Badge variant="secondary">{property.region}</Badge>
                         {(property.bedrooms || property.bathrooms) && (
                           <Badge variant="outline">
                             {property.bedrooms ? `${property.bedrooms} bed` : ''}{property.bedrooms && property.bathrooms ? ', ' : ''}{property.bathrooms ? `${property.bathrooms} bath` : ''}
                           </Badge>
+                        )}
+                        {property.squareFootage && (
+                          <Badge variant="outline">{property.squareFootage.toLocaleString()} sq ft</Badge>
                         )}
                       </div>
                       {property.propertyManager && (
@@ -499,6 +518,20 @@ export default function Properties() {
                   )}
                 />
               </div>
+
+              <FormField
+                control={editForm.control}
+                name="squareFootage"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Square Footage (Optional)</FormLabel>
+                    <FormControl>
+                      <Input type="number" {...field} value={field.value ?? ""} onChange={e => field.onChange(e.target.value ? parseInt(e.target.value) : undefined)} placeholder="e.g. 1200" />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
 
               <DialogFooter>
                 <Button type="button" variant="outline" onClick={() => setIsEditDialogOpen(false)}>
