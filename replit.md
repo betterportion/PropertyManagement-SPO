@@ -3,7 +3,17 @@
 ## Overview
 This is a comprehensive property management system for Saint Paul's Outreach, Inc. (SPO), designed to streamline administrative tasks and resident interactions. The application provides role-based dashboards for administrators and residents, enabling admins to manage properties, maintenance, assets, billing, and vendors, while residents can submit and track maintenance requests. The system emphasizes efficiency, data density, and professional trustworthiness crucial for property management operations.
 
-## Recent Changes (December 17, 2025)
+## Recent Changes (March 2, 2026)
+- **Monday.com Integration**: Maintenance requests now sync to Monday.com regional boards automatically
+- **Monday.com**: New requests are created as items on the matching regional board (Maint - WC/SW/NW/SE/EC/NE)
+- **Monday.com**: Status and priority updates in the app are pushed to Monday.com in real time
+- **Monday.com**: `mondayItemId` stored on each maintenance request to link to the Monday.com item
+- **Monday.com**: Auth handled via `MONDAY_API_KEY` secret; key-doubling bug auto-corrected in `server/monday.ts`
+- **Properties**: Added square footage field (squareFootage integer) to schema, form, and card display
+- **Properties**: Region field changed from free text to a dropdown with 7 preset options (alphabetical)
+- **Walkthroughs**: Room detail drawer now has a full photo upload dialog (file picker, condition, location, notes)
+
+## Previous Changes (December 17, 2025)
 - **Photo Upload**: Added drag-and-drop photo upload component for Assets and Walkthroughs pages
 - **Assets Photos**: New assetPhotos table with CRUD operations; Photos dialog accessible from asset menu
 - **File Upload**: Server endpoint at /api/upload handles image files (JPEG, PNG, GIF, WebP) up to 10MB

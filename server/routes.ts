@@ -5,6 +5,7 @@ import { storage } from "./storage";
 import { setupAuth, isAuthenticated } from "./replitAuth";
 import { z } from "zod";
 import multer from "multer";
+import { createMondayItem, updateMondayItem } from "./monday";
 import path from "path";
 import fs from "fs";
 import {
@@ -292,6 +293,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ...validatedData,
         submittedBy: currentUser.email || "Unknown",
       });
+
+      createMondayItem({
+        title: request.title,
+        description: request.description,
+        category: request.category,
+        priority: request.priority,
+        status: request.status,
+        region: request.region,
+        buildingAddress: request.buildingAddress,
+        location: request.location,
+        submittedBy: request.submittedBy,
+      }).then(async (mondayItemId) => {
+        if (mondayItemId) {
+          await storage.updateMaintenanceRequest(request.id, { mondayItemId });
+        }
+      }).catch((err) => console.error("Monday.com async create failed:", err));
+
       res.json(request);
     } catch (error) {
       console.error("Error creating maintenance request:", error);
@@ -328,6 +346,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       const request = await storage.updateMaintenanceRequest(req.params.id, validatedData);
       res.json(request);
+
+      if (existingRequest.mondayItemId && (validatedData.status || validatedData.priority)) {
+        updateMondayItem(
+          existingRequest.mondayItemId,
+          existingRequest.region,
+          {
+            status: validatedData.status ?? undefined,
+            priority: validatedData.priority ?? undefined,
+          }
+        ).catch((err) => console.error("Monday.com async update failed:", err));
+      }
     } catch (error) {
       console.error("Error updating maintenance request:", error);
       res.status(500).json({ message: "Failed to update maintenance request" });
