@@ -82,7 +82,7 @@ export interface IStorage {
   createMaintenanceRequest(request: InsertMaintenanceRequest): Promise<MaintenanceRequest>;
   getMaintenanceRequest(id: string): Promise<MaintenanceRequest | undefined>;
   getAllMaintenanceRequests(): Promise<MaintenanceRequest[]>;
-  updateMaintenanceRequest(id: string, data: Partial<InsertMaintenanceRequest> & { mondayItemId?: string }): Promise<MaintenanceRequest>;
+  updateMaintenanceRequest(id: string, data: Partial<InsertMaintenanceRequest> & { mondayItemId?: string | null }): Promise<MaintenanceRequest>;
   deleteMaintenanceRequest(id: string): Promise<void>;
 
   // Walkthrough Rooms
@@ -247,7 +247,7 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(maintenanceRequests).orderBy(desc(maintenanceRequests.submittedDate));
   }
 
-  async updateMaintenanceRequest(id: string, data: Partial<InsertMaintenanceRequest> & { mondayItemId?: string }): Promise<MaintenanceRequest> {
+  async updateMaintenanceRequest(id: string, data: Partial<InsertMaintenanceRequest> & { mondayItemId?: string | null }): Promise<MaintenanceRequest> {
     const [request] = await db
       .update(maintenanceRequests)
       .set({ ...filterUndefined(data), updatedAt: new Date() })

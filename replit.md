@@ -3,7 +3,14 @@
 ## Overview
 This is a comprehensive property management system for Saint Paul's Outreach, Inc. (SPO), designed to streamline administrative tasks and resident interactions. The application provides role-based dashboards for administrators and residents, enabling admins to manage properties, maintenance, assets, billing, and vendors, while residents can submit and track maintenance requests. The system emphasizes efficiency, data density, and professional trustworthiness crucial for property management operations.
 
-## Recent Changes (March 2, 2026)
+## Recent Changes (March 12, 2026)
+- **Bug Fix**: Properties page "Internal Server Error" resolved — admin bypass on GET /api/properties now correctly allows admins to view properties even without a DB permissions record
+- **Residents**: `GET /api/maintenance-requests` now returns only the requesting user's own submissions for residents (previously returned empty list due to empty `allowedRegions`)
+- **Residents**: `MyRequests` and `ResidentDashboard` pages now use real API data instead of hardcoded mock data
+- **TypeScript**: Fixed `mondayItemId` type mismatch (null vs undefined) in `updateMaintenanceRequest` — both interface and implementation updated to accept `string | null`
+- **Cleanup**: Removed unused `useAuth` import from Properties.tsx; deleted orphaned example component files with stale mock data
+
+## Previous Changes (March 2, 2026)
 - **Monday.com Integration**: Maintenance requests now sync to Monday.com regional boards automatically
 - **Monday.com**: New requests are created as items on the matching regional board (Maint - WC/SW/NW/SE/EC/NE)
 - **Monday.com**: Status and priority updates in the app are pushed to Monday.com in real time

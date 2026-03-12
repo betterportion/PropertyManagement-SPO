@@ -1,46 +1,27 @@
+import { useQuery } from "@tanstack/react-query";
 import MaintenanceRequestCard from "@/components/MaintenanceRequestCard";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import type { MaintenanceRequest } from "@shared/schema";
 
 export default function MyRequests() {
-  //todo: remove mock functionality
-  const requests = [
-    {
-      id: "1",
-      title: "Leaking kitchen faucet",
-      description: "The kitchen faucet has been dripping constantly for the past week.",
-      category: "Plumbing",
-      priority: "high" as const,
-      status: "in_progress" as const,
-      submittedBy: "Sarah Johnson",
-      submittedDate: new Date(2025, 10, 5),
-      location: "Unit 204",
-    },
-    {
-      id: "2",
-      title: "Bedroom window won't close",
-      description: "The window mechanism seems jammed.",
-      category: "Structural",
-      priority: "medium" as const,
-      status: "pending" as const,
-      submittedBy: "Sarah Johnson",
-      submittedDate: new Date(2025, 10, 7),
-      location: "Unit 204",
-    },
-    {
-      id: "3",
-      title: "Light bulb replacement",
-      description: "Hallway light needs new bulb.",
-      category: "Electrical",
-      priority: "low" as const,
-      status: "completed" as const,
-      submittedBy: "Sarah Johnson",
-      submittedDate: new Date(2025, 9, 28),
-      location: "Unit 204",
-    },
-  ];
+  const { data: requests = [], isLoading } = useQuery<MaintenanceRequest[]>({
+    queryKey: ["/api/maintenance-requests"],
+  });
 
-  const activeRequests = requests.filter((r) => r.status !== "completed");
-  const completedRequests = requests.filter((r) => r.status === "completed");
+  const activeRequests = requests.filter((r) => r.status !== "completed" && r.status !== "cancelled");
+  const completedRequests = requests.filter((r) => r.status === "completed" || r.status === "cancelled");
+
+  if (isLoading) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-3xl font-semibold">My Requests</h1>
+          <p className="text-muted-foreground mt-1">Track your maintenance requests</p>
+        </div>
+        <div className="text-center py-8 text-muted-foreground">Loading requests...</div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -60,15 +41,23 @@ export default function MyRequests() {
         </TabsList>
 
         <TabsContent value="active" className="space-y-4 mt-6">
-          {activeRequests.map((request) => (
-            <MaintenanceRequestCard key={request.id} request={request} isAdmin={false} />
-          ))}
+          {activeRequests.length === 0 ? (
+            <p className="text-center py-8 text-muted-foreground">No active requests.</p>
+          ) : (
+            activeRequests.map((request) => (
+              <MaintenanceRequestCard key={request.id} request={request} isAdmin={false} />
+            ))
+          )}
         </TabsContent>
 
         <TabsContent value="completed" className="space-y-4 mt-6">
-          {completedRequests.map((request) => (
-            <MaintenanceRequestCard key={request.id} request={request} isAdmin={false} />
-          ))}
+          {completedRequests.length === 0 ? (
+            <p className="text-center py-8 text-muted-foreground">No completed requests.</p>
+          ) : (
+            completedRequests.map((request) => (
+              <MaintenanceRequestCard key={request.id} request={request} isAdmin={false} />
+            ))
+          )}
         </TabsContent>
       </Tabs>
     </div>

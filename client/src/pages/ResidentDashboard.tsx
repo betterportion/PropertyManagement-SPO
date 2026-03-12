@@ -1,41 +1,30 @@
+import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import MaintenanceRequestCard from "@/components/MaintenanceRequestCard";
 import { Home, Wrench, Phone, Mail, MapPin } from "lucide-react";
 import { Link } from "wouter";
+import { useAuth } from "@/hooks/useAuth";
+import type { MaintenanceRequest } from "@shared/schema";
 
 export default function ResidentDashboard() {
-  //todo: remove mock functionality
-  const myRequests = [
-    {
-      id: "1",
-      title: "Leaking kitchen faucet",
-      description: "The kitchen faucet has been dripping constantly for the past week.",
-      category: "Plumbing",
-      priority: "high" as const,
-      status: "in_progress" as const,
-      submittedBy: "Sarah Johnson",
-      submittedDate: new Date(2025, 10, 5),
-      location: "Unit 204",
-    },
-    {
-      id: "2",
-      title: "Bedroom window won't close",
-      description: "The window mechanism seems jammed.",
-      category: "Structural",
-      priority: "medium" as const,
-      status: "pending" as const,
-      submittedBy: "Sarah Johnson",
-      submittedDate: new Date(2025, 10, 7),
-      location: "Unit 204",
-    },
-  ];
+  const { user } = useAuth();
+  const userData = user as any;
+  const firstName = userData?.firstName || "Resident";
+
+  const { data: requests = [] } = useQuery<MaintenanceRequest[]>({
+    queryKey: ["/api/maintenance-requests"],
+  });
+
+  const activeRequests = requests.filter(
+    (r) => r.status !== "completed" && r.status !== "cancelled"
+  );
 
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-semibold">Welcome Back, Sarah</h1>
-        <p className="text-muted-foreground mt-1">Unit 204 - Sunset Apartments</p>
+        <h1 className="text-3xl font-semibold">Welcome Back, {firstName}</h1>
+        <p className="text-muted-foreground mt-1">Your maintenance dashboard</p>
       </div>
 
       <div className="grid gap-6 md:grid-cols-2">
@@ -51,21 +40,20 @@ export default function ResidentDashboard() {
               <MapPin className="h-4 w-4 text-muted-foreground mt-0.5" />
               <div>
                 <p className="text-sm font-medium">Address</p>
-                <p className="text-sm text-muted-foreground">123 Main St, Unit 204</p>
-                <p className="text-sm text-muted-foreground">Austin, TX 78701</p>
+                <p className="text-sm text-muted-foreground">Contact your property manager for details</p>
               </div>
             </div>
             <div className="pt-3 border-t">
               <p className="text-sm font-medium mb-2">Property Manager</p>
               <div className="space-y-2">
-                <a 
+                <a
                   href="tel:5125550100"
                   className="flex items-center gap-2 text-sm hover-elevate active-elevate-2 p-2 rounded-md -ml-2"
                 >
                   <Phone className="h-4 w-4" />
                   <span>(512) 555-0100</span>
                 </a>
-                <a 
+                <a
                   href="mailto:manager@sunsetapts.com"
                   className="flex items-center gap-2 text-sm hover-elevate active-elevate-2 p-2 rounded-md -ml-2"
                 >
@@ -93,7 +81,7 @@ export default function ResidentDashboard() {
             </Link>
             <Link href="/my-requests">
               <Button variant="outline" className="w-full" data-testid="button-view-requests">
-                View My Requests ({myRequests.length})
+                View My Requests ({requests.length})
               </Button>
             </Link>
             <div className="pt-3 border-t">
@@ -119,9 +107,13 @@ export default function ResidentDashboard() {
           </Link>
         </div>
         <div className="space-y-4">
-          {myRequests.map((request) => (
-            <MaintenanceRequestCard key={request.id} request={request} isAdmin={false} />
-          ))}
+          {activeRequests.length === 0 ? (
+            <p className="text-muted-foreground text-sm">No active maintenance requests.</p>
+          ) : (
+            activeRequests.map((request) => (
+              <MaintenanceRequestCard key={request.id} request={request} isAdmin={false} />
+            ))
+          )}
         </div>
       </div>
     </div>

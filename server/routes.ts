@@ -237,7 +237,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const requests = await storage.getAllMaintenanceRequests();
       const allowedRegions = permissions?.allowedRegions || [];
       const isAdmin = currentUser?.role === "admin";
-      const filteredRequests = isAdmin ? requests : filterByRegion(requests, allowedRegions);
+      const isResident = currentUser?.role === "resident";
+      
+      // Residents only see their own requests
+      const filteredRequests = isAdmin
+        ? requests
+        : isResident
+          ? requests.filter(r => r.submittedBy === userId)
+          : filterByRegion(requests, allowedRegions);
       res.json(filteredRequests);
     } catch (error) {
       console.error("Error fetching maintenance requests:", error);
