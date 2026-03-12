@@ -151,6 +151,45 @@ export class DatabaseStorage implements IStorage {
   }
 
   async upsertUser(userData: UpsertUser): Promise<User> {
+    // Handle the case where an admin pre-created this user by email with a different ID.
+    // When the user then signs in via OIDC their Replit sub differs from the stored ID,
+    // causing a unique-email constraint violation. We detect this and link the accounts
+    // by migrating the existing role/permissions to the new OIDC identity.
+    if (userData.email && userData.id) {
+      const [existingByEmail] = await db
+        .select()
+        .from(users)
+        .where(eq(users.email, userData.email));
+
+      if (existingByEmail && existingByEmail.id !== userData.id) {
+        // Capture existing permissions before the cascade-delete
+        const existingPerms = await this.getUserPermissions(existingByEmail.id);
+
+        // Remove the old record (cascades to userPermissions)
+        await db.delete(users).where(eq(users.id, existingByEmail.id));
+
+        // Re-insert under the OIDC sub, preserving role and active status
+        const [newUser] = await db
+          .insert(users)
+          .values({
+            ...userData,
+            role: existingByEmail.role,
+            isActive: existingByEmail.isActive,
+          })
+          .returning();
+
+        // Restore the pre-configured permissions (or create defaults)
+        if (existingPerms) {
+          const { id: _id, userId: _uid, createdAt: _ca, updatedAt: _ua, ...permsFields } = existingPerms;
+          await this.upsertUserPermissions({ userId: newUser.id, ...permsFields });
+        } else {
+          await this.upsertUserPermissions(computeDefaultPermissions(newUser.id, newUser.role));
+        }
+
+        return newUser;
+      }
+    }
+
     const [user] = await db
       .insert(users)
       .values(userData)

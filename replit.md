@@ -9,6 +9,7 @@ This is a comprehensive property management system for Saint Paul's Outreach, In
 - **Residents**: `MyRequests` and `ResidentDashboard` pages now use real API data instead of hardcoded mock data
 - **TypeScript**: Fixed `mondayItemId` type mismatch (null vs undefined) in `updateMaintenanceRequest` — both interface and implementation updated to accept `string | null`
 - **Cleanup**: Removed unused `useAuth` import from Properties.tsx; deleted orphaned example component files with stale mock data
+- **Auth Account Linking**: `upsertUser` now detects when a new OIDC sign-in's email matches an admin-pre-created account with a different ID — it migrates the old record to the OIDC sub, preserving role, active status, and all permissions. This fixes "Internal Server Error" on sign-in for pre-created users like laura.wilson@spo.org
 
 ## Previous Changes (March 2, 2026)
 - **Monday.com Integration**: Maintenance requests now sync to Monday.com regional boards automatically
