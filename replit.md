@@ -10,6 +10,7 @@ This is a comprehensive property management system for Saint Paul's Outreach, In
 - **Backend Permissions**: Contacts and Billing routes (GET/POST/PATCH/DELETE) now apply the `!isAdmin` bypass pattern — admin users are no longer blocked by permission DB record checks
 - **Frontend Permissions**: Contacts and Invoices `canManage` checks now also read the user's role directly (admin/regional_administrator bypass regardless of DB permission state)
 - **Maintenance Photo Upload**: Added optional photo attachment to the Create Maintenance Request form; `photoUrl` column added to `maintenance_requests` table; uploaded photos display on request cards
+- **Asset Tracking Improvements**: Category converted to dropdown (10 preset options); Age and Last Serviced fields now only show for Fixed type assets; Purchase Price made required; Asset Tag ID added as required field; photo upload required when creating a new asset (saved to assetPhotos); `assetTagId` column added to assets table
 
 ## Recent Changes (March 12, 2026)
 - **Bug Fix**: Properties page "Internal Server Error" resolved — admin bypass on GET /api/properties now correctly allows admins to view properties even without a DB permissions record

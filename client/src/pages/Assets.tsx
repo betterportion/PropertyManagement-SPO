@@ -13,24 +13,30 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { Plus, Trash2, X, Image } from "lucide-react";
+import { Plus, Trash2, Image } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { insertAssetSchema, type Asset, type InsertAsset, type Property, type AssetPhoto } from "@shared/schema";
+import { insertAssetSchema, type Asset, type Property, type AssetPhoto } from "@shared/schema";
 import { z } from "zod";
 
-const assetFormSchema = insertAssetSchema.extend({
-  ageInYears: z.coerce.number().min(0),
-});
-
-const regions = [
-  { id: "west-central", name: "West Central" },
-  { id: "east-central", name: "East Central" },
-  { id: "north-west", name: "North West" },
-  { id: "south-west", name: "South West" },
-  { id: "north-east", name: "North East" },
-  { id: "south-east", name: "South East" },
+const ASSET_CATEGORIES = [
+  "HVAC",
+  "Appliance",
+  "Electrical",
+  "Plumbing",
+  "Structural",
+  "Furniture",
+  "IT / Electronics",
+  "Safety Equipment",
+  "Vehicle",
+  "Other",
 ];
+
+const assetFormSchema = insertAssetSchema.extend({
+  ageInYears: z.coerce.number().min(0, "Age must be 0 or greater"),
+  purchasePrice: z.coerce.number({ required_error: "Purchase price is required", invalid_type_error: "Enter a valid amount" }).min(0, "Must be 0 or greater"),
+  assetTagId: z.string().min(1, "Asset tag ID is required"),
+});
 
 export default function Assets() {
   const [selectedRegion, setSelectedRegion] = useState("all");
@@ -41,8 +47,10 @@ export default function Assets() {
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isPhotosDialogOpen, setIsPhotosDialogOpen] = useState(false);
   const [selectedAssetForPhotos, setSelectedAssetForPhotos] = useState<Asset | null>(null);
+  const [addPhotoUrl, setAddPhotoUrl] = useState<string | null>(null);
   const { toast } = useToast();
   const { user } = useAuth();
+  const typedUser = user as { id?: string; email?: string; role?: string } | null;
 
   const { data: assetsData, isLoading } = useQuery<Asset[]>({
     queryKey: ["/api/assets"],
@@ -52,61 +60,48 @@ export default function Assets() {
     queryKey: ["/api/properties"],
   });
 
-  const { data: permissionsData } = useQuery<{canManageAssets?: boolean} | null>({
-    queryKey: ["/api/users", (user as any)?.id, "/permissions"],
+  const { data: permissionsData } = useQuery<{ canManageAssets?: boolean } | null>({
+    queryKey: ["/api/users", typedUser?.id, "/permissions"],
     queryFn: async () => {
-      const userId = (user as any)?.id;
-      if (!userId) return null;
-      const response = await fetch(`/api/users/${userId}/permissions`);
+      if (!typedUser?.id) return null;
+      const response = await fetch(`/api/users/${typedUser.id}/permissions`);
       if (!response.ok) return null;
       return response.json();
     },
-    enabled: !!(user as any)?.id,
+    enabled: !!typedUser?.id,
   });
 
-  const canManage = permissionsData?.canManageAssets || false;
+  const canManage =
+    typedUser?.role === "admin" ||
+    typedUser?.role === "regional_administrator" ||
+    permissionsData?.canManageAssets ||
+    false;
 
   const createAssetMutation = useMutation({
-    mutationFn: async (data: InsertAsset) => {
-      return await apiRequest("POST", "/api/assets", data);
+    mutationFn: async (data: z.infer<typeof assetFormSchema>) => {
+      const response = await apiRequest("POST", "/api/assets", data);
+      return response.json() as Promise<Asset>;
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/assets"] });
-      setIsAddDialogOpen(false);
-      addForm.reset();
-      toast({
-        title: "Success",
-        description: "Asset created successfully",
-      });
-    },
-    onError: () => {
-      toast({
-        title: "Error",
-        description: "Failed to create asset",
-        variant: "destructive",
-      });
+  });
+
+  const createAssetPhotoMutation = useMutation({
+    mutationFn: async (data: { assetId: string; imageUrl: string; uploadedBy: string }) => {
+      return await apiRequest("POST", "/api/asset-photos", data);
     },
   });
 
   const updateAssetMutation = useMutation({
-    mutationFn: async ({ id, data }: { id: string; data: Partial<InsertAsset> }) => {
+    mutationFn: async ({ id, data }: { id: string; data: Partial<z.infer<typeof assetFormSchema>> }) => {
       return await apiRequest("PATCH", `/api/assets/${id}`, data);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/assets"] });
       setIsEditDialogOpen(false);
       setEditingAsset(null);
-      toast({
-        title: "Success",
-        description: "Asset updated successfully",
-      });
+      toast({ title: "Asset updated successfully" });
     },
     onError: () => {
-      toast({
-        title: "Error",
-        description: "Failed to update asset",
-        variant: "destructive",
-      });
+      toast({ title: "Error", description: "Failed to update asset", variant: "destructive" });
     },
   });
 
@@ -117,17 +112,10 @@ export default function Assets() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/assets"] });
       setDeletingAssetId(null);
-      toast({
-        title: "Success",
-        description: "Asset deleted successfully",
-      });
+      toast({ title: "Asset deleted successfully" });
     },
     onError: () => {
-      toast({
-        title: "Error",
-        description: "Failed to delete asset",
-        variant: "destructive",
-      });
+      toast({ title: "Error", description: "Failed to delete asset", variant: "destructive" });
     },
   });
 
@@ -142,23 +130,16 @@ export default function Assets() {
     enabled: !!selectedAssetForPhotos?.id,
   });
 
-  const createAssetPhotoMutation = useMutation({
+  const addPhotoToAssetMutation = useMutation({
     mutationFn: async (data: { assetId: string; imageUrl: string; caption?: string; uploadedBy: string }) => {
       return await apiRequest("POST", "/api/asset-photos", data);
     },
     onSuccess: () => {
       refetchPhotos();
-      toast({
-        title: "Success",
-        description: "Photo uploaded successfully",
-      });
+      toast({ title: "Photo uploaded successfully" });
     },
     onError: () => {
-      toast({
-        title: "Error",
-        description: "Failed to upload photo",
-        variant: "destructive",
-      });
+      toast({ title: "Error", description: "Failed to upload photo", variant: "destructive" });
     },
   });
 
@@ -168,17 +149,10 @@ export default function Assets() {
     },
     onSuccess: () => {
       refetchPhotos();
-      toast({
-        title: "Success",
-        description: "Photo deleted successfully",
-      });
+      toast({ title: "Photo deleted successfully" });
     },
     onError: () => {
-      toast({
-        title: "Error",
-        description: "Failed to delete photo",
-        variant: "destructive",
-      });
+      toast({ title: "Error", description: "Failed to delete photo", variant: "destructive" });
     },
   });
 
@@ -194,9 +168,17 @@ export default function Assets() {
       buildingAddress: "",
       location: "",
       serialNumber: "",
-      purchasePrice: null,
+      purchasePrice: undefined,
+      assetTagId: "",
     },
   });
+
+  const editForm = useForm<z.infer<typeof assetFormSchema>>({
+    resolver: zodResolver(assetFormSchema),
+  });
+
+  const addAssetType = addForm.watch("type");
+  const editAssetType = editForm.watch("type");
 
   const handleAddPropertyChange = (propertyId: string) => {
     const property = properties.find(p => p.id === propertyId);
@@ -217,15 +199,9 @@ export default function Assets() {
   };
 
   const getPropertyForAsset = (asset: Asset) => {
-    if (asset.propertyId) {
-      return properties.find(p => p.id === asset.propertyId) || null;
-    }
+    if (asset.propertyId) return properties.find(p => p.id === asset.propertyId) || null;
     return properties.find(p => p.address === asset.buildingAddress) || null;
   };
-
-  const editForm = useForm<z.infer<typeof assetFormSchema>>({
-    resolver: zodResolver(assetFormSchema),
-  });
 
   const handleEdit = (id: string) => {
     const asset = assetsData?.find((a) => a.id === id);
@@ -243,37 +219,33 @@ export default function Assets() {
         location: asset.location || "",
         serialNumber: asset.serialNumber || "",
         lastServiced: asset.lastServiced ? asset.lastServiced : undefined,
-        purchasePrice: asset.purchasePrice || null,
+        purchasePrice: asset.purchasePrice ? Number(asset.purchasePrice) : undefined,
+        assetTagId: asset.assetTagId || "",
       });
       setIsEditDialogOpen(true);
     }
   };
 
-  const handleDelete = (id: string) => {
-    setDeletingAssetId(id);
-  };
-
-  const handlePhotos = (id: string) => {
-    const asset = assetsData?.find((a) => a.id === id);
-    if (asset) {
-      setSelectedAssetForPhotos(asset);
-      setIsPhotosDialogOpen(true);
+  const onSubmitAdd = async (data: z.infer<typeof assetFormSchema>) => {
+    if (!addPhotoUrl) {
+      toast({ title: "Photo required", description: "Please upload a photo of the asset before saving.", variant: "destructive" });
+      return;
     }
-  };
-
-  const handlePhotoUpload = (url: string) => {
-    if (selectedAssetForPhotos) {
-      const typedUser = user as { email?: string } | null;
-      createAssetPhotoMutation.mutate({
-        assetId: selectedAssetForPhotos.id,
-        imageUrl: url,
+    try {
+      const asset = await createAssetMutation.mutateAsync(data);
+      await createAssetPhotoMutation.mutateAsync({
+        assetId: asset.id,
+        imageUrl: addPhotoUrl,
         uploadedBy: typedUser?.email || "Unknown",
       });
+      queryClient.invalidateQueries({ queryKey: ["/api/assets"] });
+      setIsAddDialogOpen(false);
+      addForm.reset();
+      setAddPhotoUrl(null);
+      toast({ title: "Asset created", description: "Asset and photo saved successfully." });
+    } catch {
+      toast({ title: "Error", description: "Failed to create asset", variant: "destructive" });
     }
-  };
-
-  const onSubmitAdd = (data: z.infer<typeof assetFormSchema>) => {
-    createAssetMutation.mutate(data);
   };
 
   const onSubmitEdit = (data: z.infer<typeof assetFormSchema>) => {
@@ -288,10 +260,11 @@ export default function Assets() {
     return matchesRegion && matchesBuilding;
   });
 
-  const buildings = Array.from(new Set((assetsData || []).map(a => a.buildingAddress).filter(addr => addr && addr.trim() !== ""))).map(addr => ({
-    id: addr,
-    address: addr,
-  }));
+  const buildings = Array.from(
+    new Set((assetsData || []).map(a => a.buildingAddress).filter(addr => addr && addr.trim() !== ""))
+  ).map(addr => ({ id: addr, address: addr }));
+
+  const isAddSubmitting = createAssetMutation.isPending || createAssetPhotoMutation.isPending;
 
   return (
     <div className="space-y-6">
@@ -302,18 +275,11 @@ export default function Assets() {
 
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="flex flex-wrap gap-4">
-          <RegionSelector
-            selectedRegion={selectedRegion}
-            onRegionChange={setSelectedRegion}
-          />
-          <BuildingSelector
-            selectedBuilding={selectedBuilding}
-            onBuildingChange={setSelectedBuilding}
-            buildings={buildings}
-          />
+          <RegionSelector selectedRegion={selectedRegion} onRegionChange={setSelectedRegion} />
+          <BuildingSelector selectedBuilding={selectedBuilding} onBuildingChange={setSelectedBuilding} buildings={buildings} />
         </div>
 
-        <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+        <Dialog open={isAddDialogOpen} onOpenChange={(open) => { setIsAddDialogOpen(open); if (!open) { addForm.reset(); setAddPhotoUrl(null); } }}>
           <DialogTrigger asChild>
             <Button data-testid="button-add-asset" disabled={!canManage}>
               <Plus className="h-4 w-4 mr-2" />
@@ -326,6 +292,8 @@ export default function Assets() {
             </DialogHeader>
             <Form {...addForm}>
               <form onSubmit={addForm.handleSubmit(onSubmitAdd)} className="space-y-4">
+
+                {/* Row 1: Name + Category */}
                 <div className="grid grid-cols-2 gap-4">
                   <FormField
                     control={addForm.control}
@@ -346,15 +314,25 @@ export default function Assets() {
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>Category</FormLabel>
-                        <FormControl>
-                          <Input {...field} placeholder="HVAC, Appliance, etc." data-testid="input-asset-category" />
-                        </FormControl>
+                        <Select onValueChange={field.onChange} value={field.value}>
+                          <FormControl>
+                            <SelectTrigger data-testid="select-asset-category">
+                              <SelectValue placeholder="Select category" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {ASSET_CATEGORIES.map((cat) => (
+                              <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                         <FormMessage />
                       </FormItem>
                     )}
                   />
                 </div>
 
+                {/* Row 2: Type + Age (age only for fixed) */}
                 <div className="grid grid-cols-2 gap-4">
                   <FormField
                     control={addForm.control}
@@ -377,30 +355,33 @@ export default function Assets() {
                       </FormItem>
                     )}
                   />
-                  <FormField
-                    control={addForm.control}
-                    name="ageInYears"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Age (Years)</FormLabel>
-                        <FormControl>
-                          <Input type="number" {...field} data-testid="input-asset-age" />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
+                  {addAssetType === "fixed" && (
+                    <FormField
+                      control={addForm.control}
+                      name="ageInYears"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Age (Years)</FormLabel>
+                          <FormControl>
+                            <Input type="number" {...field} data-testid="input-asset-age" />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  )}
                 </div>
 
+                {/* Row 3: Asset Tag ID + Purchase Price */}
                 <div className="grid grid-cols-2 gap-4">
                   <FormField
                     control={addForm.control}
-                    name="serialNumber"
+                    name="assetTagId"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Serial Number (Optional)</FormLabel>
+                        <FormLabel>Asset Tag ID</FormLabel>
                         <FormControl>
-                          <Input {...field} value={field.value || ""} data-testid="input-asset-serial" />
+                          <Input {...field} placeholder="e.g., SPO-2024-001" data-testid="input-asset-tag-id" />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -411,15 +392,15 @@ export default function Assets() {
                     name="purchasePrice"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Purchase Price (Optional)</FormLabel>
+                        <FormLabel>Purchase Price</FormLabel>
                         <FormControl>
-                          <Input 
-                            type="number" 
+                          <Input
+                            type="number"
                             step="0.01"
                             placeholder="0.00"
-                            value={field.value ?? ""} 
-                            onChange={(e) => field.onChange(e.target.value || null)}
-                            data-testid="input-asset-price" 
+                            value={field.value ?? ""}
+                            onChange={(e) => field.onChange(e.target.value === "" ? undefined : e.target.value)}
+                            data-testid="input-asset-price"
                           />
                         </FormControl>
                         <FormMessage />
@@ -428,6 +409,44 @@ export default function Assets() {
                   />
                 </div>
 
+                {/* Row 4: Serial Number + Last Serviced (last serviced only for fixed) */}
+                <div className="grid grid-cols-2 gap-4">
+                  <FormField
+                    control={addForm.control}
+                    name="serialNumber"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Serial Number <span className="text-muted-foreground text-xs">(optional)</span></FormLabel>
+                        <FormControl>
+                          <Input {...field} value={field.value || ""} data-testid="input-asset-serial" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  {addAssetType === "fixed" && (
+                    <FormField
+                      control={addForm.control}
+                      name="lastServiced"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Last Serviced <span className="text-muted-foreground text-xs">(optional)</span></FormLabel>
+                          <FormControl>
+                            <Input
+                              type="date"
+                              value={field.value ? String(field.value).split('T')[0] : ""}
+                              onChange={(e) => field.onChange(e.target.value || undefined)}
+                              data-testid="input-asset-serviced"
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  )}
+                </div>
+
+                {/* Property */}
                 <FormField
                   control={addForm.control}
                   name="propertyId"
@@ -456,6 +475,7 @@ export default function Assets() {
                   )}
                 />
 
+                {/* Location */}
                 <FormField
                   control={addForm.control}
                   name="location"
@@ -470,31 +490,30 @@ export default function Assets() {
                   )}
                 />
 
-                <FormField
-                  control={addForm.control}
-                  name="lastServiced"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Last Serviced (Optional)</FormLabel>
-                      <FormControl>
-                        <Input 
-                          type="date" 
-                          value={field.value ? String(field.value).split('T')[0] : ""} 
-                          onChange={(e) => field.onChange(e.target.value || undefined)}
-                          data-testid="input-asset-serviced" 
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
+                {/* Photo (required) */}
+                <FormItem>
+                  <FormLabel>
+                    Photo
+                    {!addPhotoUrl && (
+                      <span className="text-destructive ml-1 text-xs">* required</span>
+                    )}
+                    {addPhotoUrl && (
+                      <span className="text-green-600 dark:text-green-400 ml-1 text-xs">✓ uploaded</span>
+                    )}
+                  </FormLabel>
+                  <PhotoUpload
+                    onUpload={(url) => setAddPhotoUrl(url)}
+                    onError={(err) => toast({ title: "Upload failed", description: err, variant: "destructive" })}
+                    disabled={isAddSubmitting}
+                  />
+                </FormItem>
 
                 <DialogFooter>
                   <Button type="button" variant="outline" onClick={() => setIsAddDialogOpen(false)}>
                     Cancel
                   </Button>
-                  <Button type="submit" disabled={createAssetMutation.isPending} data-testid="button-submit-asset">
-                    {createAssetMutation.isPending ? "Creating..." : "Create Asset"}
+                  <Button type="submit" disabled={isAddSubmitting} data-testid="button-submit-asset">
+                    {isAddSubmitting ? "Saving..." : "Create Asset"}
                   </Button>
                 </DialogFooter>
               </form>
@@ -510,11 +529,15 @@ export default function Assets() {
           assets={assets}
           properties={properties}
           onEdit={canManage ? handleEdit : undefined}
-          onDelete={canManage ? handleDelete : undefined}
-          onPhotos={handlePhotos}
+          onDelete={canManage ? (id) => setDeletingAssetId(id) : undefined}
+          onPhotos={(id) => {
+            const asset = assetsData?.find(a => a.id === id);
+            if (asset) { setSelectedAssetForPhotos(asset); setIsPhotosDialogOpen(true); }
+          }}
         />
       )}
 
+      {/* Edit Dialog */}
       <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
@@ -522,6 +545,7 @@ export default function Assets() {
           </DialogHeader>
           <Form {...editForm}>
             <form onSubmit={editForm.handleSubmit(onSubmitEdit)} className="space-y-4">
+
               <div className="grid grid-cols-2 gap-4">
                 <FormField
                   control={editForm.control}
@@ -529,9 +553,7 @@ export default function Assets() {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Asset Name</FormLabel>
-                      <FormControl>
-                        <Input {...field} />
-                      </FormControl>
+                      <FormControl><Input {...field} /></FormControl>
                       <FormMessage />
                     </FormItem>
                   )}
@@ -542,9 +564,16 @@ export default function Assets() {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Category</FormLabel>
-                      <FormControl>
-                        <Input {...field} />
-                      </FormControl>
+                      <Select onValueChange={field.onChange} value={field.value}>
+                        <FormControl>
+                          <SelectTrigger><SelectValue placeholder="Select category" /></SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {ASSET_CATEGORIES.map((cat) => (
+                            <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                       <FormMessage />
                     </FormItem>
                   )}
@@ -560,9 +589,7 @@ export default function Assets() {
                       <FormLabel>Type</FormLabel>
                       <Select onValueChange={field.onChange} value={field.value}>
                         <FormControl>
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
+                          <SelectTrigger><SelectValue /></SelectTrigger>
                         </FormControl>
                         <SelectContent>
                           <SelectItem value="fixed">Fixed</SelectItem>
@@ -573,14 +600,49 @@ export default function Assets() {
                     </FormItem>
                   )}
                 />
+                {editAssetType === "fixed" && (
+                  <FormField
+                    control={editForm.control}
+                    name="ageInYears"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Age (Years)</FormLabel>
+                        <FormControl><Input type="number" {...field} /></FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                )}
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
                 <FormField
                   control={editForm.control}
-                  name="ageInYears"
+                  name="assetTagId"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Age (Years)</FormLabel>
+                      <FormLabel>Asset Tag ID</FormLabel>
                       <FormControl>
-                        <Input type="number" {...field} />
+                        <Input {...field} value={field.value || ""} placeholder="e.g., SPO-2024-001" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={editForm.control}
+                  name="purchasePrice"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Purchase Price</FormLabel>
+                      <FormControl>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          placeholder="0.00"
+                          value={field.value ?? ""}
+                          onChange={(e) => field.onChange(e.target.value === "" ? undefined : e.target.value)}
+                        />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -594,33 +656,31 @@ export default function Assets() {
                   name="serialNumber"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Serial Number (Optional)</FormLabel>
-                      <FormControl>
-                        <Input {...field} value={field.value || ""} />
-                      </FormControl>
+                      <FormLabel>Serial Number <span className="text-muted-foreground text-xs">(optional)</span></FormLabel>
+                      <FormControl><Input {...field} value={field.value || ""} /></FormControl>
                       <FormMessage />
                     </FormItem>
                   )}
                 />
-                <FormField
-                  control={editForm.control}
-                  name="purchasePrice"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Purchase Price (Optional)</FormLabel>
-                      <FormControl>
-                        <Input 
-                          type="number" 
-                          step="0.01"
-                          placeholder="0.00"
-                          value={field.value ?? ""} 
-                          onChange={(e) => field.onChange(e.target.value || null)}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
+                {editAssetType === "fixed" && (
+                  <FormField
+                    control={editForm.control}
+                    name="lastServiced"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Last Serviced <span className="text-muted-foreground text-xs">(optional)</span></FormLabel>
+                        <FormControl>
+                          <Input
+                            type="date"
+                            value={field.value ? String(field.value).split('T')[0] : ""}
+                            onChange={(e) => field.onChange(e.target.value || undefined)}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                )}
               </div>
 
               <FormField
@@ -631,9 +691,7 @@ export default function Assets() {
                     <FormLabel>Property</FormLabel>
                     <Select onValueChange={handleEditPropertyChange} value={field.value || ""}>
                       <FormControl>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select property" />
-                        </SelectTrigger>
+                        <SelectTrigger><SelectValue placeholder="Select property" /></SelectTrigger>
                       </FormControl>
                       <SelectContent>
                         {properties.map((property) => (
@@ -665,28 +723,8 @@ export default function Assets() {
                 )}
               />
 
-              <FormField
-                control={editForm.control}
-                name="lastServiced"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Last Serviced (Optional)</FormLabel>
-                    <FormControl>
-                      <Input 
-                        type="date" 
-                        value={field.value ? String(field.value).split('T')[0] : ""} 
-                        onChange={(e) => field.onChange(e.target.value || undefined)}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
               <DialogFooter>
-                <Button type="button" variant="outline" onClick={() => setIsEditDialogOpen(false)}>
-                  Cancel
-                </Button>
+                <Button type="button" variant="outline" onClick={() => setIsEditDialogOpen(false)}>Cancel</Button>
                 <Button type="submit" disabled={updateAssetMutation.isPending}>
                   {updateAssetMutation.isPending ? "Updating..." : "Update Asset"}
                 </Button>
@@ -696,6 +734,7 @@ export default function Assets() {
         </DialogContent>
       </Dialog>
 
+      {/* Delete Confirmation */}
       <AlertDialog open={!!deletingAssetId} onOpenChange={() => setDeletingAssetId(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -708,7 +747,7 @@ export default function Assets() {
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => deletingAssetId && deleteAssetMutation.mutate(deletingAssetId)}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              className="bg-destructive text-destructive-foreground"
             >
               Delete
             </AlertDialogAction>
@@ -716,30 +755,34 @@ export default function Assets() {
         </AlertDialogContent>
       </AlertDialog>
 
-      <Dialog open={isPhotosDialogOpen} onOpenChange={(open) => {
-        setIsPhotosDialogOpen(open);
-        if (!open) setSelectedAssetForPhotos(null);
-      }}>
+      {/* Photos Dialog */}
+      <Dialog open={isPhotosDialogOpen} onOpenChange={(open) => { setIsPhotosDialogOpen(open); if (!open) setSelectedAssetForPhotos(null); }}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Photos for {selectedAssetForPhotos?.name}</DialogTitle>
-            <DialogDescription>
-              Upload and manage photos for this asset
-            </DialogDescription>
+            <DialogTitle>Photos — {selectedAssetForPhotos?.name}</DialogTitle>
+            <DialogDescription>Upload and manage photos for this asset</DialogDescription>
           </DialogHeader>
 
           {canManage && (
-            <div className="space-y-4">
+            <div className="space-y-2">
               <h4 className="font-medium text-sm">Upload New Photo</h4>
               <PhotoUpload
-                onUpload={handlePhotoUpload}
+                onUpload={(url) => {
+                  if (selectedAssetForPhotos) {
+                    addPhotoToAssetMutation.mutate({
+                      assetId: selectedAssetForPhotos.id,
+                      imageUrl: url,
+                      uploadedBy: typedUser?.email || "Unknown",
+                    });
+                  }
+                }}
                 onError={(error) => toast({ title: "Error", description: error, variant: "destructive" })}
-                disabled={createAssetPhotoMutation.isPending}
+                disabled={addPhotoToAssetMutation.isPending}
               />
             </div>
           )}
 
-          <div className="space-y-4">
+          <div className="space-y-3">
             <h4 className="font-medium text-sm">Existing Photos ({assetPhotos.length})</h4>
             {assetPhotos.length === 0 ? (
               <div className="text-center py-8 text-muted-foreground">
@@ -749,18 +792,14 @@ export default function Assets() {
             ) : (
               <div className="grid grid-cols-2 gap-4">
                 {assetPhotos.map((photo) => (
-                  <div key={photo.id} className="relative group rounded-lg overflow-hidden border" data-testid={`photo-${photo.id}`}>
-                    <img
-                      src={photo.imageUrl}
-                      alt={photo.caption || "Asset photo"}
-                      className="w-full h-40 object-cover"
-                    />
+                  <div key={photo.id} className="relative group rounded-md overflow-hidden border" data-testid={`photo-${photo.id}`}>
+                    <img src={photo.imageUrl} alt={photo.caption || "Asset photo"} className="w-full h-40 object-cover" />
                     {canManage && (
                       <Button
                         type="button"
                         size="icon"
                         variant="destructive"
-                        className="absolute top-2 right-2 h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
+                        className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity"
                         onClick={() => deleteAssetPhotoMutation.mutate(photo.id)}
                         disabled={deleteAssetPhotoMutation.isPending}
                         data-testid={`button-delete-photo-${photo.id}`}
@@ -780,9 +819,7 @@ export default function Assets() {
           </div>
 
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setIsPhotosDialogOpen(false)}>
-              Close
-            </Button>
+            <Button type="button" variant="outline" onClick={() => setIsPhotosDialogOpen(false)}>Close</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

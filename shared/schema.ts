@@ -152,6 +152,7 @@ export const assets = pgTable("assets", {
   lastServiced: timestamp("last_serviced"),
   serialNumber: varchar("serial_number"),
   purchasePrice: numeric("purchase_price", { precision: 12, scale: 2 }),
+  assetTagId: varchar("asset_tag_id"),
   propertyId: varchar("property_id"), // References properties table
   location: varchar("location").notNull(),
   region: varchar("region").notNull(),
