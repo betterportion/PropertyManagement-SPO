@@ -12,6 +12,7 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Search, Plus } from "lucide-react";
+import { PhotoUpload } from "@/components/PhotoUpload";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { insertMaintenanceRequestSchema, type MaintenanceRequest, type Property } from "@shared/schema";
@@ -110,6 +111,7 @@ export default function Maintenance() {
       region: "",
       buildingAddress: "",
       submittedBy: typedUser?.email || "",
+      photoUrl: null,
     },
   });
 
@@ -288,6 +290,14 @@ export default function Maintenance() {
                     </FormItem>
                   )}
                 />
+                <FormItem>
+                  <FormLabel>Photo (optional)</FormLabel>
+                  <PhotoUpload
+                    onUpload={(url) => createForm.setValue("photoUrl", url)}
+                    onError={(err) => toast({ title: "Upload failed", description: err, variant: "destructive" })}
+                  />
+                </FormItem>
+
                 <div className="flex gap-2 justify-end pt-4">
                   <Button
                     type="button"

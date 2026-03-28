@@ -79,6 +79,7 @@ export const maintenanceRequests = pgTable("maintenance_requests", {
   submittedDate: timestamp("submitted_date").defaultNow(),
   completedDate: timestamp("completed_date"),
   mondayItemId: varchar("monday_item_id"),
+  photoUrl: varchar("photo_url"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });

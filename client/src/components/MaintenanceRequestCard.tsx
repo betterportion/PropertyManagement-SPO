@@ -50,7 +50,17 @@ export default function MaintenanceRequestCard({ request, onEdit, isAdmin = fals
         </div>
       </CardHeader>
       <CardContent>
-        <p className="text-sm text-muted-foreground mb-4">{request.description}</p>
+        <p className="text-sm text-muted-foreground mb-3">{request.description}</p>
+        {request.photoUrl && (
+          <div className="mb-3 rounded-md overflow-hidden border">
+            <img
+              src={request.photoUrl}
+              alt="Maintenance request photo"
+              className="w-full max-h-48 object-cover"
+              data-testid={`img-request-photo-${request.id}`}
+            />
+          </div>
+        )}
         <div className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-4 text-xs text-muted-foreground">
             <div className="flex items-center gap-1">

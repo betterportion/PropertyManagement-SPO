@@ -9,6 +9,7 @@ This is a comprehensive property management system for Saint Paul's Outreach, In
 - **Invoices**: Removed all hardcoded mock data; now fetches real billing records from `/api/billing` and properties from `/api/properties`; added "Add Billing Record" dialog with full form including property, region, and building address dropdowns
 - **Backend Permissions**: Contacts and Billing routes (GET/POST/PATCH/DELETE) now apply the `!isAdmin` bypass pattern — admin users are no longer blocked by permission DB record checks
 - **Frontend Permissions**: Contacts and Invoices `canManage` checks now also read the user's role directly (admin/regional_administrator bypass regardless of DB permission state)
+- **Maintenance Photo Upload**: Added optional photo attachment to the Create Maintenance Request form; `photoUrl` column added to `maintenance_requests` table; uploaded photos display on request cards
 
 ## Recent Changes (March 12, 2026)
 - **Bug Fix**: Properties page "Internal Server Error" resolved — admin bypass on GET /api/properties now correctly allows admins to view properties even without a DB permissions record
