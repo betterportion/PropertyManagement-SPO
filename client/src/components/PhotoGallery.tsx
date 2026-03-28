@@ -3,8 +3,18 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
-import { Upload, X, Save } from "lucide-react";
+import { Upload, X, Save, Calendar } from "lucide-react";
+import { format } from "date-fns";
 import type { WalkthroughPhoto } from "@shared/schema";
+
+function formatUploadDate(date: Date | string | null | undefined): string | null {
+  if (!date) return null;
+  try {
+    return format(new Date(date), "MMM d, yyyy");
+  } catch {
+    return null;
+  }
+}
 
 interface PhotoGalleryProps {
   photos: WalkthroughPhoto[];
@@ -69,29 +79,41 @@ export default function PhotoGallery({
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-        {photos.map((photo) => (
-          <Card 
-            key={photo.id} 
-            className="overflow-hidden hover-elevate cursor-pointer group"
-            onClick={() => handleOpenPhoto(photo)}
-            data-testid={`card-photo-${photo.id}`}
-          >
-            <div className="aspect-square bg-muted relative">
-              <img 
-                src={photo.imageUrl} 
-                alt={photo.notes || "Room photo"} 
-                className="w-full h-full object-cover"
-              />
-              {photo.notes && (
-                <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity">
-                  <div className="absolute bottom-0 left-0 right-0 p-3">
-                    <p className="text-white text-xs font-medium truncate">{photo.notes}</p>
+        {photos.map((photo) => {
+          const dateLabel = formatUploadDate(photo.uploadedDate);
+          return (
+            <Card
+              key={photo.id}
+              className="overflow-hidden hover-elevate cursor-pointer group"
+              onClick={() => handleOpenPhoto(photo)}
+              data-testid={`card-photo-${photo.id}`}
+            >
+              <div className="aspect-square bg-muted relative">
+                <img
+                  src={photo.imageUrl}
+                  alt={photo.notes || "Room photo"}
+                  className="w-full h-full object-cover"
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/70 to-transparent opacity-0 group-hover:opacity-100 transition-opacity">
+                  <div className="absolute bottom-0 left-0 right-0 p-3 space-y-0.5">
+                    {photo.notes && (
+                      <p className="text-white text-xs font-medium truncate">{photo.notes}</p>
+                    )}
+                    {dateLabel && (
+                      <p className="text-white/80 text-xs">{dateLabel}</p>
+                    )}
                   </div>
                 </div>
+              </div>
+              {dateLabel && (
+                <div className="px-2 py-1.5 flex items-center gap-1 text-xs text-muted-foreground border-t">
+                  <Calendar className="h-3 w-3 flex-shrink-0" />
+                  <span data-testid={`text-photo-date-${photo.id}`}>{dateLabel}</span>
+                </div>
               )}
-            </div>
-          </Card>
-        ))}
+            </Card>
+          );
+        })}
       </div>
 
       <Dialog open={!!selectedPhoto} onOpenChange={() => setSelectedPhoto(null)}>
@@ -110,6 +132,12 @@ export default function PhotoGallery({
               </div>
               
               <div className="space-y-3">
+                {selectedPhoto.uploadedDate && (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Calendar className="h-4 w-4" />
+                    <span>Uploaded {formatUploadDate(selectedPhoto.uploadedDate)}</span>
+                  </div>
+                )}
                 <div>
                   <p className="text-sm text-muted-foreground mb-2">Notes</p>
                   {isEditingCaption && canManage ? (
