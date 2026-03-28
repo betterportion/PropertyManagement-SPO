@@ -9,12 +9,23 @@ import BuildingSelector from "@/components/BuildingSelector";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Plus } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { insertMaintenanceContactSchema, type MaintenanceContact } from "@shared/schema";
+import { insertMaintenanceContactSchema, type MaintenanceContact, type Property } from "@shared/schema";
 import type { z } from "zod";
+
+const REGIONS = [
+  "East Central",
+  "National",
+  "North East",
+  "North West",
+  "South East",
+  "South West",
+  "West Central",
+];
 
 export default function Contacts() {
   const [selectedRegion, setSelectedRegion] = useState("all");
@@ -29,6 +40,10 @@ export default function Contacts() {
     queryKey: ["/api/contacts"],
   });
 
+  const { data: properties = [] } = useQuery<Property[]>({
+    queryKey: ["/api/properties"],
+  });
+
   const { data: permissionsData } = useQuery<{canManageContacts?: boolean} | null>({
     queryKey: ["/api/users", (user as any)?.id, "/permissions"],
     queryFn: async () => {
@@ -41,7 +56,8 @@ export default function Contacts() {
     enabled: !!(user as any)?.id,
   });
 
-  const canManage = permissionsData?.canManageContacts || false;
+  const userRole = (user as any)?.role;
+  const canManage = userRole === "admin" || userRole === "regional_administrator" || permissionsData?.canManageContacts || false;
 
   const createContactMutation = useMutation({
     mutationFn: async (data: z.infer<typeof insertMaintenanceContactSchema>) => {
@@ -115,6 +131,22 @@ export default function Contacts() {
     }
   };
 
+  const handleAddPropertyChange = (propertyId: string) => {
+    const property = properties.find(p => p.id === propertyId);
+    if (property) {
+      form.setValue("buildingAddress", property.address!);
+      form.setValue("region", property.region);
+    }
+  };
+
+  const handleEditPropertyChange = (propertyId: string) => {
+    const property = properties.find(p => p.id === propertyId);
+    if (property) {
+      editForm.setValue("buildingAddress", property.address!);
+      editForm.setValue("region", property.region);
+    }
+  };
+
   const handleEditContact = (id: string) => {
     const contact = contactsData?.find((c) => c.id === id);
     if (contact) {
@@ -133,15 +165,12 @@ export default function Contacts() {
   };
 
   const contacts = (contactsData || []).filter((contact) => {
-    const matchesRegion = selectedRegion === "all" || contact.region === selectedRegion;
+    const matchesRegion = selectedRegion === "all" || contact.region.toLowerCase().replace(/\s+/g, '-') === selectedRegion;
     const matchesBuilding = selectedBuilding === "all" || contact.buildingAddress === selectedBuilding;
     return matchesRegion && matchesBuilding;
   });
 
-  const buildings = Array.from(new Set((contactsData || []).map(c => c.buildingAddress).filter(addr => addr && addr.trim() !== ""))).map(addr => ({
-    id: addr,
-    address: addr,
-  }));
+  const buildings = properties.map(p => ({ id: p.address!, address: p.address! }));
 
   const allInvoices: any[] = [];
 
@@ -250,6 +279,22 @@ export default function Contacts() {
                   />
                 </div>
 
+                <FormItem>
+                  <FormLabel>Property</FormLabel>
+                  <Select onValueChange={handleAddPropertyChange}>
+                    <SelectTrigger data-testid="select-contact-property">
+                      <SelectValue placeholder="Select a property" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {properties.map(property => (
+                        <SelectItem key={property.id} value={property.id}>
+                          {property.address}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </FormItem>
+
                 <div className="grid grid-cols-2 gap-4">
                   <FormField
                     control={form.control}
@@ -257,9 +302,18 @@ export default function Contacts() {
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>Region</FormLabel>
-                        <FormControl>
-                          <Input {...field} placeholder="west-central, north-east, etc." data-testid="input-contact-region" />
-                        </FormControl>
+                        <Select onValueChange={field.onChange} value={field.value}>
+                          <FormControl>
+                            <SelectTrigger data-testid="select-contact-region">
+                              <SelectValue placeholder="Select region" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {REGIONS.map(r => (
+                              <SelectItem key={r} value={r}>{r}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                         <FormMessage />
                       </FormItem>
                     )}
@@ -270,9 +324,20 @@ export default function Contacts() {
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>Building Address</FormLabel>
-                        <FormControl>
-                          <Input {...field} placeholder="123 Main St, Austin, TX" data-testid="input-contact-building" />
-                        </FormControl>
+                        <Select onValueChange={field.onChange} value={field.value}>
+                          <FormControl>
+                            <SelectTrigger data-testid="select-contact-building">
+                              <SelectValue placeholder="Select property" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {properties.map(property => (
+                              <SelectItem key={property.id} value={property.address!}>
+                                {property.address}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                         <FormMessage />
                       </FormItem>
                     )}
@@ -386,6 +451,27 @@ export default function Contacts() {
                 />
               </div>
 
+              <FormItem>
+                <FormLabel>Property</FormLabel>
+                <Select
+                  onValueChange={handleEditPropertyChange}
+                  defaultValue={
+                    properties.find(p => p.address === editingContact?.buildingAddress)?.id
+                  }
+                >
+                  <SelectTrigger data-testid="select-edit-contact-property">
+                    <SelectValue placeholder="Select a property" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {properties.map(property => (
+                      <SelectItem key={property.id} value={property.id}>
+                        {property.address}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </FormItem>
+
               <div className="grid grid-cols-2 gap-4">
                 <FormField
                   control={editForm.control}
@@ -393,9 +479,18 @@ export default function Contacts() {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Region</FormLabel>
-                      <FormControl>
-                        <Input {...field} placeholder="west-central, north-east, etc." data-testid="input-edit-contact-region" />
-                      </FormControl>
+                      <Select onValueChange={field.onChange} value={field.value}>
+                        <FormControl>
+                          <SelectTrigger data-testid="select-edit-contact-region">
+                            <SelectValue placeholder="Select region" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {REGIONS.map(r => (
+                            <SelectItem key={r} value={r}>{r}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                       <FormMessage />
                     </FormItem>
                   )}
@@ -406,9 +501,20 @@ export default function Contacts() {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Building Address</FormLabel>
-                      <FormControl>
-                        <Input {...field} placeholder="123 Main St, Austin, TX" data-testid="input-edit-contact-building" />
-                      </FormControl>
+                      <Select onValueChange={field.onChange} value={field.value}>
+                        <FormControl>
+                          <SelectTrigger data-testid="select-edit-contact-building">
+                            <SelectValue placeholder="Select property" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {properties.map(property => (
+                            <SelectItem key={property.id} value={property.address!}>
+                              {property.address}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                       <FormMessage />
                     </FormItem>
                   )}

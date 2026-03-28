@@ -886,14 +886,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userId = req.user.claims.sub;
       const currentUser = await storage.getUser(userId);
       const permissions = await storage.getUserPermissions(userId);
-      
-      if (!currentUser?.isActive || (!permissions?.canViewContacts && !permissions?.canManageContacts)) {
+      const isAdmin = currentUser?.role === "admin";
+
+      if (!currentUser?.isActive || (!isAdmin && !permissions?.canViewContacts && !permissions?.canManageContacts)) {
         return res.status(403).json({ message: "Forbidden" });
       }
 
       const contacts = await storage.getAllMaintenanceContacts();
       const allowedRegions = permissions?.allowedRegions || [];
-      const isAdmin = currentUser?.role === "admin";
       const filteredContacts = isAdmin ? contacts : filterByRegion(contacts, allowedRegions);
       res.json(filteredContacts);
     } catch (error) {
@@ -907,8 +907,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userId = req.user.claims.sub;
       const currentUser = await storage.getUser(userId);
       const permissions = await storage.getUserPermissions(userId);
-      
-      if (!currentUser?.isActive || !permissions?.canManageContacts) {
+      const isAdmin = currentUser?.role === "admin";
+
+      if (!currentUser?.isActive || (!isAdmin && !permissions?.canManageContacts)) {
         return res.status(403).json({ message: "Forbidden" });
       }
 
@@ -931,8 +932,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userId = req.user.claims.sub;
       const currentUser = await storage.getUser(userId);
       const permissions = await storage.getUserPermissions(userId);
-      
-      if (!currentUser?.isActive || !permissions?.canManageContacts) {
+      const isAdmin = currentUser?.role === "admin";
+
+      if (!currentUser?.isActive || (!isAdmin && !permissions?.canManageContacts)) {
         return res.status(403).json({ message: "Forbidden" });
       }
 
@@ -966,8 +968,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userId = req.user.claims.sub;
       const currentUser = await storage.getUser(userId);
       const permissions = await storage.getUserPermissions(userId);
-      
-      if (!currentUser?.isActive || !permissions?.canManageContacts) {
+      const isAdmin = currentUser?.role === "admin";
+
+      if (!currentUser?.isActive || (!isAdmin && !permissions?.canManageContacts)) {
         return res.status(403).json({ message: "Forbidden" });
       }
 
@@ -1102,14 +1105,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userId = req.user.claims.sub;
       const currentUser = await storage.getUser(userId);
       const permissions = await storage.getUserPermissions(userId);
-      
-      if (!currentUser?.isActive || (!permissions?.canViewBilling && !permissions?.canManageBilling)) {
+      const isAdmin = currentUser?.role === "admin";
+
+      if (!currentUser?.isActive || (!isAdmin && !permissions?.canViewBilling && !permissions?.canManageBilling)) {
         return res.status(403).json({ message: "Forbidden" });
       }
 
       const billingRecords = await storage.getAllBillingRecords();
       const allowedRegions = permissions?.allowedRegions || [];
-      const isAdmin = currentUser?.role === "admin";
       const filteredRecords = isAdmin ? billingRecords : filterByRegion(billingRecords, allowedRegions);
       res.json(filteredRecords);
     } catch (error) {
@@ -1123,8 +1126,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userId = req.user.claims.sub;
       const currentUser = await storage.getUser(userId);
       const permissions = await storage.getUserPermissions(userId);
-      
-      if (!currentUser?.isActive || !permissions?.canManageBilling) {
+      const isAdmin = currentUser?.role === "admin";
+
+      if (!currentUser?.isActive || (!isAdmin && !permissions?.canManageBilling)) {
         return res.status(403).json({ message: "Forbidden" });
       }
 
@@ -1147,8 +1151,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userId = req.user.claims.sub;
       const currentUser = await storage.getUser(userId);
       const permissions = await storage.getUserPermissions(userId);
-      
-      if (!currentUser?.isActive || !permissions?.canManageBilling) {
+      const isAdmin = currentUser?.role === "admin";
+
+      if (!currentUser?.isActive || (!isAdmin && !permissions?.canManageBilling)) {
         return res.status(403).json({ message: "Forbidden" });
       }
 
@@ -1182,8 +1187,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userId = req.user.claims.sub;
       const currentUser = await storage.getUser(userId);
       const permissions = await storage.getUserPermissions(userId);
-      
-      if (!currentUser?.isActive || !permissions?.canManageBilling) {
+      const isAdmin = currentUser?.role === "admin";
+
+      if (!currentUser?.isActive || (!isAdmin && !permissions?.canManageBilling)) {
         return res.status(403).json({ message: "Forbidden" });
       }
 

@@ -3,6 +3,13 @@
 ## Overview
 This is a comprehensive property management system for Saint Paul's Outreach, Inc. (SPO), designed to streamline administrative tasks and resident interactions. The application provides role-based dashboards for administrators and residents, enabling admins to manage properties, maintenance, assets, billing, and vendors, while residents can submit and track maintenance requests. The system emphasizes efficiency, data density, and professional trustworthiness crucial for property management operations.
 
+## Recent Changes (March 28, 2026)
+- **Property Integration**: All sections now use real properties for dropdowns — Contacts and Invoices updated to source building address lists from `/api/properties` (Maintenance, Walkthroughs, Assets were already connected)
+- **Contacts**: Region and Building Address fields in Add/Edit forms converted from free text inputs to Select dropdowns populated from the properties table; selecting a property auto-fills both fields
+- **Invoices**: Removed all hardcoded mock data; now fetches real billing records from `/api/billing` and properties from `/api/properties`; added "Add Billing Record" dialog with full form including property, region, and building address dropdowns
+- **Backend Permissions**: Contacts and Billing routes (GET/POST/PATCH/DELETE) now apply the `!isAdmin` bypass pattern — admin users are no longer blocked by permission DB record checks
+- **Frontend Permissions**: Contacts and Invoices `canManage` checks now also read the user's role directly (admin/regional_administrator bypass regardless of DB permission state)
+
 ## Recent Changes (March 12, 2026)
 - **Bug Fix**: Properties page "Internal Server Error" resolved — admin bypass on GET /api/properties now correctly allows admins to view properties even without a DB permissions record
 - **Residents**: `GET /api/maintenance-requests` now returns only the requesting user's own submissions for residents (previously returned empty list due to empty `allowedRegions`)
