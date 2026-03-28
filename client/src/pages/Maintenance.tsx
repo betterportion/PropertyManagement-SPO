@@ -20,6 +20,25 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { z } from "zod";
 
+const CATEGORIES = [
+  "Plumbing",
+  "Electrical",
+  "HVAC",
+  "Appliance",
+  "General Maintenance",
+  "Structural",
+];
+
+const REGIONS = [
+  "East Central",
+  "National",
+  "North East",
+  "North West",
+  "South East",
+  "South West",
+  "West Central",
+];
+
 interface User {
   id: string;
   email: string;
@@ -46,14 +65,16 @@ export default function Maintenance() {
     queryKey: ['/api/properties'],
   });
 
-  const uniqueBuildings = requests
-    .filter(req => req.buildingAddress)
-    .map(req => req.buildingAddress)
-    .filter((address, index, arr) => arr.indexOf(address) === index)
-    .map(address => ({
-      id: address,
-      address,
-    }));
+  const uniqueBuildings = properties.map(p => ({ id: p.address!, address: p.address! }));
+
+  const handleLocationChange = (propertyAddress: string, field: { onChange: (val: string) => void }) => {
+    field.onChange(propertyAddress);
+    const property = properties.find(p => p.address === propertyAddress);
+    if (property) {
+      createForm.setValue("region", property.region);
+      createForm.setValue("buildingAddress", property.address!);
+    }
+  };
 
   const filteredRequests = requests.filter((r) => {
     const matchesSearch = r.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -181,9 +202,18 @@ export default function Maintenance() {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Category</FormLabel>
-                      <FormControl>
-                        <Input placeholder="e.g., Plumbing, Electrical" {...field} data-testid="input-category" />
-                      </FormControl>
+                      <Select onValueChange={field.onChange} value={field.value}>
+                        <FormControl>
+                          <SelectTrigger data-testid="select-category">
+                            <SelectValue placeholder="Select category" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {CATEGORIES.map(cat => (
+                            <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                       <FormMessage />
                     </FormItem>
                   )}
@@ -218,7 +248,7 @@ export default function Maintenance() {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Location (Property)</FormLabel>
-                      <Select onValueChange={field.onChange} value={field.value}>
+                      <Select onValueChange={(val) => handleLocationChange(val, field)} value={field.value}>
                         <FormControl>
                           <SelectTrigger data-testid="select-location">
                             <SelectValue placeholder="Select property" />
@@ -242,22 +272,18 @@ export default function Maintenance() {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Region</FormLabel>
-                      <FormControl>
-                        <Input placeholder="Region" {...field} data-testid="input-region" />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={createForm.control}
-                  name="buildingAddress"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Building Address</FormLabel>
-                      <FormControl>
-                        <Input placeholder="Building address" {...field} data-testid="input-building-address" />
-                      </FormControl>
+                      <Select onValueChange={field.onChange} value={field.value}>
+                        <FormControl>
+                          <SelectTrigger data-testid="select-region">
+                            <SelectValue placeholder="Select region" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {REGIONS.map(r => (
+                            <SelectItem key={r} value={r}>{r}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                       <FormMessage />
                     </FormItem>
                   )}
