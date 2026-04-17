@@ -1339,6 +1339,151 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Serve uploaded files
   app.use('/uploads', express.static(uploadDir));
 
+  // ─── JotForm Webhook ───────────────────────────────────────────────────────
+  // Public endpoint — no auth required (called by JotForm servers)
+  // Configure in JotForm: Settings → Integrations → WebHooks → add this URL
+  app.post('/api/webhooks/jotform', async (req, res) => {
+    try {
+      // Optional secret check
+      const secret = process.env.JOTFORM_WEBHOOK_SECRET;
+      if (secret) {
+        const provided = req.query.secret || req.body.secret;
+        if (provided !== secret) {
+          return res.status(401).json({ message: "Unauthorized" });
+        }
+      }
+
+      // Parse JotForm's rawRequest field (URL-encoded JSON string)
+      let formFields: Record<string, any> = {};
+
+      if (req.body.rawRequest) {
+        try {
+          formFields = JSON.parse(decodeURIComponent(req.body.rawRequest));
+        } catch {
+          formFields = req.body;
+        }
+      } else {
+        formFields = req.body;
+      }
+
+      // Flatten compound fields (e.g., name: {first, last} → "John Doe")
+      const flat: Record<string, string> = {};
+      for (const [key, value] of Object.entries(formFields)) {
+        if (value && typeof value === 'object' && !Array.isArray(value)) {
+          const parts = Object.values(value as Record<string, string>).filter(Boolean);
+          flat[key] = parts.join(' ').trim();
+        } else {
+          flat[key] = String(value ?? '').trim();
+        }
+      }
+
+      console.log('[JotForm] Received submission. Fields:', JSON.stringify(flat, null, 2));
+
+      // Helper: look up a field by env-var field ID first, then auto-detect by key label
+      const getField = (envKey: string, ...terms: string[]): string => {
+        const envFieldId = process.env[envKey];
+        if (envFieldId && flat[envFieldId] !== undefined) return flat[envFieldId];
+        for (const [k, v] of Object.entries(flat)) {
+          const kLower = k.toLowerCase();
+          if (terms.some(t => kLower.includes(t.toLowerCase()))) return v;
+        }
+        return '';
+      };
+
+      // Map JotForm fields to maintenance request schema
+      const title = getField('JOTFORM_FIELD_TITLE', 'title', 'subject', 'issue', 'request')
+        || `Maintenance Request – ${new Date().toLocaleDateString()}`;
+
+      const description = getField('JOTFORM_FIELD_DESCRIPTION', 'description', 'details', 'message', 'describe', 'notes', 'comment')
+        || '';
+
+      const rawCategory = getField('JOTFORM_FIELD_CATEGORY', 'category', 'type', 'problem');
+      const VALID_CATEGORIES = ['HVAC', 'Appliance', 'Electrical', 'Plumbing', 'Structural', 'Furniture', 'IT / Electronics', 'Safety Equipment', 'Vehicle', 'Other', 'Plumbing', 'General Maintenance'];
+      const category = VALID_CATEGORIES.find(c => c.toLowerCase() === rawCategory.toLowerCase()) || rawCategory || 'General Maintenance';
+
+      const rawPriority = getField('JOTFORM_FIELD_PRIORITY', 'priority', 'urgency', 'severity').toLowerCase();
+      const VALID_PRIORITIES = ['low', 'medium', 'high', 'urgent', 'wishlist'];
+      const priority = (VALID_PRIORITIES.find(p => rawPriority.includes(p)) as any) || 'medium';
+
+      const location = getField('JOTFORM_FIELD_LOCATION', 'location', 'unit', 'room', 'address', 'property')
+        || process.env.JOTFORM_DEFAULT_LOCATION || 'Unknown';
+
+      const region = getField('JOTFORM_FIELD_REGION', 'region')
+        || process.env.JOTFORM_DEFAULT_REGION || 'Unknown';
+
+      const buildingAddress = getField('JOTFORM_FIELD_BUILDING', 'building', 'buildingaddress', 'building_address')
+        || process.env.JOTFORM_DEFAULT_BUILDING || location;
+
+      const submittedBy = getField('JOTFORM_FIELD_EMAIL', 'email', 'name', 'submitter', 'contact', 'resident')
+        || req.body.formTitle || 'JotForm Submission';
+
+      const request = await storage.createMaintenanceRequest({
+        title,
+        description,
+        category,
+        priority,
+        status: 'pending',
+        location,
+        region,
+        buildingAddress,
+        submittedBy,
+        mondayItemId: null,
+      });
+
+      // Async Monday.com sync (non-blocking)
+      createMondayItem({
+        title: request.title,
+        description: request.description,
+        category: request.category,
+        priority: request.priority,
+        status: request.status,
+        region: request.region,
+        buildingAddress: request.buildingAddress,
+        location: request.location,
+        submittedBy: request.submittedBy,
+      }).then(async (mondayItemId) => {
+        if (mondayItemId) {
+          await storage.updateMaintenanceRequest(request.id, { mondayItemId });
+        }
+      }).catch((err) => console.error('[JotForm] Monday.com sync failed:', err));
+
+      console.log(`[JotForm] Created maintenance request ${request.id}: "${title}" (${priority} priority)`);
+      res.status(200).json({ success: true, id: request.id });
+    } catch (error) {
+      console.error('[JotForm] Webhook processing error:', error);
+      res.status(500).json({ message: 'Failed to process JotForm submission' });
+    }
+  });
+
+  // Return current webhook config info (admin only)
+  app.get('/api/webhooks/jotform/config', isAuthenticated, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUser(req.user.claims.sub);
+      if (currentUser?.role !== 'admin') {
+        return res.status(403).json({ message: 'Admin only' });
+      }
+      res.json({
+        webhookUrl: `${req.protocol}://${req.get('host')}/api/webhooks/jotform`,
+        fields: {
+          JOTFORM_FIELD_TITLE: process.env.JOTFORM_FIELD_TITLE || null,
+          JOTFORM_FIELD_DESCRIPTION: process.env.JOTFORM_FIELD_DESCRIPTION || null,
+          JOTFORM_FIELD_CATEGORY: process.env.JOTFORM_FIELD_CATEGORY || null,
+          JOTFORM_FIELD_PRIORITY: process.env.JOTFORM_FIELD_PRIORITY || null,
+          JOTFORM_FIELD_LOCATION: process.env.JOTFORM_FIELD_LOCATION || null,
+          JOTFORM_FIELD_EMAIL: process.env.JOTFORM_FIELD_EMAIL || null,
+          JOTFORM_FIELD_REGION: process.env.JOTFORM_FIELD_REGION || null,
+          JOTFORM_FIELD_BUILDING: process.env.JOTFORM_FIELD_BUILDING || null,
+          JOTFORM_DEFAULT_REGION: process.env.JOTFORM_DEFAULT_REGION || null,
+          JOTFORM_DEFAULT_BUILDING: process.env.JOTFORM_DEFAULT_BUILDING || null,
+          JOTFORM_DEFAULT_LOCATION: process.env.JOTFORM_DEFAULT_LOCATION || null,
+          JOTFORM_WEBHOOK_SECRET: process.env.JOTFORM_WEBHOOK_SECRET ? '(set)' : null,
+        },
+      });
+    } catch (error) {
+      res.status(500).json({ message: 'Failed to get config' });
+    }
+  });
+
   const httpServer = createServer(app);
   return httpServer;
 }

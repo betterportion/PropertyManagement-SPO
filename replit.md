@@ -3,6 +3,9 @@
 ## Overview
 This is a comprehensive property management system for Saint Paul's Outreach, Inc. (SPO), designed to streamline administrative tasks and resident interactions. The application provides role-based dashboards for administrators and residents, enabling admins to manage properties, maintenance, assets, billing, and vendors, while residents can submit and track maintenance requests. The system emphasizes efficiency, data density, and professional trustworthiness crucial for property management operations.
 
+## Recent Changes (April 17, 2026)
+- **JotForm Webhook Frontend**: Added "JotForm Setup" button (admin-only) to the Maintenance page header; clicking it opens a setup dialog with the copyable webhook URL, step-by-step JotForm integration instructions, and a field mapping table showing all `JOTFORM_FIELD_*` / `JOTFORM_DEFAULT_*` environment variables and their current values (fetched from `/api/webhooks/jotform/config`)
+
 ## Recent Changes (March 28, 2026)
 - **Property Integration**: All sections now use real properties for dropdowns — Contacts and Invoices updated to source building address lists from `/api/properties` (Maintenance, Walkthroughs, Assets were already connected)
 - **Contacts**: Region and Building Address fields in Add/Edit forms converted from free text inputs to Select dropdowns populated from the properties table; selecting a property auto-fills both fields
