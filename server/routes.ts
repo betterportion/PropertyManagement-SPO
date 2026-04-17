@@ -1455,12 +1455,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Return current webhook config info (admin only)
+  // Return current webhook config info (admin + regional_administrator)
   app.get('/api/webhooks/jotform/config', isAuthenticated, async (req: any, res) => {
     try {
       const currentUser = await storage.getUser(req.user.claims.sub);
-      if (currentUser?.role !== 'admin') {
-        return res.status(403).json({ message: 'Admin only' });
+      if (currentUser?.role !== 'admin' && currentUser?.role !== 'regional_administrator') {
+        return res.status(403).json({ message: 'Admin or regional administrator only' });
       }
       res.json({
         webhookUrl: `${req.protocol}://${req.get('host')}/api/webhooks/jotform`,

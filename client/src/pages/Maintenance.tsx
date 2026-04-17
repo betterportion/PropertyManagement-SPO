@@ -71,10 +71,11 @@ export default function Maintenance() {
   const uniqueBuildings = properties.map(p => ({ id: p.address!, address: p.address! }));
 
   const isAdmin = typedUser?.role === "admin";
+  const canManageJotForm = isAdmin || typedUser?.role === "regional_administrator";
 
   const { data: webhookConfig } = useQuery<{ webhookUrl: string; fields: Record<string, string | null> }>({
     queryKey: ['/api/webhooks/jotform/config'],
-    enabled: isAdmin && isJotFormDialogOpen,
+    enabled: canManageJotForm && isJotFormDialogOpen,
   });
 
   const copyWebhookUrl = () => {
@@ -177,7 +178,7 @@ export default function Maintenance() {
           <p className="text-muted-foreground mt-1">Manage all property maintenance requests</p>
         </div>
         <div className="flex items-center gap-2">
-          {isAdmin && (
+          {canManageJotForm && (
             <Button variant="outline" onClick={() => setIsJotFormDialogOpen(true)} data-testid="button-jotform-setup">
               <Link2 className="h-4 w-4 mr-2" />
               JotForm Setup
