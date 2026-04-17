@@ -84,7 +84,7 @@ export default function PhotoGallery({
           return (
             <Card
               key={photo.id}
-              className="overflow-hidden hover-elevate cursor-pointer group"
+              className="overflow-hidden cursor-pointer group"
               onClick={() => handleOpenPhoto(photo)}
               data-testid={`card-photo-${photo.id}`}
             >
@@ -104,6 +104,16 @@ export default function PhotoGallery({
                     )}
                   </div>
                 </div>
+                {canManage && onDelete && (
+                  <button
+                    className="absolute top-1.5 right-1.5 h-6 w-6 rounded-md bg-black/60 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-destructive"
+                    onClick={(e) => { e.stopPropagation(); onDelete(photo.id); }}
+                    data-testid={`button-delete-photo-${photo.id}`}
+                    aria-label="Delete photo"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
               </div>
               {dateLabel && (
                 <div className="px-2 py-1.5 flex items-center gap-1 text-xs text-muted-foreground border-t">

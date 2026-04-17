@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { ListChecks, AlertCircle } from "lucide-react";
+import { ListChecks, AlertCircle, Pencil, Plus, X } from "lucide-react";
 import PhotoGallery from "./PhotoGallery";
 import { PhotoUpload } from "./PhotoUpload";
 import { apiRequest } from "@/lib/queryClient";
@@ -25,7 +25,10 @@ interface RoomDetailDrawerProps {
   canManage: boolean;
 }
 
-const CONDITIONS = ["excellent", "good", "fair", "poor", "damaged"] as const;
+const CONDITIONS = ["same_as_last_walkthrough", "additional_damage"] as const;
+
+const conditionLabel = (c: string) =>
+  c === "same_as_last_walkthrough" ? "Same as Last Walkthrough" : "Additional Damage";
 
 export default function RoomDetailDrawer({ room, open, onOpenChange, canManage }: RoomDetailDrawerProps) {
   const { toast } = useToast();
@@ -34,9 +37,14 @@ export default function RoomDetailDrawer({ room, open, onOpenChange, canManage }
 
   const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
   const [uploadedUrl, setUploadedUrl] = useState<string | null>(null);
-  const [condition, setCondition] = useState<string>("good");
+  const [condition, setCondition] = useState<string>("same_as_last_walkthrough");
   const [notes, setNotes] = useState<string>("");
   const [location, setLocation] = useState<string>("");
+
+  const [isEditRoomDialogOpen, setIsEditRoomDialogOpen] = useState(false);
+  const [editName, setEditName] = useState("");
+  const [editQuestions, setEditQuestions] = useState<string[]>([]);
+  const [newQuestion, setNewQuestion] = useState("");
 
   const { data: photos = [], isLoading: photosLoading } = useQuery<WalkthroughPhoto[]>({
     queryKey: ['/api/walkthrough-photos/room', room?.id],
@@ -99,9 +107,23 @@ export default function RoomDetailDrawer({ room, open, onOpenChange, canManage }
     },
   });
 
+  const updateRoomMutation = useMutation({
+    mutationFn: async (data: { name: string; requiredQuestions: string[] }) => {
+      return await apiRequest('PATCH', `/api/walkthrough-rooms/${room!.id}`, data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/walkthrough-rooms'] });
+      setIsEditRoomDialogOpen(false);
+      toast({ title: "Room updated", description: "Room details have been saved." });
+    },
+    onError: () => {
+      toast({ variant: "destructive", title: "Error", description: "Failed to update room." });
+    },
+  });
+
   const resetUploadDialog = () => {
     setUploadedUrl(null);
-    setCondition("good");
+    setCondition("same_as_last_walkthrough");
     setNotes("");
     setLocation("");
   };
@@ -109,6 +131,25 @@ export default function RoomDetailDrawer({ room, open, onOpenChange, canManage }
   const handleOpenUploadDialog = () => {
     setLocation(room?.name || "");
     setIsUploadDialogOpen(true);
+  };
+
+  const handleOpenEditRoom = () => {
+    if (!room) return;
+    setEditName(room.name);
+    setEditQuestions(room.requiredQuestions ? [...room.requiredQuestions] : []);
+    setNewQuestion("");
+    setIsEditRoomDialogOpen(true);
+  };
+
+  const handleAddQuestion = () => {
+    const trimmed = newQuestion.trim();
+    if (!trimmed) return;
+    setEditQuestions(prev => [...prev, trimmed]);
+    setNewQuestion("");
+  };
+
+  const handleRemoveQuestion = (index: number) => {
+    setEditQuestions(prev => prev.filter((_, i) => i !== index));
   };
 
   const handleSubmitPhoto = () => {
@@ -140,8 +181,24 @@ export default function RoomDetailDrawer({ room, open, onOpenChange, canManage }
       <Sheet open={open} onOpenChange={onOpenChange}>
         <SheetContent className="w-full sm:max-w-2xl overflow-y-auto">
           <SheetHeader className="pb-4">
-            <SheetTitle className="text-2xl">{room.name}</SheetTitle>
-            <p className="text-sm text-muted-foreground">{room.buildingAddress}</p>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <SheetTitle className="text-2xl">{room.name}</SheetTitle>
+                <p className="text-sm text-muted-foreground">{room.buildingAddress}</p>
+              </div>
+              {canManage && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleOpenEditRoom}
+                  data-testid="button-edit-room"
+                  className="shrink-0 mt-1"
+                >
+                  <Pencil className="h-3.5 w-3.5 mr-1.5" />
+                  Edit Room
+                </Button>
+              )}
+            </div>
           </SheetHeader>
 
           <div className="space-y-6 py-4">
@@ -211,7 +268,7 @@ export default function RoomDetailDrawer({ room, open, onOpenChange, canManage }
                 </SelectTrigger>
                 <SelectContent>
                   {CONDITIONS.map((c) => (
-                    <SelectItem key={c} value={c} className="capitalize">{c.charAt(0).toUpperCase() + c.slice(1)}</SelectItem>
+                    <SelectItem key={c} value={c}>{conditionLabel(c)}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -248,6 +305,74 @@ export default function RoomDetailDrawer({ room, open, onOpenChange, canManage }
               data-testid="button-save-photo"
             >
               {createPhotoMutation.isPending ? "Saving…" : "Save Photo"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isEditRoomDialogOpen} onOpenChange={setIsEditRoomDialogOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Edit Room</DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Room Name</Label>
+              <Input
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                placeholder="e.g. Kitchen, Living Room…"
+                data-testid="input-edit-room-name"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Required Questions</Label>
+              {editQuestions.length > 0 && (
+                <div className="space-y-2">
+                  {editQuestions.map((q, i) => (
+                    <div key={i} className="flex items-start gap-2 p-2 bg-muted/50 rounded-md">
+                      <Badge variant="outline" className="mt-0.5 shrink-0">{i + 1}</Badge>
+                      <p className="text-sm flex-1">{q}</p>
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        onClick={() => handleRemoveQuestion(i)}
+                        data-testid={`button-remove-question-${i}`}
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="flex gap-2">
+                <Input
+                  value={newQuestion}
+                  onChange={(e) => setNewQuestion(e.target.value)}
+                  placeholder="Add a required question…"
+                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleAddQuestion(); } }}
+                  data-testid="input-new-question"
+                />
+                <Button type="button" variant="outline" onClick={handleAddQuestion} data-testid="button-add-question">
+                  <Plus className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setIsEditRoomDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => updateRoomMutation.mutate({ name: editName.trim(), requiredQuestions: editQuestions })}
+              disabled={!editName.trim() || updateRoomMutation.isPending}
+              data-testid="button-save-room"
+            >
+              {updateRoomMutation.isPending ? "Saving…" : "Save Changes"}
             </Button>
           </DialogFooter>
         </DialogContent>
