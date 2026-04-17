@@ -393,19 +393,8 @@ export default function Walkthroughs() {
               />
 
               <DialogFooter>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => {
-                    setIsPhotoUploadDialogOpen(false);
-                    setCreatedRoom(null);
-                    photoForm.reset();
-                  }}
-                >
-                  Skip for Now
-                </Button>
                 <Button type="submit" disabled={createPhotoMutation.isPending} data-testid="button-submit-photo">
-                  {createPhotoMutation.isPending ? "Uploading..." : "Save Photo"}
+                  {createPhotoMutation.isPending ? "Uploading..." : "Add Room"}
                 </Button>
               </DialogFooter>
             </form>
