@@ -97,7 +97,7 @@ export default function Walkthroughs() {
     defaultValues: {
       roomId: "",
       imageUrl: "",
-      condition: "good",
+      condition: "same_as_last_walkthrough",
       notes: "",
       region: "",
       buildingAddress: "",
@@ -364,11 +364,8 @@ export default function Walkthroughs() {
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        <SelectItem value="excellent">Excellent</SelectItem>
-                        <SelectItem value="good">Good</SelectItem>
-                        <SelectItem value="fair">Fair</SelectItem>
-                        <SelectItem value="poor">Poor</SelectItem>
-                        <SelectItem value="damaged">Damaged</SelectItem>
+                        <SelectItem value="same_as_last_walkthrough">Same as Last Walkthrough</SelectItem>
+                        <SelectItem value="additional_damage">Additional Damage</SelectItem>
                       </SelectContent>
                     </Select>
                     <FormMessage />

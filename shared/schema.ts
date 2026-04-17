@@ -121,7 +121,7 @@ export const walkthroughPhotos = pgTable("walkthrough_photos", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   roomId: varchar("room_id").notNull().references(() => walkthroughRooms.id, { onDelete: "cascade" }),
   imageUrl: varchar("image_url").notNull(),
-  condition: varchar("condition", { enum: ["excellent", "good", "fair", "poor", "damaged"] }).notNull(),
+  condition: varchar("condition", { enum: ["same_as_last_walkthrough", "additional_damage"] }).notNull(),
   notes: text("notes"),
   region: varchar("region").notNull(),
   buildingAddress: varchar("building_address").notNull(),
