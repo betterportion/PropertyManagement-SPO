@@ -20,24 +20,24 @@ import { insertAssetSchema, type Asset, type Property, type AssetPhoto } from "@
 import { z } from "zod";
 
 const ASSET_CATEGORIES = [
-  "Furniture - Household",
   "Appliances - Large",
-  "Outdoor Equipment",
+  "Appliances - Small",
   "Artwork",
   "A/V Equipment",
-  "Printers",
-  "Tools",
-  "Computer - Laptop",
-  "Furniture - Office",
-  "Tablets",
-  "Appliances - Small",
-  "Office Supplies",
-  "Musical Instruments",
-  "Computer - Monitor",
-  "Computer - Desktop",
   "Computer - Accessories",
-  "Office Equipment",
+  "Computer - Desktop",
+  "Computer - Laptop",
+  "Computer - Monitor",
+  "Furniture - Household",
+  "Furniture - Office",
   "Internet Equipment",
+  "Musical Instruments",
+  "Office Equipment",
+  "Office Supplies",
+  "Outdoor Equipment",
+  "Printers",
+  "Tablets",
+  "Tools",
 ];
 
 const assetFormSchema = insertAssetSchema.extend({
