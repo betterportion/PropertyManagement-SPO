@@ -19,6 +19,14 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { insertAssetSchema, type Asset, type Property, type AssetPhoto } from "@shared/schema";
 import { z } from "zod";
 
+const FIXED_CATEGORIES = [
+  "Appliances - Large",
+  "HVAC",
+  "Roof",
+  "Security System",
+  "Water Heater",
+];
+
 const ASSET_CATEGORIES = [
   "Appliances - Large",
   "Appliances - Small",
@@ -333,7 +341,7 @@ export default function Assets() {
                             </SelectTrigger>
                           </FormControl>
                           <SelectContent>
-                            {ASSET_CATEGORIES.map((cat) => (
+                            {(addAssetType === "fixed" ? FIXED_CATEGORIES : ASSET_CATEGORIES).map((cat) => (
                               <SelectItem key={cat} value={cat}>{cat}</SelectItem>
                             ))}
                           </SelectContent>
@@ -352,7 +360,15 @@ export default function Assets() {
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>Type</FormLabel>
-                        <Select onValueChange={field.onChange} value={field.value}>
+                        <Select
+                          onValueChange={(val) => {
+                            field.onChange(val);
+                            if (val === "fixed" && !FIXED_CATEGORIES.includes(addForm.getValues("category"))) {
+                              addForm.setValue("category", "");
+                            }
+                          }}
+                          value={field.value}
+                        >
                           <FormControl>
                             <SelectTrigger data-testid="select-asset-type">
                               <SelectValue />
@@ -581,7 +597,7 @@ export default function Assets() {
                           <SelectTrigger><SelectValue placeholder="Select category" /></SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                          {ASSET_CATEGORIES.map((cat) => (
+                          {(editAssetType === "fixed" ? FIXED_CATEGORIES : ASSET_CATEGORIES).map((cat) => (
                             <SelectItem key={cat} value={cat}>{cat}</SelectItem>
                           ))}
                         </SelectContent>
@@ -599,7 +615,15 @@ export default function Assets() {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Type</FormLabel>
-                      <Select onValueChange={field.onChange} value={field.value}>
+                      <Select
+                        onValueChange={(val) => {
+                          field.onChange(val);
+                          if (val === "fixed" && !FIXED_CATEGORIES.includes(editForm.getValues("category"))) {
+                            editForm.setValue("category", "");
+                          }
+                        }}
+                        value={field.value}
+                      >
                         <FormControl>
                           <SelectTrigger><SelectValue /></SelectTrigger>
                         </FormControl>
