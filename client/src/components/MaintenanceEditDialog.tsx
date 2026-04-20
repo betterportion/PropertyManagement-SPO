@@ -42,7 +42,7 @@ export default function MaintenanceEditDialog({ request, open, onClose }: Mainte
   const [showInvoiceForm, setShowInvoiceForm] = useState(false);
 
   const { data: contacts = [] } = useQuery<MaintenanceContact[]>({
-    queryKey: ['/api/maintenance-contacts'],
+    queryKey: ['/api/contacts'],
     enabled: open,
   });
 
