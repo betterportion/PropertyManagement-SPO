@@ -10,6 +10,7 @@ import {
   invoices,
   billingRecords,
   properties,
+  requestContacts,
   type User,
   type UpsertUser,
   type UserPermissions,
@@ -33,6 +34,7 @@ import {
   type Property,
   type InsertProperty,
   type InsertPropertyWithAddress,
+  type RequestContact,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, desc } from "drizzle-orm";
@@ -140,6 +142,11 @@ export interface IStorage {
   createProperty(property: InsertPropertyWithAddress): Promise<Property>;
   getProperty(id: string): Promise<Property | undefined>;
   getAllProperties(): Promise<Property[]>;
+
+  // Request Contacts (linking)
+  getRequestContacts(requestId: string): Promise<MaintenanceContact[]>;
+  linkContactToRequest(requestId: string, contactId: string): Promise<void>;
+  unlinkContactFromRequest(requestId: string, contactId: string): Promise<void>;
   updateProperty(id: string, data: Partial<InsertPropertyWithAddress>): Promise<Property>;
   deleteProperty(id: string): Promise<void>;
 }
@@ -536,6 +543,31 @@ export class DatabaseStorage implements IStorage {
 
   async deleteProperty(id: string): Promise<void> {
     await db.delete(properties).where(eq(properties.id, id));
+  }
+
+  async getRequestContacts(requestId: string): Promise<MaintenanceContact[]> {
+    const rows = await db
+      .select({ contact: maintenanceContacts })
+      .from(requestContacts)
+      .innerJoin(maintenanceContacts, eq(requestContacts.contactId, maintenanceContacts.id))
+      .where(eq(requestContacts.requestId, requestId));
+    return rows.map(r => r.contact);
+  }
+
+  async linkContactToRequest(requestId: string, contactId: string): Promise<void> {
+    const existing = await db
+      .select()
+      .from(requestContacts)
+      .where(and(eq(requestContacts.requestId, requestId), eq(requestContacts.contactId, contactId)));
+    if (existing.length === 0) {
+      await db.insert(requestContacts).values({ requestId, contactId });
+    }
+  }
+
+  async unlinkContactFromRequest(requestId: string, contactId: string): Promise<void> {
+    await db
+      .delete(requestContacts)
+      .where(and(eq(requestContacts.requestId, requestId), eq(requestContacts.contactId, contactId)));
   }
 }
 

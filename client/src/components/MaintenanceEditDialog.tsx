@@ -15,7 +15,7 @@ import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import type { MaintenanceRequest, MaintenanceContact, Invoice, Property } from "@shared/schema";
-import { DollarSign, Link2, FileText, Plus } from "lucide-react";
+import { DollarSign, Link2, FileText, Plus, Check, X } from "lucide-react";
 import { format } from "date-fns";
 
 interface MaintenanceEditDialogProps {
@@ -43,6 +43,43 @@ export default function MaintenanceEditDialog({ request, open, onClose }: Mainte
     queryKey: ['/api/maintenance-contacts'],
     enabled: open,
   });
+
+  const { data: linkedContacts = [] } = useQuery<MaintenanceContact[]>({
+    queryKey: ['/api/maintenance-requests', request.id, 'contacts'],
+    enabled: open,
+  });
+
+  const linkedContactIds = new Set(linkedContacts.map(c => c.id));
+
+  const linkMutation = useMutation({
+    mutationFn: async (contactId: string) =>
+      apiRequest('POST', `/api/maintenance-requests/${request.id}/contacts/${contactId}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/maintenance-requests', request.id, 'contacts'] });
+    },
+    onError: () => {
+      toast({ title: "Failed to link contact", variant: "destructive" });
+    },
+  });
+
+  const unlinkMutation = useMutation({
+    mutationFn: async (contactId: string) =>
+      apiRequest('DELETE', `/api/maintenance-requests/${request.id}/contacts/${contactId}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/maintenance-requests', request.id, 'contacts'] });
+    },
+    onError: () => {
+      toast({ title: "Failed to unlink contact", variant: "destructive" });
+    },
+  });
+
+  const toggleContact = (contactId: string) => {
+    if (linkedContactIds.has(contactId)) {
+      unlinkMutation.mutate(contactId);
+    } else {
+      linkMutation.mutate(contactId);
+    }
+  };
 
   const { data: invoices = [] } = useQuery<Invoice[]>({
     queryKey: ['/api/invoices'],
@@ -231,27 +268,50 @@ export default function MaintenanceEditDialog({ request, open, onClose }: Mainte
 
             <Separator />
 
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
                 <h3 className="text-sm font-semibold flex items-center gap-2">
                   <Link2 className="h-4 w-4" />
                   Linked Contacts
                 </h3>
+                {linkedContacts.length > 0 && (
+                  <Badge variant="secondary" className="text-xs">{linkedContacts.length} linked</Badge>
+                )}
               </div>
-              {contacts.length > 0 ? (
-                <div className="grid grid-cols-2 gap-2">
-                  {contacts.map((contact) => (
-                    <Card key={contact.id} className="p-3">
-                      <div className="space-y-1">
-                        <p className="font-medium text-sm">{contact.name}</p>
-                        <p className="text-xs text-muted-foreground">{contact.company}</p>
-                        <p className="text-xs text-muted-foreground">{contact.service}</p>
-                      </div>
-                    </Card>
-                  ))}
-                </div>
-              ) : (
+              {contacts.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No contacts available. Add contacts in the Contacts section.</p>
+              ) : (
+                <div className="grid grid-cols-2 gap-2">
+                  {contacts.map((contact) => {
+                    const isLinked = linkedContactIds.has(contact.id);
+                    const isPending = linkMutation.isPending || unlinkMutation.isPending;
+                    return (
+                      <button
+                        key={contact.id}
+                        type="button"
+                        onClick={() => toggleContact(contact.id)}
+                        disabled={isPending}
+                        data-testid={`button-toggle-contact-${contact.id}`}
+                        className={`w-full text-left rounded-md border p-3 transition-colors ${
+                          isLinked
+                            ? "border-primary bg-primary/5"
+                            : "border-border hover:bg-muted/50"
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="space-y-0.5 min-w-0">
+                            <p className="font-medium text-sm truncate">{contact.name}</p>
+                            <p className="text-xs text-muted-foreground truncate">{contact.company}</p>
+                            <p className="text-xs text-muted-foreground truncate">{contact.service}</p>
+                          </div>
+                          <div className={`mt-0.5 flex-shrink-0 rounded-full p-0.5 ${isLinked ? "bg-primary text-primary-foreground" : "border border-border"}`}>
+                            {isLinked ? <Check className="h-3 w-3" /> : <X className="h-3 w-3 text-muted-foreground" />}
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
               )}
             </div>
 

@@ -3,7 +3,10 @@
 ## Overview
 This is a comprehensive property management system for Saint Paul's Outreach, Inc. (SPO), designed to streamline administrative tasks and resident interactions. The application provides role-based dashboards for administrators and residents, enabling admins to manage properties, maintenance, assets, billing, and vendors, while residents can submit and track maintenance requests. The system emphasizes efficiency, data density, and professional trustworthiness crucial for property management operations.
 
-## Recent Changes (April 20, 2026)
+## Recent Changes (April 20, 2026) — Part 2
+- **Linked Contacts on Maintenance Requests**: Added full link/unlink support; new `request_contacts` join table in DB; storage methods `getRequestContacts`, `linkContactToRequest`, `unlinkContactFromRequest`; routes `GET/POST/DELETE /api/maintenance-requests/:id/contacts/:contactId`; `MaintenanceEditDialog` now shows all contacts as clickable toggle cards — highlighted with a check icon when linked, click again to unlink; badge shows linked count
+
+## Recent Changes (April 20, 2026) — Part 1
 - **Invoices Section Removed**: The standalone "Invoices" nav item and `/invoices` route have been removed entirely
 - **Add Invoice Record Dialog**: Completely redesigned — now on the "Maint Contacts & Invoices" page; fields: Company Name, Email, Phone, Invoice Cost; Contact selection: toggle between "Select Existing" contact (dropdown auto-fills fields) or "New Contact" (creates a new contact in DB on submit); three document upload slots: Contract/Invoice, COI, W-9 (uploads to `/api/upload-doc`); new contacts are created with company name, email, phone
 - **BillingRecords Schema**: Overhauled — removed resident/rent/region fields; new fields: contactId (nullable), companyName, email, phone, invoiceCost, contractInvoiceUrl, coiUrl, w9Url

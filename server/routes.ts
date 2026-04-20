@@ -397,6 +397,47 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Linked Contacts for a Maintenance Request
+  app.get('/api/maintenance-requests/:id/contacts', isAuthenticated, async (req: any, res) => {
+    try {
+      const contacts = await storage.getRequestContacts(req.params.id);
+      res.json(contacts);
+    } catch (error) {
+      console.error("Error fetching request contacts:", error);
+      res.status(500).json({ message: "Failed to fetch linked contacts" });
+    }
+  });
+
+  app.post('/api/maintenance-requests/:id/contacts/:contactId', isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const currentUser = await storage.getUser(userId);
+      if (!currentUser?.isActive || currentUser.role === "resident") {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+      await storage.linkContactToRequest(req.params.id, req.params.contactId);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error linking contact:", error);
+      res.status(500).json({ message: "Failed to link contact" });
+    }
+  });
+
+  app.delete('/api/maintenance-requests/:id/contacts/:contactId', isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const currentUser = await storage.getUser(userId);
+      if (!currentUser?.isActive || currentUser.role === "resident") {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+      await storage.unlinkContactFromRequest(req.params.id, req.params.contactId);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error unlinking contact:", error);
+      res.status(500).json({ message: "Failed to unlink contact" });
+    }
+  });
+
   // Walkthrough Rooms Routes
   app.get('/api/walkthrough-rooms', isAuthenticated, async (req: any, res) => {
     try {

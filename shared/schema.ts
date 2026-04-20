@@ -293,3 +293,13 @@ export type Property = typeof properties.$inferSelect;
 export type InsertProperty = z.infer<typeof insertPropertySchema>;
 // Type for creating/updating properties with computed address
 export type InsertPropertyWithAddress = InsertProperty & { address: string };
+
+// Request Contacts (join table for linking maintenance contacts to requests)
+export const requestContacts = pgTable("request_contacts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  requestId: varchar("request_id").notNull().references(() => maintenanceRequests.id, { onDelete: "cascade" }),
+  contactId: varchar("contact_id").notNull().references(() => maintenanceContacts.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type RequestContact = typeof requestContacts.$inferSelect;
