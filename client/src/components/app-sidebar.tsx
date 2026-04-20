@@ -35,6 +35,11 @@ const adminMenuItems = [
     icon: Wrench,
   },
   {
+    title: "Maint Contacts & Invoices",
+    url: "/contacts",
+    icon: Users,
+  },
+  {
     title: "Walkthroughs",
     url: "/walkthroughs",
     icon: Camera,
@@ -43,11 +48,6 @@ const adminMenuItems = [
     title: "Assets",
     url: "/assets",
     icon: Package,
-  },
-  {
-    title: "Maint Contacts & Invoices",
-    url: "/contacts",
-    icon: Users,
   },
   {
     title: "Settings",
