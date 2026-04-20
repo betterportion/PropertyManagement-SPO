@@ -279,22 +279,6 @@ export default function Contacts() {
                   />
                 </div>
 
-                <FormItem>
-                  <FormLabel>Property</FormLabel>
-                  <Select onValueChange={handleAddPropertyChange}>
-                    <SelectTrigger data-testid="select-contact-property">
-                      <SelectValue placeholder="Select a property" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {properties.map(property => (
-                        <SelectItem key={property.id} value={property.id}>
-                          {property.address}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </FormItem>
-
                 <div className="grid grid-cols-2 gap-4">
                   <FormField
                     control={form.control}
@@ -323,7 +307,7 @@ export default function Contacts() {
                     name="buildingAddress"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Building Address</FormLabel>
+                        <FormLabel>Household Address</FormLabel>
                         <Select onValueChange={field.onChange} value={field.value}>
                           <FormControl>
                             <SelectTrigger data-testid="select-contact-building">
@@ -500,7 +484,7 @@ export default function Contacts() {
                   name="buildingAddress"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Building Address</FormLabel>
+                      <FormLabel>Household Address</FormLabel>
                       <Select onValueChange={field.onChange} value={field.value}>
                         <FormControl>
                           <SelectTrigger data-testid="select-edit-contact-building">
