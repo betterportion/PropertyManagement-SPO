@@ -14,7 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Plus, Upload, FileText, X, Loader2 } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { insertMaintenanceContactSchema, type MaintenanceContact, type Property } from "@shared/schema";
+import { insertMaintenanceContactSchema, type MaintenanceContact, type Property, type BillingRecord } from "@shared/schema";
 import { z } from "zod";
 
 const REGIONS = [
@@ -61,6 +61,10 @@ export default function Contacts() {
 
   const { data: properties = [] } = useQuery<Property[]>({
     queryKey: ["/api/properties"],
+  });
+
+  const { data: billingRecords = [] } = useQuery<BillingRecord[]>({
+    queryKey: ["/api/billing"],
   });
 
   const { data: permissionsData } = useQuery<{canManageContacts?: boolean} | null>({
@@ -269,7 +273,6 @@ export default function Contacts() {
 
   const buildings = properties.map(p => ({ id: p.address!, address: p.address! }));
 
-  const allInvoices: any[] = [];
 
   return (
     <div className="space-y-6">
@@ -680,7 +683,7 @@ export default function Contacts() {
       ) : (
         <ContactsInvoices
           contacts={contacts}
-          invoices={allInvoices}
+          invoices={billingRecords}
           onAddContact={() => setIsAddDialogOpen(true)}
           onEditContact={handleEditContact}
           onAddInvoice={() => console.log("Add invoice")}
