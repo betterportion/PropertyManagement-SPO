@@ -243,14 +243,14 @@ export type InsertInvoice = z.infer<typeof insertInvoiceSchema>;
 // Billing Records
 export const billingRecords = pgTable("billing_records", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  residentName: varchar("resident_name").notNull(),
-  unit: varchar("unit").notNull(),
+  contactId: varchar("contact_id"),
+  companyName: varchar("company_name").notNull(),
   email: varchar("email").notNull(),
   phone: varchar("phone").notNull(),
-  moveInDate: timestamp("move_in_date").notNull(),
-  rentAmount: numeric("rent_amount", { precision: 12, scale: 2 }).notNull(),
-  region: varchar("region").notNull(),
-  buildingAddress: varchar("building_address").notNull(),
+  invoiceCost: numeric("invoice_cost", { precision: 12, scale: 2 }).notNull(),
+  contractInvoiceUrl: varchar("contract_invoice_url"),
+  coiUrl: varchar("coi_url"),
+  w9Url: varchar("w9_url"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });

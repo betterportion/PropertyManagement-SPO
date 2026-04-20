@@ -757,7 +757,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // File Upload Route
+  // File Upload Route (images)
   app.post('/api/upload', isAuthenticated, upload.single('file'), async (req: any, res) => {
     try {
       if (!req.file) {
@@ -768,6 +768,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error uploading file:", error);
       res.status(500).json({ message: "Failed to upload file" });
+    }
+  });
+
+  // Document Upload Route (PDF, images, doc files up to 20MB)
+  const docUpload = multer({
+    storage: fileStorage,
+    limits: { fileSize: 20 * 1024 * 1024 },
+    fileFilter: (req, file, cb) => {
+      const allowedTypes = /pdf|doc|docx|jpeg|jpg|png|gif|webp/;
+      const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+      if (extname) {
+        return cb(null, true);
+      }
+      cb(new Error("Only document and image files are allowed"));
+    },
+  });
+
+  app.post('/api/upload-doc', isAuthenticated, docUpload.single('file'), async (req: any, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ message: "No file uploaded" });
+      }
+      const fileUrl = `/uploads/${req.file.filename}`;
+      res.json({ url: fileUrl, filename: req.file.filename, originalName: req.file.originalname });
+    } catch (error) {
+      console.error("Error uploading document:", error);
+      res.status(500).json({ message: "Failed to upload document" });
     }
   });
 
@@ -1112,9 +1139,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const billingRecords = await storage.getAllBillingRecords();
-      const allowedRegions = permissions?.allowedRegions || [];
-      const filteredRecords = isAdmin ? billingRecords : filterByRegion(billingRecords, allowedRegions);
-      res.json(filteredRecords);
+      res.json(billingRecords);
     } catch (error) {
       console.error("Error fetching billing records:", error);
       res.status(500).json({ message: "Failed to fetch billing records" });
@@ -1132,12 +1157,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "Forbidden" });
       }
 
-      const validatedData = insertBillingRecordSchema.parse(req.body);
-      
-      if (validatedData.region && !canAccessRegion(validatedData.region, permissions?.allowedRegions || [], currentUser?.role === "admin")) {
-        return res.status(403).json({ message: "Forbidden - Cannot create in this region" });
+      const { createContact, ...rest } = req.body;
+      const validatedData = insertBillingRecordSchema.parse(rest);
+
+      // If createContact is true and no contactId, create a new contact from the billing info
+      if (createContact && !validatedData.contactId) {
+        const newContact = await storage.createMaintenanceContact({
+          name: validatedData.companyName,
+          company: validatedData.companyName,
+          service: "",
+          phone: validatedData.phone,
+          email: validatedData.email,
+          region: "",
+          buildingAddress: "",
+        });
+        (validatedData as any).contactId = newContact.id;
       }
-      
+
       const record = await storage.createBillingRecord(validatedData);
       res.json(record);
     } catch (error) {
@@ -1161,19 +1197,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!existingRecord) {
         return res.status(404).json({ message: "Billing record not found" });
       }
-      
-      if (!canAccessRegion(existingRecord.region, permissions?.allowedRegions || [], currentUser?.role === "admin")) {
-        return res.status(403).json({ message: "Forbidden - Region not accessible" });
-      }
 
       const validatedData = insertBillingRecordSchema.partial().parse(req.body);
-      
-      if (validatedData.region && validatedData.region !== existingRecord.region) {
-        if (!canAccessRegion(validatedData.region, permissions?.allowedRegions || [], currentUser?.role === "admin")) {
-          return res.status(403).json({ message: "Forbidden - Cannot move to this region" });
-        }
-      }
-      
       const record = await storage.updateBillingRecord(req.params.id, validatedData);
       res.json(record);
     } catch (error) {
@@ -1196,10 +1221,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const existingRecord = await storage.getBillingRecord(req.params.id);
       if (!existingRecord) {
         return res.status(404).json({ message: "Billing record not found" });
-      }
-      
-      if (!canAccessRegion(existingRecord.region, permissions?.allowedRegions || [], currentUser?.role === "admin")) {
-        return res.status(403).json({ message: "Forbidden - Region not accessible" });
       }
 
       await storage.deleteBillingRecord(req.params.id);

@@ -5,7 +5,9 @@ This is a comprehensive property management system for Saint Paul's Outreach, In
 
 ## Recent Changes (April 20, 2026)
 - **Invoices Section Removed**: The standalone "Invoices" nav item and `/invoices` route have been removed entirely
-- **Add Invoice Button**: Moved to the "Maint Contacts & Invoices" (Contacts) page, styled identically to the "Add Contact" button; opens a dialog with all billing record fields (resident name, unit, email, phone, move-in date, monthly rent, property selector, region, building address)
+- **Add Invoice Record Dialog**: Completely redesigned — now on the "Maint Contacts & Invoices" page; fields: Company Name, Email, Phone, Invoice Cost; Contact selection: toggle between "Select Existing" contact (dropdown auto-fills fields) or "New Contact" (creates a new contact in DB on submit); three document upload slots: Contract/Invoice, COI, W-9 (uploads to `/api/upload-doc`); new contacts are created with company name, email, phone
+- **BillingRecords Schema**: Overhauled — removed resident/rent/region fields; new fields: contactId (nullable), companyName, email, phone, invoiceCost, contractInvoiceUrl, coiUrl, w9Url
+- **Document Upload Endpoint**: Added `/api/upload-doc` accepting PDF, DOC, DOCX, image files up to 20MB
 - **Settings Permissions**: Billing permissions (View/Manage Invoices) merged into the "Maint Contacts & Invoices" section
 - **Landing Page**: Removed standalone "Billing" feature card; updated "Maint Contacts & Invoices" description to include billing
 

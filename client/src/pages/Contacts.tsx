@@ -11,10 +11,10 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
-import { Plus } from "lucide-react";
+import { Plus, Upload, FileText, X, Loader2 } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { insertMaintenanceContactSchema, insertBillingRecordSchema, type MaintenanceContact, type Property } from "@shared/schema";
+import { insertMaintenanceContactSchema, type MaintenanceContact, type Property } from "@shared/schema";
 import { z } from "zod";
 
 const REGIONS = [
@@ -27,8 +27,11 @@ const REGIONS = [
   "West Central",
 ];
 
-const billingFormSchema = insertBillingRecordSchema.extend({
-  rentAmount: z.coerce.string(),
+const invoiceFormSchema = z.object({
+  companyName: z.string().min(1, "Company name is required"),
+  email: z.string().min(1, "Email is required").email("Valid email required"),
+  phone: z.string().min(1, "Phone is required"),
+  invoiceCost: z.string().min(1, "Invoice cost is required"),
 });
 
 export default function Contacts() {
@@ -38,6 +41,17 @@ export default function Contacts() {
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isAddInvoiceDialogOpen, setIsAddInvoiceDialogOpen] = useState(false);
   const [editingContact, setEditingContact] = useState<MaintenanceContact | null>(null);
+  const [contactSource, setContactSource] = useState<"existing" | "new">("existing");
+  const [selectedContactId, setSelectedContactId] = useState<string>("");
+  const [contractInvoiceUrl, setContractInvoiceUrl] = useState<string | null>(null);
+  const [contractInvoiceName, setContractInvoiceName] = useState<string | null>(null);
+  const [coiUrl, setCoiUrl] = useState<string | null>(null);
+  const [coiName, setCoiName] = useState<string | null>(null);
+  const [w9Url, setW9Url] = useState<string | null>(null);
+  const [w9Name, setW9Name] = useState<string | null>(null);
+  const [uploadingContract, setUploadingContract] = useState(false);
+  const [uploadingCoi, setUploadingCoi] = useState(false);
+  const [uploadingW9, setUploadingW9] = useState(false);
   const { toast } = useToast();
   const { user } = useAuth();
 
@@ -169,45 +183,82 @@ export default function Contacts() {
     }
   };
 
-  const billingForm = useForm<z.infer<typeof billingFormSchema>>({
-    resolver: zodResolver(billingFormSchema),
-    defaultValues: {
-      residentName: "",
-      unit: "",
-      email: "",
-      phone: "",
-      moveInDate: new Date(),
-      rentAmount: "",
-      region: "",
-      buildingAddress: "",
-    },
+  const invoiceForm = useForm<z.infer<typeof invoiceFormSchema>>({
+    resolver: zodResolver(invoiceFormSchema),
+    defaultValues: { companyName: "", email: "", phone: "", invoiceCost: "" },
   });
 
   const createBillingMutation = useMutation({
-    mutationFn: async (data: z.infer<typeof billingFormSchema>) => {
-      return await apiRequest("POST", "/api/billing", data);
+    mutationFn: async (payload: Record<string, unknown>) => {
+      return await apiRequest("POST", "/api/billing", payload);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/billing"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/contacts"] });
       setIsAddInvoiceDialogOpen(false);
-      billingForm.reset();
-      toast({ title: "Success", description: "Billing record created successfully" });
+      invoiceForm.reset();
+      setSelectedContactId("");
+      setContactSource("existing");
+      setContractInvoiceUrl(null); setContractInvoiceName(null);
+      setCoiUrl(null); setCoiName(null);
+      setW9Url(null); setW9Name(null);
+      toast({ title: "Success", description: "Invoice record created successfully" });
     },
     onError: () => {
-      toast({ title: "Error", description: "Failed to create billing record", variant: "destructive" });
+      toast({ title: "Error", description: "Failed to create invoice record", variant: "destructive" });
     },
   });
 
-  const handleBillingPropertyChange = (propertyId: string) => {
-    const property = properties.find(p => p.id === propertyId);
-    if (property) {
-      billingForm.setValue("buildingAddress", property.address!);
-      billingForm.setValue("region", property.region);
+  const uploadDoc = async (
+    file: File,
+    setUrl: (u: string) => void,
+    setName: (n: string) => void,
+    setUploading: (b: boolean) => void
+  ) => {
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch("/api/upload-doc", { method: "POST", body: fd, credentials: "include" });
+      if (!res.ok) throw new Error("Upload failed");
+      const data = await res.json();
+      setUrl(data.url);
+      setName(file.name);
+    } catch {
+      toast({ title: "Error", description: "Failed to upload document", variant: "destructive" });
+    } finally {
+      setUploading(false);
     }
   };
 
-  const onBillingSubmit = (data: z.infer<typeof billingFormSchema>) => {
-    createBillingMutation.mutate(data);
+  const onInvoiceSubmit = (data: z.infer<typeof invoiceFormSchema>) => {
+    let payload: Record<string, unknown> = {
+      companyName: data.companyName,
+      email: data.email,
+      phone: data.phone,
+      invoiceCost: data.invoiceCost,
+      contractInvoiceUrl: contractInvoiceUrl ?? undefined,
+      coiUrl: coiUrl ?? undefined,
+      w9Url: w9Url ?? undefined,
+    };
+
+    if (contactSource === "existing" && selectedContactId) {
+      payload.contactId = selectedContactId;
+    } else if (contactSource === "new") {
+      payload.createContact = true;
+    }
+
+    createBillingMutation.mutate(payload);
+  };
+
+  const handleContactSelect = (contactId: string) => {
+    setSelectedContactId(contactId);
+    const contact = contactsData?.find(c => c.id === contactId);
+    if (contact) {
+      invoiceForm.setValue("companyName", contact.company || contact.name);
+      invoiceForm.setValue("email", contact.email);
+      invoiceForm.setValue("phone", contact.phone);
+    }
   };
 
   const contacts = (contactsData || []).filter((contact) => {
@@ -392,37 +443,80 @@ export default function Contacts() {
           <DialogTrigger asChild>
             <Button data-testid="button-add-invoice" disabled={!canManage}>
               <Plus className="h-4 w-4 mr-2" />
-              Add Invoice
+              Add Invoice Record
             </Button>
           </DialogTrigger>
-          <DialogContent className="max-w-2xl">
+          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle>Add Billing Record</DialogTitle>
+              <DialogTitle>Add Invoice Record</DialogTitle>
             </DialogHeader>
-            <Form {...billingForm}>
-              <form onSubmit={billingForm.handleSubmit(onBillingSubmit)} className="space-y-4">
+            <Form {...invoiceForm}>
+              <form onSubmit={invoiceForm.handleSubmit(onInvoiceSubmit)} className="space-y-5">
+                {/* Contact source toggle */}
+                <div>
+                  <p className="text-sm font-medium mb-2">Contact</p>
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      variant={contactSource === "existing" ? "default" : "outline"}
+                      size="sm"
+                      onClick={() => { setContactSource("existing"); setSelectedContactId(""); invoiceForm.reset(); }}
+                      data-testid="button-contact-existing"
+                    >
+                      Select Existing
+                    </Button>
+                    <Button
+                      type="button"
+                      variant={contactSource === "new" ? "default" : "outline"}
+                      size="sm"
+                      onClick={() => { setContactSource("new"); setSelectedContactId(""); invoiceForm.reset(); }}
+                      data-testid="button-contact-new"
+                    >
+                      New Contact
+                    </Button>
+                  </div>
+                </div>
+
+                {contactSource === "existing" && (
+                  <FormItem>
+                    <FormLabel>Select Contact</FormLabel>
+                    <Select onValueChange={handleContactSelect} value={selectedContactId}>
+                      <SelectTrigger data-testid="select-invoice-contact">
+                        <SelectValue placeholder="Select a contact" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(contactsData || []).map(c => (
+                          <SelectItem key={c.id} value={c.id}>
+                            {c.company || c.name} — {c.email}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </FormItem>
+                )}
+
                 <div className="grid grid-cols-2 gap-4">
                   <FormField
-                    control={billingForm.control}
-                    name="residentName"
+                    control={invoiceForm.control}
+                    name="companyName"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Resident Name</FormLabel>
+                        <FormLabel>Company Name</FormLabel>
                         <FormControl>
-                          <Input {...field} data-testid="input-invoice-resident-name" />
+                          <Input {...field} data-testid="input-invoice-company" />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
                     )}
                   />
                   <FormField
-                    control={billingForm.control}
-                    name="unit"
+                    control={invoiceForm.control}
+                    name="invoiceCost"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Unit</FormLabel>
+                        <FormLabel>Invoice Cost ($)</FormLabel>
                         <FormControl>
-                          <Input {...field} placeholder="Unit 204" data-testid="input-invoice-unit" />
+                          <Input {...field} type="number" step="0.01" placeholder="0.00" data-testid="input-invoice-cost" />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -432,7 +526,7 @@ export default function Contacts() {
 
                 <div className="grid grid-cols-2 gap-4">
                   <FormField
-                    control={billingForm.control}
+                    control={invoiceForm.control}
                     name="email"
                     render={({ field }) => (
                       <FormItem>
@@ -445,7 +539,7 @@ export default function Contacts() {
                     )}
                   />
                   <FormField
-                    control={billingForm.control}
+                    control={invoiceForm.control}
                     name="phone"
                     render={({ field }) => (
                       <FormItem>
@@ -459,110 +553,118 @@ export default function Contacts() {
                   />
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                  <FormField
-                    control={billingForm.control}
-                    name="moveInDate"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Move-In Date</FormLabel>
-                        <FormControl>
-                          <Input
-                            type="date"
-                            data-testid="input-invoice-movein"
-                            value={field.value ? new Date(field.value).toISOString().split('T')[0] : ""}
-                            onChange={e => field.onChange(new Date(e.target.value))}
-                          />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                  <FormField
-                    control={billingForm.control}
-                    name="rentAmount"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Monthly Rent ($)</FormLabel>
-                        <FormControl>
-                          <Input {...field} type="number" step="0.01" placeholder="1500.00" data-testid="input-invoice-rent" />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                </div>
+                {/* Document Uploads */}
+                <div className="space-y-3">
+                  <p className="text-sm font-medium">Documents</p>
 
-                <FormItem>
-                  <FormLabel>Property</FormLabel>
-                  <Select onValueChange={handleBillingPropertyChange}>
-                    <SelectTrigger data-testid="select-invoice-property">
-                      <SelectValue placeholder="Select a property" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {properties.map(property => (
-                        <SelectItem key={property.id} value={property.id}>
-                          {property.address}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </FormItem>
+                  {/* Contract/Invoice */}
+                  <div className="flex items-center justify-between p-3 border rounded-md">
+                    <div className="flex items-center gap-3">
+                      <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
+                      <div>
+                        <p className="text-sm font-medium">Contract / Invoice</p>
+                        {contractInvoiceName && <p className="text-xs text-muted-foreground truncate max-w-[180px]">{contractInvoiceName}</p>}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      {contractInvoiceUrl && (
+                        <Button type="button" size="icon" variant="ghost" onClick={() => { setContractInvoiceUrl(null); setContractInvoiceName(null); }}>
+                          <X className="h-4 w-4" />
+                        </Button>
+                      )}
+                      <label className="cursor-pointer">
+                        <input
+                          type="file"
+                          accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
+                          className="hidden"
+                          data-testid="input-contract-file"
+                          onChange={e => { const f = e.target.files?.[0]; if (f) uploadDoc(f, setContractInvoiceUrl, setContractInvoiceName, setUploadingContract); }}
+                        />
+                        {uploadingContract ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Button type="button" size="sm" variant="outline" asChild>
+                            <span><Upload className="h-3 w-3 mr-1" />{contractInvoiceUrl ? "Replace" : "Upload"}</span>
+                          </Button>
+                        )}
+                      </label>
+                    </div>
+                  </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                  <FormField
-                    control={billingForm.control}
-                    name="region"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Region</FormLabel>
-                        <Select onValueChange={field.onChange} value={field.value}>
-                          <FormControl>
-                            <SelectTrigger data-testid="select-invoice-region">
-                              <SelectValue placeholder="Select region" />
-                            </SelectTrigger>
-                          </FormControl>
-                          <SelectContent>
-                            {REGIONS.map(r => (
-                              <SelectItem key={r} value={r}>{r}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                  <FormField
-                    control={billingForm.control}
-                    name="buildingAddress"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Building Address</FormLabel>
-                        <Select onValueChange={field.onChange} value={field.value}>
-                          <FormControl>
-                            <SelectTrigger data-testid="select-invoice-building">
-                              <SelectValue placeholder="Select property" />
-                            </SelectTrigger>
-                          </FormControl>
-                          <SelectContent>
-                            {properties.map(property => (
-                              <SelectItem key={property.id} value={property.address!}>
-                                {property.address}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
+                  {/* COI */}
+                  <div className="flex items-center justify-between p-3 border rounded-md">
+                    <div className="flex items-center gap-3">
+                      <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
+                      <div>
+                        <p className="text-sm font-medium">COI</p>
+                        {coiName && <p className="text-xs text-muted-foreground truncate max-w-[180px]">{coiName}</p>}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      {coiUrl && (
+                        <Button type="button" size="icon" variant="ghost" onClick={() => { setCoiUrl(null); setCoiName(null); }}>
+                          <X className="h-4 w-4" />
+                        </Button>
+                      )}
+                      <label className="cursor-pointer">
+                        <input
+                          type="file"
+                          accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
+                          className="hidden"
+                          data-testid="input-coi-file"
+                          onChange={e => { const f = e.target.files?.[0]; if (f) uploadDoc(f, setCoiUrl, setCoiName, setUploadingCoi); }}
+                        />
+                        {uploadingCoi ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Button type="button" size="sm" variant="outline" asChild>
+                            <span><Upload className="h-3 w-3 mr-1" />{coiUrl ? "Replace" : "Upload"}</span>
+                          </Button>
+                        )}
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* W-9 */}
+                  <div className="flex items-center justify-between p-3 border rounded-md">
+                    <div className="flex items-center gap-3">
+                      <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
+                      <div>
+                        <p className="text-sm font-medium">W-9</p>
+                        {w9Name && <p className="text-xs text-muted-foreground truncate max-w-[180px]">{w9Name}</p>}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      {w9Url && (
+                        <Button type="button" size="icon" variant="ghost" onClick={() => { setW9Url(null); setW9Name(null); }}>
+                          <X className="h-4 w-4" />
+                        </Button>
+                      )}
+                      <label className="cursor-pointer">
+                        <input
+                          type="file"
+                          accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
+                          className="hidden"
+                          data-testid="input-w9-file"
+                          onChange={e => { const f = e.target.files?.[0]; if (f) uploadDoc(f, setW9Url, setW9Name, setUploadingW9); }}
+                        />
+                        {uploadingW9 ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Button type="button" size="sm" variant="outline" asChild>
+                            <span><Upload className="h-3 w-3 mr-1" />{w9Url ? "Replace" : "Upload"}</span>
+                          </Button>
+                        )}
+                      </label>
+                    </div>
+                  </div>
                 </div>
 
                 <DialogFooter>
                   <Button type="button" variant="outline" onClick={() => setIsAddInvoiceDialogOpen(false)}>
                     Cancel
                   </Button>
-                  <Button type="submit" disabled={createBillingMutation.isPending} data-testid="button-submit-invoice">
+                  <Button type="submit" disabled={createBillingMutation.isPending || uploadingContract || uploadingCoi || uploadingW9} data-testid="button-submit-invoice">
                     {createBillingMutation.isPending ? "Creating..." : "Create Record"}
                   </Button>
                 </DialogFooter>
