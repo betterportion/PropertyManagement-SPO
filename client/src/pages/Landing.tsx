@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Building2, Wrench, Camera, Package, DollarSign, Users } from "lucide-react";
+import { Building2, Wrench, Camera, Package, Users } from "lucide-react";
 import spoLogo from "@assets/SPO Logo under 600x600px_SPO Vertical - Ocean_1763138801065.png";
 
 export default function Landing() {
@@ -54,21 +54,11 @@ export default function Landing() {
 
               <div className="flex flex-col items-center text-center p-4">
                 <div className="p-3 bg-primary/10 rounded-lg mb-3">
-                  <DollarSign className="h-6 w-6 text-primary" />
-                </div>
-                <h3 className="font-semibold mb-2">Billing</h3>
-                <p className="text-sm text-muted-foreground">
-                  Manage resident billing and payment records
-                </p>
-              </div>
-
-              <div className="flex flex-col items-center text-center p-4">
-                <div className="p-3 bg-primary/10 rounded-lg mb-3">
                   <Users className="h-6 w-6 text-primary" />
                 </div>
                 <h3 className="font-semibold mb-2">Maint Contacts & Invoices</h3>
                 <p className="text-sm text-muted-foreground">
-                  Keep track of vendors and service providers
+                  Manage vendors, service providers, and resident billing
                 </p>
               </div>
 

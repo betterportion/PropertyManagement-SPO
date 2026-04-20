@@ -14,8 +14,8 @@ import { Button } from "@/components/ui/button";
 import { Plus } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { insertMaintenanceContactSchema, type MaintenanceContact, type Property } from "@shared/schema";
-import type { z } from "zod";
+import { insertMaintenanceContactSchema, insertBillingRecordSchema, type MaintenanceContact, type Property } from "@shared/schema";
+import { z } from "zod";
 
 const REGIONS = [
   "East Central",
@@ -27,11 +27,16 @@ const REGIONS = [
   "West Central",
 ];
 
+const billingFormSchema = insertBillingRecordSchema.extend({
+  rentAmount: z.coerce.string(),
+});
+
 export default function Contacts() {
   const [selectedRegion, setSelectedRegion] = useState("all");
   const [selectedBuilding, setSelectedBuilding] = useState("all");
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [isAddInvoiceDialogOpen, setIsAddInvoiceDialogOpen] = useState(false);
   const [editingContact, setEditingContact] = useState<MaintenanceContact | null>(null);
   const { toast } = useToast();
   const { user } = useAuth();
@@ -164,6 +169,47 @@ export default function Contacts() {
     }
   };
 
+  const billingForm = useForm<z.infer<typeof billingFormSchema>>({
+    resolver: zodResolver(billingFormSchema),
+    defaultValues: {
+      residentName: "",
+      unit: "",
+      email: "",
+      phone: "",
+      moveInDate: new Date(),
+      rentAmount: "",
+      region: "",
+      buildingAddress: "",
+    },
+  });
+
+  const createBillingMutation = useMutation({
+    mutationFn: async (data: z.infer<typeof billingFormSchema>) => {
+      return await apiRequest("POST", "/api/billing", data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/billing"] });
+      setIsAddInvoiceDialogOpen(false);
+      billingForm.reset();
+      toast({ title: "Success", description: "Billing record created successfully" });
+    },
+    onError: () => {
+      toast({ title: "Error", description: "Failed to create billing record", variant: "destructive" });
+    },
+  });
+
+  const handleBillingPropertyChange = (propertyId: string) => {
+    const property = properties.find(p => p.id === propertyId);
+    if (property) {
+      billingForm.setValue("buildingAddress", property.address!);
+      billingForm.setValue("region", property.region);
+    }
+  };
+
+  const onBillingSubmit = (data: z.infer<typeof billingFormSchema>) => {
+    createBillingMutation.mutate(data);
+  };
+
   const contacts = (contactsData || []).filter((contact) => {
     const matchesRegion = selectedRegion === "all" || contact.region.toLowerCase().replace(/\s+/g, '-') === selectedRegion;
     const matchesBuilding = selectedBuilding === "all" || contact.buildingAddress === selectedBuilding;
@@ -194,6 +240,7 @@ export default function Contacts() {
           />
         </div>
 
+        <div className="flex flex-wrap gap-2">
         <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
           <DialogTrigger asChild>
             <Button data-testid="button-add-contact" disabled={!canManage}>
@@ -340,6 +387,190 @@ export default function Contacts() {
             </Form>
           </DialogContent>
         </Dialog>
+
+        <Dialog open={isAddInvoiceDialogOpen} onOpenChange={setIsAddInvoiceDialogOpen}>
+          <DialogTrigger asChild>
+            <Button data-testid="button-add-invoice" disabled={!canManage}>
+              <Plus className="h-4 w-4 mr-2" />
+              Add Invoice
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>Add Billing Record</DialogTitle>
+            </DialogHeader>
+            <Form {...billingForm}>
+              <form onSubmit={billingForm.handleSubmit(onBillingSubmit)} className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <FormField
+                    control={billingForm.control}
+                    name="residentName"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Resident Name</FormLabel>
+                        <FormControl>
+                          <Input {...field} data-testid="input-invoice-resident-name" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={billingForm.control}
+                    name="unit"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Unit</FormLabel>
+                        <FormControl>
+                          <Input {...field} placeholder="Unit 204" data-testid="input-invoice-unit" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <FormField
+                    control={billingForm.control}
+                    name="email"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Email</FormLabel>
+                        <FormControl>
+                          <Input {...field} type="email" data-testid="input-invoice-email" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={billingForm.control}
+                    name="phone"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Phone</FormLabel>
+                        <FormControl>
+                          <Input {...field} placeholder="(512) 555-0123" data-testid="input-invoice-phone" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <FormField
+                    control={billingForm.control}
+                    name="moveInDate"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Move-In Date</FormLabel>
+                        <FormControl>
+                          <Input
+                            type="date"
+                            data-testid="input-invoice-movein"
+                            value={field.value ? new Date(field.value).toISOString().split('T')[0] : ""}
+                            onChange={e => field.onChange(new Date(e.target.value))}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={billingForm.control}
+                    name="rentAmount"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Monthly Rent ($)</FormLabel>
+                        <FormControl>
+                          <Input {...field} type="number" step="0.01" placeholder="1500.00" data-testid="input-invoice-rent" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+
+                <FormItem>
+                  <FormLabel>Property</FormLabel>
+                  <Select onValueChange={handleBillingPropertyChange}>
+                    <SelectTrigger data-testid="select-invoice-property">
+                      <SelectValue placeholder="Select a property" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {properties.map(property => (
+                        <SelectItem key={property.id} value={property.id}>
+                          {property.address}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </FormItem>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <FormField
+                    control={billingForm.control}
+                    name="region"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Region</FormLabel>
+                        <Select onValueChange={field.onChange} value={field.value}>
+                          <FormControl>
+                            <SelectTrigger data-testid="select-invoice-region">
+                              <SelectValue placeholder="Select region" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {REGIONS.map(r => (
+                              <SelectItem key={r} value={r}>{r}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={billingForm.control}
+                    name="buildingAddress"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Building Address</FormLabel>
+                        <Select onValueChange={field.onChange} value={field.value}>
+                          <FormControl>
+                            <SelectTrigger data-testid="select-invoice-building">
+                              <SelectValue placeholder="Select property" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {properties.map(property => (
+                              <SelectItem key={property.id} value={property.address!}>
+                                {property.address}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+
+                <DialogFooter>
+                  <Button type="button" variant="outline" onClick={() => setIsAddInvoiceDialogOpen(false)}>
+                    Cancel
+                  </Button>
+                  <Button type="submit" disabled={createBillingMutation.isPending} data-testid="button-submit-invoice">
+                    {createBillingMutation.isPending ? "Creating..." : "Create Record"}
+                  </Button>
+                </DialogFooter>
+              </form>
+            </Form>
+          </DialogContent>
+        </Dialog>
+        </div>
       </div>
 
       {isLoading ? (

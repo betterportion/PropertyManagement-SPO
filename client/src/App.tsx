@@ -13,7 +13,6 @@ import AdminDashboard from "@/pages/AdminDashboard";
 import Maintenance from "@/pages/Maintenance";
 import Walkthroughs from "@/pages/Walkthroughs";
 import Assets from "@/pages/Assets";
-import Invoices from "@/pages/Invoices";
 import Contacts from "@/pages/Contacts";
 import Properties from "@/pages/Properties";
 import ResidentDashboard from "@/pages/ResidentDashboard";
@@ -43,7 +42,6 @@ function Router() {
         <Route path="/maintenance" component={Maintenance} />
         <Route path="/walkthroughs" component={Walkthroughs} />
         <Route path="/assets" component={Assets} />
-        <Route path="/invoices" component={Invoices} />
         <Route path="/contacts" component={Contacts} />
         <Route path="/settings" component={AdminSettings} />
         <Route component={NotFound} />
