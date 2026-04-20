@@ -43,7 +43,7 @@ const ASSET_CATEGORIES = [
 const assetFormSchema = insertAssetSchema.extend({
   ageInYears: z.coerce.number().min(0, "Age must be 0 or greater"),
   purchasePrice: z.coerce.number({ required_error: "Purchase price is required", invalid_type_error: "Enter a valid amount" }).min(0, "Must be 0 or greater"),
-  assetTagId: z.string().min(1, "Asset tag ID is required"),
+  assetTagId: z.string().optional(),
 });
 
 export default function Assets() {
@@ -387,7 +387,7 @@ export default function Assets() {
                     name="assetTagId"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Asset Tag ID</FormLabel>
+                        <FormLabel>Asset Tag ID <span className="text-muted-foreground font-normal">(Optional)</span></FormLabel>
                         <FormControl>
                           <Input {...field} placeholder="e.g., SPO-2024-001" data-testid="input-asset-tag-id" />
                         </FormControl>
@@ -629,7 +629,7 @@ export default function Assets() {
                   name="assetTagId"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Asset Tag ID</FormLabel>
+                      <FormLabel>Asset Tag ID <span className="text-muted-foreground font-normal">(Optional)</span></FormLabel>
                       <FormControl>
                         <Input {...field} value={field.value || ""} placeholder="e.g., SPO-2024-001" />
                       </FormControl>
