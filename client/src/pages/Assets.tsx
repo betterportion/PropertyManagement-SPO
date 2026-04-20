@@ -52,6 +52,8 @@ const ASSET_CATEGORIES = [
   "Water Heater",
 ];
 
+const MOVABLE_CATEGORIES = ASSET_CATEGORIES.filter(c => !FIXED_CATEGORIES.includes(c));
+
 const assetFormSchema = insertAssetSchema.extend({
   ageInYears: z.coerce.number().min(0, "Age must be 0 or greater"),
   purchasePrice: z.coerce.number({ required_error: "Purchase price is required", invalid_type_error: "Enter a valid amount" }).min(0, "Must be 0 or greater"),
@@ -341,7 +343,7 @@ export default function Assets() {
                             </SelectTrigger>
                           </FormControl>
                           <SelectContent>
-                            {(addAssetType === "fixed" ? FIXED_CATEGORIES : ASSET_CATEGORIES).map((cat) => (
+                            {(addAssetType === "fixed" ? FIXED_CATEGORIES : MOVABLE_CATEGORIES).map((cat) => (
                               <SelectItem key={cat} value={cat}>{cat}</SelectItem>
                             ))}
                           </SelectContent>
@@ -597,7 +599,7 @@ export default function Assets() {
                           <SelectTrigger><SelectValue placeholder="Select category" /></SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                          {(editAssetType === "fixed" ? FIXED_CATEGORIES : ASSET_CATEGORIES).map((cat) => (
+                          {(editAssetType === "fixed" ? FIXED_CATEGORIES : MOVABLE_CATEGORIES).map((cat) => (
                             <SelectItem key={cat} value={cat}>{cat}</SelectItem>
                           ))}
                         </SelectContent>
