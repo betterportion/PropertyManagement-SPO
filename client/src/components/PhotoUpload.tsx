@@ -1,20 +1,26 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { Upload, X, Image, Loader2, Camera, ImageIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 interface PhotoUploadProps {
   onUpload: (url: string) => void;
+  onRemove?: () => void;
   onError?: (error: string) => void;
+  existingUrl?: string;
   className?: string;
   disabled?: boolean;
 }
 
-export function PhotoUpload({ onUpload, onError, className, disabled }: PhotoUploadProps) {
+export function PhotoUpload({ onUpload, onRemove, onError, existingUrl, className, disabled }: PhotoUploadProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
-  const [preview, setPreview] = useState<string | null>(null);
+  const [preview, setPreview] = useState<string | null>(existingUrl ?? null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setPreview(existingUrl ?? null);
+  }, [existingUrl]);
 
   const handleFile = useCallback(async (file: File) => {
     if (!file.type.startsWith("image/")) {
@@ -58,14 +64,14 @@ export function PhotoUpload({ onUpload, onError, className, disabled }: PhotoUpl
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to upload file";
       onError?.(message);
-      setPreview(null);
+      setPreview(existingUrl ?? null);
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
       }
     } finally {
       setIsUploading(false);
     }
-  }, [onUpload, onError]);
+  }, [onUpload, onError, existingUrl]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -109,6 +115,7 @@ export function PhotoUpload({ onUpload, onError, className, disabled }: PhotoUpl
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
+    onRemove?.();
   };
 
   return (

@@ -15,7 +15,8 @@ import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import type { MaintenanceRequest, MaintenanceContact, Invoice, Property } from "@shared/schema";
-import { DollarSign, Link2, FileText, Plus, Check, X } from "lucide-react";
+import { DollarSign, Link2, FileText, Plus, Check, X, ImageIcon } from "lucide-react";
+import { PhotoUpload } from "@/components/PhotoUpload";
 import { format } from "date-fns";
 
 interface MaintenanceEditDialogProps {
@@ -31,6 +32,7 @@ const editSchema = z.object({
   priority: z.enum(["low", "medium", "high", "urgent", "wishlist"]),
   status: z.enum(["pending", "in_progress", "completed", "cancelled"]),
   location: z.string().min(1, "Location is required"),
+  photoUrl: z.string().nullable().optional(),
 });
 
 type EditFormData = z.infer<typeof editSchema>;
@@ -102,6 +104,7 @@ export default function MaintenanceEditDialog({ request, open, onClose }: Mainte
       priority: request.priority,
       status: request.status,
       location: request.location,
+      photoUrl: request.photoUrl ?? null,
     },
   });
 
@@ -263,6 +266,18 @@ export default function MaintenanceEditDialog({ request, open, onClose }: Mainte
                     <FormMessage />
                   </FormItem>
                 )}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <h3 className="text-sm font-semibold flex items-center gap-2">
+                <ImageIcon className="h-4 w-4" />
+                Photo
+              </h3>
+              <PhotoUpload
+                onUpload={(url) => form.setValue("photoUrl", url)}
+                onRemove={() => form.setValue("photoUrl", null)}
+                existingUrl={form.watch("photoUrl") ?? undefined}
               />
             </div>
 
