@@ -50,7 +50,7 @@ const adminMenuItems = [
     icon: DollarSign,
   },
   {
-    title: "Maintenance Contacts & Invoices",
+    title: "Maint Contacts & Invoices",
     url: "/contacts",
     icon: Users,
   },

@@ -66,7 +66,7 @@ export default function Landing() {
                 <div className="p-3 bg-primary/10 rounded-lg mb-3">
                   <Users className="h-6 w-6 text-primary" />
                 </div>
-                <h3 className="font-semibold mb-2">Maintenance Contacts & Invoices</h3>
+                <h3 className="font-semibold mb-2">Maint Contacts & Invoices</h3>
                 <p className="text-sm text-muted-foreground">
                   Keep track of vendors and service providers
                 </p>
