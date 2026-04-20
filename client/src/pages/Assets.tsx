@@ -40,6 +40,7 @@ const ASSET_CATEGORIES = [
   "Roof",
   "Tablets",
   "Tools",
+  "Water Heater",
 ];
 
 const assetFormSchema = insertAssetSchema.extend({
