@@ -21,6 +21,16 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { z } from "zod";
 
+const createRequestSchema = insertMaintenanceRequestSchema.extend({
+  title: z.string().min(1, "Title is required"),
+  description: z.string().min(1, "Description is required"),
+  category: z.string().min(1, "Category is required"),
+  location: z.string().min(1, "Location is required"),
+  priority: z.enum(["low", "medium", "high", "urgent", "wishlist"], {
+    errorMap: () => ({ message: "Priority is required" }),
+  }),
+});
+
 const CATEGORIES = [
   "Plumbing",
   "Electrical",
@@ -117,8 +127,8 @@ export default function Maintenance() {
     setSelectedRequest(null);
   };
 
-  const createForm = useForm<z.infer<typeof insertMaintenanceRequestSchema>>({
-    resolver: zodResolver(insertMaintenanceRequestSchema),
+  const createForm = useForm<z.infer<typeof createRequestSchema>>({
+    resolver: zodResolver(createRequestSchema),
     defaultValues: {
       title: "",
       description: "",
@@ -134,7 +144,7 @@ export default function Maintenance() {
   });
 
   const createMutation = useMutation({
-    mutationFn: async (data: z.infer<typeof insertMaintenanceRequestSchema>) => {
+    mutationFn: async (data: z.infer<typeof createRequestSchema>) => {
       return apiRequest('POST', '/api/maintenance-requests', data);
     },
     onSuccess: () => {
@@ -155,7 +165,7 @@ export default function Maintenance() {
     },
   });
 
-  const onSubmitCreate = (data: z.infer<typeof insertMaintenanceRequestSchema>) => {
+  const onSubmitCreate = (data: z.infer<typeof createRequestSchema>) => {
     createMutation.mutate(data);
   };
 
