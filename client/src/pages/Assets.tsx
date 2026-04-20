@@ -38,6 +38,7 @@ const ASSET_CATEGORIES = [
   "Outdoor Equipment",
   "Printers",
   "Roof",
+  "Security System",
   "Tablets",
   "Tools",
   "Water Heater",
