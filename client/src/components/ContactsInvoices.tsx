@@ -97,11 +97,6 @@ export default function ContactsInvoices({ contacts, invoices, onAddContact, onE
       </TabsContent>
 
       <TabsContent value="invoices" className="mt-6">
-        <div className="flex justify-end mb-4">
-          <Button onClick={onAddInvoice} data-testid="button-add-invoice">
-            Add Invoice
-          </Button>
-        </div>
         <div className="space-y-4">
           {invoices.map((invoice) => (
             <Card key={invoice.id} className="hover-elevate" data-testid={`card-invoice-${invoice.id}`}>
