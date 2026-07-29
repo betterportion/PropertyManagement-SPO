@@ -1,6 +1,35 @@
+# Dependencies
 node_modules
+
+# Build output
 dist
-.DS_Store
 server/public
+
+# Environment variables & secrets
+.env
+.env.*
+!.env.example
+
+# User-uploaded files (runtime data, must never be committed)
+uploads/
+
+# Replit internal state & agent files
+.cache/
+.local/
+.agents/
+.upm/
+.config/
+
+# Attached assets are chat uploads (screenshots, notes) and are not part of
+# the app. The SPO logo is the one exception: it is imported by the sidebar
+# and landing page via the "@assets" alias, so it must stay tracked.
+attached_assets/*
+!attached_assets/SPO Logo under 600x600px_SPO Vertical - Ocean_1763138801065.png
+
+# Editor / OS noise
+.DS_Store
+*.swp
+
+# Misc
 vite.config.ts.*
 *.tar.gz

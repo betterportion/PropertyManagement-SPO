@@ -3,6 +3,49 @@
 ## Overview
 This is a comprehensive property management system for Saint Paul's Outreach, Inc. (SPO), designed to streamline administrative tasks and resident interactions. The application provides role-based dashboards for administrators and residents, enabling admins to manage properties, maintenance, assets, billing, and vendors, while residents can submit and track maintenance requests. The system emphasizes efficiency, data density, and professional trustworthiness crucial for property management operations.
 
+## First-Run Setup
+
+Follow these steps when cloning this repository into a fresh environment (including a new Replit workspace or a local checkout from GitHub).
+
+### 1. Install dependencies
+```bash
+npm install
+```
+
+### 2. Set required environment variables
+
+| Variable | Required | Notes |
+|---|---|---|
+| `DATABASE_URL` | **Yes** | PostgreSQL connection string (Neon serverless) |
+| `SESSION_SECRET` | **Yes** | Long random string used to sign session cookies |
+| `REPL_ID` | On Replit only | Auto-provided by Replit; used as the OIDC client ID |
+| `ISSUER_URL` | No | Defaults to `https://replit.com/oidc` |
+| `MONDAY_API_KEY` | No | Monday.com sync; the feature is silently skipped if unset |
+| `JOTFORM_WEBHOOK_SECRET` | Recommended | Shared secret for the JotForm webhook endpoint |
+| `JOTFORM_FIELD_*` | No | JotForm field ID mappings (TITLE, DESCRIPTION, CATEGORY, PRIORITY, LOCATION, EMAIL, REGION, BUILDING) |
+| `JOTFORM_DEFAULT_*` | No | Fallback values for JotForm submissions (REGION, BUILDING, LOCATION) |
+| `PORT` | No | Defaults to 5000 |
+
+### 3. Create the database schema — required before first start
+The app will not start against an empty database, because the session store expects a `sessions` table to exist. Push the schema first:
+```bash
+npm run db:push
+```
+
+### 4. Start the app
+```bash
+npm run dev
+```
+
+### Notes for running outside Replit
+- Authentication uses **Replit OIDC** and depends on `REPL_ID`. It will not work outside Replit without being replaced by another provider (Clerk, Auth0, etc.).
+- Uploaded files are written to a local `uploads/` folder. This folder is intentionally not tracked in git, and it does not survive container restarts in autoscale deployments. Cloud storage is required before relying on uploads in production.
+
+## Recent Changes (July 29, 2026)
+- **Pre-Push Repo Cleanup**: Removed user-uploaded files and chat screenshots from git tracking (files remain on disk); expanded `.gitignore` to cover `uploads/`, `.env*`, `.cache/`, `.local/`, `.agents/`, and `attached_assets/`. The SPO logo is explicitly kept tracked because it is imported via the `@assets` alias by the sidebar and landing page
+- **Dead Code Removal**: Deleted the orphaned `pages/Invoices.tsx` (not routed since the standalone Invoices section was removed in April), the entire `components/examples/` folder, and the now-unreferenced `components/ResidentBilling.tsx`. These were the source of all outstanding TypeScript errors — the type check now passes with zero errors
+- **Documentation**: Added the First-Run Setup section above covering required environment variables and the mandatory `npm run db:push` before first start
+
 ## Recent Changes (April 20, 2026) — Part 2
 - **Linked Contacts on Maintenance Requests**: Added full link/unlink support; new `request_contacts` join table in DB; storage methods `getRequestContacts`, `linkContactToRequest`, `unlinkContactFromRequest`; routes `GET/POST/DELETE /api/maintenance-requests/:id/contacts/:contactId`; `MaintenanceEditDialog` now shows all contacts as clickable toggle cards — highlighted with a check icon when linked, click again to unlink; badge shows linked count
 
