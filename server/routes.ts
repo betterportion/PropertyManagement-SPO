@@ -1,6 +1,5 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
-import express from "express";
 import { storage } from "./storage";
 import { setupAuth, isAuthenticated } from "./replitAuth";
 import { z } from "zod";
@@ -8,6 +7,7 @@ import multer from "multer";
 import { createMondayItem, updateMondayItem } from "./monday";
 import path from "path";
 import fs from "fs";
+import crypto from "crypto";
 import {
   insertMaintenanceRequestSchema,
   insertWalkthroughRoomSchema,
@@ -80,6 +80,15 @@ function filterByRegion<T extends { region?: string | null }>(items: T[], allowe
     return items;
   }
   return items.filter(item => item.region && allowedRegions.includes(item.region));
+}
+
+// Constant-time string comparison, so a wrong secret cannot be discovered by
+// measuring how long the comparison takes.
+function secretsMatch(provided: string, expected: string): boolean {
+  const a = Buffer.from(provided, "utf8");
+  const b = Buffer.from(expected, "utf8");
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
 }
 
 function canAccessRegion(region: string | null | undefined, allowedRegions: string[] | null, isAdmin: boolean): boolean {
@@ -156,6 +165,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get('/api/users/:id/permissions', isAuthenticated, async (req: any, res) => {
     try {
+      // A user may read only their own permissions. Admins may read anyone's.
+      const userId = req.user.claims.sub;
+      const currentUser = await storage.getUser(userId);
+      const isAdmin = currentUser?.role === "admin";
+      if (!isAdmin && req.params.id !== userId) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
       const permissions = await storage.getUserPermissions(req.params.id);
       if (!permissions) {
         return res.status(404).json({ message: "Permissions not found" });
@@ -1398,21 +1414,52 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Serve uploaded files
-  app.use('/uploads', express.static(uploadDir));
+  // ─── Uploaded files ────────────────────────────────────────────────────────
+  // Requires a valid session. These files include maintenance and walkthrough
+  // photos as well as W-9s, COIs and contract invoices, so they must never be
+  // downloadable by an anonymous visitor who guesses a filename.
+  app.get('/uploads/:filename', isAuthenticated, (req, res) => {
+    const requested = req.params.filename;
+
+    // Reject anything that is not a bare filename, so a crafted path cannot
+    // escape the uploads directory.
+    if (requested !== path.basename(requested)) {
+      return res.status(400).json({ message: "Invalid filename" });
+    }
+
+    const resolved = path.resolve(uploadDir, requested);
+    if (!resolved.startsWith(path.resolve(uploadDir) + path.sep)) {
+      return res.status(400).json({ message: "Invalid filename" });
+    }
+
+    if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) {
+      return res.status(404).json({ message: "File not found" });
+    }
+
+    // "private" keeps authenticated content out of shared/proxy caches.
+    res.setHeader("Cache-Control", "private, max-age=3600");
+    res.sendFile(resolved);
+  });
 
   // ─── JotForm Webhook ───────────────────────────────────────────────────────
-  // Public endpoint — no auth required (called by JotForm servers)
+  // Called by JotForm's servers, so it cannot use session auth. It is guarded
+  // by a shared secret instead, passed as ?secret=... on the webhook URL.
   // Configure in JotForm: Settings → Integrations → WebHooks → add this URL
   app.post('/api/webhooks/jotform', async (req, res) => {
     try {
-      // Optional secret check
+      // Fail closed. If no secret is configured the endpoint is disabled
+      // entirely, rather than silently accepting anonymous submissions.
       const secret = process.env.JOTFORM_WEBHOOK_SECRET;
-      if (secret) {
-        const provided = req.query.secret || req.body.secret;
-        if (provided !== secret) {
-          return res.status(401).json({ message: "Unauthorized" });
-        }
+      if (!secret) {
+        console.error(
+          "Rejected JotForm webhook: JOTFORM_WEBHOOK_SECRET is not configured."
+        );
+        return res.status(503).json({ message: "Webhook not configured" });
+      }
+
+      const provided = req.query.secret ?? req.body?.secret;
+      if (typeof provided !== "string" || !secretsMatch(provided, secret)) {
+        return res.status(401).json({ message: "Unauthorized" });
       }
 
       // Parse JotForm's rawRequest field (URL-encoded JSON string)

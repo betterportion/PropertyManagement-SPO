@@ -22,7 +22,9 @@ export function getSession() {
   const pgStore = connectPg(session);
   const sessionStore = new pgStore({
     conString: process.env.DATABASE_URL,
-    createTableIfMissing: false,
+    // Create the sessions table on demand so a fresh database does not crash
+    // the app on startup.
+    createTableIfMissing: true,
     ttl: sessionTtl,
     tableName: "sessions",
   });
@@ -30,7 +32,10 @@ export function getSession() {
     secret: process.env.SESSION_SECRET!,
     store: sessionStore,
     resave: false,
-    saveUninitialized: true,
+    // Do not persist a session row for anonymous visitors. The OIDC login flow
+    // still works: passport writes state into the session, which marks it
+    // dirty and causes it to be saved.
+    saveUninitialized: false,
     cookie: {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
