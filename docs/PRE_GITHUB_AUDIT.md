@@ -3,6 +3,20 @@
 **Audit date:** July 29, 2026  
 **Auditor:** Replit Agent (read-only, no code changes made)
 
+> ## ⚠️ Status: mostly resolved — kept only until the last findings close
+>
+> **Reviewed July 30, 2026.** This audit was written *before* any fixes were made, and the findings below are preserved in their original wording for the record. Most are now closed. **Delete this file once the remaining ones are done.**
+>
+> **Still open**
+> - 🟡 Uploaded files do not survive an autoscale deployment — section 2
+> - 🟢 Monday.com board IDs hardcoded in source — section 1
+> - 🟢 No error boundary in the frontend — section 2
+> - 🟢 `throw err` after the error response in middleware — section 2
+>
+> **Resolved** — everything else, including both HIGH `uploads/` and `.gitignore` findings, the unauthenticated JotForm webhook, the permissions endpoint, public upload access, both session-store settings, all TypeScript errors, and the Replit-only login dependency.
+>
+> A separately discovered bug that this audit missed is tracked in `CLAUDE.md`: residents cannot see their own maintenance requests, because `submittedBy` stores an email while the filter compares against a user ID.
+
 ---
 
 ## Executive Summary
@@ -289,6 +303,3 @@ Variables required to run the app (for documentation in a future README):
 - ~~Replace Replit Auth with a portable auth provider~~ — ✅ resolved July 30, 2026 by making the provider configurable instead of replacing it
 - Migrate file uploads to cloud storage for production — **still open**, tracked as its own piece of work
 
-> **Audit status (July 30, 2026):** every HIGH and MEDIUM finding is resolved except file-upload persistence.
->
-> Still open: file-upload persistence in autoscale (MEDIUM), hardcoded Monday.com board IDs (LOW), no frontend error boundary (LOW), and `throw err` after the error response (LOW). Delete this file once those close.
