@@ -42,20 +42,22 @@ npm install
 
 ### 2. Set the environment variables
 
-Copy the template and fill it in:
+`.env.example` lists everything the app reads:
 
 ```bash
 cp .env.example .env
 ```
 
-Only two variables are genuinely required:
+> **Note:** the app does **not** read a `.env` file automatically — there is no `dotenv` in the project. On Replit, values come from the Secrets pane. Elsewhere, export them in your shell or have your host inject them (`set -a && . ./.env && set +a` works for local use).
+
+Three variables are required before the app will start:
 
 | Variable | Required | What it is |
 |---|---|---|
 | `DATABASE_URL` | **Yes** | PostgreSQL connection string |
 | `SESSION_SECRET` | **Yes** | A long random string used to sign session cookies |
-| `REPL_ID` | On Replit | Auto-provided by Replit. Used as the login client ID unless `OIDC_CLIENT_ID` is set |
-| `OIDC_ISSUER_URL` | No | Identity provider discovery root. Defaults to `https://replit.com/oidc` |
+| `OIDC_CLIENT_ID` *or* `REPL_ID` | **Yes** | Login client ID. On Replit `REPL_ID` is provided automatically; anywhere else set `OIDC_CLIENT_ID` or startup fails |
+| `OIDC_ISSUER_URL` | No | Identity provider discovery root. Defaults to `https://replit.com/oidc`. `ISSUER_URL` is accepted as an older alias |
 | `OIDC_CLIENT_ID` | No | Client ID from your identity provider. Overrides `REPL_ID` |
 | `OIDC_CLIENT_SECRET` | No | Client secret, if your provider issues one |
 | `OIDC_PROVIDER_NAME` | No | Internal login strategy label. Defaults to `replitauth` |
@@ -68,13 +70,13 @@ Only two variables are genuinely required:
 
 Never commit a real `.env` — it is gitignored.
 
-### 3. Create the database tables — do this before the first start
-
-The app stores sessions in PostgreSQL, so the schema has to exist before it can serve a request:
+### 3. Create the database tables
 
 ```bash
 npm run db:push
 ```
+
+The session table creates itself on first start, but every application table comes from this command, so run it before signing in.
 
 ### 4. Start it
 
@@ -146,6 +148,8 @@ Autoscale rebuilds the container on every publish and may run several instances 
 
 - **Uploaded files do not survive deployment.** Files are written to a local `uploads/` folder. On autoscale that folder is not shared between instances and is wiped on each publish, so uploads are lost. Moving to cloud storage is planned.
 - **Residents see an empty list on "My Requests".** Requests are saved with the submitter's email address, but the resident view looks them up by account ID, so the two never match. Staff pages are unaffected.
+- **Vendor contacts linked to a maintenance request are visible to any signed-in user**, including residents, if they know the request's ID. That one endpoint is missing its permission check.
+- **Admins with no permissions row are locked out of the maintenance pages.** Every other section lets admins through automatically; maintenance does not.
 - **The JotForm webhook is turned off** until `JOTFORM_WEBHOOK_SECRET` is set. It returns 503 rather than accepting unauthenticated submissions.
 - **No error boundary in the frontend**, so an unexpected display error shows a blank page rather than a message.
 

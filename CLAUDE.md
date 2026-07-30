@@ -86,11 +86,13 @@ Defined in `shared/schema.ts` using Drizzle, with Zod insert schemas generated b
 
 ## Authorization model
 
-This is the part that is easiest to get wrong. There are three layers, and **all three** apply:
+This is the part that is easiest to get wrong. Three layers are *intended* to apply to every data route:
 
 1. **Authenticated** — `isAuthenticated` middleware on the route.
 2. **Active** — `currentUser.isActive` must be true.
 3. **Permitted** — either the user is an admin, or their `user_permissions` row grants the relevant flag.
+
+**The codebase does not apply this uniformly — do not assume a route is protected because its neighbours are.** Two known gaps, both listed under open issues below: `GET /api/maintenance-requests/:id/contacts` has no check beyond `isAuthenticated`, and the maintenance-request routes check permissions *without* the admin bypass. Roughly 22 of the ~54 handlers compute `isAdmin`. New code should follow the pattern below regardless.
 
 ### The admin bypass pattern
 
@@ -183,9 +185,11 @@ Reading files back goes through `GET /uploads/:filename`, which is **authenticat
 
 1. **Uploads do not survive deployment.** The deployment target is autoscale, so containers are rebuilt on every publish and multiple instances can run at once. Files written to local `uploads/` are not shared between instances and are lost on publish. Cloud storage is the planned fix.
 2. **Residents cannot see their own maintenance requests.** `submittedBy` is written as the user's *email* when a request is created, but `GET /api/maintenance-requests` filters residents' own requests with `r.submittedBy === userId`, where `userId` is the identity provider's subject ID. These never match. Verified against the database: all existing requests store an email and none matches a user ID, so every resident currently sees an empty list. The JotForm webhook also writes an email into this field. Fixing it means picking one identity for the column and migrating the existing rows.
-3. **No frontend error boundary.** Any render error blanks the whole page.
-4. **`throw err` after responding** in the `index.ts` error handler can take the process down.
-5. **Monday.com board IDs are hardcoded** in source rather than configured.
+3. **`GET /api/maintenance-requests/:id/contacts` is not authorized.** It runs behind `isAuthenticated` only — no active-user, role, permission, ownership or region check — so any signed-in user, including a resident, can read the vendor contacts linked to any request if they know its ID.
+4. **The maintenance-request routes omit the admin bypass.** They gate on the permissions row alone, so an admin without a `user_permissions` row gets a 403 on the maintenance pages even though every other module lets them through.
+5. **No frontend error boundary.** Any render error blanks the whole page.
+6. **`throw err` after responding** in the `index.ts` error handler can take the process down.
+7. **Monday.com board IDs are hardcoded** in source rather than configured.
 
 `docs/PRE_GITHUB_AUDIT.md` tracks these with full detail and marks what has already been fixed.
 
