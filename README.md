@@ -123,10 +123,10 @@ server/                 Express backend
   storage.ts            All database access, behind one interface
   db.ts                 Drizzle + Neon connection
   monday.ts             Monday.com integration
+  objectStorage.ts      Replit App Storage — where uploaded files are kept
   vite.ts               Dev server / static file wiring
 shared/
   schema.ts             Drizzle tables and Zod types — the source of truth
-                        (uploaded files live in App Storage, not on disk)
 docs/                   Additional documentation
 ```
 

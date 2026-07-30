@@ -1439,14 +1439,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.setHeader("Content-Type", contentTypeFor(requested));
 
     const stream = openUploadStream(requested);
+
+    // If the client disconnects part way through, stop pulling bytes out of
+    // the bucket instead of leaving the download running.
+    res.on("close", () => stream.destroy());
+
     stream.on("error", (error) => {
       console.error("Error streaming uploaded file:", error);
-      if (!res.headersSent) {
-        res.status(500).json({ message: "Failed to load file" });
-      } else {
+      // Detach first, so no further bytes can race the response below.
+      stream.unpipe(res);
+      if (res.headersSent) {
+        // Part of the file has already gone out, so the only honest signal
+        // left is to break the connection rather than end it normally and
+        // let the client treat a truncated file as complete.
         res.destroy();
+      } else {
+        res.status(500).json({ message: "Failed to load file" });
       }
     });
+
     stream.pipe(res);
   });
 
