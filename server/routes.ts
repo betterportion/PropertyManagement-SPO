@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { setupAuth, isAuthenticated } from "./replitAuth";
+import { setupAuth, isAuthenticated, getUserId } from "./auth";
 import { z } from "zod";
 import multer from "multer";
 import { createMondayItem, updateMondayItem } from "./monday";
@@ -103,7 +103,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get('/api/auth/user', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = getUserId(req);
       const user = await storage.getUser(userId);
       if (!user) {
         return res.status(404).json({ message: "User not found" });
@@ -118,7 +118,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get('/api/users', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = getUserId(req);
       const currentUser = await storage.getUser(userId);
       if (currentUser?.role !== "admin") {
         return res.status(403).json({ message: "Forbidden" });
@@ -133,7 +133,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch('/api/users/:id/role', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = getUserId(req);
       const currentUser = await storage.getUser(userId);
       if (currentUser?.role !== "admin") {
         return res.status(403).json({ message: "Forbidden" });
@@ -149,7 +149,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch('/api/users/:id/status', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = getUserId(req);
       const currentUser = await storage.getUser(userId);
       if (currentUser?.role !== "admin") {
         return res.status(403).json({ message: "Forbidden" });
@@ -166,7 +166,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get('/api/users/:id/permissions', isAuthenticated, async (req: any, res) => {
     try {
       // A user may read only their own permissions. Admins may read anyone's.
-      const userId = req.user.claims.sub;
+      const userId = getUserId(req);
       const currentUser = await storage.getUser(userId);
       const isAdmin = currentUser?.role === "admin";
       if (!isAdmin && req.params.id !== userId) {
@@ -185,7 +185,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch('/api/users/:id/permissions', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = getUserId(req);
       const currentUser = await storage.getUser(userId);
       if (currentUser?.role !== "admin") {
         return res.status(403).json({ message: "Forbidden" });
@@ -207,7 +207,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post('/api/users', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = getUserId(req);
       const currentUser = await storage.getUser(userId);
       if (currentUser?.role !== "admin") {
         return res.status(403).json({ message: "Forbidden" });
@@ -226,7 +226,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.delete('/api/users/:id', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = getUserId(req);
       const currentUser = await storage.getUser(userId);
       if (currentUser?.role !== "admin") {
         return res.status(403).json({ message: "Forbidden" });
@@ -242,7 +242,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Maintenance Requests Routes
   app.get('/api/maintenance-requests', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = getUserId(req);
       const currentUser = await storage.getUser(userId);
       const permissions = await storage.getUserPermissions(userId);
       
@@ -270,7 +270,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get('/api/maintenance-requests/:id', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = getUserId(req);
       const currentUser = await storage.getUser(userId);
       const permissions = await storage.getUserPermissions(userId);
       
@@ -298,7 +298,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post('/api/maintenance-requests', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = getUserId(req);
       const currentUser = await storage.getUser(userId);
       const permissions = await storage.getUserPermissions(userId);
       
@@ -342,7 +342,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch('/api/maintenance-requests/:id', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = getUserId(req);
       const currentUser = await storage.getUser(userId);
       const permissions = await storage.getUserPermissions(userId);
       
@@ -388,7 +388,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.delete('/api/maintenance-requests/:id', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = getUserId(req);
       const currentUser = await storage.getUser(userId);
       const permissions = await storage.getUserPermissions(userId);
       
@@ -426,7 +426,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post('/api/maintenance-requests/:id/contacts/:contactId', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = getUserId(req);
       const currentUser = await storage.getUser(userId);
       if (!currentUser?.isActive || currentUser.role === "resident") {
         return res.status(403).json({ message: "Forbidden" });
@@ -441,7 +441,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.delete('/api/maintenance-requests/:id/contacts/:contactId', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = getUserId(req);
       const currentUser = await storage.getUser(userId);
       if (!currentUser?.isActive || currentUser.role === "resident") {
         return res.status(403).json({ message: "Forbidden" });
@@ -457,7 +457,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Walkthrough Rooms Routes
   app.get('/api/walkthrough-rooms', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = getUserId(req);
       const currentUser = await storage.getUser(userId);
       const permissions = await storage.getUserPermissions(userId);
       
@@ -483,7 +483,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post('/api/walkthrough-rooms', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = getUserId(req);
       const currentUser = await storage.getUser(userId);
       const permissions = await storage.getUserPermissions(userId);
       
@@ -510,7 +510,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch('/api/walkthrough-rooms/:id', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = getUserId(req);
       const currentUser = await storage.getUser(userId);
       const permissions = await storage.getUserPermissions(userId);
       
@@ -549,7 +549,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.delete('/api/walkthrough-rooms/:id', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = getUserId(req);
       const currentUser = await storage.getUser(userId);
       const permissions = await storage.getUserPermissions(userId);
       
@@ -580,7 +580,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Walkthrough Photos Routes
   app.get('/api/walkthrough-photos', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = getUserId(req);
       const currentUser = await storage.getUser(userId);
       const permissions = await storage.getUserPermissions(userId);
       
@@ -601,7 +601,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get('/api/walkthrough-photos/room/:roomId', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = getUserId(req);
       const currentUser = await storage.getUser(userId);
       const permissions = await storage.getUserPermissions(userId);
       
@@ -622,7 +622,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post('/api/walkthrough-photos', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = getUserId(req);
       const currentUser = await storage.getUser(userId);
       const permissions = await storage.getUserPermissions(userId);
       
@@ -646,7 +646,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch('/api/walkthrough-photos/:id', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = getUserId(req);
       const currentUser = await storage.getUser(userId);
       const permissions = await storage.getUserPermissions(userId);
       
@@ -681,7 +681,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.delete('/api/walkthrough-photos/:id', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = getUserId(req);
       const currentUser = await storage.getUser(userId);
       const permissions = await storage.getUserPermissions(userId);
       
@@ -709,7 +709,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Assets Routes
   app.get('/api/assets', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = getUserId(req);
       const currentUser = await storage.getUser(userId);
       const permissions = await storage.getUserPermissions(userId);
       
@@ -730,7 +730,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post('/api/assets', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = getUserId(req);
       const currentUser = await storage.getUser(userId);
       const permissions = await storage.getUserPermissions(userId);
       
@@ -754,7 +754,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch('/api/assets/:id', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = getUserId(req);
       const currentUser = await storage.getUser(userId);
       const permissions = await storage.getUserPermissions(userId);
       
@@ -789,7 +789,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.delete('/api/assets/:id', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = getUserId(req);
       const currentUser = await storage.getUser(userId);
       const permissions = await storage.getUserPermissions(userId);
       
@@ -858,7 +858,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Asset Photos Routes
   app.get('/api/asset-photos', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = getUserId(req);
       const currentUser = await storage.getUser(userId);
       const permissions = await storage.getUserPermissions(userId);
       
@@ -884,7 +884,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get('/api/asset-photos/asset/:assetId', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = getUserId(req);
       const currentUser = await storage.getUser(userId);
       const permissions = await storage.getUserPermissions(userId);
       
@@ -913,7 +913,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post('/api/asset-photos', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = getUserId(req);
       const currentUser = await storage.getUser(userId);
       const permissions = await storage.getUserPermissions(userId);
       
@@ -938,7 +938,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.delete('/api/asset-photos/:id', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = getUserId(req);
       const currentUser = await storage.getUser(userId);
       const permissions = await storage.getUserPermissions(userId);
       
@@ -967,7 +967,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Maintenance Contacts Routes
   app.get('/api/contacts', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = getUserId(req);
       const currentUser = await storage.getUser(userId);
       const permissions = await storage.getUserPermissions(userId);
       const isAdmin = currentUser?.role === "admin";
@@ -988,7 +988,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post('/api/contacts', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = getUserId(req);
       const currentUser = await storage.getUser(userId);
       const permissions = await storage.getUserPermissions(userId);
       const isAdmin = currentUser?.role === "admin";
@@ -1013,7 +1013,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch('/api/contacts/:id', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = getUserId(req);
       const currentUser = await storage.getUser(userId);
       const permissions = await storage.getUserPermissions(userId);
       const isAdmin = currentUser?.role === "admin";
@@ -1049,7 +1049,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.delete('/api/contacts/:id', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = getUserId(req);
       const currentUser = await storage.getUser(userId);
       const permissions = await storage.getUserPermissions(userId);
       const isAdmin = currentUser?.role === "admin";
@@ -1078,7 +1078,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Invoices Routes
   app.get('/api/invoices', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = getUserId(req);
       const currentUser = await storage.getUser(userId);
       const permissions = await storage.getUserPermissions(userId);
       
@@ -1099,7 +1099,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post('/api/invoices', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = getUserId(req);
       const currentUser = await storage.getUser(userId);
       const permissions = await storage.getUserPermissions(userId);
       
@@ -1123,7 +1123,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch('/api/invoices/:id', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = getUserId(req);
       const currentUser = await storage.getUser(userId);
       const permissions = await storage.getUserPermissions(userId);
       
@@ -1158,7 +1158,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.delete('/api/invoices/:id', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = getUserId(req);
       const currentUser = await storage.getUser(userId);
       const permissions = await storage.getUserPermissions(userId);
       
@@ -1186,7 +1186,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Billing Records Routes
   app.get('/api/billing', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = getUserId(req);
       const currentUser = await storage.getUser(userId);
       const permissions = await storage.getUserPermissions(userId);
       const isAdmin = currentUser?.role === "admin";
@@ -1205,7 +1205,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post('/api/billing', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = getUserId(req);
       const currentUser = await storage.getUser(userId);
       const permissions = await storage.getUserPermissions(userId);
       const isAdmin = currentUser?.role === "admin";
@@ -1241,7 +1241,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch('/api/billing/:id', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = getUserId(req);
       const currentUser = await storage.getUser(userId);
       const permissions = await storage.getUserPermissions(userId);
       const isAdmin = currentUser?.role === "admin";
@@ -1266,7 +1266,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.delete('/api/billing/:id', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = getUserId(req);
       const currentUser = await storage.getUser(userId);
       const permissions = await storage.getUserPermissions(userId);
       const isAdmin = currentUser?.role === "admin";
@@ -1291,7 +1291,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Properties Routes
   app.get('/api/properties', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = getUserId(req);
       const currentUser = await storage.getUser(userId);
       const permissions = await storage.getUserPermissions(userId);
       const isAdmin = currentUser?.role === "admin";
@@ -1312,7 +1312,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post('/api/properties', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = getUserId(req);
       const currentUser = await storage.getUser(userId);
       const permissions = await storage.getUserPermissions(userId);
       const isAdmin = currentUser?.role === "admin";
@@ -1342,7 +1342,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch('/api/properties/:id', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = getUserId(req);
       const currentUser = await storage.getUser(userId);
       const permissions = await storage.getUserPermissions(userId);
       const isAdmin = currentUser?.role === "admin";
@@ -1388,7 +1388,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.delete('/api/properties/:id', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = getUserId(req);
       const currentUser = await storage.getUser(userId);
       const permissions = await storage.getUserPermissions(userId);
       const isAdmin = currentUser?.role === "admin";
@@ -1567,7 +1567,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Return current webhook config info (admin + regional_administrator)
   app.get('/api/webhooks/jotform/config', isAuthenticated, async (req: any, res) => {
     try {
-      const currentUser = await storage.getUser(req.user.claims.sub);
+      const currentUser = await storage.getUser(getUserId(req));
       if (currentUser?.role !== 'admin' && currentUser?.role !== 'regional_administrator') {
         return res.status(403).json({ message: 'Admin or regional administrator only' });
       }

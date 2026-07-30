@@ -18,8 +18,13 @@ npm install
 |---|---|---|
 | `DATABASE_URL` | **Yes** | PostgreSQL connection string (Neon serverless) |
 | `SESSION_SECRET` | **Yes** | Long random string used to sign session cookies |
-| `REPL_ID` | On Replit only | Auto-provided by Replit; used as the OIDC client ID |
-| `ISSUER_URL` | No | Defaults to `https://replit.com/oidc` |
+| `REPL_ID` | On Replit only | Auto-provided by Replit; used as the OIDC client ID unless `OIDC_CLIENT_ID` is set |
+| `OIDC_ISSUER_URL` | No | Identity provider discovery root. Defaults to `https://replit.com/oidc` |
+| `OIDC_CLIENT_ID` | No | Client ID from your identity provider. Overrides `REPL_ID` |
+| `OIDC_CLIENT_SECRET` | No | Client secret, if your provider issues one. Replit does not use one |
+| `OIDC_PROVIDER_NAME` | No | Internal login strategy prefix only; defaults to `replitauth` |
+| `OIDC_SCOPES` | No | Space-separated scopes; defaults to `openid email profile offline_access` |
+| `ISSUER_URL` | No | Legacy alias for `OIDC_ISSUER_URL`; still honoured |
 | `MONDAY_API_KEY` | No | Monday.com sync; the feature is silently skipped if unset |
 | `JOTFORM_WEBHOOK_SECRET` | Recommended | Shared secret for the JotForm webhook endpoint |
 | `JOTFORM_FIELD_*` | No | JotForm field ID mappings (TITLE, DESCRIPTION, CATEGORY, PRIORITY, LOCATION, EMAIL, REGION, BUILDING) |
@@ -38,8 +43,45 @@ npm run dev
 ```
 
 ### Notes for running outside Replit
-- Authentication uses **Replit OIDC** and depends on `REPL_ID`. It will not work outside Replit without being replaced by another provider (Clerk, Auth0, etc.).
+- Authentication is standard OpenID Connect and is configurable — see "Swapping the identity provider" below. It defaults to Replit Auth, which requires `REPL_ID`.
 - Uploaded files are written to a local `uploads/` folder. This folder is intentionally not tracked in git, and it does not survive container restarts in autoscale deployments. Cloud storage is required before relying on uploads in production.
+
+## Swapping the identity provider
+
+Login is standard OpenID Connect, and every provider-specific detail lives in one file: `server/auth.ts`. Nothing else in the server knows which provider is in use — route handlers call `getUserId(req)` and never read provider claims directly.
+
+### What to configure
+Point the app at a different provider by setting these. No code changes are required.
+
+| Variable | Example |
+|---|---|
+| `OIDC_ISSUER_URL` | `https://your-tenant.auth0.com` |
+| `OIDC_CLIENT_ID` | The client ID issued by the provider |
+| `OIDC_CLIENT_SECRET` | The client secret, if the provider issues one |
+| `OIDC_PROVIDER_NAME` | Any short label, e.g. `auth0` |
+
+Then register `https://your-domain/api/callback` as an allowed redirect URI with the new provider, and `https://your-domain` as an allowed logout redirect.
+
+### What already works with any provider
+- **Claim names**: standard OIDC `given_name`, `family_name`, and `picture` are read when Replit's `first_name`, `last_name`, and `profile_image_url` are absent.
+- **Logout**: providers that do not advertise an end-session endpoint are handled — the local session is cleared and the user returns to the home page instead of hitting an error.
+- **Callback URL**: follows the protocol of the incoming request, so an `http://localhost` checkout can complete the login round trip.
+
+### Important: what happens to existing accounts
+User records are keyed on the provider's subject identifier (`sub`), so switching providers issues **new IDs for the same people**. The app already handles this: `upsertUser` in `server/storage.ts` detects a sign-in whose email matches an existing account under a different ID and migrates that account, preserving its role, active status, and permissions.
+
+The practical migration path is therefore:
+1. Confirm every user has the correct email address on their account **before** the switch.
+2. Change the `OIDC_*` variables.
+3. Have each user sign in once — their account re-links by email automatically.
+
+Anyone whose record has no email, or who signs in with a different email than the one stored, arrives as a brand-new account with default resident permissions and has to be re-granted access by an admin.
+
+## Recent Changes (July 30, 2026)
+- **Portable Login**: Authentication is no longer hard-wired to Replit. The issuer, client ID and secret, scopes, and strategy naming all moved into configuration inside `server/auth.ts`, defaulting to the current Replit values so sign-in behaviour is unchanged. `server/replitAuth.ts` was renamed to `server/auth.ts` because it is no longer provider-specific
+- **Single User Accessor**: The 49 route handlers that read `req.user.claims.sub` directly now call `getUserId(req)`, so the shape of provider data is referenced in exactly one place
+- **Provider-Agnostic Behaviour**: Standard OIDC claim names are accepted alongside Replit's; logout tolerates providers without an end-session endpoint; the callback URL follows the request protocol
+- **Docs**: Added the "Swapping the identity provider" section above, including what happens to existing accounts during a real switch
 
 ## Recent Changes (July 29, 2026)
 - **Pre-Push Repo Cleanup**: Removed user-uploaded files and chat screenshots from git tracking (files remain on disk); expanded `.gitignore` to cover `uploads/`, `.env*`, `.cache/`, `.local/`, `.agents/`, and `attached_assets/`. The SPO logo is explicitly kept tracked because it is imported via the `@assets` alias by the sidebar and landing page
@@ -126,7 +168,7 @@ Preferred communication style: Simple, everyday language.
 ### Backend Architecture
 - **Server Framework**: Express.js on Node.js with TypeScript, ESM module system.
 - **API Design**: RESTful API under `/api`, session-based authentication, JSON format, centralized error handling.
-- **Authentication & Authorization**: OpenID Connect (OIDC) with Replit Auth, Passport.js, express-session with PostgreSQL store, role-based access control (admin, regional_administrator, resident), fine-grained database-stored permissions.
+- **Authentication & Authorization**: Standard OpenID Connect via Passport.js, configured through `OIDC_*` environment variables and defaulting to Replit Auth (see "Swapping the identity provider"). Express-session with a PostgreSQL store, role-based access control (admin, regional_administrator, resident), fine-grained database-stored permissions. Route handlers resolve the signed-in user only through `getUserId(req)` from `server/auth.ts`.
 - **Database Layer**: Drizzle ORM for type-safe operations, PostgreSQL (Neon serverless driver), schema-first approach, Drizzle Kit for migrations.
 
 ### Data Storage Solutions

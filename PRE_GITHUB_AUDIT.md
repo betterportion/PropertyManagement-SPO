@@ -70,7 +70,7 @@ The project is a React + Express + Neon PostgreSQL property-management portal wi
 ---
 
 ### 🟢 LOW — Sessions created for unauthenticated visitors
-**File:** `server/replitAuth.ts`, line 33  
+**File:** `server/auth.ts` (was `server/replitAuth.ts`)  
 **What:** `saveUninitialized: true` causes the session store to save a new session for every request, including unauthenticated ones.  
 **Why it matters:** Over time this will grow the `sessions` table with rows for every anonymous visitor. In a low-traffic admin portal this is minor, but it wastes database space.  
 **Recommended fix:** Change to `saveUninitialized: false`.
@@ -116,7 +116,7 @@ Invoices.tsx(106,57): error TS2339 — Property 'region' does not exist
 ---
 
 ### 🟡 MEDIUM — Session store `createTableIfMissing: false` could crash on startup
-**File:** `server/replitAuth.ts`, line 26  
+**File:** `server/auth.ts` (was `server/replitAuth.ts`)  
 **What:** The PostgreSQL session store is configured with `createTableIfMissing: false`. If the `sessions` table doesn't exist (e.g., fresh database, new environment), the app will crash at startup.  
 **Why it matters:** On a fresh clone with a new database, the app won't start until the sessions table is manually created.  
 **Recommended fix:** Change to `createTableIfMissing: true`, or add a note in the README that `npm run db:push` must be run first.
@@ -194,11 +194,13 @@ Invoices.tsx(106,57): error TS2339 — Property 'region' does not exist
 
 ### Required to change before running outside Replit
 
+✅ **All items in this section were resolved on July 30, 2026.** Authentication was made provider-agnostic rather than replaced, so nothing here blocks running outside Replit any more.
+
 | Item | File(s) | Notes |
 |---|---|---|
-| **Replit OIDC Auth** | `server/replitAuth.ts` | Entire auth system uses `REPL_ID` and `https://replit.com/oidc`. Will not work outside Replit. Must be replaced with Clerk, Auth0, NextAuth, etc. |
-| `REPL_ID` env var | `server/replitAuth.ts` lines 14, 123 | Auto-provided by Replit; does not exist elsewhere |
-| `ISSUER_URL` env var | `server/replitAuth.ts` line 13 | Defaults to `https://replit.com/oidc` — Replit-specific OIDC endpoint |
+| ~~**Replit OIDC Auth**~~ | `server/auth.ts` | ✅ **RESOLVED** — auth is standard OIDC driven by `OIDC_*` environment variables, defaulting to Replit. Changing provider is configuration only. See "Swapping the identity provider" in `replit.md` |
+| ~~`REPL_ID` env var~~ | `server/auth.ts` | ✅ **RESOLVED** — still the default client ID on Replit, but `OIDC_CLIENT_ID` overrides it |
+| ~~`ISSUER_URL` env var~~ | `server/auth.ts` | ✅ **RESOLVED** — superseded by `OIDC_ISSUER_URL`; the old name is still honoured |
 
 ### Safe to leave but Replit-specific
 
@@ -262,7 +264,7 @@ Variables required to run the app (for documentation in a future README):
 | 8 | **Change `createTableIfMissing: true`** in session store config | 2 min |
 | 9 | **Add a note to README** about needing `npm run db:push` on a fresh install | 5 min |
 | 10 | Protect `/uploads` route behind `isAuthenticated` middleware | 30 min |
-| 11 | Plan migration from Replit Auth to an auth provider that works outside Replit (Clerk, Auth0) | Major — plan separately |
+| 11 | ✅ **RESOLVED (July 30, 2026)** — Replit Auth was made swappable rather than replaced. Provider details are now `OIDC_*` configuration in `server/auth.ts`, and all 49 route handlers read the signed-in user through `getUserId(req)` | Done |
 | 12 | Plan migration of file uploads from local disk to cloud storage before autoscale production deployment | Major — plan separately |
 
 ---
@@ -284,5 +286,9 @@ Variables required to run the app (for documentation in a future README):
 - Session config tweaks (items 7–8)
 
 **Plan for later (significant work):**
-- Replace Replit Auth with a portable auth provider
-- Migrate file uploads to cloud storage for production
+- ~~Replace Replit Auth with a portable auth provider~~ — ✅ resolved July 30, 2026 by making the provider configurable instead of replacing it
+- Migrate file uploads to cloud storage for production — **still open**, tracked as its own piece of work
+
+> **Audit status (July 30, 2026):** every HIGH and MEDIUM finding is resolved except file-upload persistence.
+>
+> Still open: file-upload persistence in autoscale (MEDIUM), hardcoded Monday.com board IDs (LOW), no frontend error boundary (LOW), and `throw err` after the error response (LOW). Delete this file once those close.

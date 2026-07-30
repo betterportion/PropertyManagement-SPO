@@ -170,7 +170,7 @@ export default function RoomDetailDrawer({ room, open, onOpenChange, canManage }
       region: getRegionForRoom(),
       buildingAddress: room.buildingAddress,
       location: location || room.name,
-      uploadedBy: typedUser?.email || typedUser?.claims?.email || "",
+      uploadedBy: typedUser?.email || "",
     });
   };
 
