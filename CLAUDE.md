@@ -161,7 +161,9 @@ Two endpoints, both behind `isAuthenticated`, both buffering the file in memory 
 
 Both generate the stored filename server-side — the client's filename is only used for its extension — and both return `{ url: "/uploads/<filename>" }`.
 
-Objects are keyed as `uploads/<filename>`, deliberately mirroring the URL path, so the URLs already saved in the database keep working without a migration.
+Objects are keyed as `uploads/<filename>`, deliberately mirroring the URL path, so the URLs already saved in the database keep resolving unchanged.
+
+The files that predate this were copied into the bucket by `scripts/migrate-uploads-to-object-storage.mjs`, which is idempotent, verifies each file byte for byte, and leaves the local copies alone. Re-run it if local `uploads/` files ever reappear (for example when restoring a backup).
 
 Reading files back goes through `GET /uploads/:filename`, which is **authenticated** — it is not `express.static`. It rejects anything that is not a bare filename, checks the object exists, streams it out of the bucket, and sets `Cache-Control: private` so authenticated content stays out of shared caches. Because object storage carries no content type, the response type is derived from the extension in `contentTypeFor()`. If you add another way to serve uploads, it must keep all of those properties.
 

@@ -127,6 +127,7 @@ server/                 Express backend
   vite.ts               Dev server / static file wiring
 shared/
   schema.ts             Drizzle tables and Zod types — the source of truth
+scripts/                One-off maintenance scripts
 docs/                   Additional documentation
 ```
 
@@ -143,6 +144,8 @@ The app is deployed on Replit using **autoscale**:
 - Port 5000 internally, exposed on port 80
 
 Autoscale rebuilds the container on every publish and may run several instances at once. Uploaded files are kept in App Storage rather than on the container, so they are unaffected by this.
+
+Files that were uploaded before the move to App Storage were copied across with `node scripts/migrate-uploads-to-object-storage.mjs`. That script is safe to re-run — it verifies every file arrives byte for byte and never deletes the local copies.
 
 ---
 
