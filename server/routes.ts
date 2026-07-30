@@ -6,8 +6,14 @@ import { z } from "zod";
 import multer from "multer";
 import { createMondayItem, updateMondayItem } from "./monday";
 import path from "path";
-import fs from "fs";
 import crypto from "crypto";
+import {
+  generateUploadFilename,
+  putUpload,
+  uploadExists,
+  openUploadStream,
+  contentTypeFor,
+} from "./objectStorage";
 import {
   insertMaintenanceRequestSchema,
   insertWalkthroughRoomSchema,
@@ -22,20 +28,10 @@ import {
   type InsertPropertyWithAddress,
 } from "@shared/schema";
 
-const uploadDir = path.join(process.cwd(), "uploads");
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-}
-
-const fileStorage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, uploadDir);
-  },
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-    cb(null, uniqueSuffix + path.extname(file.originalname));
-  },
-});
+// Uploads are buffered in memory only long enough to be written to App Storage.
+// Nothing is written to the container filesystem, because autoscale rebuilds it
+// on every publish and runs more than one instance. See server/objectStorage.ts.
+const fileStorage = multer.memoryStorage();
 
 const upload = multer({
   storage: fileStorage,
@@ -820,8 +816,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!req.file) {
         return res.status(400).json({ message: "No file uploaded" });
       }
-      const fileUrl = `/uploads/${req.file.filename}`;
-      res.json({ url: fileUrl, filename: req.file.filename });
+      const filename = generateUploadFilename(req.file.originalname);
+      await putUpload(filename, req.file.buffer);
+      res.json({ url: `/uploads/${filename}`, filename });
     } catch (error) {
       console.error("Error uploading file:", error);
       res.status(500).json({ message: "Failed to upload file" });
@@ -847,8 +844,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!req.file) {
         return res.status(400).json({ message: "No file uploaded" });
       }
-      const fileUrl = `/uploads/${req.file.filename}`;
-      res.json({ url: fileUrl, filename: req.file.filename, originalName: req.file.originalname });
+      const filename = generateUploadFilename(req.file.originalname);
+      await putUpload(filename, req.file.buffer);
+      res.json({ url: `/uploads/${filename}`, filename, originalName: req.file.originalname });
     } catch (error) {
       console.error("Error uploading document:", error);
       res.status(500).json({ message: "Failed to upload document" });
@@ -1418,27 +1416,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Requires a valid session. These files include maintenance and walkthrough
   // photos as well as W-9s, COIs and contract invoices, so they must never be
   // downloadable by an anonymous visitor who guesses a filename.
-  app.get('/uploads/:filename', isAuthenticated, (req, res) => {
+  app.get('/uploads/:filename', isAuthenticated, async (req, res) => {
     const requested = req.params.filename;
 
-    // Reject anything that is not a bare filename, so a crafted path cannot
-    // escape the uploads directory.
-    if (requested !== path.basename(requested)) {
+    // Reject anything that is not a bare filename, so a crafted key cannot
+    // reach outside the uploads prefix in the bucket.
+    if (!requested || requested !== path.basename(requested) || requested.startsWith(".")) {
       return res.status(400).json({ message: "Invalid filename" });
     }
 
-    const resolved = path.resolve(uploadDir, requested);
-    if (!resolved.startsWith(path.resolve(uploadDir) + path.sep)) {
-      return res.status(400).json({ message: "Invalid filename" });
-    }
-
-    if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) {
-      return res.status(404).json({ message: "File not found" });
+    try {
+      if (!(await uploadExists(requested))) {
+        return res.status(404).json({ message: "File not found" });
+      }
+    } catch (error) {
+      console.error("Error checking uploaded file:", error);
+      return res.status(500).json({ message: "Failed to load file" });
     }
 
     // "private" keeps authenticated content out of shared/proxy caches.
     res.setHeader("Cache-Control", "private, max-age=3600");
-    res.sendFile(resolved);
+    res.setHeader("Content-Type", contentTypeFor(requested));
+
+    const stream = openUploadStream(requested);
+    stream.on("error", (error) => {
+      console.error("Error streaming uploaded file:", error);
+      if (!res.headersSent) {
+        res.status(500).json({ message: "Failed to load file" });
+      } else {
+        res.destroy();
+      }
+    });
+    stream.pipe(res);
   });
 
   // ─── JotForm Webhook ───────────────────────────────────────────────────────

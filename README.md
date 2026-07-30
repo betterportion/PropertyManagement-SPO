@@ -28,6 +28,8 @@ On top of the role, each user has a row of fine-grained permissions (view/manage
 
 **Database** — PostgreSQL (Neon serverless driver) with Drizzle ORM and Drizzle Kit. The schema is the single source of truth and lives in `shared/schema.ts`.
 
+**File storage** — Replit App Storage (object storage backed by Google Cloud Storage) holds uploaded photos and documents, so they survive restarts and publishes.
+
 **Integrations** — Monday.com (maintenance requests sync to regional boards) and JotForm (a webhook turns form submissions into maintenance requests). Both are optional.
 
 ---
@@ -124,7 +126,7 @@ server/                 Express backend
   vite.ts               Dev server / static file wiring
 shared/
   schema.ts             Drizzle tables and Zod types — the source of truth
-uploads/                User-uploaded files (gitignored, local disk only)
+                        (uploaded files live in App Storage, not on disk)
 docs/                   Additional documentation
 ```
 
@@ -140,13 +142,12 @@ The app is deployed on Replit using **autoscale**:
 - Run: `npm run start`
 - Port 5000 internally, exposed on port 80
 
-Autoscale rebuilds the container on every publish and may run several instances at once. See the known issue about file uploads below before relying on this in production.
+Autoscale rebuilds the container on every publish and may run several instances at once. Uploaded files are kept in App Storage rather than on the container, so they are unaffected by this.
 
 ---
 
 ## Known issues
 
-- **Uploaded files do not survive deployment.** Files are written to a local `uploads/` folder. On autoscale that folder is not shared between instances and is wiped on each publish, so uploads are lost. Moving to cloud storage is planned.
 - **Residents see an empty list on "My Requests".** Requests are saved with the submitter's email address, but the resident view looks them up by account ID, so the two never match. Staff pages are unaffected.
 - **Vendor contacts linked to a maintenance request are visible to any signed-in user**, including residents, if they know the request's ID. That one endpoint is missing its permission check.
 - **Admins with no permissions row are locked out of the maintenance pages.** Every other section lets admins through automatically; maintenance does not.

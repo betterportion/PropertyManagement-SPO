@@ -40,6 +40,7 @@ There is no test suite and no linter. `npm run check` is the only automated gate
 | `storage.ts` | Every database query, behind a single `IStorage` interface exported as `storage`. |
 | `db.ts` | Drizzle + Neon connection pool. Throws at import time if `DATABASE_URL` is missing. |
 | `monday.ts` | Monday.com integration. |
+| `objectStorage.ts` | Replit App Storage helpers. The only file that talks to the storage bucket. |
 | `vite.ts` | Dev middleware in development, static file serving in production. |
 
 **Route handlers never touch the database directly.** They go through `storage`. Keep it that way — it is the only reason the data layer is testable and swappable.
@@ -151,14 +152,18 @@ The full swap procedure is in `replit.md` under "Swapping the identity provider"
 
 ## File uploads
 
-Two endpoints, both behind `isAuthenticated`, both writing to a local `uploads/` folder via multer disk storage:
+Uploaded photos and documents are stored in **Replit App Storage**, not on the container filesystem. Autoscale rebuilds the container on every publish and can run several instances at once, so anything written to local disk would be lost and invisible to the other instances.
+
+Two endpoints, both behind `isAuthenticated`, both buffering the file in memory with multer and then writing it to the bucket:
 
 - `POST /api/upload` — images only (jpeg/jpg/png/gif/webp), 10 MB limit, checks both extension and MIME type.
 - `POST /api/upload-doc` — documents and images (pdf/doc/docx + image types), 20 MB limit, **checks the extension only, not the MIME type**.
 
-Both return `{ url: "/uploads/<filename>" }`.
+Both generate the stored filename server-side — the client's filename is only used for its extension — and both return `{ url: "/uploads/<filename>" }`.
 
-Reading files back goes through `GET /uploads/:filename`, which is **authenticated** — it is not `express.static`. It rejects anything that is not a bare filename, resolves the path and confirms it is still inside the upload directory, and sets `Cache-Control: private` so authenticated content stays out of shared caches. If you add another way to serve uploads, it must keep all of those properties.
+Objects are keyed as `uploads/<filename>`, deliberately mirroring the URL path, so the URLs already saved in the database keep working without a migration.
+
+Reading files back goes through `GET /uploads/:filename`, which is **authenticated** — it is not `express.static`. It rejects anything that is not a bare filename, checks the object exists, streams it out of the bucket, and sets `Cache-Control: private` so authenticated content stays out of shared caches. Because object storage carries no content type, the response type is derived from the extension in `contentTypeFor()`. If you add another way to serve uploads, it must keep all of those properties.
 
 ---
 
@@ -183,13 +188,12 @@ Reading files back goes through `GET /uploads/:filename`, which is **authenticat
 
 ## Known open issues
 
-1. **Uploads do not survive deployment.** The deployment target is autoscale, so containers are rebuilt on every publish and multiple instances can run at once. Files written to local `uploads/` are not shared between instances and are lost on publish. Cloud storage is the planned fix.
-2. **Residents cannot see their own maintenance requests.** `submittedBy` is written as the user's *email* when a request is created, but `GET /api/maintenance-requests` filters residents' own requests with `r.submittedBy === userId`, where `userId` is the identity provider's subject ID. These never match. Verified against the database: all existing requests store an email and none matches a user ID, so every resident currently sees an empty list. The JotForm webhook also writes an email into this field. Fixing it means picking one identity for the column and migrating the existing rows.
-3. **`GET /api/maintenance-requests/:id/contacts` is not authorized.** It runs behind `isAuthenticated` only — no active-user, role, permission, ownership or region check — so any signed-in user, including a resident, can read the vendor contacts linked to any request if they know its ID.
-4. **The maintenance-request routes omit the admin bypass.** They gate on the permissions row alone, so an admin without a `user_permissions` row gets a 403 on the maintenance pages even though every other module lets them through.
-5. **No frontend error boundary.** Any render error blanks the whole page.
-6. **`throw err` after responding** in the `index.ts` error handler can take the process down.
-7. **Monday.com board IDs are hardcoded** in source rather than configured.
+1. **Residents cannot see their own maintenance requests.** `submittedBy` is written as the user's *email* when a request is created, but `GET /api/maintenance-requests` filters residents' own requests with `r.submittedBy === userId`, where `userId` is the identity provider's subject ID. These never match. Verified against the database: all existing requests store an email and none matches a user ID, so every resident currently sees an empty list. The JotForm webhook also writes an email into this field. Fixing it means picking one identity for the column and migrating the existing rows.
+2. **`GET /api/maintenance-requests/:id/contacts` is not authorized.** It runs behind `isAuthenticated` only — no active-user, role, permission, ownership or region check — so any signed-in user, including a resident, can read the vendor contacts linked to any request if they know its ID.
+3. **The maintenance-request routes omit the admin bypass.** They gate on the permissions row alone, so an admin without a `user_permissions` row gets a 403 on the maintenance pages even though every other module lets them through.
+4. **No frontend error boundary.** Any render error blanks the whole page.
+5. **`throw err` after responding** in the `index.ts` error handler can take the process down.
+6. **Monday.com board IDs are hardcoded** in source rather than configured.
 
 `docs/PRE_GITHUB_AUDIT.md` tracks these with full detail and marks what has already been fixed.
 
@@ -200,7 +204,7 @@ Reading files back goes through `GET /uploads/:filename`, which is **authenticat
 **Never commit:**
 - Real secrets, API keys, tokens or connection strings. Everything comes from `process.env`; there are no hardcoded credentials in this repo and it must stay that way.
 - A real `.env` file. Update `.env.example` instead, with placeholders only.
-- Anything under `uploads/` — those are real user files.
+- Anything under `uploads/` — those are leftover local copies of real user files. Live uploads now go to App Storage.
 - Contents of `attached_assets/` except the SPO logo, which is deliberately tracked because the sidebar and landing page import it through the `@assets` alias. The `.gitignore` uses `attached_assets/*` plus a negation for exactly this reason; do not replace it with a plain directory ignore.
 
 **Always:**

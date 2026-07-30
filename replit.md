@@ -44,7 +44,7 @@ npm run dev
 
 ### Notes for running outside Replit
 - Authentication is standard OpenID Connect and is configurable — see "Swapping the identity provider" below. It defaults to Replit Auth, which requires `REPL_ID`.
-- Uploaded files are written to a local `uploads/` folder. This folder is intentionally not tracked in git, and it does not survive container restarts in autoscale deployments. Cloud storage is required before relying on uploads in production.
+- Uploaded files are stored in Replit App Storage, so they survive restarts and publishes. Running outside Replit requires replacing `server/objectStorage.ts` with an equivalent backed by your own object store.
 
 ## Swapping the identity provider
 
