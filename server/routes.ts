@@ -42,7 +42,11 @@ const fileStorage = multer.memoryStorage();
 
 const upload = multer({
   storage: fileStorage,
-  limits: { fileSize: IMAGE_UPLOAD_MAX_BYTES, files: 1 },
+  // `fields: 0` matters as much as the size limit: without it a request could
+  // carry one legal-sized file plus any number of text fields, which are also
+  // buffered in memory but would not be counted against the in-flight ceiling.
+  // The uploader only ever sends the file itself.
+  limits: { fileSize: IMAGE_UPLOAD_MAX_BYTES, files: 1, fields: 0 },
   fileFilter: (req, file, cb) => {
     const allowedTypes = /jpeg|jpg|png|gif|webp/;
     const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
@@ -835,7 +839,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Document Upload Route (PDF, images, doc files up to 20MB)
   const docUpload = multer({
     storage: fileStorage,
-    limits: { fileSize: DOCUMENT_UPLOAD_MAX_BYTES, files: 1 },
+    // See the image uploader above: one file and no extra form fields, so the
+    // request cannot exceed the reservation made for it.
+    limits: { fileSize: DOCUMENT_UPLOAD_MAX_BYTES, files: 1, fields: 0 },
     fileFilter: (req, file, cb) => {
       const ext = path.extname(file.originalname).toLowerCase().replace(".", "");
       // Each extension maps to the exact MIME type it must arrive with, so a

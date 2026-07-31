@@ -17,8 +17,10 @@ export const IMAGE_UPLOAD_MAX_BYTES = 10 * 1024 * 1024;
 export const DOCUMENT_UPLOAD_MAX_BYTES = 20 * 1024 * 1024;
 
 /**
- * Room for the multipart envelope around the file itself: boundaries, headers
- * and any accompanying form fields.
+ * Room for the multipart envelope around the file itself: the boundary lines and
+ * part headers. The upload routes accept a single part and no text fields, so
+ * nothing else can be buffered on top of the file, and this reservation really
+ * is the most a request can cost.
  */
 const REQUEST_OVERHEAD_BYTES = 1024 * 1024;
 
@@ -120,6 +122,16 @@ function withUploadErrorHandling(
         }
         if (err.code === "LIMIT_FILE_COUNT" || err.code === "LIMIT_UNEXPECTED_FILE") {
           return res.status(400).json({ message: "Please upload one file at a time." });
+        }
+        if (
+          err.code === "LIMIT_PART_COUNT" ||
+          err.code === "LIMIT_FIELD_COUNT" ||
+          err.code === "LIMIT_FIELD_KEY" ||
+          err.code === "LIMIT_FIELD_VALUE"
+        ) {
+          return res.status(400).json({
+            message: "That upload contained more than a single file. Please upload just the file.",
+          });
         }
         return res.status(400).json({ message: "That upload could not be read. Please try again." });
       }
