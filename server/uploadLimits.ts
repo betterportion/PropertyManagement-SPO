@@ -67,8 +67,18 @@ function describeSize(bytes: number): string {
 function reserveUploadCapacity(maxRequestBytes: number): RequestHandler {
   return (req, res, next) => {
     const declared = Number(req.headers["content-length"]);
+
+    // A request that announces more than this route can ever accept is turned
+    // away before a byte of it is read, rather than being charged the capped
+    // amount and then read anyway.
+    if (Number.isFinite(declared) && declared > maxRequestBytes) {
+      return res.status(413).json({
+        message: `That upload is too large. Files must be smaller than ${describeSize(maxRequestBytes - REQUEST_OVERHEAD_BYTES)}.`,
+      });
+    }
+
     // A chunked request declares no length, so it is charged the most it could
-    // legitimately be. Anything larger is rejected by the per-file limit anyway.
+    // legitimately be; the multer limits below stop it going further.
     const reserved =
       Number.isFinite(declared) && declared > 0
         ? Math.min(declared, maxRequestBytes)
