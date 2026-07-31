@@ -165,6 +165,17 @@ Objects are keyed as `uploads/<filename>`, deliberately mirroring the URL path, 
 
 The files that predate this were copied into the bucket by `scripts/migrate-uploads-to-object-storage.mjs`, which is idempotent, verifies each file byte for byte, and leaves the local copies alone. Re-run it if local `uploads/` files ever reappear (for example when restoring a backup).
 
+### Upload limits
+
+Because uploads are buffered in memory, `server/uploadLimits.ts` bounds them. It is the single source of truth for the per-file limits (10MB images, 20MB documents) — the multer configs import them rather than repeating the numbers.
+
+`guardedUpload()` wraps each upload route with two things:
+
+- **A ceiling on total in-flight upload bytes**, 64MB by default and configurable with `MAX_UPLOAD_BYTES_IN_FLIGHT`. Capacity is reserved from the request's `Content-Length` *before* the body is read and released when the response finishes or the client disconnects. Requests that would exceed the ceiling get `503` with `Retry-After`, so a burst degrades into a retry rather than an out-of-memory crash.
+- **Local handling of multer's own errors.** An oversized file returns `413` with the limit stated. This matters beyond tidiness: the global error handler in `server/index.ts` re-throws after responding, so an upload error that reached it would take the process down.
+
+Any new upload route should go through `guardedUpload()` too. Adding one with a bare `upload.single(...)` reintroduces both problems.
+
 Reading files back goes through `GET /uploads/:filename`, which is **authenticated** — it is not `express.static`. It rejects anything that is not a bare filename, checks the object exists, streams it out of the bucket, and sets `Cache-Control: private` so authenticated content stays out of shared caches. Because object storage carries no content type, the response type is derived from the extension in `contentTypeFor()`. If you add another way to serve uploads, it must keep all of those properties.
 
 ---

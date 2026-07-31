@@ -68,6 +68,7 @@ Three variables are required before the app will start:
 | `JOTFORM_WEBHOOK_SECRET` | Recommended | Shared secret for the JotForm webhook. **Without it the webhook is disabled and returns 503** |
 | `JOTFORM_FIELD_*` | No | JotForm field ID mappings (TITLE, DESCRIPTION, CATEGORY, PRIORITY, LOCATION, EMAIL, REGION, BUILDING) |
 | `JOTFORM_DEFAULT_*` | No | Fallback values for JotForm submissions (REGION, BUILDING, LOCATION) |
+| `MAX_UPLOAD_BYTES_IN_FLIGHT` | No | Ceiling on how much upload data may be processed at once, in bytes. Defaults to 64MB. Uploads beyond it get a "try again in a few seconds" response rather than exhausting memory |
 | `PORT` | No | Defaults to 5000 |
 
 Never commit a real `.env` — it is gitignored.

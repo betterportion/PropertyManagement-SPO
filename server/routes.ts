@@ -17,6 +17,11 @@ import {
   contentTypeFor,
 } from "./objectStorage";
 import {
+  guardedUpload,
+  IMAGE_UPLOAD_MAX_BYTES,
+  DOCUMENT_UPLOAD_MAX_BYTES,
+} from "./uploadLimits";
+import {
   insertMaintenanceRequestSchema,
   insertWalkthroughRoomSchema,
   insertWalkthroughPhotoSchema,
@@ -37,7 +42,7 @@ const fileStorage = multer.memoryStorage();
 
 const upload = multer({
   storage: fileStorage,
-  limits: { fileSize: 10 * 1024 * 1024 },
+  limits: { fileSize: IMAGE_UPLOAD_MAX_BYTES, files: 1 },
   fileFilter: (req, file, cb) => {
     const allowedTypes = /jpeg|jpg|png|gif|webp/;
     const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
@@ -813,7 +818,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // File Upload Route (images)
-  app.post('/api/upload', isAuthenticated, upload.single('file'), async (req: any, res) => {
+  app.post('/api/upload', isAuthenticated, ...guardedUpload(upload.single('file'), IMAGE_UPLOAD_MAX_BYTES), async (req: any, res) => {
     try {
       if (!req.file) {
         return res.status(400).json({ message: "No file uploaded" });
@@ -830,7 +835,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Document Upload Route (PDF, images, doc files up to 20MB)
   const docUpload = multer({
     storage: fileStorage,
-    limits: { fileSize: 20 * 1024 * 1024 },
+    limits: { fileSize: DOCUMENT_UPLOAD_MAX_BYTES, files: 1 },
     fileFilter: (req, file, cb) => {
       const ext = path.extname(file.originalname).toLowerCase().replace(".", "");
       // Each extension maps to the exact MIME type it must arrive with, so a
@@ -890,7 +895,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return allowed.includes(detected.ext);
   }
 
-  app.post('/api/upload-doc', isAuthenticated, docUpload.single('file'), async (req: any, res) => {
+  app.post('/api/upload-doc', isAuthenticated, ...guardedUpload(docUpload.single('file'), DOCUMENT_UPLOAD_MAX_BYTES), async (req: any, res) => {
     try {
       if (!req.file) {
         return res.status(400).json({ message: "No file uploaded" });
