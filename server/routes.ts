@@ -7,6 +7,8 @@ import multer from "multer";
 import { createMondayItem, updateMondayItem } from "./monday";
 import path from "path";
 import crypto from "crypto";
+import { fileTypeFromBuffer } from "file-type";
+import AdmZip from "adm-zip";
 import {
   generateUploadFilename,
   putUpload,
@@ -830,19 +832,73 @@ export async function registerRoutes(app: Express): Promise<Server> {
     storage: fileStorage,
     limits: { fileSize: 20 * 1024 * 1024 },
     fileFilter: (req, file, cb) => {
-      const allowedTypes = /pdf|doc|docx|jpeg|jpg|png|gif|webp/;
-      const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
-      if (extname) {
+      const ext = path.extname(file.originalname).toLowerCase().replace(".", "");
+      // Each extension maps to the exact MIME type it must arrive with, so a
+      // PDF claiming to be an image (or any other cross-pairing) is rejected.
+      const extToMime: Record<string, string> = {
+        pdf: "application/pdf",
+        doc: "application/msword",
+        docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        jpeg: "image/jpeg",
+        jpg: "image/jpeg",
+        png: "image/png",
+        gif: "image/gif",
+        webp: "image/webp",
+      };
+      if (extToMime[ext] && file.mimetype === extToMime[ext]) {
         return cb(null, true);
       }
-      cb(new Error("Only document and image files are allowed"));
+      cb(new Error("Only document and image files are allowed, and the file type must match the extension"));
     },
   });
+
+  // Detect the file's real type from its contents using the maintained
+  // `file-type` library (which parses container structure — e.g. it walks ZIP
+  // entries to distinguish a genuine .docx from an arbitrary archive) and
+  // confirm it matches what the extension claims. The browser-supplied MIME
+  // type is attacker-controlled, so this content check is the one that matters.
+  async function bufferMatchesExtension(buffer: Buffer, originalname: string): Promise<boolean> {
+    const ext = path.extname(originalname).toLowerCase().replace(".", "");
+    // Detected type (file-type's `ext`) each upload extension must resolve to.
+    // Legacy .doc files are CFB (OLE2 compound file) containers.
+    const expectedDetected: Record<string, string[]> = {
+      pdf: ["pdf"],
+      jpeg: ["jpg"],
+      jpg: ["jpg"],
+      png: ["png"],
+      gif: ["gif"],
+      webp: ["webp"],
+      doc: ["cfb"],
+      docx: ["docx"],
+    };
+    const allowed = expectedDetected[ext];
+    if (!allowed) return false;
+    if (ext === "docx") {
+      // OOXML is a ZIP container; a generic ZIP signature is not enough and
+      // string-scanning raw bytes is spoofable. Parse the ZIP central
+      // directory with a real ZIP parser and require the package entries
+      // every genuine .docx contains.
+      try {
+        const zip = new AdmZip(buffer);
+        return !!zip.getEntry("[Content_Types].xml") && !!zip.getEntry("word/document.xml");
+      } catch {
+        return false;
+      }
+    }
+    const detected = await fileTypeFromBuffer(buffer);
+    if (!detected) return false;
+    return allowed.includes(detected.ext);
+  }
 
   app.post('/api/upload-doc', isAuthenticated, docUpload.single('file'), async (req: any, res) => {
     try {
       if (!req.file) {
         return res.status(400).json({ message: "No file uploaded" });
+      }
+      if (!(await bufferMatchesExtension(req.file.buffer, req.file.originalname))) {
+        return res.status(400).json({
+          message: "File contents do not match the file extension. The file was not saved.",
+        });
       }
       const filename = generateUploadFilename(req.file.originalname);
       await putUpload(filename, req.file.buffer);

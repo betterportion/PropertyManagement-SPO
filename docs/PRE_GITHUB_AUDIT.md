@@ -155,7 +155,8 @@ Invoices.tsx(106,57): error TS2339 — Property 'region' does not exist
 ### ✅ INFORMATIONAL — No MIME-type check on document uploads
 **File:** `server/routes.ts`, line 816  
 **What:** The `docUpload` multer config only checks file extension (not MIME type) for document uploads. An attacker could rename a malicious file with a `.pdf` extension to bypass the check.  
-**Why it matters:** Low risk since files are stored on disk, not executed. But worth noting.
+**Why it matters:** Low risk since files are stored on disk, not executed. But worth noting.  
+**✅ RESOLVED (July 31, 2026):** document uploads now validate extension, MIME type, and the file's actual magic bytes; mismatched files are rejected with a clear message and nothing is stored.
 
 ---
 
