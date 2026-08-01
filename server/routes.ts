@@ -827,6 +827,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!req.file) {
         return res.status(400).json({ message: "No file uploaded" });
       }
+      // The browser-supplied MIME type is attacker-controlled; verify the
+      // file's real bytes match its extension (same check as /api/upload-doc).
+      if (!(await bufferMatchesExtension(req.file.buffer, req.file.originalname))) {
+        return res.status(400).json({
+          message: "File contents do not match the file extension. The file was not saved.",
+        });
+      }
       const filename = generateUploadFilename(req.file.originalname);
       await putUpload(filename, req.file.buffer);
       res.json({ url: `/uploads/${filename}`, filename });
