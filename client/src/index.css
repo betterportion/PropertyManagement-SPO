@@ -2,6 +2,19 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * SPO Design System tokens.
+ *
+ * Source of truth: attached_assets/spo-design-system_1786056605884.md (§2, §10).
+ * CSS variables hold bare HSL triplets and are consumed as hsl(var(--token)).
+ * Never hardcode a brand hex in a component — dark mode reads from these.
+ *
+ * Two reds on purpose:
+ *   --primary        #F04769  fills, borders, hover backgrounds, tints
+ *   --accent / --destructive  #D6515D  the literal brand red
+ *   --primary-strong #E7133D  red as TEXT or icons on a light ground (WCAG AA)
+ */
+
 /* LIGHT MODE */
 :root {
   --button-outline: rgba(0,0,0, .10);
@@ -14,80 +27,71 @@
   --elevate-1: rgba(0,0,0, .03);
   --elevate-2: rgba(0,0,0, .08);
 
-  --background: 210 4% 98%;
+  /* Brand literals — logos and marketing only, never app UI */
+  --spo-blue: 220 34% 34%;
+  --spo-red: 355 62% 58%;
+  --spo-white: 0 0% 100%;
 
-  --foreground: 210 6% 12%;
+  --background: 0 0% 100%;
+  --foreground: 220 34% 34%;
 
-  --border: 210 5% 88%;
+  --border: 220 20% 88%;
 
-  --card: 210 4% 96%;
+  --card: 0 0% 100%;
+  --card-foreground: 220 34% 34%;
+  --card-border: 220 20% 88%;
 
-  --card-foreground: 210 6% 12%;
+  --sidebar: 0 0% 100%;
+  --sidebar-foreground: 220 34% 34%;
+  --sidebar-border: 220 20% 88%;
+  --sidebar-primary: 348 85% 61%;
+  --sidebar-primary-foreground: 0 0% 100%;
+  --sidebar-accent: 220 20% 96%;
+  --sidebar-accent-foreground: 220 34% 34%;
+  --sidebar-ring: 220 34% 34%;
 
-  --card-border: 210 5% 90%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 220 34% 34%;
+  --popover-border: 220 20% 88%;
 
-  --sidebar: 210 4% 94%;
+  --primary: 348 85% 61%;
+  --primary-foreground: 0 0% 100%;
+  --primary-strong: 348 85% 49%;
 
-  --sidebar-foreground: 210 6% 12%;
+  --secondary: 220 30% 95%;
+  --secondary-foreground: 220 34% 34%;
 
-  --sidebar-border: 210 5% 86%;
+  --muted: 220 20% 96%;
+  --muted-foreground: 220 20% 46%;
 
-  --sidebar-primary: 349 84% 61%;
+  --accent: 355 62% 58%;
+  --accent-foreground: 0 0% 100%;
 
-  --sidebar-primary-foreground: 210 4% 98%;
+  --destructive: 355 62% 58%;
+  --destructive-foreground: 0 0% 100%;
 
-  --sidebar-accent: 210 8% 88%;
+  --input: 220 20% 88%;
+  --ring: 220 34% 34%;
 
-  --sidebar-accent-foreground: 210 6% 20%;
+  --chart-1: 220 34% 34%;
+  --chart-2: 348 85% 61%;
+  --chart-3: 142 71% 38%;
+  --chart-4: 38 92% 50%;
+  --chart-5: 262 52% 58%;
+  --chart-6: 199 89% 48%;
 
-  --sidebar-ring: 349 84% 61%;
-
-  --popover: 210 4% 92%;
-
-  --popover-foreground: 210 6% 12%;
-
-  --popover-border: 210 5% 84%;
-
-  --primary: 349 84% 61%;
-
-  --primary-foreground: 210 4% 98%;
-
-  --secondary: 249 61% 15%;
-
-  --secondary-foreground: 210 4% 98%;
-
-  --muted: 210 8% 90%;
-
-  --muted-foreground: 210 6% 35%;
-
-  --accent: 210 12% 92%;
-
-  --accent-foreground: 210 6% 18%;
-
-  --destructive: 0 84% 42%;
-
-  --destructive-foreground: 0 4% 98%;
-
-  --input: 210 8% 75%;
-  --ring: 349 84% 61%;
-  --chart-1: 349 84% 61%;
-  --chart-2: 142 76% 36%;
-  --chart-3: 262 83% 48%;
-  --chart-4: 32 98% 50%;
-  --chart-5: 340 82% 52%;
-
-  --font-sans: Inter, sans-serif;
+  --font-sans: Inter, system-ui, sans-serif;
   --font-serif: Georgia, serif;
   --font-mono: Menlo, monospace;
-  --radius: .5rem; /* 8px */
-  --shadow-2xs: 0px 1px 2px 0px hsl(210 10% 10% / 0.04);
-  --shadow-xs: 0px 1px 2px 0px hsl(210 10% 10% / 0.05);
-  --shadow-sm: 0px 1px 3px 0px hsl(210 10% 10% / 0.06), 0px 1px 2px -1px hsl(210 10% 10% / 0.04);
-  --shadow: 0px 2px 4px -1px hsl(210 10% 10% / 0.06), 0px 4px 6px -1px hsl(210 10% 10% / 0.08);
-  --shadow-md: 0px 4px 6px -1px hsl(210 10% 10% / 0.08), 0px 2px 4px -2px hsl(210 10% 10% / 0.05);
-  --shadow-lg: 0px 10px 15px -3px hsl(210 10% 10% / 0.08), 0px 4px 6px -4px hsl(210 10% 10% / 0.05);
-  --shadow-xl: 0px 20px 25px -5px hsl(210 10% 10% / 0.08), 0px 8px 10px -6px hsl(210 10% 10% / 0.05);
-  --shadow-2xl: 0px 25px 50px -12px hsl(210 10% 10% / 0.15);
+  --radius: .75rem; /* 12px */
+  --shadow-2xs: 0px 1px 2px 0px hsl(220 34% 20% / 0.04);
+  --shadow-xs: 0px 1px 2px 0px hsl(220 34% 20% / 0.05);
+  --shadow-sm: 0px 1px 3px 0px hsl(220 34% 20% / 0.06), 0px 1px 2px -1px hsl(220 34% 20% / 0.04);
+  --shadow: 0px 2px 4px -1px hsl(220 34% 20% / 0.06), 0px 4px 6px -1px hsl(220 34% 20% / 0.08);
+  --shadow-md: 0px 4px 6px -1px hsl(220 34% 20% / 0.08), 0px 2px 4px -2px hsl(220 34% 20% / 0.05);
+  --shadow-lg: 0px 10px 15px -3px hsl(220 34% 20% / 0.08), 0px 4px 6px -4px hsl(220 34% 20% / 0.05);
+  --shadow-xl: 0px 20px 25px -5px hsl(220 34% 20% / 0.08), 0px 8px 10px -6px hsl(220 34% 20% / 0.05);
+  --shadow-2xl: 0px 25px 50px -12px hsl(220 34% 20% / 0.15);
   --tracking-normal: 0em;
   --spacing: 0.25rem;
 
@@ -122,6 +126,11 @@
   --destructive-border: hsl(from hsl(var(--destructive)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
 }
 
+/*
+ * DARK MODE — slate-navy, not neutral gray.
+ * --primary and --accent never change between themes; everything else inverts.
+ * Cards are LIGHTER than the page: layering is by lightness, not by shadow.
+ */
 .dark {
   --button-outline: rgba(255,255,255, .10);
   --badge-outline: rgba(255,255,255, .05);
@@ -132,77 +141,63 @@
   --elevate-1: rgba(255,255,255, .04);
   --elevate-2: rgba(255,255,255, .09);
 
-  --background: 210 5% 8%;
+  --background: 222 47% 11%;
+  --foreground: 210 40% 98%;
 
-  --foreground: 210 4% 92%;
+  --border: 217 33% 25%;
 
-  --border: 210 6% 18%;
+  --card: 222 47% 14%;
+  --card-foreground: 210 40% 98%;
+  --card-border: 217 33% 25%;
 
-  --card: 210 5% 10%;
+  --sidebar: 222 47% 11%;
+  --sidebar-foreground: 210 40% 98%;
+  --sidebar-border: 217 33% 25%;
+  --sidebar-primary: 348 85% 61%;
+  --sidebar-primary-foreground: 0 0% 100%;
+  --sidebar-accent: 217 33% 18%;
+  --sidebar-accent-foreground: 210 40% 98%;
+  --sidebar-ring: 210 40% 70%;
 
-  --card-foreground: 210 4% 92%;
+  --popover: 222 47% 14%;
+  --popover-foreground: 210 40% 98%;
+  --popover-border: 217 33% 25%;
 
-  --card-border: 210 6% 16%;
+  --primary: 348 85% 61%;
+  --primary-foreground: 0 0% 100%;
+  --primary-strong: 348 85% 61%;
 
-  --sidebar: 210 5% 12%;
+  --secondary: 217 33% 20%;
+  --secondary-foreground: 210 40% 98%;
 
-  --sidebar-foreground: 210 4% 92%;
+  --muted: 217 33% 18%;
+  --muted-foreground: 215 20% 65%;
 
-  --sidebar-border: 210 6% 20%;
+  --accent: 355 62% 58%;
+  --accent-foreground: 0 0% 100%;
 
-  --sidebar-primary: 349 84% 65%;
-
-  --sidebar-primary-foreground: 210 5% 8%;
-
-  --sidebar-accent: 210 8% 18%;
-
-  --sidebar-accent-foreground: 210 4% 88%;
-
-  --sidebar-ring: 349 84% 65%;
-
-  --popover: 210 5% 14%;
-
-  --popover-foreground: 210 4% 92%;
-
-  --popover-border: 210 6% 22%;
-
-  --primary: 349 84% 65%;
-
-  --primary-foreground: 210 5% 8%;
-
-  --secondary: 249 61% 20%;
-
-  --secondary-foreground: 210 4% 92%;
-
-  --muted: 210 8% 16%;
-
-  --muted-foreground: 210 5% 65%;
-
-  --accent: 210 12% 18%;
-
-  --accent-foreground: 210 4% 88%;
-
-  --destructive: 0 84% 48%;
-
-  --destructive-foreground: 0 5% 8%;
+  --destructive: 0 63% 55%;
+  --destructive-foreground: 0 0% 100%;
 
   /* Used as the border around inputs. Dark mode: Should be a border that is light enough to have high contrast when rendered on a --card background. More contrast than standard --border */
-  --input: 210 8% 28%;
-  --ring: 349 84% 65%;
-  --chart-1: 349 84% 70%;
-  --chart-2: 142 76% 50%;
-  --chart-3: 262 83% 62%;
-  --chart-4: 32 98% 58%;
-  --chart-5: 340 82% 62%;
+  --input: 217 33% 25%;
+  --ring: 210 40% 70%;
 
-  --shadow-2xs: 0px 1px 2px 0px hsl(210 10% 2% / 0.30);
-  --shadow-xs: 0px 1px 2px 0px hsl(210 10% 2% / 0.35);
-  --shadow-sm: 0px 1px 3px 0px hsl(210 10% 2% / 0.40), 0px 1px 2px -1px hsl(210 10% 2% / 0.30);
-  --shadow: 0px 2px 4px -1px hsl(210 10% 2% / 0.40), 0px 4px 6px -1px hsl(210 10% 2% / 0.50);
-  --shadow-md: 0px 4px 6px -1px hsl(210 10% 2% / 0.50), 0px 2px 4px -2px hsl(210 10% 2% / 0.35);
-  --shadow-lg: 0px 10px 15px -3px hsl(210 10% 2% / 0.50), 0px 4px 6px -4px hsl(210 10% 2% / 0.35);
-  --shadow-xl: 0px 20px 25px -5px hsl(210 10% 2% / 0.50), 0px 8px 10px -6px hsl(210 10% 2% / 0.35);
-  --shadow-2xl: 0px 25px 50px -12px hsl(210 10% 2% / 0.60);
+  --chart-1: 210 40% 98%;
+  --chart-2: 348 85% 65%;
+  --chart-3: 142 65% 55%;
+  --chart-4: 38 92% 62%;
+  --chart-5: 262 62% 70%;
+  --chart-6: 199 89% 62%;
+
+  --shadow-2xs: 0px 1px 2px 0px hsl(222 47% 4% / 0.30);
+  --shadow-xs: 0px 1px 2px 0px hsl(222 47% 4% / 0.35);
+  --shadow-sm: 0px 1px 3px 0px hsl(222 47% 4% / 0.40), 0px 1px 2px -1px hsl(222 47% 4% / 0.30);
+  --shadow: 0px 2px 4px -1px hsl(222 47% 4% / 0.40), 0px 4px 6px -1px hsl(222 47% 4% / 0.50);
+  --shadow-md: 0px 4px 6px -1px hsl(222 47% 4% / 0.50), 0px 2px 4px -2px hsl(222 47% 4% / 0.35);
+  --shadow-lg: 0px 10px 15px -3px hsl(222 47% 4% / 0.50), 0px 4px 6px -4px hsl(222 47% 4% / 0.35);
+  --shadow-xl: 0px 20px 25px -5px hsl(222 47% 4% / 0.50), 0px 8px 10px -6px hsl(222 47% 4% / 0.35);
+  --shadow-2xl: 0px 25px 50px -12px hsl(222 47% 4% / 0.60);
 
 }
 
@@ -213,6 +208,19 @@
 
   body {
     @apply font-sans antialiased bg-background text-foreground;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+
+  /* Spinner arrows are poor UX for currency/count fields and inconsistent across browsers. */
+  input[type="number"]::-webkit-outer-spin-button,
+  input[type="number"]::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+
+  input[type="number"] {
+    -moz-appearance: textfield;
+    appearance: textfield;
   }
 }
 
@@ -237,6 +245,12 @@
  * need to be distinguished from eachother visually.
  */
 @layer utilities {
+
+  /* Page composition helpers — see §4 and §6 of the design system. */
+  .text-balance { text-wrap: balance; }
+  .container-custom { @apply mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8; }
+  .section-padding { @apply py-12 md:py-16; }
+  .section-padding-lg { @apply py-16 md:py-20; }
 
   /* Hide ugly search cancel button in Chrome until we can style it properly */
   input[type="search"]::-webkit-search-cancel-button {

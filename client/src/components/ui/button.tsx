@@ -4,32 +4,50 @@ import { cva, type VariantProps } from "class-variance-authority"
 
 import { cn } from "@/lib/utils"
 
+/**
+ * SPO button — the signature component.
+ *
+ * Which variant to use:
+ *   default / outline  Outlined red. The standard call to action on any page.
+ *                      White background, 2px red border, red label, solid red on hover.
+ *   primary            Solid red at rest. Reserved for THE single most important
+ *                      action on a page (e.g. "Submit request"). One per page, never two.
+ *   secondary          Tinted blue-gray. A supporting action sitting beside a CTA.
+ *   ghost              No border. Icon buttons, toolbars, table row actions.
+ *   link               Inline text action inside a sentence.
+ *   destructive        Solid red. Delete and other irreversible actions only.
+ *
+ * Never add `rounded-full` — buttons are 12px corners across the whole suite.
+ */
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0" +
-  " hover-elevate active-elevate-2",
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
   {
     variants: {
       variant: {
         default:
-          "bg-primary text-primary-foreground border border-primary-border",
-        destructive:
-          "bg-destructive text-destructive-foreground border border-destructive-border",
+          "border-2 border-primary bg-background text-primary-strong tracking-wide hover:bg-primary hover:text-primary-foreground hover:border-primary active:bg-primary/90",
         outline:
-          // Shows the background color of whatever card / sidebar / accent background it is inside of.
-          // Inherits the current text color.
-          " border [border-color:var(--button-outline)]  shadow-xs active:shadow-none ",
-        secondary: "border bg-secondary text-secondary-foreground border border-secondary-border ",
-        // Add a transparent border so that when someone toggles a border on later, it doesn't shift layout/size.
-        ghost: "border border-transparent",
+          // Compatibility alias for `default` — the outlined CTA.
+          "border-2 border-primary bg-background text-primary-strong tracking-wide hover:bg-primary hover:text-primary-foreground hover:border-primary active:bg-primary/90",
+        primary:
+          "border-2 border-primary bg-primary text-primary-foreground tracking-wide hover:bg-primary/90 hover:border-primary/90 active:bg-primary",
+        secondary:
+          "border border-border bg-secondary text-secondary-foreground hover:bg-secondary/70 active:bg-secondary",
+        // Transparent border so toggling a border on later doesn't shift layout.
+        ghost:
+          "border border-transparent text-foreground hover:bg-muted hover:text-foreground active:bg-muted",
+        link:
+          "border border-transparent text-primary-strong underline-offset-4 hover:underline",
+        destructive:
+          "border-2 border-destructive bg-destructive text-destructive-foreground hover:bg-destructive/90 hover:border-destructive/90 active:bg-destructive",
       },
-      // Heights are set as "min" heights, because sometimes Ai will place large amount of content
-      // inside buttons. With a min-height they will look appropriate with small amounts of content,
-      // but will expand to fit large amounts of content.
+      // Heights are "min" heights so a button with unusually long content grows
+      // instead of clipping, while normal content sits at the documented height.
       size: {
-        default: "min-h-9 px-4 py-2",
-        sm: "min-h-8 rounded-md px-3 text-xs",
-        lg: "min-h-10 rounded-md px-8",
-        icon: "h-9 w-9",
+        default: "min-h-10 px-4 py-2 text-sm",
+        sm: "min-h-9 px-3 text-sm",
+        lg: "min-h-12 px-6 text-base",
+        icon: "h-10 w-10",
       },
     },
     defaultVariants: {

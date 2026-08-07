@@ -6,11 +6,20 @@ export default {
   theme: {
     extend: {
       borderRadius: {
-        lg: ".5625rem", /* 9px */
-        md: ".375rem", /* 6px */
-        sm: ".1875rem", /* 3px */
+        /* SPO: 12px everywhere. Cards/buttons/inputs use `lg`, badges `md`. */
+        lg: "var(--radius)", /* 12px */
+        md: "calc(var(--radius) - 2px)", /* 10px */
+        sm: "calc(var(--radius) - 4px)", /* 8px */
+        xl: "var(--radius)", /* 12px */
       },
       colors: {
+        /* Brand literals — logos and marketing moments only. App UI must use
+           the semantic tokens below so dark mode works. */
+        spo: {
+          blue: "#3A4D75",
+          red: "#D74F59",
+          white: "#FFFFFF",
+        },
         // Flat / base colors (regular buttons)
         background: "hsl(var(--background) / <alpha-value>)",
         foreground: "hsl(var(--foreground) / <alpha-value>)",
@@ -30,6 +39,9 @@ export default {
           DEFAULT: "hsl(var(--primary) / <alpha-value>)",
           foreground: "hsl(var(--primary-foreground) / <alpha-value>)",
           border: "var(--primary-border)",
+          /* Darker red for red TEXT and icons on a light ground (WCAG AA).
+             Fills, borders and hover backgrounds keep using DEFAULT. */
+          strong: "hsl(var(--primary-strong) / <alpha-value>)",
         },
         secondary: {
           DEFAULT: "hsl(var(--secondary) / <alpha-value>)",
@@ -58,6 +70,7 @@ export default {
           "3": "hsl(var(--chart-3) / <alpha-value>)",
           "4": "hsl(var(--chart-4) / <alpha-value>)",
           "5": "hsl(var(--chart-5) / <alpha-value>)",
+          "6": "hsl(var(--chart-6) / <alpha-value>)",
         },
         sidebar: {
           ring: "hsl(var(--sidebar-ring) / <alpha-value>)",

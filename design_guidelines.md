@@ -1,142 +1,77 @@
-# Property Management Dashboard - Design Guidelines
+# Design Guidelines — SPO Property Management Portal
 
-## Design Approach
+## Where the rules live
 
-**Selected Approach:** Design System (Productivity-Focused)
+The portal follows the **SPO Design System**, the shared specification used across the
+suite of SPO applications. That document is the authority for every value — colors,
+type scale, spacing, radius, component behavior, states and data display:
 
-**Rationale:** This is a data-heavy, utility-focused application prioritizing efficiency and information density. Drawing inspiration from modern admin dashboards like Linear, Notion, and property management tools like Buildium.
+**`attached_assets/spo-design-system_1786056605884.md`**
 
-**Core Principles:**
-- Professional trustworthiness for property management context
-- Clear role-based navigation (resident vs admin views)
-- Efficient data scanning and form completion
-- Consistent patterns for reduced cognitive load
+This file only records the decisions specific to this portal. Where the two disagree,
+the SPO Design System wins, except for the portal-specific choices listed below.
 
-## Typography
+A live reference is built into the app at **`/styleguide`** (staff only). It reads its
+colors from the running theme, so it can never drift from the code. Check a new screen
+against that page before calling it done.
 
-**Font System:** Inter (via Google Fonts CDN)
-- Headers: 600-700 weight, sizes from text-2xl to text-4xl
-- Body text: 400 weight, text-sm to text-base
-- Labels/metadata: 500 weight, text-xs to text-sm
-- Data tables: 400-500 weight, text-sm for optimal scanning
+## The five rules that make it look like SPO
 
-**Hierarchy:**
-- Dashboard titles: text-3xl, font-semibold
-- Section headers: text-xl, font-semibold
-- Card titles: text-lg, font-medium
-- Form labels: text-sm, font-medium
-- Body/descriptions: text-sm, font-normal
+1. **Primary calls to action are outlined, not solid.** White background, 2px red border,
+   red label. Solid red on hover.
+2. **Body text is navy, not black.** Nothing in light mode is `#000`.
+3. **Cards use borders, not shadows.** Shadows appear only on floating layers — dropdowns,
+   popovers, sheets, toasts.
+4. **12px corners everywhere, never pills.** No `rounded-full` on a button or an input;
+   only avatars and status dots.
+5. **Sections breathe.** `Section` → `Container` → `space-y-6`. Dense dashboards are the
+   exception, not the default.
 
-## Layout System
+## Portal-specific decisions
 
-**Spacing Primitives:** Tailwind units of 2, 4, 6, 8, and 12
-- Component padding: p-4 to p-6
-- Section margins: mb-6 to mb-8
-- Card spacing: space-y-4
-- Form field gaps: gap-4
-- Table cell padding: p-4
+- **One solid red action per page.** The SPO spec reserves solid red at rest for
+  destructive actions. This portal also allows it for the single most important action on
+  a page — use `<Button variant="primary">` for that, and never place two on one screen.
+  Everything else uses the outlined default.
+- **`outline` is an alias of `default`.** Both render the outlined red CTA. A neutral
+  supporting action is `variant="secondary"`, not `outline`.
+- **Toasts stay on the existing Radix toast** (`useToast` / `<Toaster />`), restyled to the
+  spec. The suite's `sonner` is not used here.
+- **Money stays as stored.** The database keeps decimal amounts; the spec's integer-cents
+  rule is not adopted. Format at the render boundary with `formatCurrency()` from
+  `client/src/lib/format.ts`.
+- **URL filter state does not use `nuqs`.** This app routes with `wouter`, which `nuqs`
+  does not support. Filter state is read and written through a small hook over the router.
+- **Menus and lists highlight in neutral gray, not red.** The spec makes `--accent` the
+  brand red. Applied literally, every dropdown, select option and command row would fill
+  solid red on hover, and the label contrast fell short of the accessibility target. Those
+  primitives use the muted surface with normal text instead. `--accent` keeps its spec
+  value and is still available for brand highlights.
+- **Theme choice** lives in `localStorage` under `spo-portal-theme` and supports light,
+  dark and system. A bootstrap script in `client/index.html` applies it before the first
+  paint; keep the storage key in that script in sync with `ThemeProvider`.
 
-**Grid Structure:**
-- Main layout: Sidebar (w-64) + Content area (flex-1)
-- Dashboard cards: grid-cols-1 md:grid-cols-2 lg:grid-cols-3
-- Asset tables: full-width with horizontal scroll on mobile
-- Forms: max-w-2xl single column
+## Where the pieces are
 
-## Component Library
+| Piece | Location |
+|---|---|
+| Theme tokens (light + dark) | `client/src/index.css` |
+| Tailwind mappings, brand colors, radius | `tailwind.config.ts` |
+| Buttons, cards, badges, inputs, tables, toasts | `client/src/components/ui/` |
+| Page layout primitives | `client/src/components/layout/page.tsx` |
+| Loading / empty / error patterns | `client/src/components/states.tsx` |
+| Money, date and percentage formatters | `client/src/lib/format.ts` |
+| Chart series colors | `client/src/lib/chart-palette.ts` |
+| Theme provider and toggle | `client/src/providers/ThemeProvider.tsx`, `client/src/components/ThemeToggle.tsx` |
+| Live reference page | `client/src/pages/Styleguide.tsx` (`/styleguide`) |
 
-### Navigation
-**Sidebar (Admin):**
-- Fixed left sidebar with logo at top
-- Icon + label navigation items (h-12 each)
-- Active state with subtle background
-- Sections: Dashboard, Maintenance, Walkthroughs, Assets, Billing, Contacts
-- Role indicator badge at bottom
+## Signs a screen has drifted
 
-**Top Bar (Resident):**
-- Horizontal navigation with property selector
-- User profile dropdown (right-aligned)
-- Simplified menu: Dashboard, Submit Request, My Requests
-
-### Core Components
-
-**Data Tables:**
-- Striped rows for readability
-- Sticky header on scroll
-- Action buttons (icon-only) in rightmost column
-- Sort indicators in column headers
-- Hover state for rows
-- Status badges (color-coded: pending, in progress, completed)
-
-**Cards:**
-- Rounded corners (rounded-lg)
-- Subtle border (border)
-- Padding: p-6
-- Header with title + optional action button
-- Content area with consistent spacing
-
-**Forms:**
-- Label above input pattern
-- Input height: h-10
-- Textarea: min-h-32
-- Select dropdowns with icons
-- File upload with drag-and-drop zone
-- Submit button: full-width on mobile, auto on desktop
-
-**Status Badges:**
-- Pill shape (rounded-full)
-- Small text (text-xs)
-- Padding: px-3 py-1
-- Used for request status, asset condition, payment status
-
-**Image Gallery (Walkthroughs):**
-- Grid layout: grid-cols-2 md:grid-cols-3 lg:grid-cols-4
-- Aspect ratio maintained (aspect-square)
-- Lightbox modal for full view
-- Upload button prominent in empty state
-
-**Asset Cards:**
-- Two-column layout: Fixed Assets | Movable Assets
-- Nested lists with expandable categories
-- Metadata: Last serviced, condition, serial number
-- Quick action menu (3-dot icon)
-
-### Dashboards
-
-**Admin Dashboard:**
-- Summary cards row (3-4 cards): Total Properties, Active Requests, Overdue Invoices, Assets
-- Recent maintenance requests table (5-10 rows)
-- Upcoming walkthroughs calendar widget
-- Quick actions sidebar
-
-**Resident Dashboard:**
-- Welcome header with property name
-- Active requests status (card grid)
-- Submit request CTA (prominent button)
-- Property information card
-- Contact emergency maintenance (always visible)
-
-### Data Visualization
-- Simple progress bars for completion rates
-- Icon-based statistics (number with icon)
-- Minimal charts if needed (bar/line only)
-
-## Images
-
-**Not Applicable:** This is a dashboard application focused on user-generated data (maintenance photos, asset photos). No hero images or marketing imagery needed. All images are functional uploads within galleries and asset tracking.
-
-## Accessibility & Interaction
-
-- Focus states on all interactive elements (ring-2 ring-offset-2)
-- Keyboard navigation throughout
-- Clear button hierarchy (primary vs secondary actions)
-- Form validation with inline error messages
-- Loading states for async operations
-- Empty states with helpful CTAs
-
-## Animations
-
-**Minimal, purposeful only:**
-- Sidebar collapse/expand (transition-transform duration-200)
-- Dropdown menus (fade + slide)
-- Modal overlays (fade backdrop + scale content)
-- No scroll animations or decorative motion
+- `font-bold` anywhere — the system stops at `font-semibold`
+- `bg-white`, `bg-gray-*`, `text-black` instead of the semantic tokens
+- A shadow on a card
+- `rounded-full` on a button
+- "No data" as empty-state copy — say what the emptiness means
+- A hardcoded hex color instead of a token
+- Red text using `text-primary`; red **text** and icons use `text-primary-strong`, which is
+  the darker red that meets contrast requirements. Fills and borders use `primary`.

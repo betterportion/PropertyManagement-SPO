@@ -163,7 +163,7 @@ Preferred communication style: Simple, everyday language.
 - **Framework & Build Tools**: React with TypeScript, Vite, Wouter for routing, TanStack Query for server state.
 - **UI Component System**: Shadcn/ui (New York style), Radix UI primitives, Tailwind CSS for styling, Inter font, dark mode support.
 - **State Management**: TanStack Query for server state (conservative caching), React hooks for local state, React Hook Form with Zod for form state.
-- **Design Principles**: Role-based navigation, information-dense layouts, consistent spacing, responsive grid layouts, hover/active state elevation.
+- **Design Principles**: The portal follows the shared **SPO Design System** (`attached_assets/spo-design-system_1786056605884.md`), with portal-specific decisions recorded in `design_guidelines.md`. Outlined red calls to action, navy body text, bordered cards without shadows, 12px corners, light/dark/system themes. A live reference page for staff lives at `/styleguide`.
 
 ### Backend Architecture
 - **Server Framework**: Express.js on Node.js with TypeScript, ESM module system.

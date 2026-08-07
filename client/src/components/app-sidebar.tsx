@@ -1,7 +1,9 @@
-import { Home, Wrench, Camera, Package, Users, Settings, Building2 } from "lucide-react";
+import { Home, Wrench, Camera, Package, Users, Settings, Building2, Palette } from "lucide-react";
+import { Link } from "wouter";
 import {
   Sidebar,
   SidebarContent,
+  SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
   SidebarGroupLabel,
@@ -9,6 +11,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarHeader,
+  useSidebar,
 } from "@/components/ui/sidebar";
 import { Badge } from "@/components/ui/badge";
 import spoLogo from "@assets/SPO Logo under 600x600px_SPO Vertical - Ocean_1763138801065.png";
@@ -18,115 +21,88 @@ interface AppSidebarProps {
   currentPath: string;
 }
 
-const adminMenuItems = [
-  {
-    title: "Dashboard",
-    url: "/",
-    icon: Home,
-  },
-  {
-    title: "Properties",
-    url: "/properties",
-    icon: Building2,
-  },
-  {
-    title: "Maintenance",
-    url: "/maintenance",
-    icon: Wrench,
-  },
-  {
-    title: "Maint Contacts & Invoices",
-    url: "/contacts",
-    icon: Users,
-  },
-  {
-    title: "Walkthroughs",
-    url: "/walkthroughs",
-    icon: Camera,
-  },
-  {
-    title: "Assets",
-    url: "/assets",
-    icon: Package,
-  },
-  {
-    title: "Settings",
-    url: "/settings",
-    icon: Settings,
-  },
+type NavItem = { title: string; url: string; icon: typeof Home };
+
+const adminMenuItems: NavItem[] = [
+  { title: "Dashboard", url: "/", icon: Home },
+  { title: "Properties", url: "/properties", icon: Building2 },
+  { title: "Maintenance", url: "/maintenance", icon: Wrench },
+  { title: "Maint Contacts & Invoices", url: "/contacts", icon: Users },
+  { title: "Walkthroughs", url: "/walkthroughs", icon: Camera },
+  { title: "Assets", url: "/assets", icon: Package },
 ];
 
-const residentMenuItems = [
-  {
-    title: "Dashboard",
-    url: "/",
-    icon: Home,
-  },
-  {
-    title: "Submit Request",
-    url: "/submit-request",
-    icon: Wrench,
-  },
-  {
-    title: "My Requests",
-    url: "/my-requests",
-    icon: Wrench,
-  },
+const residentMenuItems: NavItem[] = [
+  { title: "Dashboard", url: "/", icon: Home },
+  { title: "Submit Request", url: "/submit-request", icon: Wrench },
+  { title: "My Requests", url: "/my-requests", icon: Wrench },
 ];
 
 export function AppSidebar({ role, currentPath }: AppSidebarProps) {
-  let menuItems = (role === "admin" || role === "regional_administrator") ? adminMenuItems : residentMenuItems;
-  
-  // Regional administrators cannot access Settings
-  if (role === "regional_administrator") {
-    menuItems = menuItems.filter(item => item.title !== "Settings");
+  const { isMobile, setOpenMobile } = useSidebar();
+  const isStaff = role === "admin" || role === "regional_administrator";
+
+  const menuItems = isStaff ? adminMenuItems : residentMenuItems;
+
+  // Bottom-pinned utility group. Regional administrators cannot access Settings.
+  const utilityItems: NavItem[] = [];
+  if (role === "admin") {
+    utilityItems.push({ title: "Settings", url: "/settings", icon: Settings });
   }
+  if (isStaff) {
+    utilityItems.push({ title: "Style guide", url: "/styleguide", icon: Palette });
+  }
+
+  const closeOnMobile = () => {
+    if (isMobile) setOpenMobile(false);
+  };
+
+  const renderItem = (item: NavItem) => (
+    <SidebarMenuItem key={item.title}>
+      <SidebarMenuButton
+        asChild
+        isActive={currentPath === item.url}
+        data-testid={`link-${item.title.toLowerCase().replace(/\s/g, "-")}`}
+      >
+        <Link href={item.url} onClick={closeOnMobile}>
+          <item.icon />
+          <span>{item.title}</span>
+        </Link>
+      </SidebarMenuButton>
+    </SidebarMenuItem>
+  );
 
   return (
     <Sidebar>
-      <SidebarHeader className="p-4 border-b border-sidebar-border">
+      <SidebarHeader className="h-16 justify-center border-b border-sidebar-border px-4 py-0">
         <div className="flex items-center gap-3">
-          <div className="flex-shrink-0">
-            <img src={spoLogo} alt="SPO Logo" className="h-10 w-10 object-contain" />
-          </div>
+          <img src={spoLogo} alt="SPO logo" className="h-9 w-9 shrink-0 object-contain" />
           <div className="min-w-0">
-            <h2 className="font-semibold text-sm leading-tight">Property Management Portal</h2>
-            <p className="text-xs text-muted-foreground">Saint Paul's Outreach, Inc.</p>
+            <h2 className="truncate text-sm font-semibold leading-tight">Property Management Portal</h2>
+            <p className="truncate text-xs text-muted-foreground">Saint Paul's Outreach, Inc.</p>
           </div>
         </div>
       </SidebarHeader>
+
       <SidebarContent>
         <SidebarGroup>
           <SidebarGroupLabel>Navigation</SidebarGroupLabel>
           <SidebarGroupContent>
-            <SidebarMenu>
-              {menuItems.map((item) => {
-                const isActive = currentPath === item.url;
-                return (
-                  <SidebarMenuItem key={item.title}>
-                    <SidebarMenuButton 
-                      asChild 
-                      className={isActive ? "bg-sidebar-accent" : ""}
-                      data-testid={`link-${item.title.toLowerCase().replace(/\s/g, "-")}`}
-                    >
-                      <a href={item.url}>
-                        <item.icon />
-                        <span>{item.title}</span>
-                      </a>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                );
-              })}
-            </SidebarMenu>
+            <SidebarMenu>{menuItems.map(renderItem)}</SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
-
-        <div className="mt-auto p-4 border-t border-sidebar-border">
-          <Badge variant="secondary" className="w-full justify-center">
-            {role === "admin" ? "Admin Account" : role === "regional_administrator" ? "Regional Admin" : "Resident Account"}
-          </Badge>
-        </div>
       </SidebarContent>
+
+      <SidebarFooter className="gap-3 border-t border-sidebar-border">
+        {utilityItems.length > 0 && <SidebarMenu>{utilityItems.map(renderItem)}</SidebarMenu>}
+        <Badge variant="secondary" className="w-full justify-center py-1">
+          {role === "admin"
+            ? "Admin account"
+            : role === "regional_administrator"
+              ? "Regional admin"
+              : "Resident account"}
+        </Badge>
+      </SidebarFooter>
     </Sidebar>
   );
 }

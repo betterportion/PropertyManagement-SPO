@@ -6,6 +6,8 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
 import ThemeToggle from "@/components/ThemeToggle";
+import UserMenu from "@/components/UserMenu";
+import { ThemeProvider } from "@/providers/ThemeProvider";
 import { useAuth } from "@/hooks/useAuth";
 import NotFound from "@/pages/not-found";
 import Landing from "@/pages/Landing";
@@ -19,6 +21,7 @@ import ResidentDashboard from "@/pages/ResidentDashboard";
 import SubmitRequest from "@/pages/SubmitRequest";
 import MyRequests from "@/pages/MyRequests";
 import AdminSettings from "@/pages/Settings";
+import Styleguide from "@/pages/Styleguide";
 
 function Router() {
   const { user, isAuthenticated, isLoading } = useAuth();
@@ -44,6 +47,8 @@ function Router() {
         <Route path="/assets" component={Assets} />
         <Route path="/contacts" component={Contacts} />
         <Route path="/settings" component={AdminSettings} />
+        {/* Internal design reference — staff only; residents fall through to Not Found. */}
+        <Route path="/styleguide" component={Styleguide} />
         <Route component={NotFound} />
       </Switch>
     );
@@ -58,6 +63,12 @@ function Router() {
     </Switch>
   );
 }
+
+type UserMenuUser = {
+  firstName?: string | null;
+  lastName?: string | null;
+  email?: string | null;
+} | null;
 
 function AppContent() {
   const { user, isAuthenticated, isLoading } = useAuth();
@@ -80,15 +91,22 @@ function AppContent() {
 
   return (
     <SidebarProvider style={style as React.CSSProperties}>
-      <div className="flex h-screen w-full">
+      <div className="flex h-screen w-full overflow-hidden bg-background">
         <AppSidebar role={role} currentPath={location} />
-        <div className="flex flex-col flex-1 overflow-hidden">
-          <header className="flex items-center justify-between p-4 border-b">
+        <div className="flex flex-1 flex-col overflow-hidden">
+          <header className="flex h-16 shrink-0 items-center justify-between border-b border-border bg-background px-4 lg:px-6">
             <SidebarTrigger data-testid="button-sidebar-toggle" />
-            <ThemeToggle />
+            <div className="flex items-center gap-1">
+              <ThemeToggle />
+              <UserMenu user={user as UserMenuUser} />
+            </div>
           </header>
-          <main className="flex-1 overflow-auto p-6">
-            <Router />
+          <main className="flex-1 overflow-y-auto">
+            {/* Interim page padding. As each page adopts <Section><Container> during
+                the page rollout, this wrapper should shrink to just <Router />. */}
+            <div className="container-custom py-8">
+              <Router />
+            </div>
           </main>
         </div>
       </div>
@@ -99,10 +117,12 @@ function AppContent() {
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <TooltipProvider>
-        <AppContent />
-        <Toaster />
-      </TooltipProvider>
+      <ThemeProvider>
+        <TooltipProvider>
+          <AppContent />
+          <Toaster />
+        </TooltipProvider>
+      </ThemeProvider>
     </QueryClientProvider>
   );
 }
