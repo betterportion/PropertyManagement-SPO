@@ -360,7 +360,7 @@ export default function Maintenance() {
           onBuildingChange={(value) => setFilters({ building: value })}
           buildings={uniqueBuildings}
         />
-        <div className="relative flex-1 min-w-64">
+        <div className="relative flex-1 min-w-0 md:min-w-64">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
             placeholder="Search by title or location..."
@@ -374,6 +374,7 @@ export default function Maintenance() {
       </div>
 
       <Tabs defaultValue="all" data-testid="tabs-request-status">
+        <div className="overflow-x-auto">
         <TabsList>
           <TabsTrigger value="all" data-testid="tab-all-requests">
             All ({filteredRequests.length})
@@ -388,6 +389,7 @@ export default function Maintenance() {
             Completed ({completedRequests.length})
           </TabsTrigger>
         </TabsList>
+        </div>
 
         <TabsContent value="all" className="space-y-4 mt-6">
           {filteredRequests.map((request) => (
