@@ -374,21 +374,21 @@ export default function Maintenance() {
       </div>
 
       <Tabs defaultValue="all" data-testid="tabs-request-status">
-        <div className="overflow-x-auto">
-        <TabsList>
-          <TabsTrigger value="all" data-testid="tab-all-requests">
-            All ({filteredRequests.length})
-          </TabsTrigger>
-          <TabsTrigger value="pending" data-testid="tab-pending-requests">
-            Pending ({pendingRequests.length})
-          </TabsTrigger>
-          <TabsTrigger value="in_progress" data-testid="tab-inprogress-requests">
-            In Progress ({inProgressRequests.length})
-          </TabsTrigger>
-          <TabsTrigger value="completed" data-testid="tab-completed-requests">
-            Completed ({completedRequests.length})
-          </TabsTrigger>
-        </TabsList>
+        <div className="overflow-x-auto [&::-webkit-scrollbar]:hidden" style={{ scrollbarWidth: "none" }}>
+          <TabsList className="w-max">
+            <TabsTrigger value="all" data-testid="tab-all-requests">
+              All ({filteredRequests.length})
+            </TabsTrigger>
+            <TabsTrigger value="pending" data-testid="tab-pending-requests">
+              Pending ({pendingRequests.length})
+            </TabsTrigger>
+            <TabsTrigger value="in_progress" data-testid="tab-inprogress-requests">
+              In Progress ({inProgressRequests.length})
+            </TabsTrigger>
+            <TabsTrigger value="completed" data-testid="tab-completed-requests">
+              Completed ({completedRequests.length})
+            </TabsTrigger>
+          </TabsList>
         </div>
 
         <TabsContent value="all" className="space-y-4 mt-6">
