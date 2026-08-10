@@ -20,6 +20,10 @@ import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { z } from "zod";
+import { Section, Container, PageHeader, PageStack } from "@/components/layout/page";
+import { EmptyState, ErrorState, LoadingState } from "@/components/states";
+import { useUrlState } from "@/hooks/use-url-state";
+import { ClipboardList, SlidersHorizontal } from "lucide-react";
 
 const createRequestSchema = insertMaintenanceRequestSchema.extend({
   title: z.string().min(1, "Title is required"),
@@ -57,9 +61,10 @@ interface User {
 }
 
 export default function Maintenance() {
-  const [searchQuery, setSearchQuery] = useState("");
-  const [selectedRegion, setSelectedRegion] = useState("all");
-  const [selectedBuilding, setSelectedBuilding] = useState("all");
+  const [filters, setFilters, resetFilters] = useUrlState({ q: "", region: "all", building: "all" });
+  const searchQuery = filters.q;
+  const selectedRegion = filters.region;
+  const selectedBuilding = filters.building;
   const [selectedRequest, setSelectedRequest] = useState<MaintenanceRequest | null>(null);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
@@ -70,7 +75,7 @@ export default function Maintenance() {
   const typedUser = user as User | null;
   const { toast } = useToast();
 
-  const { data: requests = [], isLoading } = useQuery<MaintenanceRequest[]>({
+  const { data: requests = [], isLoading, isError, refetch } = useQuery<MaintenanceRequest[]>({
     queryKey: ['/api/maintenance-requests'],
   });
 
@@ -169,34 +174,24 @@ export default function Maintenance() {
     createMutation.mutate(data);
   };
 
-  if (isLoading) {
-    return (
-      <div className="space-y-6">
-        <div>
-          <h1 className="text-3xl font-semibold">Maintenance Requests</h1>
-          <p className="text-muted-foreground mt-1">Loading...</p>
-        </div>
-      </div>
-    );
-  }
+  if (isLoading) return <Section><Container><LoadingState message="Loading maintenance requests..." /></Container></Section>;
+  if (isError) return <Section><Container><ErrorState message="Maintenance requests could not be loaded." onRetry={() => refetch()} /></Container></Section>;
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div>
-          <h1 className="text-3xl font-semibold">Maintenance Requests</h1>
-          <p className="text-muted-foreground mt-1">Manage all property maintenance requests</p>
-        </div>
-        <div className="flex items-center gap-2">
+    <Section>
+      <Container>
+      <PageStack>
+      <PageHeader title="Maintenance requests" description="Keep property issues moving from report to resolution."
+        actions={<div className="flex flex-wrap items-center gap-2">
           {canManageJotForm && (
-            <Button variant="outline" onClick={() => setIsJotFormDialogOpen(true)} data-testid="button-jotform-setup">
+            <Button variant="secondary" onClick={() => setIsJotFormDialogOpen(true)} data-testid="button-jotform-setup">
               <Link2 className="h-4 w-4 mr-2" />
               JotForm Setup
             </Button>
           )}
           <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
           <DialogTrigger asChild>
-            <Button data-testid="button-create-maintenance-request">
+            <Button variant="primary" data-testid="button-create-maintenance-request">
               <Plus className="h-4 w-4 mr-2" />
               Create Request
             </Button>
@@ -336,7 +331,7 @@ export default function Maintenance() {
                 <div className="flex gap-2 justify-end pt-4">
                   <Button
                     type="button"
-                    variant="outline"
+                    variant="secondary"
                     onClick={() => setIsCreateDialogOpen(false)}
                     data-testid="button-cancel-create"
                   >
@@ -350,17 +345,19 @@ export default function Maintenance() {
             </Form>
           </DialogContent>
         </Dialog>
-        </div>
-      </div>
+        </div>} />
 
-      <div className="flex flex-wrap gap-4">
+      <div className="flex flex-col gap-3 rounded-lg border border-border/80 bg-muted/30 p-4 md:flex-row md:items-center">
+        <div className="flex items-center gap-2 text-sm font-medium text-foreground md:mr-1">
+          <SlidersHorizontal className="h-4 w-4 text-primary-strong" /> Filter requests
+        </div>
         <RegionSelector 
           selectedRegion={selectedRegion}
-          onRegionChange={setSelectedRegion}
+          onRegionChange={(value) => setFilters({ region: value })}
         />
         <BuildingSelector
           selectedBuilding={selectedBuilding}
-          onBuildingChange={setSelectedBuilding}
+          onBuildingChange={(value) => setFilters({ building: value })}
           buildings={uniqueBuildings}
         />
         <div className="relative flex-1 min-w-64">
@@ -368,11 +365,12 @@ export default function Maintenance() {
           <Input
             placeholder="Search by title or location..."
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
+            onChange={(e) => setFilters({ q: e.target.value })}
             className="pl-10"
             data-testid="input-search-requests"
           />
         </div>
+        <Button type="button" variant="ghost" size="sm" onClick={resetFilters}>Clear filters</Button>
       </div>
 
       <Tabs defaultValue="all" data-testid="tabs-request-status">
@@ -400,9 +398,7 @@ export default function Maintenance() {
               onEdit={() => handleEditRequest(request)}
             />
           ))}
-          {filteredRequests.length === 0 && (
-            <p className="text-center text-muted-foreground py-8">No maintenance requests found</p>
-          )}
+          {filteredRequests.length === 0 && <EmptyState icon={ClipboardList} title="Your request queue is clear" description="Try another filter, or create a request when a property issue needs attention." />}
         </TabsContent>
 
         <TabsContent value="pending" className="space-y-4 mt-6">
@@ -414,9 +410,7 @@ export default function Maintenance() {
               onEdit={() => handleEditRequest(request)}
             />
           ))}
-          {pendingRequests.length === 0 && (
-            <p className="text-center text-muted-foreground py-8">No pending requests</p>
-          )}
+          {pendingRequests.length === 0 && <EmptyState icon={ClipboardList} title="Nothing is waiting for review" description="New maintenance reports will appear here as they arrive." />}
         </TabsContent>
 
         <TabsContent value="in_progress" className="space-y-4 mt-6">
@@ -428,9 +422,7 @@ export default function Maintenance() {
               onEdit={() => handleEditRequest(request)}
             />
           ))}
-          {inProgressRequests.length === 0 && (
-            <p className="text-center text-muted-foreground py-8">No requests in progress</p>
-          )}
+          {inProgressRequests.length === 0 && <EmptyState icon={ClipboardList} title="No active repairs right now" description="Requests move here once work has started." />}
         </TabsContent>
 
         <TabsContent value="completed" className="space-y-4 mt-6">
@@ -442,9 +434,7 @@ export default function Maintenance() {
               onEdit={() => handleEditRequest(request)}
             />
           ))}
-          {completedRequests.length === 0 && (
-            <p className="text-center text-muted-foreground py-8">No completed requests</p>
-          )}
+          {completedRequests.length === 0 && <EmptyState icon={ClipboardList} title="Completed work will collect here" description="Resolved requests remain available for your records." />}
         </TabsContent>
       </Tabs>
 
@@ -476,7 +466,7 @@ export default function Maintenance() {
                 <code className="flex-1 bg-muted text-muted-foreground text-xs px-3 py-2 rounded-md truncate" data-testid="text-webhook-url">
                   {webhookConfig?.webhookUrl ?? "Loading…"}
                 </code>
-                <Button size="icon" variant="outline" onClick={copyWebhookUrl} disabled={!webhookConfig?.webhookUrl} data-testid="button-copy-webhook-url">
+                <Button size="icon" variant="ghost" onClick={copyWebhookUrl} disabled={!webhookConfig?.webhookUrl} data-testid="button-copy-webhook-url">
                   {copiedUrl ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
                 </Button>
               </div>
@@ -547,6 +537,8 @@ export default function Maintenance() {
           </div>
         </DialogContent>
       </Dialog>
-    </div>
+      </PageStack>
+      </Container>
+    </Section>
   );
 }

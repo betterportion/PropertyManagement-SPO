@@ -102,11 +102,7 @@ function AppContent() {
             </div>
           </header>
           <main className="flex-1 overflow-y-auto">
-            {/* Interim page padding. As each page adopts <Section><Container> during
-                the page rollout, this wrapper should shrink to just <Router />. */}
-            <div className="container-custom py-8">
-              <Router />
-            </div>
+            <Router />
           </main>
         </div>
       </div>

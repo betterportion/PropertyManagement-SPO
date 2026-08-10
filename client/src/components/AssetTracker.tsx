@@ -10,6 +10,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import type { Asset, Property } from "@shared/schema";
+import { EmptyState } from "@/components/states";
+import { formatDate, formatCurrency } from "@/lib/format";
 
 interface AssetTrackerProps {
   assets: Asset[];
@@ -40,7 +42,9 @@ export default function AssetTracker({ assets, properties, onEdit, onDelete, onP
 
   const AssetList = ({ items }: { items: Asset[] }) => (
     <div className="space-y-4">
-      {items.map((asset) => {
+      {items.length === 0 ? (
+        <EmptyState title="This asset list is clear" description="Assets added to this category will appear here with their property and service details." />
+      ) : items.map((asset) => {
         const Icon = assetIcons[asset.category as keyof typeof assetIcons] || Sofa;
         const property = getPropertyForAsset(asset);
         return (
@@ -82,14 +86,14 @@ export default function AssetTracker({ assets, properties, onEdit, onDelete, onP
                     )}
                     {asset.lastServiced && (
                       <p className="text-xs text-muted-foreground mt-0.5">
-                        Last serviced: {asset.lastServiced.toLocaleDateString()}
+                        Last serviced: {formatDate(asset.lastServiced)}
                       </p>
                     )}
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
                   <Badge variant="secondary" data-testid={`badge-age-${asset.id}`}>
-                    {asset.ageInYears} {asset.ageInYears === 1 ? 'year' : 'years'}
+                    {asset.type === "fixed" ? `${asset.ageInYears} ${asset.ageInYears === 1 ? "year" : "years"}` : formatCurrency(asset.purchasePrice)}
                   </Badge>
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>

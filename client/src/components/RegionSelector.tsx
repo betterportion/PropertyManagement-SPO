@@ -19,7 +19,7 @@ const regions = [
 export default function RegionSelector({ selectedRegion, onRegionChange }: RegionSelectorProps) {
   return (
     <Select value={selectedRegion} onValueChange={onRegionChange}>
-      <SelectTrigger className="w-48" data-testid="select-region">
+      <SelectTrigger className="w-full min-w-48 sm:w-48" data-testid="select-region">
         <div className="flex items-center gap-2">
           <MapPin className="h-4 w-4" />
           <SelectValue placeholder="Select region" />

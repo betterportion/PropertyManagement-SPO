@@ -1,21 +1,15 @@
-import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { AlertCircle } from "lucide-react";
+import { Link } from "wouter";
+import { Section, Container, PageStack } from "@/components/layout/page";
 
 export default function NotFound() {
   return (
-    <div className="min-h-screen w-full flex items-center justify-center bg-gray-50">
-      <Card className="w-full max-w-md mx-4">
-        <CardContent className="pt-6">
-          <div className="flex mb-4 gap-2">
-            <AlertCircle className="h-8 w-8 text-red-500" />
-            <h1 className="text-2xl font-bold text-gray-900">404 Page Not Found</h1>
-          </div>
-
-          <p className="mt-4 text-sm text-gray-600">
-            Did you forget to add the page to the router?
-          </p>
-        </CardContent>
-      </Card>
-    </div>
+    <Section className="min-h-[100dvh] flex items-center"><Container><PageStack className="mx-auto max-w-md text-center items-center">
+      <AlertCircle className="h-10 w-10 text-primary-strong" aria-hidden="true" />
+      <h1 className="text-3xl font-semibold">This page is not available</h1>
+      <p className="text-muted-foreground">The address may be out of date. Return to the portal and continue from there.</p>
+      <Link href="/"><Button variant="secondary">Return to portal</Button></Link>
+    </PageStack></Container></Section>
   );
 }

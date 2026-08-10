@@ -2,88 +2,11 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Calendar, MapPin, User } from "lucide-react";
-import { format } from "date-fns";
-
+import { formatDate } from "@/lib/format";
 import type { MaintenanceRequest as MaintenanceRequestType } from "@shared/schema";
-
-interface MaintenanceRequestCardProps {
-  request: MaintenanceRequestType;
-  onEdit?: () => void;
-  isAdmin?: boolean;
-}
-
-const priorityColors = {
-  low: "bg-secondary text-secondary-foreground",
-  medium: "bg-chart-4 text-white",
-  high: "bg-destructive text-destructive-foreground",
-  urgent: "bg-red-600 text-white dark:bg-red-500",
-  wishlist: "bg-yellow-500 text-yellow-950 dark:bg-yellow-600 dark:text-yellow-50",
-};
-
-const statusColors = {
-  pending: "bg-muted text-muted-foreground",
-  in_progress: "bg-chart-1 text-white",
-  completed: "bg-chart-2 text-white",
-  cancelled: "bg-muted text-muted-foreground",
-};
-
+interface MaintenanceRequestCardProps { request: MaintenanceRequestType; onEdit?: () => void; isAdmin?: boolean; }
+const priorityColors: Record<string, string> = { low: "bg-secondary text-secondary-foreground", medium: "bg-muted text-foreground", high: "bg-destructive text-destructive-foreground", urgent: "bg-destructive text-destructive-foreground", wishlist: "bg-accent text-accent-foreground" };
+const statusColors: Record<string, string> = { pending: "bg-muted text-muted-foreground", in_progress: "bg-accent text-accent-foreground", completed: "bg-secondary text-secondary-foreground", cancelled: "bg-muted text-muted-foreground" };
 export default function MaintenanceRequestCard({ request, onEdit, isAdmin = false }: MaintenanceRequestCardProps) {
-  return (
-    <Card className="hover-elevate" data-testid={`card-request-${request.id}`}>
-      <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
-        <div className="flex-1 min-w-0">
-          <h3 className="font-semibold text-base truncate" data-testid={`text-request-title-${request.id}`}>
-            {request.title}
-          </h3>
-          <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground">
-            <MapPin className="h-3 w-3" />
-            <span>{request.location}</span>
-          </div>
-        </div>
-        <div className="flex gap-2">
-          <Badge className={priorityColors[request.priority]} data-testid={`badge-priority-${request.id}`}>
-            {request.priority}
-          </Badge>
-          <Badge className={statusColors[request.status]} data-testid={`badge-status-${request.id}`}>
-            {request.status.replace("_", " ")}
-          </Badge>
-        </div>
-      </CardHeader>
-      <CardContent>
-        <p className="text-sm text-muted-foreground mb-3">{request.description}</p>
-        {request.photoUrl && (
-          <div className="mb-3 rounded-md overflow-hidden border">
-            <img
-              src={request.photoUrl}
-              alt="Maintenance request photo"
-              className="w-full max-h-48 object-cover"
-              data-testid={`img-request-photo-${request.id}`}
-            />
-          </div>
-        )}
-        <div className="flex items-center justify-between gap-4">
-          <div className="flex items-center gap-4 text-xs text-muted-foreground">
-            <div className="flex items-center gap-1">
-              <User className="h-3 w-3" />
-              <span>{request.submittedBy}</span>
-            </div>
-            <div className="flex items-center gap-1">
-              <Calendar className="h-3 w-3" />
-              <span>{request.submittedDate ? format(new Date(request.submittedDate), "MMM d, yyyy") : "N/A"}</span>
-            </div>
-          </div>
-          {isAdmin && (
-            <Button 
-              size="sm" 
-              variant="outline"
-              onClick={() => onEdit?.()}
-              data-testid={`button-edit-request-${request.id}`}
-            >
-              Edit
-            </Button>
-          )}
-        </div>
-      </CardContent>
-    </Card>
-  );
+ return <Card data-testid={`card-request-${request.id}`}><CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0 pb-2"><div className="min-w-0"><h3 className="truncate font-semibold">{request.title}</h3><div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground"><MapPin className="h-3 w-3" />{request.location}</div></div><div className="flex shrink-0 flex-wrap justify-end gap-2"><Badge className={priorityColors[request.priority]}>{request.priority}</Badge><Badge className={statusColors[request.status]}>{request.status.replace("_"," ")}</Badge></div></CardHeader><CardContent><p className="mb-3 text-sm text-muted-foreground">{request.description}</p>{request.photoUrl && <div className="mb-3 overflow-hidden rounded-lg border"><img src={request.photoUrl} alt="Maintenance request photo" className="max-h-48 w-full object-cover" /></div>}<div className="flex flex-wrap items-center justify-between gap-4 text-xs text-muted-foreground"><div className="flex flex-wrap gap-4"><span className="flex items-center gap-1"><User className="h-3 w-3" />{request.submittedBy}</span><span className="flex items-center gap-1"><Calendar className="h-3 w-3" />{formatDate(request.submittedDate)}</span></div>{isAdmin && <Button size="sm" variant="secondary" onClick={onEdit}>Edit</Button>}</div></CardContent></Card>;
 }

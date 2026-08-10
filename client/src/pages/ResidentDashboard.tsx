@@ -6,13 +6,15 @@ import { Home, Wrench, Phone, Mail, MapPin } from "lucide-react";
 import { Link } from "wouter";
 import { useAuth } from "@/hooks/useAuth";
 import type { MaintenanceRequest } from "@shared/schema";
+import { Section, Container, PageHeader, PageStack } from "@/components/layout/page";
+import { EmptyState, ErrorState, LoadingState } from "@/components/states";
 
 export default function ResidentDashboard() {
   const { user } = useAuth();
   const userData = user as any;
   const firstName = userData?.firstName || "Resident";
 
-  const { data: requests = [] } = useQuery<MaintenanceRequest[]>({
+  const { data: requests = [], isLoading, isError, refetch } = useQuery<MaintenanceRequest[]>({
     queryKey: ["/api/maintenance-requests"],
   });
 
@@ -21,11 +23,11 @@ export default function ResidentDashboard() {
   );
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-semibold">Welcome Back, {firstName}</h1>
-        <p className="text-muted-foreground mt-1">Your maintenance dashboard</p>
-      </div>
+    <Section size="compact"><Container><PageStack>
+      <PageHeader title={`Welcome back, ${firstName}`} description="Keep an eye on your home and the requests you have submitted." actions={
+        <Button variant="primary" asChild data-testid="button-submit-maintenance"><Link href="/submit-request"><Wrench /> Submit a request</Link></Button>
+      } />
+      {isLoading ? <LoadingState message="Loading your requests..." /> : isError ? <ErrorState onRetry={() => refetch()} /> : null}
 
       <div className="grid gap-6 md:grid-cols-2">
         <Card>
@@ -73,17 +75,13 @@ export default function ResidentDashboard() {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            <Link href="/submit-request">
-              <Button className="w-full" data-testid="button-submit-maintenance">
+            <Button variant="secondary" className="w-full" asChild data-testid="button-submit-maintenance"><Link href="/submit-request">
                 <Wrench className="h-4 w-4 mr-2" />
                 Submit Maintenance Request
-              </Button>
-            </Link>
-            <Link href="/my-requests">
-              <Button variant="outline" className="w-full" data-testid="button-view-requests">
-                View My Requests ({requests.length})
-              </Button>
-            </Link>
+              </Link></Button>
+            <Button variant="secondary" className="w-full" asChild data-testid="button-view-requests"><Link href="/my-requests">
+                View My Requests ({isLoading || isError ? "—" : requests.length})
+              </Link></Button>
             <div className="pt-3 border-t">
               <p className="text-sm font-medium mb-2 text-destructive">Emergency Maintenance</p>
               <a href="tel:5125550911">
@@ -97,25 +95,25 @@ export default function ResidentDashboard() {
         </Card>
       </div>
 
-      <div className="space-y-4">
+      {!isLoading && !isError && <div className="space-y-4">
         <div className="flex items-center justify-between">
           <h2 className="text-xl font-semibold">My Active Requests</h2>
           <Link href="/my-requests">
-            <Button variant="outline" size="sm" data-testid="button-view-all-my-requests">
+            <Button variant="secondary" size="sm" data-testid="button-view-all-my-requests">
               View All
             </Button>
           </Link>
         </div>
         <div className="space-y-4">
           {activeRequests.length === 0 ? (
-            <p className="text-muted-foreground text-sm">No active maintenance requests.</p>
+            <EmptyState icon={Wrench} title="Your home is in good shape" description="You do not have any active maintenance requests right now." action={<Link href="/submit-request"><Button variant="secondary">Report an issue</Button></Link>} />
           ) : (
             activeRequests.map((request) => (
               <MaintenanceRequestCard key={request.id} request={request} isAdmin={false} />
             ))
           )}
         </div>
-      </div>
-    </div>
+      </div>}
+    </PageStack></Container></Section>
   );
 }

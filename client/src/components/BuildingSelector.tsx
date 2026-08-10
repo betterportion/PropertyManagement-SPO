@@ -10,7 +10,7 @@ interface BuildingSelectorProps {
 export default function BuildingSelector({ selectedBuilding, onBuildingChange, buildings }: BuildingSelectorProps) {
   return (
     <Select value={selectedBuilding} onValueChange={onBuildingChange}>
-      <SelectTrigger className="w-64" data-testid="select-building">
+      <SelectTrigger className="w-full min-w-56 sm:w-64" data-testid="select-building">
         <div className="flex items-center gap-2">
           <Building2 className="h-4 w-4" />
           <SelectValue placeholder="Select building" />
@@ -18,7 +18,7 @@ export default function BuildingSelector({ selectedBuilding, onBuildingChange, b
       </SelectTrigger>
       <SelectContent>
         <SelectItem value="all" data-testid="option-building-all">
-          All Buildings
+          All buildings
         </SelectItem>
         {buildings.map((building) => (
           <SelectItem key={building.id} value={building.id} data-testid={`option-building-${building.id}`}>

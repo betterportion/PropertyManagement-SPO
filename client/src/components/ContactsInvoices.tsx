@@ -4,6 +4,8 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Phone, Mail, DollarSign, FileText, Pencil, ExternalLink } from "lucide-react";
 import type { BillingRecord, MaintenanceContact } from "@shared/schema";
+import { EmptyState } from "@/components/states";
+import { formatCurrency } from "@/lib/format";
 
 interface ContactsInvoicesProps {
   contacts: MaintenanceContact[];
@@ -28,7 +30,9 @@ export default function ContactsInvoices({ contacts, invoices, onAddContact, onE
 
       <TabsContent value="contacts" className="mt-6">
         <div className="space-y-4">
-          {contacts.map((contact) => (
+          {contacts.length === 0 ? (
+            <EmptyState title="Your maintenance directory is clear" description="Add a vendor contact when a new service relationship is ready to track." />
+          ) : contacts.map((contact) => (
             <Card key={contact.id} className="hover-elevate" data-testid={`card-contact-${contact.id}`}>
               <CardContent className="p-4">
                 <div className="flex items-start justify-between gap-4">
@@ -75,7 +79,7 @@ export default function ContactsInvoices({ contacts, invoices, onAddContact, onE
       <TabsContent value="invoices" className="mt-6">
         <div className="space-y-4">
           {invoices.length === 0 && (
-            <p className="text-sm text-muted-foreground text-center py-6">No invoice records yet.</p>
+            <EmptyState title="No invoices are waiting here" description="Create an invoice record to keep vendor costs and documents attached to the right contact." />
           )}
           {invoices.map((invoice) => (
             <Card key={invoice.id} className="hover-elevate" data-testid={`card-invoice-${invoice.id}`}>
@@ -89,7 +93,7 @@ export default function ContactsInvoices({ contacts, invoices, onAddContact, onE
                       <div className="flex items-center gap-2">
                         <DollarSign className="h-4 w-4 text-muted-foreground" />
                         <span className="font-medium">
-                          ${Number(invoice.invoiceCost).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          {formatCurrency(invoice.invoiceCost)}
                         </span>
                       </div>
                       {invoice.email && (
@@ -114,7 +118,7 @@ export default function ContactsInvoices({ contacts, invoices, onAddContact, onE
                             rel="noopener noreferrer"
                             data-testid={`link-contract-${invoice.id}`}
                           >
-                            <Badge variant="outline" className="gap-1 cursor-pointer">
+                            <Badge variant="secondary" className="gap-1 cursor-pointer">
                               <FileText className="h-3 w-3" />
                               Contract/Invoice
                               <ExternalLink className="h-3 w-3" />
@@ -128,7 +132,7 @@ export default function ContactsInvoices({ contacts, invoices, onAddContact, onE
                             rel="noopener noreferrer"
                             data-testid={`link-coi-${invoice.id}`}
                           >
-                            <Badge variant="outline" className="gap-1 cursor-pointer">
+                            <Badge variant="secondary" className="gap-1 cursor-pointer">
                               <FileText className="h-3 w-3" />
                               COI
                               <ExternalLink className="h-3 w-3" />
@@ -142,7 +146,7 @@ export default function ContactsInvoices({ contacts, invoices, onAddContact, onE
                             rel="noopener noreferrer"
                             data-testid={`link-w9-${invoice.id}`}
                           >
-                            <Badge variant="outline" className="gap-1 cursor-pointer">
+                            <Badge variant="secondary" className="gap-1 cursor-pointer">
                               <FileText className="h-3 w-3" />
                               W-9
                               <ExternalLink className="h-3 w-3" />

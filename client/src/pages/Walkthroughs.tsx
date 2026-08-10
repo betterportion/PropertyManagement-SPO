@@ -19,6 +19,8 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { insertWalkthroughRoomSchema, insertWalkthroughPhotoSchema, type WalkthroughRoom, type WalkthroughPhoto, type UserPermissions, type Property } from "@shared/schema";
 import { z } from "zod";
+import { Section, Container, PageHeader, PageStack } from "@/components/layout/page";
+import { LoadingState, EmptyState } from "@/components/states";
 
 interface User {
   id: string;
@@ -165,46 +167,37 @@ export default function Walkthroughs() {
   const isLoading = propertiesLoading || roomsLoading;
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-start flex-wrap gap-2">
-        <div className="flex items-center gap-3">
-          {selectedProperty && (
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setSelectedProperty(null)}
-              data-testid="button-back-to-properties"
-            >
-              <ArrowLeft className="h-4 w-4" />
-            </Button>
-          )}
-          <div>
-            <h1 className="text-3xl font-semibold">
-              {selectedProperty ? selectedProperty.name : "Walkthroughs"}
-            </h1>
-            <p className="text-muted-foreground mt-1">
-              {selectedProperty
-                ? selectedProperty.address
-                : "Select a property to view and document its rooms"}
-            </p>
-          </div>
-        </div>
-        {selectedProperty && canManage && (
-          <Button onClick={handleOpenAddRoom} data-testid="button-add-room">
-            <Plus className="h-4 w-4 mr-2" />
-            Add Room
-          </Button>
-        )}
-      </div>
+    <Section size="compact">
+      <Container>
+      <PageStack>
+      <PageHeader
+        title={selectedProperty ? selectedProperty.name : "Walkthroughs"}
+        description={selectedProperty ? selectedProperty.address : "Select a property to view and document its rooms."}
+        actions={
+          <>
+            {selectedProperty && (
+              <Button variant="ghost" size="icon" onClick={() => setSelectedProperty(null)} data-testid="button-back-to-properties" aria-label="Back to properties">
+                <ArrowLeft className="h-4 w-4" />
+              </Button>
+            )}
+            {selectedProperty && canManage && (
+              <Button variant="primary" onClick={handleOpenAddRoom} data-testid="button-add-room">
+                <Plus className="h-4 w-4" />
+                Add room
+              </Button>
+            )}
+          </>
+        }
+      />
 
       {isLoading ? (
-        <div className="text-muted-foreground">Loading...</div>
+        <LoadingState message="Loading walkthroughs..." />
       ) : !selectedProperty ? (
         /* Property selection grid */
         properties.length === 0 ? (
           <div className="text-center py-16">
             <Building2 className="h-12 w-12 text-muted-foreground/40 mx-auto mb-3" />
-            <p className="text-muted-foreground">No properties found. Add a property first.</p>
+            <EmptyState title="No properties are ready for walkthroughs" description="Add a property first, then document each room from this workspace." />
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -252,16 +245,12 @@ export default function Walkthroughs() {
       ) : (
         /* Rooms for selected property */
         roomsForSelectedProperty.length === 0 ? (
-          <div className="text-center py-16">
-            <DoorOpen className="h-12 w-12 text-muted-foreground/40 mx-auto mb-3" />
-            <p className="text-muted-foreground mb-4">No rooms documented for this property yet.</p>
-            {canManage && (
-              <Button onClick={handleOpenAddRoom} data-testid="button-add-room-empty">
-                <Plus className="h-4 w-4 mr-2" />
-                Add First Room
-              </Button>
-            )}
-          </div>
+          <EmptyState
+            icon={DoorOpen}
+            title="This property has no rooms yet"
+            description="Add the first room to begin documenting its condition."
+            action={canManage ? <Button variant="primary" onClick={handleOpenAddRoom} data-testid="button-add-room-empty"><Plus className="h-4 w-4" />Add first room</Button> : undefined}
+          />
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {roomsForSelectedProperty.map((room) => (
@@ -309,7 +298,7 @@ export default function Walkthroughs() {
                 )}
               />
               <DialogFooter>
-                <Button type="button" variant="outline" onClick={() => setIsAddRoomDialogOpen(false)}>
+                <Button type="button" variant="secondary" onClick={() => setIsAddRoomDialogOpen(false)}>
                   Cancel
                 </Button>
                 <Button type="submit" disabled={createRoomMutation.isPending} data-testid="button-submit-room">
@@ -401,6 +390,8 @@ export default function Walkthroughs() {
           </Form>
         </DialogContent>
       </Dialog>
-    </div>
+      </PageStack>
+      </Container>
+    </Section>
   );
 }

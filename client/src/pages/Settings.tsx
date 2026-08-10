@@ -8,14 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { DataTable } from "@/components/data-table";
 import {
   Select,
   SelectContent,
@@ -33,6 +26,9 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { insertUserSchema, type User, type UserPermissions } from "@shared/schema";
 import { z } from "zod";
+import { Section, Container, PageHeader, PageStack } from "@/components/layout/page";
+import { LoadingState, EmptyState } from "@/components/states";
+import { formatDate, formatValue } from "@/lib/format";
 
 const ALL_REGIONS = [
   { id: "west-central", name: "West Central" },
@@ -243,13 +239,10 @@ export default function Settings() {
   );
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-semibold">User Management</h1>
-        <p className="text-muted-foreground mt-1">
-          Manage user accounts, roles, and permissions
-        </p>
-      </div>
+    <Section size="compact">
+      <Container>
+      <PageStack>
+      <PageHeader title="User Management" description="Manage staff access, roles, and regional permissions from one place." />
 
       <div className="flex gap-4 items-center justify-between">
         <div className="relative flex-1 max-w-md">
@@ -343,7 +336,7 @@ export default function Settings() {
                 />
 
                 <DialogFooter>
-                  <Button type="button" variant="outline" onClick={() => setIsAddDialogOpen(false)}>
+                  <Button type="button" variant="secondary" onClick={() => setIsAddDialogOpen(false)}>
                     Cancel
                   </Button>
                   <Button type="submit" disabled={createUserMutation.isPending} data-testid="button-submit-user">
@@ -356,118 +349,95 @@ export default function Settings() {
         </Dialog>
       </div>
 
-      <Card>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>User</TableHead>
-              <TableHead>Email</TableHead>
-              <TableHead>Role</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Joined</TableHead>
-              <TableHead className="text-right">Actions</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {isLoading ? (
-              <TableRow>
-                <TableCell colSpan={6} className="text-center py-8">
-                  Loading users...
-                </TableCell>
-              </TableRow>
-            ) : filteredUsers.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
-                  No users found
-                </TableCell>
-              </TableRow>
-            ) : (
-              filteredUsers.map((user) => (
-                <TableRow key={user.id} data-testid={`row-user-${user.id}`}>
-                  <TableCell>
-                    <div className="flex items-center gap-3">
-                      {user.profileImageUrl && (
-                        <img
-                          src={user.profileImageUrl}
-                          alt={`${user.firstName} ${user.lastName}`}
-                          className="h-8 w-8 rounded-full object-cover"
-                        />
-                      )}
-                      <div>
-                        <div className="font-medium">
-                          {user.firstName} {user.lastName}
-                        </div>
-                      </div>
-                    </div>
-                  </TableCell>
-                  <TableCell>{user.email || "—"}</TableCell>
-                  <TableCell>
-                    <Select
-                      value={user.role}
-                      onValueChange={(value) =>
-                        updateRoleMutation.mutate({ id: user.id, role: value as "admin" | "regional_administrator" | "resident" })
-                      }
-                      disabled={updateRoleMutation.isPending}
-                    >
-                      <SelectTrigger className="w-32" data-testid={`select-role-${user.id}`}>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="admin">
-                          <div className="flex items-center gap-2">
-                            <Shield className="h-3 w-3" />
-                            Admin
-                          </div>
-                        </SelectItem>
-                        <SelectItem value="regional_administrator">
-                          <div className="flex items-center gap-2">
-                            <UserCog className="h-3 w-3" />
-                            Regional Admin
-                          </div>
-                        </SelectItem>
-                        <SelectItem value="resident">
-                          <div className="flex items-center gap-2">
-                            <UserCog className="h-3 w-3" />
-                            Resident
-                          </div>
-                        </SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-2">
-                      <Switch
-                        checked={user.isActive}
-                        onCheckedChange={(checked) =>
-                          updateStatusMutation.mutate({ id: user.id, isActive: checked })
-                        }
-                        disabled={updateStatusMutation.isPending}
-                        data-testid={`switch-status-${user.id}`}
-                      />
-                      <Badge variant={user.isActive ? "default" : "secondary"}>
-                        {user.isActive ? "Active" : "Inactive"}
-                      </Badge>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    {user.createdAt ? new Date(user.createdAt).toLocaleDateString() : "—"}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => handleOpenPermissions(user)}
-                      data-testid={`button-permissions-${user.id}`}
-                    >
-                      <Settings2 className="h-4 w-4 mr-2" />
-                      Permissions
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
+      <Card className="p-2 sm:p-4">
+        <DataTable
+          columns={[
+            {
+              key: "user",
+              header: "User",
+              cell: (user) => (
+                <div className="flex items-center gap-3">
+                  {user.profileImageUrl && (
+                    <img
+                      src={user.profileImageUrl}
+                      alt={`${user.firstName} ${user.lastName}`}
+                      className="h-8 w-8 rounded-full object-cover"
+                    />
+                  )}
+                  <span className="font-medium">{formatValue(`${user.firstName || ""} ${user.lastName || ""}`)}</span>
+                </div>
+              ),
+            },
+            {
+              key: "email",
+              header: "Email",
+              cell: (user) => formatValue(user.email),
+              hideOnMobile: true,
+            },
+            {
+              key: "role",
+              header: "Role",
+              cell: (user) => (
+                <Select
+                  value={user.role}
+                  onValueChange={(value) =>
+                    updateRoleMutation.mutate({ id: user.id, role: value as "admin" | "regional_administrator" | "resident" })
+                  }
+                  disabled={updateRoleMutation.isPending}
+                >
+                  <SelectTrigger className="w-32" data-testid={`select-role-${user.id}`}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="admin"><div className="flex items-center gap-2"><Shield className="h-3 w-3" />Admin</div></SelectItem>
+                    <SelectItem value="regional_administrator"><div className="flex items-center gap-2"><UserCog className="h-3 w-3" />Regional Admin</div></SelectItem>
+                    <SelectItem value="resident"><div className="flex items-center gap-2"><UserCog className="h-3 w-3" />Resident</div></SelectItem>
+                  </SelectContent>
+                </Select>
+              ),
+            },
+            {
+              key: "status",
+              header: "Status",
+              cell: (user) => (
+                <div className="flex items-center gap-2">
+                  <Switch
+                    checked={user.isActive}
+                    onCheckedChange={(checked) => updateStatusMutation.mutate({ id: user.id, isActive: checked })}
+                    disabled={updateStatusMutation.isPending}
+                    data-testid={`switch-status-${user.id}`}
+                  />
+                  <Badge variant={user.isActive ? "success" : "secondary"}>{user.isActive ? "Active" : "Inactive"}</Badge>
+                </div>
+              ),
+              hideOnMobile: true,
+            },
+            {
+              key: "joined",
+              header: "Joined",
+              cell: (user) => formatDate(user.createdAt),
+              sortValue: (user) => user.createdAt,
+              hideOnMobile: true,
+            },
+            {
+              key: "actions",
+              header: "Actions",
+              align: "right",
+              cell: (user) => (
+                <Button variant="ghost" size="sm" onClick={() => handleOpenPermissions(user)} data-testid={`button-permissions-${user.id}`}>
+                  <Settings2 className="mr-2 h-4 w-4" />
+                  <span className="hidden sm:inline">Permissions</span>
+                </Button>
+              ),
+            },
+          ]}
+          rows={filteredUsers}
+          getRowId={(user) => user.id}
+          isLoading={isLoading}
+          loadingMessage="Loading staff accounts..."
+          empty={<EmptyState title="No staff accounts match this search" description="Try a different name or email address." />}
+          data-testid="users-table"
+        />
       </Card>
 
       <Dialog open={isPermissionsDialogOpen} onOpenChange={(open) => {
@@ -493,10 +463,10 @@ export default function Settings() {
                   Region Access
                 </h3>
                 <div className="flex gap-2">
-                  <Button variant="outline" size="sm" onClick={handleSelectAllRegions}>
+                  <Button variant="secondary" size="sm" onClick={handleSelectAllRegions}>
                     Select All
                   </Button>
-                  <Button variant="outline" size="sm" onClick={handleClearAllRegions}>
+                  <Button variant="secondary" size="sm" onClick={handleClearAllRegions}>
                     Clear All
                   </Button>
                 </div>
@@ -569,7 +539,7 @@ export default function Settings() {
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsPermissionsDialogOpen(false)}>
+            <Button variant="secondary" onClick={() => setIsPermissionsDialogOpen(false)}>
               Cancel
             </Button>
             <Button 
@@ -582,6 +552,8 @@ export default function Settings() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+      </PageStack>
+      </Container>
+    </Section>
   );
 }

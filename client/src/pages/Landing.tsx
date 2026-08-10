@@ -1,16 +1,16 @@
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Building2, Wrench, Camera, Package, Users } from "lucide-react";
 import spoLogo from "@assets/SPO Logo under 600x600px_SPO Vertical - Ocean_1763138801065.png";
+import { Section, Container, PageStack } from "@/components/layout/page";
 
 export default function Landing() {
   return (
-    <div className="min-h-screen bg-gradient-to-br from-background via-background to-primary/5">
-      <div className="container mx-auto px-4 py-12">
-        <div className="flex flex-col items-center justify-center min-h-screen -mt-12">
+    <div className="min-h-[100dvh] bg-muted/30">
+      <Section size="lg"><Container><PageStack className="items-center">
           <div className="text-center mb-12">
             <img src={spoLogo} alt="SPO Logo" className="h-24 w-24 mx-auto mb-6 object-contain" />
-            <h1 className="text-4xl md:text-5xl font-bold mb-4">Property Management Portal</h1>
+            <h1 className="text-4xl md:text-5xl font-semibold tracking-tight mb-4">Property Management Portal</h1>
             <p className="text-xl text-muted-foreground mb-2">
               Saint Paul's Outreach, Inc.
             </p>
@@ -19,7 +19,8 @@ export default function Landing() {
             </p>
           </div>
 
-          <Card className="p-8 max-w-4xl w-full mb-8">
+          <Card className="max-w-4xl w-full">
+            <CardContent className="p-6 md:p-8">
             <h2 className="text-2xl font-semibold mb-6 text-center">Features</h2>
             <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
               <div className="flex flex-col items-center text-center p-4">
@@ -72,6 +73,7 @@ export default function Landing() {
                 </p>
               </div>
             </div>
+            </CardContent>
           </Card>
 
           <div className="flex flex-col items-center gap-4">
@@ -86,8 +88,7 @@ export default function Landing() {
               Please contact your administrator if you need access.
             </p>
           </div>
-        </div>
-      </div>
+      </PageStack></Container></Section>
     </div>
   );
 }

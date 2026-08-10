@@ -6,14 +6,12 @@ import { Textarea } from "@/components/ui/textarea";
 import { Upload, X, Save, Calendar } from "lucide-react";
 import { format } from "date-fns";
 import type { WalkthroughPhoto } from "@shared/schema";
+import { EmptyState } from "@/components/states";
+import { formatDate } from "@/lib/format";
 
 function formatUploadDate(date: Date | string | null | undefined): string | null {
   if (!date) return null;
-  try {
-    return format(new Date(date), "MMM d, yyyy");
-  } catch {
-    return null;
-  }
+    return formatDate(date);
 }
 
 interface PhotoGalleryProps {
@@ -53,8 +51,7 @@ export default function PhotoGallery({
       <Card className="border-dashed">
         <div className="flex flex-col items-center justify-center py-12 px-6">
           <Upload className="h-12 w-12 text-muted-foreground mb-4" />
-          <h3 className="text-lg font-medium mb-2">No photos yet</h3>
-          <p className="text-sm text-muted-foreground mb-4">Upload photos to document this room</p>
+          <EmptyState title="This room has no photos yet" description="Upload a clear room photo to build a useful walkthrough record." />
           {canManage && onUpload && (
             <Button onClick={onUpload} data-testid="button-upload-photos">
               <Upload className="h-4 w-4 mr-2" />
@@ -71,7 +68,7 @@ export default function PhotoGallery({
       <div className="mb-4 flex justify-between items-center">
         <p className="text-sm text-muted-foreground">{photos.length} photo{photos.length !== 1 ? 's' : ''}</p>
         {canManage && onUpload && (
-          <Button onClick={onUpload} variant="outline" size="sm" data-testid="button-add-photos">
+          <Button onClick={onUpload} variant="secondary" size="sm" data-testid="button-add-photos">
             <Upload className="h-4 w-4 mr-2" />
             Add Photos
           </Button>
@@ -164,9 +161,9 @@ export default function PhotoGallery({
                           <Save className="h-3 w-3 mr-1" />
                           Save
                         </Button>
-                        <Button 
+                <Button
                           size="sm" 
-                          variant="outline" 
+                          variant="secondary"
                           onClick={() => {
                             setIsEditingCaption(false);
                             setEditingCaption(selectedPhoto.notes || "");
@@ -196,7 +193,7 @@ export default function PhotoGallery({
               </div>
 
               <div className="flex justify-end gap-2 pt-4 border-t">
-                <Button variant="outline" onClick={() => setSelectedPhoto(null)}>
+                <Button variant="secondary" onClick={() => setSelectedPhoto(null)}>
                   Close
                 </Button>
                 {canManage && onDelete && (

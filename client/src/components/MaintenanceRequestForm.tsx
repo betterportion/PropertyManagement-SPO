@@ -8,10 +8,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Wrench } from "lucide-react";
 
 interface MaintenanceRequestFormProps {
-  onSubmit?: (data: any) => void;
+  onSubmit?: (data: any) => void | Promise<void>;
+  isSubmitting?: boolean;
 }
 
-export default function MaintenanceRequestForm({ onSubmit }: MaintenanceRequestFormProps) {
+export default function MaintenanceRequestForm({
+  onSubmit,
+  isSubmitting = false,
+}: MaintenanceRequestFormProps) {
   const [formData, setFormData] = useState({
     title: "",
     description: "",
@@ -19,100 +23,22 @@ export default function MaintenanceRequestForm({ onSubmit }: MaintenanceRequestF
     priority: "",
     location: "",
   });
-
+  const update = (key: string, value: string) => setFormData((current) => ({ ...current, [key]: value }));
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    console.log("Submitting maintenance request:", formData);
     onSubmit?.(formData);
     setFormData({ title: "", description: "", category: "", priority: "", location: "" });
   };
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Wrench className="h-5 w-5" />
-          Submit Maintenance Request
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="title">Issue Title</Label>
-            <Input
-              id="title"
-              placeholder="Brief description of the issue"
-              value={formData.title}
-              onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-              required
-              data-testid="input-request-title"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="location">Location</Label>
-            <Input
-              id="location"
-              placeholder="e.g., Unit 204, Kitchen"
-              value={formData.location}
-              onChange={(e) => setFormData({ ...formData, location: e.target.value })}
-              required
-              data-testid="input-request-location"
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="category">Category</Label>
-              <Select value={formData.category} onValueChange={(value) => setFormData({ ...formData, category: value })}>
-                <SelectTrigger id="category" data-testid="select-request-category">
-                  <SelectValue placeholder="Select category" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="plumbing">Plumbing</SelectItem>
-                  <SelectItem value="electrical">Electrical</SelectItem>
-                  <SelectItem value="hvac">HVAC</SelectItem>
-                  <SelectItem value="appliance">Appliance</SelectItem>
-                  <SelectItem value="structural">Structural</SelectItem>
-                  <SelectItem value="other">Other</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="priority">Priority</Label>
-              <Select value={formData.priority} onValueChange={(value) => setFormData({ ...formData, priority: value })}>
-                <SelectTrigger id="priority" data-testid="select-request-priority">
-                  <SelectValue placeholder="Select priority" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="low">Low</SelectItem>
-                  <SelectItem value="medium">Medium</SelectItem>
-                  <SelectItem value="high">High</SelectItem>
-                  <SelectItem value="urgent">Urgent</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="description">Description</Label>
-            <Textarea
-              id="description"
-              placeholder="Detailed description of the issue..."
-              value={formData.description}
-              onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-              rows={4}
-              required
-              data-testid="input-request-description"
-            />
-          </div>
-
-          <Button type="submit" className="w-full" data-testid="button-submit-request">
-            Submit Request
-          </Button>
-        </form>
-      </CardContent>
-    </Card>
-  );
+  return <Card className="border-border/80"><CardHeader><CardTitle className="flex items-center gap-2 text-xl"><Wrench className="h-5 w-5" />Submit maintenance request</CardTitle></CardHeader><CardContent>
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <div className="space-y-2"><Label htmlFor="title">Issue title</Label><Input id="title" placeholder="Brief description of the issue" value={formData.title} onChange={(e) => update("title", e.target.value)} required /></div>
+      <div className="space-y-2"><Label htmlFor="location">Location</Label><Input id="location" placeholder="e.g., Unit 204, Kitchen" value={formData.location} onChange={(e) => update("location", e.target.value)} required /></div>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div className="space-y-2"><Label htmlFor="category">Category</Label><Select value={formData.category} onValueChange={(v) => update("category", v)}><SelectTrigger id="category"><SelectValue placeholder="Select category" /></SelectTrigger><SelectContent>{["plumbing","electrical","hvac","appliance","structural","other"].map((v) => <SelectItem key={v} value={v}>{v[0].toUpperCase()+v.slice(1)}</SelectItem>)}</SelectContent></Select></div>
+        <div className="space-y-2"><Label htmlFor="priority">Priority</Label><Select value={formData.priority} onValueChange={(v) => update("priority", v)}><SelectTrigger id="priority"><SelectValue placeholder="Select priority" /></SelectTrigger><SelectContent>{["low","medium","high","urgent"].map((v) => <SelectItem key={v} value={v}>{v[0].toUpperCase()+v.slice(1)}</SelectItem>)}</SelectContent></Select></div>
+      </div>
+      <div className="space-y-2"><Label htmlFor="description">Description</Label><Textarea id="description" placeholder="Detailed description of the issue" value={formData.description} onChange={(e) => update("description", e.target.value)} rows={4} required /></div>
+      <Button type="submit" variant="primary" className="w-full" disabled={isSubmitting}>{isSubmitting ? "Sending request..." : "Submit request"}</Button>
+    </form>
+  </CardContent></Card>;
 }

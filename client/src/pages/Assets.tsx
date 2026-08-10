@@ -18,6 +18,8 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { insertAssetSchema, type Asset, type Property, type AssetPhoto } from "@shared/schema";
 import { z } from "zod";
+import { Section, Container, PageHeader, PageStack } from "@/components/layout/page";
+import { LoadingState } from "@/components/states";
 
 const FIXED_CATEGORIES = [
   "Appliances - Large",
@@ -289,11 +291,10 @@ export default function Assets() {
   const isAddSubmitting = createAssetMutation.isPending || createAssetPhotoMutation.isPending;
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-semibold">Asset Tracking</h1>
-        <p className="text-muted-foreground mt-1">Manage fixed and movable assets across properties</p>
-      </div>
+    <Section size="compact">
+      <Container>
+      <PageStack>
+      <PageHeader title="Asset Tracking" description="Keep fixed and movable assets accountable across every property." />
 
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="flex flex-wrap gap-4">
@@ -539,7 +540,7 @@ export default function Assets() {
                 </FormItem>
 
                 <DialogFooter>
-                  <Button type="button" variant="outline" onClick={() => setIsAddDialogOpen(false)}>
+                  <Button type="button" variant="secondary" onClick={() => setIsAddDialogOpen(false)}>
                     Cancel
                   </Button>
                   <Button type="submit" disabled={isAddSubmitting} data-testid="button-submit-asset">
@@ -553,7 +554,7 @@ export default function Assets() {
       </div>
 
       {isLoading ? (
-        <div className="text-center py-8">Loading assets...</div>
+        <LoadingState message="Loading assets..." />
       ) : (
         <AssetTracker
           assets={assets}
@@ -762,7 +763,7 @@ export default function Assets() {
               />
 
               <DialogFooter>
-                <Button type="button" variant="outline" onClick={() => setIsEditDialogOpen(false)}>Cancel</Button>
+                <Button type="button" variant="secondary" onClick={() => setIsEditDialogOpen(false)}>Cancel</Button>
                 <Button type="submit" disabled={updateAssetMutation.isPending}>
                   {updateAssetMutation.isPending ? "Updating..." : "Update Asset"}
                 </Button>
@@ -857,10 +858,12 @@ export default function Assets() {
           </div>
 
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setIsPhotosDialogOpen(false)}>Close</Button>
+            <Button type="button" variant="secondary" onClick={() => setIsPhotosDialogOpen(false)}>Close</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+      </PageStack>
+      </Container>
+    </Section>
   );
 }

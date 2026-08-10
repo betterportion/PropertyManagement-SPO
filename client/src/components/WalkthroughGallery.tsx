@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Upload, Calendar, X } from "lucide-react";
 import { format } from "date-fns";
+import { EmptyState } from "@/components/states";
 
 interface WalkthroughImage {
   id: string;
@@ -28,8 +29,7 @@ export default function WalkthroughGallery({ images, onUpload, onDelete }: Walkt
       <Card className="border-dashed">
         <CardContent className="flex flex-col items-center justify-center py-12">
           <Upload className="h-12 w-12 text-muted-foreground mb-4" />
-          <h3 className="text-lg font-medium mb-2">No walkthrough images yet</h3>
-          <p className="text-sm text-muted-foreground mb-4">Upload images from property walkthroughs</p>
+          <EmptyState title="Walkthrough documentation starts here" description="Upload images to preserve the condition and context of each visit." />
           <Button onClick={onUpload} data-testid="button-upload-images">
             <Upload className="h-4 w-4 mr-2" />
             Upload Images
@@ -43,7 +43,7 @@ export default function WalkthroughGallery({ images, onUpload, onDelete }: Walkt
     <>
       <div className="mb-4 flex justify-between items-center">
         <p className="text-sm text-muted-foreground">{images.length} images</p>
-        <Button onClick={onUpload} variant="outline" data-testid="button-add-images">
+        <Button onClick={onUpload} variant="secondary" data-testid="button-add-images">
           <Upload className="h-4 w-4 mr-2" />
           Add Images
         </Button>
@@ -105,7 +105,7 @@ export default function WalkthroughGallery({ images, onUpload, onDelete }: Walkt
                 </div>
               </div>
               <div className="flex justify-end gap-2">
-                <Button variant="outline" onClick={() => setSelectedImage(null)}>
+                <Button variant="secondary" onClick={() => setSelectedImage(null)}>
                   Close
                 </Button>
                 <Button 

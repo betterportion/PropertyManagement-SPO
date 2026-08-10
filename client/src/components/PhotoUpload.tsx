@@ -175,13 +175,13 @@ export function PhotoUpload({ onUpload, onRemove, onError, existingUrl, classNam
         ) : (
           <>
             <div className="flex items-center gap-3">
-              <div className="rounded-full bg-muted p-3">
+              <div className="rounded-lg bg-muted p-3">
                 <Camera className="h-5 w-5 text-muted-foreground" />
               </div>
-              <div className="rounded-full bg-muted p-3">
+              <div className="rounded-lg bg-muted p-3">
                 <ImageIcon className="h-5 w-5 text-muted-foreground" />
               </div>
-              <div className="rounded-full bg-muted p-3">
+              <div className="rounded-lg bg-muted p-3">
                 <Upload className="h-5 w-5 text-muted-foreground" />
               </div>
             </div>

@@ -17,7 +17,7 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 import type { MaintenanceRequest, MaintenanceContact, Invoice, Property } from "@shared/schema";
 import { DollarSign, Link2, FileText, Plus, Check, X, ImageIcon } from "lucide-react";
 import { PhotoUpload } from "@/components/PhotoUpload";
-import { format } from "date-fns";
+import { formatCurrency, formatDate } from "@/lib/format";
 
 interface MaintenanceEditDialogProps {
   request: MaintenanceRequest;
@@ -341,7 +341,7 @@ export default function MaintenanceEditDialog({ request, open, onClose }: Mainte
                 <Button
                   type="button"
                   size="sm"
-                  variant="outline"
+                  variant="secondary"
                   onClick={() => setShowInvoiceForm(!showInvoiceForm)}
                   data-testid="button-add-invoice"
                 >
@@ -358,14 +358,14 @@ export default function MaintenanceEditDialog({ request, open, onClose }: Mainte
                         <div className="space-y-1">
                           <p className="font-medium text-sm">{invoice.invoiceNumber}</p>
                           <p className="text-xs text-muted-foreground">{invoice.service}</p>
-                          <p className="text-xs text-muted-foreground">
-                            Due: {format(new Date(invoice.dueDate), "MMM d, yyyy")}
+                            <p className="text-xs text-muted-foreground">
+                             Due: {formatDate(invoice.dueDate)}
                           </p>
                         </div>
                         <div className="text-right">
                           <p className="font-semibold flex items-center gap-1">
                             <DollarSign className="h-3 w-3" />
-                            {invoice.amount}
+                            {formatCurrency(invoice.amount)}
                           </p>
                           <Badge variant="outline" className="mt-1">
                             {invoice.status}
@@ -387,7 +387,7 @@ export default function MaintenanceEditDialog({ request, open, onClose }: Mainte
                   <Button
                     type="button"
                     size="sm"
-                    variant="outline"
+                    variant="secondary"
                     className="mt-2"
                     onClick={() => setShowInvoiceForm(false)}
                   >
@@ -400,7 +400,7 @@ export default function MaintenanceEditDialog({ request, open, onClose }: Mainte
             <div className="flex justify-end gap-2 pt-4">
               <Button
                 type="button"
-                variant="outline"
+                variant="secondary"
                 onClick={onClose}
                 disabled={updateMutation.isPending}
                 data-testid="button-cancel"

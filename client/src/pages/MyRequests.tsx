@@ -2,9 +2,14 @@ import { useQuery } from "@tanstack/react-query";
 import MaintenanceRequestCard from "@/components/MaintenanceRequestCard";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { MaintenanceRequest } from "@shared/schema";
+import { Section, Container, PageHeader, PageStack } from "@/components/layout/page";
+import { EmptyState, ErrorState, LoadingState } from "@/components/states";
+import { Button } from "@/components/ui/button";
+import { Link } from "wouter";
+import { Wrench } from "lucide-react";
 
 export default function MyRequests() {
-  const { data: requests = [], isLoading } = useQuery<MaintenanceRequest[]>({
+  const { data: requests = [], isLoading, isError, refetch } = useQuery<MaintenanceRequest[]>({
     queryKey: ["/api/maintenance-requests"],
   });
 
@@ -12,23 +17,13 @@ export default function MyRequests() {
   const completedRequests = requests.filter((r) => r.status === "completed" || r.status === "cancelled");
 
   if (isLoading) {
-    return (
-      <div className="space-y-6">
-        <div>
-          <h1 className="text-3xl font-semibold">My Requests</h1>
-          <p className="text-muted-foreground mt-1">Track your maintenance requests</p>
-        </div>
-        <div className="text-center py-8 text-muted-foreground">Loading requests...</div>
-      </div>
-    );
+    return <Section><Container><PageStack><PageHeader title="My requests" description="Track updates from the property team." /><LoadingState message="Loading your requests..." /></PageStack></Container></Section>;
   }
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-semibold">My Requests</h1>
-        <p className="text-muted-foreground mt-1">Track your maintenance requests</p>
-      </div>
+    <Section><Container><PageStack>
+      <PageHeader title="My requests" description="Track updates from the property team." actions={<Link href="/submit-request"><Button variant="primary"><Wrench /> Submit a request</Button></Link>} />
+      {isError && <ErrorState onRetry={() => refetch()} />}
 
       <Tabs defaultValue="active" data-testid="tabs-my-requests">
         <TabsList>
@@ -42,7 +37,7 @@ export default function MyRequests() {
 
         <TabsContent value="active" className="space-y-4 mt-6">
           {activeRequests.length === 0 ? (
-            <p className="text-center py-8 text-muted-foreground">No active requests.</p>
+            <EmptyState icon={Wrench} title="Nothing needs attention right now" description="New maintenance requests will appear here as soon as you submit them." action={<Link href="/submit-request"><Button variant="secondary">Submit a request</Button></Link>} />
           ) : (
             activeRequests.map((request) => (
               <MaintenanceRequestCard key={request.id} request={request} isAdmin={false} />
@@ -52,7 +47,7 @@ export default function MyRequests() {
 
         <TabsContent value="completed" className="space-y-4 mt-6">
           {completedRequests.length === 0 ? (
-            <p className="text-center py-8 text-muted-foreground">No completed requests.</p>
+            <EmptyState title="Your completed requests will appear here" description="Resolved and cancelled requests stay here so you can refer back to them." />
           ) : (
             completedRequests.map((request) => (
               <MaintenanceRequestCard key={request.id} request={request} isAdmin={false} />
@@ -60,6 +55,6 @@ export default function MyRequests() {
           )}
         </TabsContent>
       </Tabs>
-    </div>
+    </PageStack></Container></Section>
   );
 }

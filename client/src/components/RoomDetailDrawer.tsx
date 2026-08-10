@@ -188,7 +188,7 @@ export default function RoomDetailDrawer({ room, open, onOpenChange, canManage }
               </div>
               {canManage && (
                 <Button
-                  variant="outline"
+                  variant="secondary"
                   size="sm"
                   onClick={handleOpenEditRoom}
                   data-testid="button-edit-room"
@@ -296,7 +296,7 @@ export default function RoomDetailDrawer({ room, open, onOpenChange, canManage }
           </div>
 
           <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={() => { setIsUploadDialogOpen(false); resetUploadDialog(); }}>
+            <Button variant="secondary" onClick={() => { setIsUploadDialogOpen(false); resetUploadDialog(); }}>
               Cancel
             </Button>
             <Button
@@ -356,7 +356,7 @@ export default function RoomDetailDrawer({ room, open, onOpenChange, canManage }
                   onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleAddQuestion(); } }}
                   data-testid="input-new-question"
                 />
-                <Button type="button" variant="outline" onClick={handleAddQuestion} data-testid="button-add-question">
+                <Button type="button" variant="secondary" onClick={handleAddQuestion} data-testid="button-add-question">
                   <Plus className="h-4 w-4" />
                 </Button>
               </div>
@@ -364,7 +364,7 @@ export default function RoomDetailDrawer({ room, open, onOpenChange, canManage }
           </div>
 
           <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={() => setIsEditRoomDialogOpen(false)}>
+            <Button variant="secondary" onClick={() => setIsEditRoomDialogOpen(false)}>
               Cancel
             </Button>
             <Button

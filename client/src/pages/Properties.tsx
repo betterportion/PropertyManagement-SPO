@@ -15,6 +15,8 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { insertPropertySchema, type Property, type InsertProperty } from "@shared/schema";
 import { z } from "zod";
+import { Section, Container, PageHeader, PageStack } from "@/components/layout/page";
+import { LoadingState, EmptyState } from "@/components/states";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -156,11 +158,10 @@ export default function Properties() {
   };
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-semibold">Properties</h1>
-        <p className="text-muted-foreground mt-1">Manage all properties and locations</p>
-      </div>
+    <Section size="compact">
+      <Container>
+      <PageStack>
+      <PageHeader title="Properties" description="Maintain the homes and locations that anchor your operations." />
 
       <div className="flex justify-end">
         <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
@@ -327,7 +328,7 @@ export default function Properties() {
                 />
 
                 <DialogFooter>
-                  <Button type="button" variant="outline" onClick={() => setIsAddDialogOpen(false)}>
+                  <Button type="button" variant="secondary" onClick={() => setIsAddDialogOpen(false)}>
                     Cancel
                   </Button>
                   <Button type="submit" disabled={createPropertyMutation.isPending} data-testid="button-submit-property">
@@ -341,11 +342,9 @@ export default function Properties() {
       </div>
 
       {isLoading ? (
-        <div className="text-center py-8">Loading properties...</div>
+        <LoadingState message="Loading properties..." />
       ) : properties && properties.length === 0 ? (
-        <div className="text-center py-12 text-muted-foreground">
-          No properties found. Add your first property to get started.
-        </div>
+        <EmptyState title="Your property directory is ready for its first home" description="Add a property to start connecting rooms, assets, contacts, and walkthroughs." />
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {(properties || []).map((property) => (
@@ -367,12 +366,12 @@ export default function Properties() {
                       <div className="flex items-center gap-2 mt-2 flex-wrap">
                         <Badge variant="secondary">{property.region}</Badge>
                         {(property.bedrooms || property.bathrooms) && (
-                          <Badge variant="outline">
+                          <Badge variant="secondary">
                             {property.bedrooms ? `${property.bedrooms} bed` : ''}{property.bedrooms && property.bathrooms ? ', ' : ''}{property.bathrooms ? `${property.bathrooms} bath` : ''}
                           </Badge>
                         )}
                         {property.squareFootage && (
-                          <Badge variant="outline">{property.squareFootage.toLocaleString()} sq ft</Badge>
+                          <Badge variant="secondary">{property.squareFootage.toLocaleString()} sq ft</Badge>
                         )}
                       </div>
                       {property.propertyManager && (
@@ -562,7 +561,7 @@ export default function Properties() {
               />
 
               <DialogFooter>
-                <Button type="button" variant="outline" onClick={() => setIsEditDialogOpen(false)}>
+                <Button type="button" variant="secondary" onClick={() => setIsEditDialogOpen(false)}>
                   Cancel
                 </Button>
                 <Button type="submit" disabled={updatePropertyMutation.isPending}>
@@ -593,6 +592,8 @@ export default function Properties() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+      </PageStack>
+      </Container>
+    </Section>
   );
 }

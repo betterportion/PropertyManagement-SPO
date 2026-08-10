@@ -16,6 +16,8 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { insertMaintenanceContactSchema, type MaintenanceContact, type Property, type BillingRecord } from "@shared/schema";
 import { z } from "zod";
+import { Section, Container, PageHeader, PageStack } from "@/components/layout/page";
+import { LoadingState, EmptyState } from "@/components/states";
 
 const REGIONS = [
   "East Central",
@@ -275,11 +277,10 @@ export default function Contacts() {
 
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-semibold">Maint Contacts & Invoices</h1>
-        <p className="text-muted-foreground mt-1">Manage maintenance contacts and track invoices</p>
-      </div>
+    <Section size="compact">
+      <Container>
+      <PageStack>
+      <PageHeader title="Maint Contacts & Invoices" description="Keep vendor relationships and invoice records ready for the next repair." />
 
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="flex flex-wrap gap-4">
@@ -430,7 +431,7 @@ export default function Contacts() {
                 </div>
 
                 <DialogFooter>
-                  <Button type="button" variant="outline" onClick={() => setIsAddDialogOpen(false)}>
+                  <Button type="button" variant="secondary" onClick={() => setIsAddDialogOpen(false)}>
                     Cancel
                   </Button>
                   <Button type="submit" disabled={createContactMutation.isPending} data-testid="button-submit-contact">
@@ -586,7 +587,7 @@ export default function Contacts() {
                         {uploadingContract ? (
                           <Loader2 className="h-4 w-4 animate-spin" />
                         ) : (
-                          <Button type="button" size="sm" variant="outline" asChild>
+                          <Button type="button" size="sm" variant="secondary" asChild>
                             <span><Upload className="h-3 w-3 mr-1" />{contractInvoiceUrl ? "Replace" : "Upload"}</span>
                           </Button>
                         )}
@@ -620,7 +621,7 @@ export default function Contacts() {
                         {uploadingCoi ? (
                           <Loader2 className="h-4 w-4 animate-spin" />
                         ) : (
-                          <Button type="button" size="sm" variant="outline" asChild>
+                            <Button type="button" size="sm" variant="secondary" asChild>
                             <span><Upload className="h-3 w-3 mr-1" />{coiUrl ? "Replace" : "Upload"}</span>
                           </Button>
                         )}
@@ -654,7 +655,7 @@ export default function Contacts() {
                         {uploadingW9 ? (
                           <Loader2 className="h-4 w-4 animate-spin" />
                         ) : (
-                          <Button type="button" size="sm" variant="outline" asChild>
+                          <Button type="button" size="sm" variant="secondary" asChild>
                             <span><Upload className="h-3 w-3 mr-1" />{w9Url ? "Replace" : "Upload"}</span>
                           </Button>
                         )}
@@ -664,7 +665,7 @@ export default function Contacts() {
                 </div>
 
                 <DialogFooter>
-                  <Button type="button" variant="outline" onClick={() => setIsAddInvoiceDialogOpen(false)}>
+                  <Button type="button" variant="secondary" onClick={() => setIsAddInvoiceDialogOpen(false)}>
                     Cancel
                   </Button>
                   <Button type="submit" disabled={createBillingMutation.isPending || uploadingContract || uploadingCoi || uploadingW9} data-testid="button-submit-invoice">
@@ -679,7 +680,7 @@ export default function Contacts() {
       </div>
 
       {isLoading ? (
-        <div className="text-center py-8">Loading contacts...</div>
+        <LoadingState message="Loading contacts..." />
       ) : (
         <ContactsInvoices
           contacts={contacts}
@@ -842,7 +843,7 @@ export default function Contacts() {
               </div>
 
               <DialogFooter>
-                <Button type="button" variant="outline" onClick={() => setIsEditDialogOpen(false)}>
+                <Button type="button" variant="secondary" onClick={() => setIsEditDialogOpen(false)}>
                   Cancel
                 </Button>
                 <Button type="submit" disabled={updateContactMutation.isPending} data-testid="button-update-contact">
@@ -853,6 +854,8 @@ export default function Contacts() {
           </Form>
         </DialogContent>
       </Dialog>
-    </div>
+      </PageStack>
+      </Container>
+    </Section>
   );
 }
