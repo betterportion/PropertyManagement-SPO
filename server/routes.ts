@@ -2,6 +2,7 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { setupAuth, isAuthenticated, getUserId } from "./auth";
+import { normalizeRegion, normalizeRegions } from "./migrateRegions";
 import { z } from "zod";
 import multer from "multer";
 import { createMondayItem, updateMondayItem } from "./monday";
@@ -79,14 +80,17 @@ const permissionsUpdateSchema = z.object({
   allowedRegions: z.array(z.string()).optional(),
 });
 
-function filterByRegion<T extends { region?: string | null }>(items: T[], allowedRegions: string[] | null): T[] {
-  if (!allowedRegions || allowedRegions.length === 0) {
+function filterByRegion<T extends { region?: string | null }>(items: T[], rawAllowedRegions: string[] | null): T[] {
+  if (!rawAllowedRegions || rawAllowedRegions.length === 0) {
     return [];
   }
+  // Normalise stored allowedRegions so legacy kebab-case values (e.g. "west-central")
+  // match Title Case values stored in data records (e.g. "West Central").
+  const allowedRegions = normalizeRegions(rawAllowedRegions);
   if (allowedRegions.includes("all")) {
     return items;
   }
-  return items.filter(item => item.region && allowedRegions.includes(item.region));
+  return items.filter(item => item.region && allowedRegions.includes(normalizeRegion(item.region)));
 }
 
 // Constant-time string comparison, so a wrong secret cannot be discovered by
@@ -98,11 +102,13 @@ function secretsMatch(provided: string, expected: string): boolean {
   return crypto.timingSafeEqual(a, b);
 }
 
-function canAccessRegion(region: string | null | undefined, allowedRegions: string[] | null, isAdmin: boolean): boolean {
+function canAccessRegion(region: string | null | undefined, rawAllowedRegions: string[] | null, isAdmin: boolean): boolean {
   if (isAdmin) return true;
   if (!region) return false;
-  if (!allowedRegions || allowedRegions.length === 0) return false;
-  return allowedRegions.includes(region);
+  if (!rawAllowedRegions || rawAllowedRegions.length === 0) return false;
+  // Normalise both sides so legacy kebab-case allowedRegions match Title Case record regions.
+  const allowedRegions = normalizeRegions(rawAllowedRegions);
+  return allowedRegions.includes(normalizeRegion(region));
 }
 
 export async function registerRoutes(app: Express): Promise<Server> {

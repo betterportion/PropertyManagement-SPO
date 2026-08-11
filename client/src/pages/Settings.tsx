@@ -31,12 +31,12 @@ import { LoadingState, EmptyState } from "@/components/states";
 import { formatDate, formatValue } from "@/lib/format";
 
 const ALL_REGIONS = [
-  { id: "west-central", name: "West Central" },
-  { id: "east-central", name: "East Central" },
-  { id: "north-west", name: "North West" },
-  { id: "south-west", name: "South West" },
-  { id: "north-east", name: "North East" },
-  { id: "south-east", name: "South East" },
+  { id: "West Central", name: "West Central" },
+  { id: "East Central", name: "East Central" },
+  { id: "North West", name: "North West" },
+  { id: "South West", name: "South West" },
+  { id: "North East", name: "North East" },
+  { id: "South East", name: "South East" },
 ];
 
 const FEATURE_PERMISSIONS = [

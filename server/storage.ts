@@ -47,7 +47,7 @@ function filterUndefined<T extends Record<string, any>>(obj: T): Partial<T> {
 }
 
 // Helper function to compute default permissions for a given role
-const ALL_REGIONS = ["west-central", "east-central", "north-west", "south-west", "north-east", "south-east"];
+const ALL_REGIONS = ["West Central", "East Central", "North West", "South West", "North East", "South East"];
 
 function computeDefaultPermissions(userId: string, role: "admin" | "regional_administrator" | "resident"): InsertUserPermissions {
   return {
