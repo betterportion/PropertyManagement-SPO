@@ -854,8 +854,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Middleware: rejects the request with 403 before multer reads a single byte
+  // when the caller is deactivated or lacks a role that legitimately needs
+  // file-storage access (residents are not permitted to upload directly).
+  const requireUploadPermission: import("express").RequestHandler = async (req: any, res, next) => {
+    try {
+      const userId = getUserId(req);
+      const currentUser = await storage.getUser(userId);
+      if (!currentUser?.isActive) {
+        return res.status(403).json({ message: "Your account is not active." });
+      }
+      if (currentUser.role === "resident") {
+        return res.status(403).json({ message: "Residents are not permitted to upload files." });
+      }
+      next();
+    } catch (error) {
+      console.error("Error checking upload permission:", error);
+      res.status(500).json({ message: "Failed to verify upload permission." });
+    }
+  };
+
   // File Upload Route (images)
-  app.post('/api/upload', isAuthenticated, ...guardedUpload(upload.single('file'), IMAGE_UPLOAD_MAX_BYTES), async (req: any, res) => {
+  app.post('/api/upload', isAuthenticated, requireUploadPermission, ...guardedUpload(upload.single('file'), IMAGE_UPLOAD_MAX_BYTES), async (req: any, res) => {
     try {
       if (!req.file) {
         return res.status(400).json({ message: "No file uploaded" });
@@ -941,7 +961,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return allowed.includes(detected.ext);
   }
 
-  app.post('/api/upload-doc', isAuthenticated, ...guardedUpload(docUpload.single('file'), DOCUMENT_UPLOAD_MAX_BYTES), async (req: any, res) => {
+  app.post('/api/upload-doc', isAuthenticated, requireUploadPermission, ...guardedUpload(docUpload.single('file'), DOCUMENT_UPLOAD_MAX_BYTES), async (req: any, res) => {
     try {
       if (!req.file) {
         return res.status(400).json({ message: "No file uploaded" });
