@@ -298,7 +298,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       const allowedRegions = permissions?.allowedRegions || [];
       const isAdmin = currentUser?.role === "admin";
-      if (!isAdmin && request.region && !allowedRegions.includes(request.region)) {
+      const isResident = currentUser?.role === "resident";
+
+      // Residents may only read their own requests
+      if (isResident && request.submittedBy !== currentUser?.email) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+
+      if (!isAdmin && !isResident && request.region && !allowedRegions.includes(request.region)) {
         return res.status(403).json({ message: "Forbidden - Region not accessible" });
       }
       
@@ -429,6 +436,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Linked Contacts for a Maintenance Request
   app.get('/api/maintenance-requests/:id/contacts', isAuthenticated, async (req: any, res) => {
     try {
+      const userId = getUserId(req);
+      const currentUser = await storage.getUser(userId);
+      const permissions = await storage.getUserPermissions(userId);
+
+      if (!currentUser?.isActive || (!permissions?.canViewMaintenance && !permissions?.canManageMaintenance)) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+
+      const request = await storage.getMaintenanceRequest(req.params.id);
+      if (!request) {
+        return res.status(404).json({ message: "Maintenance request not found" });
+      }
+
+      const isResident = currentUser?.role === "resident";
+
+      // Residents may only view contacts on their own requests
+      if (isResident && request.submittedBy !== currentUser?.email) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+
       const contacts = await storage.getRequestContacts(req.params.id);
       res.json(contacts);
     } catch (error) {
