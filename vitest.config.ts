@@ -13,7 +13,7 @@ export default defineConfig({
     // picks up ~144 test files that ship inside cached dependencies, which
     // fail for reasons that have nothing to do with this project and bury the
     // real results.
-    include: ["{server,shared,client}/**/*.{test,spec}.{ts,tsx}"],
+    include: ["{server,shared,client,scripts}/**/*.{test,spec}.{ts,tsx}"],
     exclude: ["**/node_modules/**", "**/dist/**", ".cache/**", ".local/**"],
   },
   resolve: {

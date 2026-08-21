@@ -335,6 +335,52 @@ export const insertUploadSchema = createInsertSchema(uploads).omit({
 export type Upload = typeof uploads.$inferSelect;
 export type InsertUpload = z.infer<typeof insertUploadSchema>;
 
+// Audit log
+//
+// An append-only record of the actions that matter after the fact: who changed
+// someone's access, who moved money, who took a document out of the system.
+// Nothing here is used by the application at runtime -- it exists so that a
+// question asked weeks later ("who deactivated this account?") has an answer.
+//
+// It deliberately stores no request bodies. Details are written field by field
+// by the calling route, and `server/audit.ts` scrubs anything whose name looks
+// like a credential before it is saved.
+export const auditLog = pgTable(
+  "audit_log",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    createdAt: timestamp("created_at").defaultNow(),
+    // Who did it. Kept as plain columns rather than a foreign key: the record
+    // must survive the deletion of the account it describes, which is exactly
+    // the case where it is most likely to be needed.
+    actorId: varchar("actor_id"),
+    actorEmail: varchar("actor_email"),
+    // What happened, as a stable dotted name, e.g. "user.role_changed".
+    action: varchar("action").notNull(),
+    // What it happened to.
+    entityType: varchar("entity_type").notNull(),
+    entityId: varchar("entity_id"),
+    // One human-readable sentence, safe to show to a non-technical reader.
+    summary: text("summary"),
+    // Structured extras: changed field names, before/after for small scalar
+    // values. Never a whole request body.
+    details: jsonb("details"),
+  },
+  (table) => [
+    index("IDX_audit_log_created_at").on(table.createdAt),
+    index("IDX_audit_log_entity").on(table.entityType, table.entityId),
+    index("IDX_audit_log_actor").on(table.actorId),
+  ],
+);
+
+export const insertAuditEventSchema = createInsertSchema(auditLog).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type AuditEvent = typeof auditLog.$inferSelect;
+export type InsertAuditEvent = z.infer<typeof insertAuditEventSchema>;
+
 // Request Contacts (join table for linking maintenance contacts to requests)
 export const requestContacts = pgTable("request_contacts", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),

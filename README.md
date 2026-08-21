@@ -26,13 +26,13 @@ On top of the role, each user has a row of fine-grained permissions (view/manage
 
 **Backend** — Express on Node 20, TypeScript with ESM, Passport with `openid-client` for OpenID Connect login, `express-session` backed by PostgreSQL.
 
-**Database** — PostgreSQL over the standard `pg` driver, with Drizzle ORM and Drizzle Kit. Any Postgres works: Supabase, Render, RDS, or one you run yourself. The schema is the single source of truth and lives in `shared/schema.ts`.
+**Database** — PostgreSQL over the standard `pg` driver, with Drizzle ORM and Drizzle Kit. Any Postgres works: Supabase, Neon, RDS, or one you run yourself. The schema is the single source of truth and lives in `shared/schema.ts`.
 
 **File storage** — either the local filesystem (development) or a private Supabase Storage bucket (production), chosen with `STORAGE_DRIVER`.
 
 **Integrations** — JotForm: a webhook turns form submissions into maintenance requests. Optional.
 
-**Hosting** — an ordinary Node service. It needs a Postgres connection string and the environment variables below, and nothing specific to any one hosting provider.
+**Hosting** — an ordinary Node service. It needs a Postgres connection string and the environment variables below, and nothing specific to any one hosting provider. The intended production home is **Render** with **Supabase** for the database and file storage; `docs/PRODUCTION_MIGRATION.md` is the step-by-step runbook for getting there.
 
 ---
 
@@ -46,41 +46,39 @@ npm install
 
 ### 2. Set the environment variables
 
-`.env.example` lists everything the app reads:
+`.env.example` lists everything the app reads, grouped by what it is for:
 
 ```bash
 cp .env.example .env
 ```
 
-> **Note:** the app does **not** read a `.env` file automatically — there is no `dotenv` in the project. On Replit, values come from the Secrets pane. Elsewhere, export them in your shell or have your host inject them (`set -a && . ./.env && set +a` works for local use).
+> **Note:** the app does **not** read a `.env` file automatically — there is no `dotenv` in the project. On Replit, values come from the Secrets pane; on Render, from the service's Environment tab. Locally, `set -a && . ./.env && set +a` works.
 
-Three variables are required before the app will start:
+Required before the app will start:
 
 | Variable | Required | What it is |
 |---|---|---|
 | `DATABASE_URL` | **Yes** | PostgreSQL connection string |
-| `SESSION_SECRET` | **Yes** | A long random string used to sign session cookies |
-| `OIDC_CLIENT_ID` *or* `REPL_ID` | **Yes** | Login client ID. On Replit `REPL_ID` is provided automatically; anywhere else set `OIDC_CLIENT_ID` or startup fails |
-| `OIDC_ISSUER_URL` | No | Identity provider discovery root. Defaults to `https://replit.com/oidc`. `ISSUER_URL` is accepted as an older alias |
-| `OIDC_CLIENT_ID` | No | Client ID from your identity provider. Overrides `REPL_ID` |
-| `OIDC_CLIENT_SECRET` | No | Client secret, if your provider issues one |
-| `OIDC_PROVIDER_NAME` | No | Internal login strategy label. Defaults to `replitauth` |
-| `OIDC_SCOPES` | No | Space-separated scopes. Defaults to `openid email profile offline_access` |
-| `JOTFORM_WEBHOOK_SECRET` | Recommended | Shared secret for the JotForm webhook. **Without it the webhook is disabled and returns 503** |
-| `JOTFORM_FIELD_*` | No | JotForm field ID mappings (TITLE, DESCRIPTION, CATEGORY, PRIORITY, LOCATION, EMAIL, REGION, BUILDING) |
-| `JOTFORM_DEFAULT_*` | No | Fallback values for JotForm submissions (REGION, BUILDING, LOCATION) |
-| `MAX_UPLOAD_BYTES_IN_FLIGHT` | No | Ceiling on how much upload data may be processed at once, in bytes. Defaults to 64MB. Uploads beyond it get a "try again in a few seconds" response rather than exhausting memory |
-| `PORT` | No | Defaults to 5000 |
+| `SESSION_SECRET` | **Yes** | A long random string used to sign session cookies. At least 32 characters in production |
+| `OIDC_ISSUER_URL` | **Yes, off Replit** | Identity provider discovery root, e.g. `https://accounts.google.com`. Inside a Replit workspace it defaults to Replit's |
+| `OIDC_CLIENT_ID` | **Yes, off Replit** | Client ID from your identity provider. Inside a Replit workspace `REPL_ID` is used automatically |
+| `STORAGE_DRIVER` | **Yes, in production** | `local` or `supabase`. Defaults to `local` in development; the server refuses to start without it in production rather than silently lose files |
+
+Everything else is optional and documented in `.env.example`: the remaining `OIDC_*` settings, the Supabase storage credentials, database TLS and pool tuning, the JotForm webhook, `MAX_UPLOAD_BYTES_IN_FLIGHT`, `UPLOAD_DIR` and `PORT`.
+
+If anything required is missing, the server refuses to start and prints **every** missing value at once, rather than failing hours later when someone tries to log in or upload a file.
 
 Never commit a real `.env` — it is gitignored.
 
 ### 3. Create the database tables
 
 ```bash
-npm run db:push
+npm run db:migrate
 ```
 
-The session table creates itself on first start, but every application table comes from this command, so run it before signing in.
+Every table the app needs, including the `sessions` table the login store depends on, comes from the migrations. The app does **not** create anything at startup, so this step is required before the first sign-in.
+
+> Pointing at a database that already has the tables but no migration history? Run `npm run db:baseline -- <tag>` once first, naming the migration whose schema that database already matches — it records everything up to and including that one as applied, so `db:migrate` does not try to create it again. A database matching the app as it stood before the audit log was added should use `npm run db:baseline -- 0002_drop_monday_item_id`. Bare `npm run db:baseline` records only the first migration and is right only for a database that matches `0000` alone. If the tag does not match what is actually there, the command refuses and tells you which table or column is wrong rather than recording a history that is not true.
 
 ### 4. Start it
 
@@ -104,9 +102,10 @@ The app serves the API and the frontend together on a single port (5000 by defau
 | `npm run lint` | ESLint over the server, the client and the shared code |
 | `npm run check` | TypeScript type check. Should always pass with zero errors |
 | `npm test` | Run the test suite (Vitest) |
-| `npm run db:push` | Push `shared/schema.ts` to the database. **Run this after any schema change** |
-| `npm run db:generate` | Generate a migration from a schema change |
-| `npm run db:migrate` | Apply pending migrations |
+| `npm run db:generate` | Write a migration file from a change to `shared/schema.ts` |
+| `npm run db:migrate` | Apply pending migrations. **This is how schema changes reach production** |
+| `npm run db:baseline -- <tag>` | Record existing tables as already migrated, through `<tag>`, for a database that predates `migrations/` |
+| `npm run db:push` | Push the schema directly with no migration. Development experiments only |
 
 ---
 
@@ -152,10 +151,11 @@ where a mistake is expensive and silent:
 | `server/__tests__/ownership.test.ts` | A resident reaching another resident's maintenance request |
 | `server/__tests__/uploadAccess.test.ts` | Which attachments a given account may read |
 | `server/__tests__/objectStorage.test.ts` | Storage keys, including the ones that try to escape the uploads folder |
+| `server/__tests__/audit.test.ts` | The audit log never storing a credential and never failing a request |
 | `server/__tests__/errors.test.ts` | Failures becoming clean responses instead of stack traces |
 | `server/__tests__/region.test.ts` | Turning region names into one canonical form |
 
-Two habits worth keeping when you add to them:
+Three habits worth keeping when you add to them:
 
 - **Test the real module, not a copy of it.** An earlier version of
   `region.test.ts` re-implemented the region rules inside the test file. The
@@ -164,6 +164,10 @@ Two habits worth keeping when you add to them:
 - **Assert that refused work never happened**, not just that the status code
   was 403. `expect(putUpload).not.toHaveBeenCalled()` is what proves the check
   ran *before* the file was written rather than after.
+- **When ordering is the requirement, instrument the stage itself and add a
+  positive control.** Proving an upload is refused before the body is read
+  means spying on the multipart parser; and one accepted request has to prove
+  the spy actually fires, or every "was not called" assertion is vacuous.
 
 ---
 
@@ -181,16 +185,21 @@ server/                 Express backend
   index.ts              Entry point, middleware, error handler
   routes.ts             Every API endpoint
   auth.ts               OpenID Connect login — the only provider-aware file
+  authz.ts              Who may do what: permissions, regions, ownership
+  audit.ts              Records access, money and document events
   storage.ts            All database access, behind one interface
   db.ts                 Drizzle over the standard pg pool
   config.ts             Boot-time configuration checks and OIDC settings
   security.ts           Security headers and rate limits
+  uploadLimits.ts       Per-file size limits and the in-flight memory ceiling
   health.ts             GET /api/health for the hosting platform
   objectStorage/        Where uploaded files are kept (local or Supabase)
   static.ts             Serves the built client in production
   vite.ts               Dev server wiring (development only)
+  __tests__/            Vitest suites
 shared/
   schema.ts             Drizzle tables and Zod types — the source of truth
+migrations/             Committed SQL migrations, applied with db:migrate
 scripts/                One-off maintenance scripts
 docs/                   Additional documentation
 ```
@@ -199,9 +208,42 @@ Path aliases: `@/` → `client/src/`, `@shared/` → `shared/`, `@assets/` → `
 
 ---
 
+## How the security model works
+
+Worth understanding before changing anything server-side.
+
+- **Every data route requires a session**, and a session alone is not enough: the account must still be active. A deactivated user keeps their cookie until it expires, so the active check is what actually revokes access.
+- **Permissions live in the database**, one row of flags per user, plus a list of allowed regions. Admins bypass both — they frequently have no permissions row at all, and any check that reads only the row will lock them out.
+- **Regions fail closed.** An empty region list grants access to nothing, not everything. Updates check both the record's current region and the incoming one, so a record cannot be moved somewhere the user cannot reach.
+- **Uploaded files are not public.** `GET /uploads/:filename` requires a session and authorizes against the record that references the file. Production hands out a short-lived signed link; the bucket itself is private.
+- **Uploads are refused before the body is read.** The permission check sits ahead of the multipart parser, so someone with no right to upload cannot push megabytes into the server's memory.
+- **The JotForm webhook fails closed.** With no `JOTFORM_WEBHOOK_SECRET` set it returns 503 rather than accepting anonymous submissions from the internet.
+- **Errors never leak internals.** Only messages the app wrote itself reach the client; everything else becomes a generic message with the detail logged server-side.
+
+### Audit log
+
+The `audit_log` table records the actions somebody may have to account for later: user and permission changes, maintenance status changes, invoice and billing changes, and document uploads and downloads. Photo views are deliberately not recorded — there are far too many of them and they would bury everything else.
+
+Nothing in the app displays it yet. Read it with SQL:
+
+```sql
+select created_at, actor_email, action, summary
+from audit_log
+order by created_at desc
+limit 50;
+```
+
+Two guarantees, both covered by tests: it never stores a credential, and a failure to write it never fails the user's request. Entries do contain names, filenames and email addresses — that is what makes the log worth reading — but each one is length-capped before it is stored.
+
+### Financial data
+
+The portal **never** stores raw bank account numbers, routing numbers, card numbers, CVVs or ACH credentials. Any future payments work goes through QuickBooks, Stripe or an equivalent processor, and this database keeps only references, statuses, dates and amounts. The reasoning is in `CLAUDE.md` under "Financial data" — treat it as a standing rule, not a preference.
+
+---
+
 ## Deployment
 
-The app is an ordinary Node web service. Any host that can run Node 20 and reach a Postgres database will do.
+The app is an ordinary Node web service. Any host that can run Node 20 and reach a Postgres database will do; **Render** is the intended home.
 
 - **Build:** `npm run build`
 - **Start:** `npm run start`
@@ -210,22 +252,24 @@ The app is an ordinary Node web service. Any host that can run Node 20 and reach
 
 The build produces `dist/index.js` (server) and `dist/public/` (frontend). The server bundle depends only on production dependencies — Vite and the other build tools are not needed at runtime, so `npm ci --omit=dev` is enough to run it.
 
-**Before the first start on a new host**, set at least `DATABASE_URL`, `SESSION_SECRET`, `STORAGE_DRIVER`, `OIDC_ISSUER_URL` and `OIDC_CLIENT_ID`. If anything required is missing the server refuses to start and prints every missing value at once, rather than failing later when someone tries to log in or upload a file.
+**Before the first start on a new host**, set at least `DATABASE_URL`, `SESSION_SECRET`, `STORAGE_DRIVER`, `OIDC_ISSUER_URL` and `OIDC_CLIENT_ID`, and apply the migrations with `npm run db:migrate`.
 
 Two things to know about running more than one instance:
 
 - **Uploads must not use `STORAGE_DRIVER=local`.** Local files live on one instance's disk and disappear when the host replaces it. Use `supabase`.
 - **Shutdown is graceful.** On `SIGTERM` the server stops accepting connections, lets in-flight requests finish, closes the database pool, and exits — so a rolling deploy does not cut anyone off mid-request.
 
+**Going to production for the first time?** Follow [`docs/PRODUCTION_MIGRATION.md`](docs/PRODUCTION_MIGRATION.md) rather than improvising. It is staging-first and lists what has to be configured inside Google Workspace and Supabase, which are the two steps nobody can do from this repository.
+
 ---
 
 ## Known issues
 
-- **Residents see an empty list on "My Requests".** Requests are saved with the submitter's email address, but the resident view looks them up by account ID, so the two never match. Staff pages are unaffected.
-- **Vendor contacts linked to a maintenance request are visible to any signed-in user**, including residents, if they know the request's ID. That one endpoint is missing its permission check.
-- **Admins with no permissions row are locked out of the maintenance pages.** Every other section lets admins through automatically; maintenance does not.
+- **Deleting a photo or document leaves the file in storage.** The record disappears from the app, but the file stays in the bucket and keeps costing space.
+- **Files uploaded before the current storage layout are unreachable.** Their links no longer resolve. Nothing in the app depends on them.
 - **The JotForm webhook is turned off** until `JOTFORM_WEBHOOK_SECRET` is set. It returns 503 rather than accepting unauthenticated submissions.
 - **No error boundary in the frontend**, so an unexpected display error shows a blank page rather than a message.
+- **Two dependency advisories remain**: `drizzle-orm`, and `vite` in the dev-only build tooling.
 
 The full list, including lower-priority items, is in [`docs/PRE_GITHUB_AUDIT.md`](docs/PRE_GITHUB_AUDIT.md).
 
@@ -235,7 +279,8 @@ The full list, including lower-priority items, is in [`docs/PRE_GITHUB_AUDIT.md`
 
 | Document | What it covers |
 |---|---|
-| [`CLAUDE.md`](CLAUDE.md) | Detailed architecture, data model, conventions and gotchas — written for AI coding assistants, but useful to anyone |
-| [`replit.md`](replit.md) | Replit-specific setup, the change log, and how to swap the login provider |
+| [`CLAUDE.md`](CLAUDE.md) | Detailed architecture, data model, conventions, standing rules and gotchas — written for AI coding assistants, but the most useful document here for any engineer |
+| [`docs/PRODUCTION_MIGRATION.md`](docs/PRODUCTION_MIGRATION.md) | The staging-first runbook for standing up Supabase, Google Workspace login and Render |
+| [`replit.md`](replit.md) | Replit-specific setup and the change log |
 | [`design_guidelines.md`](design_guidelines.md) | Typography, spacing, layout and component design rules |
-| [`docs/PRE_GITHUB_AUDIT.md`](docs/PRE_GITHUB_AUDIT.md) | Security and reliability audit, with each finding marked resolved or open |
+| [`docs/PRE_GITHUB_AUDIT.md`](docs/PRE_GITHUB_AUDIT.md) | The original security and reliability audit, with each finding marked resolved or open |

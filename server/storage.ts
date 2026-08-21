@@ -36,6 +36,9 @@ import {
   uploads,
   type Upload,
   type InsertUpload,
+  auditLog,
+  type AuditEvent,
+  type InsertAuditEvent,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, or, desc } from "drizzle-orm";
@@ -150,6 +153,9 @@ export interface IStorage {
   unlinkContactFromRequest(requestId: string, contactId: string): Promise<void>;
   updateProperty(id: string, data: Partial<InsertPropertyWithAddress>): Promise<Property>;
   deleteProperty(id: string): Promise<void>;
+
+  // Audit log
+  createAuditEvent(event: InsertAuditEvent): Promise<AuditEvent>;
 
   // Uploaded Files
   createUpload(upload: InsertUpload): Promise<Upload>;
@@ -589,6 +595,11 @@ export class DatabaseStorage implements IStorage {
     await db
       .delete(requestContacts)
       .where(and(eq(requestContacts.requestId, requestId), eq(requestContacts.contactId, contactId)));
+  }
+
+  async createAuditEvent(event: InsertAuditEvent): Promise<AuditEvent> {
+    const [created] = await db.insert(auditLog).values(event).returning();
+    return created;
   }
 
   async createUpload(upload: InsertUpload): Promise<Upload> {

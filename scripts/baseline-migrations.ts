@@ -18,6 +18,7 @@
 import crypto from "crypto";
 import fs from "fs";
 import path from "path";
+import { fileURLToPath } from "url";
 import pg from "pg";
 
 const MIGRATIONS_DIR = path.join(process.cwd(), "migrations");
@@ -58,31 +59,130 @@ function hashOf(tag: string): string {
 }
 
 /**
- * The tables and columns a migration creates, so we can confirm the database
- * really does already look the way the migration describes.
+ * The tables and columns the given migrations leave behind when applied in
+ * order, so we can confirm the database really does already look that way.
  *
- * Checking table names alone is not enough: a database can have every table
- * and still be missing a column added later, and recording the migration as
- * applied would leave that column missing forever.
+ * Checking table names alone is not enough: a database can have every table and
+ * still be missing a column added later, and recording the migration as applied
+ * would leave that column missing forever.
+ *
+ * Crucially this is the schema they *end up with*, not everything they mention.
+ * A migration that drops a column means a database at that point should not
+ * have it; expecting it anyway would make the one sequence anybody would
+ * actually baseline impossible to baseline, and would send them to
+ * `db:migrate`, which then fails on a table that already exists.
  */
-function schemaCreatedBy(tag: string): Map<string, Set<string>> {
-  const sql = fs.readFileSync(path.join(MIGRATIONS_DIR, `${tag}.sql`), "utf8");
+export function expectedSchema(tags: string[]): Map<string, Set<string>> {
   const tables = new Map<string, Set<string>>();
 
-  const createTable = /CREATE TABLE (?:IF NOT EXISTS )?"([^"]+)"\s*\(([\s\S]*?)\n\);/gi;
-  for (const match of sql.matchAll(createTable)) {
-    const [, table, body] = match;
-    const columns = new Set<string>();
-    for (const line of body.split("\n")) {
-      // Column definitions start with a quoted name. Table-level constraints
-      // (CONSTRAINT ..., PRIMARY KEY (...)) start with a keyword instead.
-      const column = line.trim().match(/^"([^"]+)"\s+\S/);
-      if (column) columns.add(column[1]);
+  for (const tag of tags) {
+    const sql = fs.readFileSync(path.join(MIGRATIONS_DIR, `${tag}.sql`), "utf8");
+
+    const createTable = /CREATE TABLE (?:IF NOT EXISTS )?"([^"]+)"\s*\(([\s\S]*?)\n\);/gi;
+    for (const match of sql.matchAll(createTable)) {
+      const [, table, body] = match;
+      const columns = new Set<string>();
+      for (const line of body.split("\n")) {
+        // Column definitions start with a quoted name. Table-level constraints
+        // (CONSTRAINT ..., PRIMARY KEY (...)) start with a keyword instead.
+        const column = line.trim().match(/^"([^"]+)"\s+\S/);
+        if (column) columns.add(column[1]);
+      }
+      tables.set(table, columns);
     }
-    tables.set(table, columns);
+
+    for (const [, table] of sql.matchAll(/DROP TABLE (?:IF EXISTS )?"([^"]+)"/gi)) {
+      tables.delete(table);
+    }
+
+    for (const [, table, column] of sql.matchAll(
+      /ALTER TABLE "([^"]+)"\s+ADD COLUMN (?:IF NOT EXISTS )?"([^"]+)"/gi,
+    )) {
+      tables.get(table)?.add(column);
+    }
+
+    for (const [, table, column] of sql.matchAll(
+      /ALTER TABLE "([^"]+)"\s+DROP COLUMN (?:IF EXISTS )?"([^"]+)"/gi,
+    )) {
+      tables.get(table)?.delete(column);
+    }
   }
 
   return tables;
+}
+
+/**
+ * Tables that only appear *after* the migration at `throughIndex`.
+ *
+ * If one of these is already in the database, the database is further along
+ * than the tag being claimed. Recording the earlier tag would leave the
+ * migration that creates the table unrecorded, and the next `db:migrate` would
+ * try to create a table that is already there and stop.
+ */
+export function tablesAddedAfter(tags: string[], throughIndex: number): Set<string> {
+  const now = new Set(expectedSchema(tags.slice(0, throughIndex + 1)).keys());
+  return new Set([...expectedSchema(tags).keys()].filter((table) => !now.has(table)));
+}
+
+/**
+ * How the database differs from the schema those migrations describe. Empty
+ * means it matches and the tag can honestly be recorded.
+ *
+ * The comparison is exact in both directions on purpose. A *missing* column
+ * means baselining would record it as created when it never was. An
+ * *unexpected* column -- one a later migration drops -- means the database has
+ * not reached this point in history yet, and recording the drop as applied
+ * would leave the column behind forever with nothing left to remove it.
+ */
+export function compareSchema(
+  expected: Map<string, Set<string>>,
+  present: Map<string, Set<string>>,
+  laterTables: Set<string>,
+): string[] {
+  const problems: string[] = [];
+
+  for (const [table, columns] of expected) {
+    const found = present.get(table);
+    if (!found) {
+      problems.push(`table "${table}" is missing entirely`);
+      continue;
+    }
+    const missing = [...columns].filter((column) => !found.has(column));
+    if (missing.length > 0) {
+      problems.push(`table "${table}" is missing: ${missing.join(", ")}`);
+    }
+    const unexpected = [...found].filter((column) => !columns.has(column));
+    if (unexpected.length > 0) {
+      problems.push(
+        `table "${table}" still has ${unexpected.join(", ")}, which a migration up to this ` +
+          `tag removes -- so this database has not reached that migration yet`,
+      );
+    }
+  }
+
+  for (const table of laterTables) {
+    if (present.has(table)) {
+      problems.push(
+        `table "${table}" already exists, but nothing up to this tag creates it -- this ` +
+          `database is further along than the tag you named`,
+      );
+    }
+  }
+
+  return problems;
+}
+
+/**
+ * The tag whose schema this database actually matches, so a refusal can name
+ * the command to run instead of leaving the reader to guess.
+ */
+export function tagMatching(tags: string[], present: Map<string, Set<string>>): string | undefined {
+  for (let index = 0; index < tags.length; index++) {
+    const expected = expectedSchema(tags.slice(0, index + 1));
+    const problems = compareSchema(expected, present, tablesAddedAfter(tags, index));
+    if (problems.length === 0) return tags[index];
+  }
+  return undefined;
 }
 
 async function main(): Promise<void> {
@@ -137,23 +237,20 @@ async function main(): Promise<void> {
     }
 
     // Refuse to pretend a migration ran against a database where it plainly did
-    // not. Without this the command could be used on an incomplete database and
-    // would leave it permanently missing tables or columns with no way to
-    // notice.
-    const expected = new Map<string, Set<string>>();
-    for (const entry of toRecord) {
-      for (const [table, columns] of schemaCreatedBy(entry.tag)) {
-        const merged = expected.get(table) ?? new Set<string>();
-        for (const column of columns) merged.add(column);
-        expected.set(table, merged);
-      }
-    }
+    // not. Without this the command could be used on a database that does not
+    // match the tag, and would write a migration history that is not true --
+    // leaving columns permanently uncreated, or sending the next `db:migrate`
+    // at a table that already exists.
+    const allTags = entries.map((entry) => entry.tag);
+    const expected = expectedSchema(toRecord.map((entry) => entry.tag));
 
-    if (expected.size > 0) {
+    {
+      // Every table, not only the expected ones: a table this tag does not know
+      // about yet is exactly how we detect a database that is newer than the
+      // tag being claimed.
       const { rows: actual } = await client.query<{ table_name: string; column_name: string }>(
         `SELECT table_name, column_name FROM information_schema.columns
-          WHERE table_schema = 'public' AND table_name = ANY($1)`,
-        [[...expected.keys()]],
+          WHERE table_schema = 'public'`,
       );
 
       const present = new Map<string, Set<string>>();
@@ -163,25 +260,24 @@ async function main(): Promise<void> {
         present.set(row.table_name, columns);
       }
 
-      const problems: string[] = [];
-      for (const [table, columns] of expected) {
-        const found = present.get(table);
-        if (!found) {
-          problems.push(`table "${table}" is missing entirely`);
-          continue;
-        }
-        const missingColumns = [...columns].filter((c) => !found.has(c));
-        if (missingColumns.length > 0) {
-          problems.push(`table "${table}" is missing: ${missingColumns.join(", ")}`);
-        }
-      }
+      const problems = compareSchema(expected, present, tablesAddedAfter(allTags, throughIndex));
 
       if (problems.length > 0) {
+        const suggestion = tagMatching(allTags, present);
+        const advice =
+          present.size === 0
+            ? `This database is empty, so there is nothing to baseline. Run "npm run db:migrate" ` +
+              `and let every migration apply for real.`
+            : suggestion
+              ? `This database matches "${suggestion}". Run:\n\n  npm run db:baseline -- ${suggestion}\n`
+              : `This database does not match any point in the migration history, so no tag is ` +
+                `correct for it. Compare it against migrations/ by hand before going further; ` +
+                `recording a history that is not true is harder to undo than this refusal.`;
+
         fail(
-          `This database does not match the migrations you are trying to baseline:\n  ` +
+          `This database does not match "${entries[throughIndex].tag}":\n  ` +
             problems.join("\n  ") +
-            `\n\nBaselining would record them as applied and the missing pieces would ` +
-            `never be created. Run "npm run db:migrate" instead.`,
+            `\n\n${advice}\n\nNothing has been written.`,
         );
       }
     }
@@ -237,7 +333,16 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exit(1);
-});
+// Only when run as a command. Without this guard, importing anything from this
+// file -- as the test for the schema check does -- would connect to a database
+// and call process.exit.
+const invokedDirectly =
+  process.argv[1] !== undefined &&
+  path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+
+if (invokedDirectly) {
+  main().catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
+}

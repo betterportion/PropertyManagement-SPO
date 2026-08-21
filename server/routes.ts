@@ -19,6 +19,7 @@ import {
 } from "./authz";
 import { z } from "zod";
 import { sendError, logError } from "./errors";
+import { recordAuditEvent, auditLookup, changedFields, AUDIT_ACTIONS } from "./audit";
 import multer from "multer";
 import path from "path";
 import crypto from "crypto";
@@ -211,7 +212,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!requireAdmin(res, ctx)) return;
 
       const validatedData = roleUpdateSchema.parse(req.body);
+      const previous = await auditLookup(() => storage.getUser(req.params.id));
       const user = await storage.updateUserRole(req.params.id, validatedData.role);
+
+      recordAuditEvent(ctx, {
+        action: AUDIT_ACTIONS.USER_ROLE_CHANGED,
+        entityType: "user",
+        entityId: req.params.id,
+        summary: `Changed ${previous?.email ?? req.params.id} from ${previous?.role ?? "unknown"} to ${validatedData.role}`,
+        details: { from: previous?.role ?? null, to: validatedData.role },
+      });
+
       res.json(user);
     } catch (error) {
       sendError(res, error, "Failed to update user role");
@@ -225,7 +236,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!requireAdmin(res, ctx)) return;
 
       const { isActive } = statusUpdateSchema.parse(req.body);
+      const previous = await auditLookup(() => storage.getUser(req.params.id));
       const user = await storage.updateUserActiveStatus(req.params.id, isActive);
+
+      recordAuditEvent(ctx, {
+        action: AUDIT_ACTIONS.USER_STATUS_CHANGED,
+        entityType: "user",
+        entityId: req.params.id,
+        summary: `${isActive ? "Reactivated" : "Deactivated"} ${previous?.email ?? req.params.id}`,
+        details: { isActive },
+      });
+
       res.json(user);
     } catch (error) {
       sendError(res, error, "Failed to update user status");
@@ -260,10 +281,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const filteredData = Object.fromEntries(
         Object.entries(validatedData).filter(([_, v]) => v !== undefined)
       );
+      const existingPermissions = await auditLookup(() => storage.getUserPermissions(req.params.id));
       const permissions = await storage.upsertUserPermissions({
         userId: req.params.id,
         ...filteredData,
       });
+
+      // Field names and the region list only. A permissions row is all
+      // booleans plus regions, so this is the whole change without storing a
+      // copy of the request.
+      recordAuditEvent(ctx, {
+        action: AUDIT_ACTIONS.USER_PERMISSIONS_CHANGED,
+        entityType: "user",
+        entityId: req.params.id,
+        summary: `Changed permissions for ${req.params.id}`,
+        details: {
+          changed: changedFields(existingPermissions as Record<string, unknown> | undefined, filteredData),
+          allowedRegions: filteredData.allowedRegions ?? existingPermissions?.allowedRegions ?? [],
+        },
+      });
+
       res.json(permissions);
     } catch (error) {
       sendError(res, error, "Failed to update permissions");
@@ -281,6 +318,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         id: req.body.id || undefined,
         ...validatedData,
       });
+
+      recordAuditEvent(ctx, {
+        action: AUDIT_ACTIONS.USER_CREATED,
+        entityType: "user",
+        entityId: user.id,
+        summary: `Created account ${user.email ?? user.id} with role ${user.role ?? "resident"}`,
+        details: { role: user.role ?? null, isActive: user.isActive ?? null },
+      });
+
       res.json(user);
     } catch (error) {
       sendError(res, error, "Failed to create user");
@@ -293,7 +339,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!ctx) return;
       if (!requireAdmin(res, ctx)) return;
 
+      const previous = await auditLookup(() => storage.getUser(req.params.id));
       await storage.deleteUser(req.params.id);
+
+      // Written after the deletion, and with no foreign key to the row that is
+      // now gone -- this is the event most likely to be asked about later.
+      recordAuditEvent(ctx, {
+        action: AUDIT_ACTIONS.USER_DELETED,
+        entityType: "user",
+        entityId: req.params.id,
+        summary: `Deleted account ${previous?.email ?? req.params.id}`,
+        details: { role: previous?.role ?? null },
+      });
+
       res.json({ success: true });
     } catch (error) {
       sendError(res, error, "Failed to delete user");
@@ -385,6 +443,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!requireRegionMove(res, ctx, existingRequest.region, validatedData.region)) return;
 
       const request = await storage.updateMaintenanceRequest(req.params.id, validatedData);
+
+      // Only a status change is recorded. Every other edit is ordinary work,
+      // and logging all of them would bury the ones that matter.
+      if (validatedData.status && validatedData.status !== existingRequest.status) {
+        recordAuditEvent(ctx, {
+          action: AUDIT_ACTIONS.MAINTENANCE_STATUS_CHANGED,
+          entityType: "maintenance_request",
+          entityId: req.params.id,
+          summary: `Moved "${existingRequest.title}" from ${existingRequest.status} to ${validatedData.status}`,
+          details: { from: existingRequest.status, to: validatedData.status },
+        });
+      }
+
       res.json(request);
     } catch (error) {
       sendError(res, error, "Failed to update maintenance request");
@@ -775,8 +846,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
    */
   async function storeUploadedFile(
     file: Express.Multer.File,
-    uploadedBy: string,
+    actor: AuthContext,
   ): Promise<{ url: string; filename: string; originalName: string }> {
+    const uploadedBy = actor.userId;
     const storageKey = generateStorageKey(file.originalname);
     const contentType = contentTypeFor(file.originalname);
 
@@ -802,6 +874,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       throw error;
     }
 
+    recordAuditEvent(actor, {
+      action: AUDIT_ACTIONS.DOCUMENT_UPLOADED,
+      entityType: "upload",
+      entityId: storageKey,
+      summary: `Uploaded ${file.originalname}`,
+      details: { contentType, sizeBytes: file.size },
+    });
+
     return { url: `/uploads/${storageKey}`, filename: storageKey, originalName: file.originalname };
   }
 
@@ -818,7 +898,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           message: "File contents do not match the file extension. The file was not saved.",
         });
       }
-      res.json(await storeUploadedFile(req.file, req.uploadContext.userId));
+      res.json(await storeUploadedFile(req.file, req.uploadContext));
     } catch (error) {
       sendError(res, error, "Failed to upload file");
     }
@@ -899,7 +979,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           message: "File contents do not match the file extension. The file was not saved.",
         });
       }
-      res.json(await storeUploadedFile(req.file, req.uploadContext.userId));
+      res.json(await storeUploadedFile(req.file, req.uploadContext));
     } catch (error) {
       sendError(res, error, "Failed to upload document");
     }
@@ -1102,6 +1182,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!requireRegion(res, ctx, validatedData.region, "Forbidden - Cannot create in this region")) return;
 
       const invoice = await storage.createInvoice(validatedData);
+
+      recordAuditEvent(ctx, {
+        action: AUDIT_ACTIONS.INVOICE_CREATED,
+        entityType: "invoice",
+        entityId: invoice.id,
+        summary: `Created an invoice for ${invoice.amount ?? "an unstated amount"} in ${invoice.region}`,
+        details: { amount: invoice.amount ?? null, status: invoice.status ?? null, region: invoice.region },
+      });
+
       res.json(invoice);
     } catch (error) {
       sendError(res, error, "Failed to create invoice");
@@ -1125,6 +1214,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!requireRegionMove(res, ctx, existingInvoice.region, validatedData.region)) return;
 
       const invoice = await storage.updateInvoice(req.params.id, validatedData);
+
+      recordAuditEvent(ctx, {
+        action: AUDIT_ACTIONS.INVOICE_UPDATED,
+        entityType: "invoice",
+        entityId: req.params.id,
+        summary: `Updated an invoice in ${existingInvoice.region}`,
+        details: {
+          changed: changedFields(existingInvoice as unknown as Record<string, unknown>, validatedData),
+          amount: invoice.amount ?? null,
+          status: invoice.status ?? null,
+        },
+      });
+
       res.json(invoice);
     } catch (error) {
       sendError(res, error, "Failed to update invoice");
@@ -1146,6 +1248,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!requireRegion(res, ctx, existingInvoice.region)) return;
 
       await storage.deleteInvoice(req.params.id);
+
+      recordAuditEvent(ctx, {
+        action: AUDIT_ACTIONS.INVOICE_DELETED,
+        entityType: "invoice",
+        entityId: req.params.id,
+        summary: `Deleted an invoice for ${existingInvoice.amount ?? "an unstated amount"} in ${existingInvoice.region}`,
+        details: { amount: existingInvoice.amount ?? null, status: existingInvoice.status ?? null },
+      });
+
       res.json({ success: true });
     } catch (error) {
       sendError(res, error, "Failed to delete invoice");
@@ -1197,6 +1308,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const record = await storage.createBillingRecord(validatedData);
+
+      recordAuditEvent(ctx, {
+        action: AUDIT_ACTIONS.BILLING_RECORD_CREATED,
+        entityType: "billing_record",
+        entityId: record.id,
+        summary: `Created a billing record for ${record.companyName ?? "an unnamed company"} in ${record.region}`,
+        details: { invoiceCost: record.invoiceCost ?? null, region: record.region },
+      });
+
       res.json(record);
     } catch (error) {
       sendError(res, error, "Failed to create billing record");
@@ -1220,6 +1340,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!requireRegionMove(res, ctx, existingRecord.region, validatedData.region)) return;
 
       const record = await storage.updateBillingRecord(req.params.id, validatedData);
+
+      recordAuditEvent(ctx, {
+        action: AUDIT_ACTIONS.BILLING_RECORD_UPDATED,
+        entityType: "billing_record",
+        entityId: req.params.id,
+        summary: `Updated the billing record for ${existingRecord.companyName ?? "an unnamed company"}`,
+        details: {
+          changed: changedFields(existingRecord as unknown as Record<string, unknown>, validatedData),
+          invoiceCost: record.invoiceCost ?? null,
+        },
+      });
+
       res.json(record);
     } catch (error) {
       sendError(res, error, "Failed to update billing record");
@@ -1241,6 +1373,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!requireRegion(res, ctx, existingRecord.region)) return;
 
       await storage.deleteBillingRecord(req.params.id);
+
+      recordAuditEvent(ctx, {
+        action: AUDIT_ACTIONS.BILLING_RECORD_DELETED,
+        entityType: "billing_record",
+        entityId: req.params.id,
+        summary: `Deleted the billing record for ${existingRecord.companyName ?? "an unnamed company"}`,
+        details: { invoiceCost: existingRecord.invoiceCost ?? null, region: existingRecord.region },
+      });
+
       res.json({ success: true });
     } catch (error) {
       sendError(res, error, "Failed to delete billing record");
@@ -1374,6 +1515,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       if (!(await uploadExists(requested))) {
         return res.status(404).json({ message: "File not found" });
+      }
+
+      // Photos are viewed constantly -- every card in every list pulls one --
+      // so recording them would drown the log. Documents are the ones somebody
+      // may later need to know were taken out: W-9s, COIs, contract invoices.
+      if (upload?.contentType && !upload.contentType.startsWith("image/")) {
+        recordAuditEvent(ctx, {
+          action: AUDIT_ACTIONS.DOCUMENT_DOWNLOADED,
+          entityType: "upload",
+          entityId: requested,
+          summary: `Downloaded ${upload.originalName}`,
+          details: { contentType: upload.contentType },
+        });
       }
 
       // Where the store can issue one, hand the browser a short-lived direct

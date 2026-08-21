@@ -6,7 +6,7 @@ import crypto from "crypto";
 import pg from "pg";
 
 const pool = new pg.Pool({
-  connectionString: process.env.DATABASE_URL || process.env.NEON_DATABASE_URL,
+  connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: true },
 });
 const base = `https://${process.env.REPLIT_DEV_DOMAIN}`;

@@ -30,7 +30,9 @@ npm install
 | `OIDC_CLIENT_ID` | No | Client ID from your identity provider. Overrides `REPL_ID` |
 | `OIDC_CLIENT_SECRET` | No | Client secret, if your provider issues one. Replit does not use one |
 | `OIDC_PROVIDER_NAME` | No | Internal login strategy prefix only; defaults to `replitauth` |
-| `OIDC_SCOPES` | No | Space-separated scopes; defaults to `openid email profile offline_access` |
+| `OIDC_SCOPES` | No | Space-separated scopes; defaults to `openid email profile offline_access`. **Google Workspace rejects `offline_access`** — set it to `openid email profile` there |
+| `MAX_UPLOAD_BYTES_IN_FLIGHT` | No | Total upload bytes processed at once; defaults to 64MB |
+| `NODE_ENV` | No | Set by the npm scripts; controls secure cookies, security headers and the production CSP |
 | `ISSUER_URL` | No | Legacy alias for `OIDC_ISSUER_URL`; still honoured |
 | `JOTFORM_WEBHOOK_SECRET` | Recommended | Shared secret for the JotForm webhook endpoint |
 | `JOTFORM_FIELD_*` | No | JotForm field ID mappings (TITLE, DESCRIPTION, CATEGORY, PRIORITY, LOCATION, EMAIL, REGION, BUILDING) |
@@ -38,10 +40,13 @@ npm install
 | `PORT` | No | Defaults to 5000 |
 
 ### 3. Create the database schema — required before first start
-The app will not start against an empty database, because the session store expects a `sessions` table to exist. Push the schema first:
+Apply the committed migrations before the first start:
 ```bash
-npm run db:push
+npm run db:migrate
 ```
+Pointing at a database that already has the tables but no migration history? Run `npm run db:baseline -- <tag>` once first, naming the last migration that database already matches (for a database predating the audit log, that is `0002_drop_monday_item_id`), then `npm run db:migrate`. Bare `db:baseline` records only migration `0000`.
+
+`npm run db:push` still exists for throwaway experiments, but anything that has to reach production must be a committed migration.
 
 ### 4. Start the app
 ```bash
@@ -71,8 +76,13 @@ Then register `https://your-domain/api/callback` as an allowed redirect URI with
 
 ### What already works with any provider
 - **Claim names**: standard OIDC `given_name`, `family_name`, and `picture` are read when Replit's `first_name`, `last_name`, and `profile_image_url` are absent.
-- **Logout**: providers that do not advertise an end-session endpoint are handled — the local session is cleared and the user returns to the home page instead of hitting an error.
-- **Callback URL**: follows the protocol of the incoming request, so an `http://localhost` checkout can complete the login round trip.
+- **Logout**: providers that do not advertise an end-session endpoint are handled — the local session is cleared and the user returns to the home page instead of hitting an error. Google Workspace is one of these.
+- **Callback URL**: built as `https://<hostname>/api/callback`, with plain http only for a genuine localhost checkout, so a request arriving without forwarded-proto headers cannot cache a broken `http://` callback for a production domain.
+
+### Scopes are not universal
+The default scope list includes `offline_access`, which is what lets a session refresh quietly in the background. **Google Workspace rejects it** and the login fails with `invalid_scope`, so `OIDC_SCOPES` must be set to `openid email profile` there. The consequence is that staff sign in again when their token expires rather than being refreshed silently — a click, since the browser is already signed in to Google, but not invisible.
+
+> Doing this for real? Follow `docs/PRODUCTION_MIGRATION.md` — it covers the Google Cloud console steps, the exact redirect URI, and how to check every account's email before the switch.
 
 ### Important: what happens to existing accounts
 User records are keyed on the provider's subject identifier (`sub`), so switching providers issues **new IDs for the same people**. The app already handles this: `upsertUser` in `server/storage.ts` detects a sign-in whose email matches an existing account under a different ID and migrates that account, preserving its role, active status, and permissions.
@@ -84,7 +94,14 @@ The practical migration path is therefore:
 
 Anyone whose record has no email, or who signs in with a different email than the one stored, arrives as a brand-new account with default resident permissions and has to be re-granted access by an admin.
 
-## Recent Changes (August 21, 2026)
+## Recent Changes (August 21, 2026) — Part 3
+- **Handoff documentation**: `README.md` and `CLAUDE.md` rewritten to describe the app as it actually is now — the local/Supabase storage drivers, the committed migrations, the audit log, and the current known issues. `.env.example` regrouped by purpose and no longer written as if Replit were the only host
+- **Production runbook**: `docs/PRODUCTION_MIGRATION.md` — a staging-first sequence for Supabase, Google Workspace login and Render, including exactly what has to be configured inside Google Workspace and what happens to existing accounts during a provider switch. No external infrastructure has been created; the runbook is instructions, not a record
+- **Audit log**: new `audit_log` table and `server/audit.ts`. Records user, permission, maintenance-status, invoice, billing and document events. Never fails a request, never stores a credential
+- **Financial data rule**: recorded permanently in `CLAUDE.md` — the portal must never store raw bank, routing, card or ACH credentials. Payments belong with QuickBooks or Stripe, and this database keeps only references, statuses, dates and amounts
+- **Secret scan**: no credentials found in any tracked file. The two "hardcoded secret" hits from static analysis are placeholder strings inside error messages, and the two tainted-redirect hits are the logout redirect, whose origin is built from a fixed scheme rather than user input
+
+## Recent Changes (August 21, 2026) — Parts 1 & 2
 - **Runs anywhere**: The app no longer depends on anything Replit-specific at runtime. The Replit Vite plugins are loaded only inside a Replit workspace and are imported dynamically, so `npm run build` works on any host; `reusePort` was dropped from the listen call because it is Linux-specific and unnecessary
 - **Production install is smaller and safer**: `log()` moved to `server/logger.ts` and static file serving to `server/static.ts`, so the built server bundle no longer imports Vite. Only production dependencies are needed to run it
 - **Startup validation**: `server/config.ts` checks everything the server cannot run without and reports *all* problems at once, instead of failing hours later at the first login or upload. Off Replit, an explicit `OIDC_CLIENT_ID` and `OIDC_ISSUER_URL` are required
@@ -188,7 +205,8 @@ Preferred communication style: Simple, everyday language.
 - **Server Framework**: Express.js on Node.js with TypeScript, ESM module system.
 - **API Design**: RESTful API under `/api`, session-based authentication, JSON format, centralized error handling.
 - **Authentication & Authorization**: Standard OpenID Connect via Passport.js, configured through `OIDC_*` environment variables and defaulting to Replit Auth (see "Swapping the identity provider"). Express-session with a PostgreSQL store, role-based access control (admin, regional_administrator, resident), fine-grained database-stored permissions. Route handlers resolve the signed-in user only through `getUserId(req)` from `server/auth.ts`.
-- **Database Layer**: Drizzle ORM for type-safe operations, PostgreSQL (Neon serverless driver), schema-first approach, Drizzle Kit for migrations.
+- **Database Layer**: Drizzle ORM for type-safe operations, PostgreSQL over the standard `pg` driver, schema-first approach, Drizzle Kit for migrations.
+- **Audit Log**: `server/audit.ts` records user and permission changes, maintenance status changes, invoice and billing changes, and document uploads and downloads into the `audit_log` table. Fire-and-forget, so a logging failure never fails the user's request; details are scrubbed of anything whose field name looks like a credential. Nothing reads it back in the app yet — query it with SQL.
 
 ### Data Storage Solutions
 - **Database Schema**:
@@ -202,22 +220,28 @@ Preferred communication style: Simple, everyday language.
     - `assetPhotos`: Photos linked to assets, stores image URLs and captions.
     - `maintenanceContacts`: Vendor details.
     - `invoices`: Linked to contacts and maintenance requests.
-    - `billingRecords`: Resident billing with amount, description, payment status.
+    - `billingRecords`: Vendor billing with company details, invoice cost, and contract/COI/W-9 document URLs.
     - `properties`: Property records with address components.
+    - `requestContacts`: Join table linking vendor contacts to maintenance requests.
+    - `uploads`: One row per stored file — storage key, original name, content type, size, uploader.
+    - `auditLog`: Append-only record of access, money and document events.
 - **ORM Strategy**: Drizzle ORM for type safety and performance, Zod schemas for validation.
 - **Connection Management**: the standard `pg` driver's connection pool, configured from `DATABASE_URL`. Nothing is tied to a particular hosting provider, so the same code runs against Supabase, Neon, RDS or a self-hosted server.
-- **Schema Changes**: committed SQL migrations in `migrations/`. `npm run db:generate` writes a migration from the schema, `npm run db:migrate` applies pending ones, and `npm run db:baseline` records the existing schema as already applied when pointing at a database that predates migrations.
+- **Schema Changes**: committed SQL migrations in `migrations/`. `npm run db:generate` writes a migration from the schema, `npm run db:migrate` applies pending ones, and `npm run db:baseline -- <tag>` records the existing schema as already applied, up to the named migration, when pointing at a database that predates migrations. It verifies the database really matches that point in history before recording anything.
 - **File Storage**: one interface in `server/objectStorage/` with two drivers, chosen by `STORAGE_DRIVER` -- a local folder for development and a private Supabase bucket for production. Object keys are random; the uploaded filename is kept in the `uploads` table. Downloads are authorized against the record that references the file, then served as a short-lived signed link where the driver supports one.
 
 ## External Dependencies
 
 ### Third-Party Services
-- **Replit OIDC**: For OpenID Connect authentication.
-- **Neon Serverless PostgreSQL**: Database hosting.
+- **OpenID Connect provider**: Replit Auth by default inside a Replit workspace; Google Workspace is the intended production provider. Configuration only — see "Swapping the identity provider".
+- **PostgreSQL**: any provider. Supabase is the intended production home; the standard `pg` driver means nothing is tied to one host.
+- **Supabase Storage**: private bucket for uploaded files in production.
+- **JotForm** (optional): webhook that turns form submissions into maintenance requests.
 - **Google Fonts CDN**: For Inter font family.
 
 ### Key NPM Packages
-- `@neondatabase/serverless`: PostgreSQL client.
+- `pg`: PostgreSQL client.
+- `@supabase/storage-js`: Supabase Storage client (used directly rather than the full `supabase-js` client).
 - `drizzle-orm`, `drizzle-kit`: ORM and migration tools.
 - `express`, `express-session`: Server framework and session management.
 - `passport`, `openid-client`: Authentication middleware.

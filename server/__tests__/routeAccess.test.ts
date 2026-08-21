@@ -218,6 +218,7 @@ beforeEach(() => {
   storageMock.getRequestContacts.mockResolvedValue([]);
   storageMock.findUploadReferences.mockResolvedValue([]);
   storageMock.getUploadByStorageKey.mockResolvedValue(undefined);
+  storageMock.createAuditEvent.mockResolvedValue({ id: "evt" });
   storageMock.updateMaintenanceRequest.mockImplementation(async (_id, patch) => ({ ...WEST_REQUEST, ...patch }));
   fileStoreMock.uploadExists.mockResolvedValue(true);
   fileStoreMock.createUploadSignedUrl.mockResolvedValue(null);
@@ -860,5 +861,151 @@ describe("identifiers that do not correspond to anything", () => {
     await get(`/api/maintenance-requests/${"x".repeat(500)}`);
     storageMock.getMaintenanceRequest.mockResolvedValue(WEST_REQUEST);
     expect((await get("/api/maintenance-requests/req-west")).status).toBe(200);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Audit log
+// ---------------------------------------------------------------------------
+
+describe("what reaches the audit log", () => {
+  const patch = (path: string, body: unknown) => request("PATCH", path, { body });
+
+  /** The single event a request recorded, or undefined if it recorded none. */
+  function recordedEvent() {
+    const calls = storageMock.createAuditEvent.mock.calls;
+    return calls.length === 1 ? calls[0][0] : undefined;
+  }
+
+  it("records who changed a role, and from what to what", async () => {
+    actAs(ADMIN);
+    storageMock.getUser.mockResolvedValueOnce(ADMIN).mockResolvedValue(ALICE);
+    storageMock.updateUserRole.mockResolvedValue({ ...ALICE, role: "regional_administrator" });
+
+    const { status } = await patch("/api/users/u-alice/role", { role: "regional_administrator" });
+
+    expect(status).toBe(200);
+    expect(recordedEvent()).toMatchObject({
+      action: "user.role_changed",
+      entityType: "user",
+      entityId: "u-alice",
+      actorId: ADMIN.id,
+      actorEmail: ADMIN.email,
+      details: { from: "resident", to: "regional_administrator" },
+    });
+  });
+
+  it("records a deactivation", async () => {
+    actAs(ADMIN);
+    storageMock.getUser.mockResolvedValueOnce(ADMIN).mockResolvedValue(ALICE);
+    storageMock.updateUserActiveStatus.mockResolvedValue({ ...ALICE, isActive: false });
+
+    await patch("/api/users/u-alice/status", { isActive: false });
+
+    expect(recordedEvent()).toMatchObject({
+      action: "user.status_changed",
+      entityId: "u-alice",
+      details: { isActive: false },
+    });
+  });
+
+  it("records a permission change as field names, not as a copy of the request", async () => {
+    actAs(ADMIN);
+    storageMock.getUserPermissions
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValue({ userId: "u-alice", canViewMaintenance: false, allowedRegions: [] });
+    storageMock.upsertUserPermissions.mockResolvedValue({ userId: "u-alice" });
+
+    await patch("/api/users/u-alice/permissions", {
+      canViewMaintenance: true,
+      allowedRegions: ["West Central"],
+    });
+
+    expect(recordedEvent()).toMatchObject({
+      action: "user.permissions_changed",
+      entityId: "u-alice",
+      details: { changed: ["allowedRegions", "canViewMaintenance"], allowedRegions: ["West Central"] },
+    });
+  });
+
+  it("records a maintenance status change", async () => {
+    actAs(STAFF, { ...ALL_MAINTENANCE, allowedRegions: ["West Central"] });
+    storageMock.getMaintenanceRequest.mockResolvedValue(WEST_REQUEST);
+
+    await patch("/api/maintenance-requests/req-west", { status: "completed" });
+
+    expect(recordedEvent()).toMatchObject({
+      action: "maintenance_request.status_changed",
+      entityId: "req-west",
+      details: { from: "pending", to: "completed" },
+    });
+  });
+
+  it("does not record an ordinary maintenance edit that leaves the status alone", async () => {
+    actAs(STAFF, { ...ALL_MAINTENANCE, allowedRegions: ["West Central"] });
+    storageMock.getMaintenanceRequest.mockResolvedValue(WEST_REQUEST);
+
+    await patch("/api/maintenance-requests/req-west", { description: "Now dripping faster" });
+
+    expect(storageMock.createAuditEvent).not.toHaveBeenCalled();
+  });
+
+  it("records nothing at all when the action was refused", async () => {
+    actAs(ALICE);
+    storageMock.getUser.mockResolvedValue(ALICE);
+
+    const { status } = await patch("/api/users/u-bob/role", { role: "admin" });
+
+    expect(status).toBe(403);
+    expect(storageMock.updateUserRole).not.toHaveBeenCalled();
+    expect(storageMock.createAuditEvent).not.toHaveBeenCalled();
+  });
+
+  it("still performs the change when the lookup done for the log fails", async () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    actAs(ADMIN);
+    // The second getUser call is the one made purely to put an email in the
+    // summary. It must not be able to stop the role change from happening.
+    storageMock.getUser.mockResolvedValueOnce(ADMIN).mockRejectedValue(new Error("connection reset"));
+    storageMock.updateUserRole.mockResolvedValue({ ...ALICE, role: "admin" });
+
+    const { status } = await patch("/api/users/u-alice/role", { role: "admin" });
+
+    expect(status).toBe(200);
+    expect(storageMock.updateUserRole).toHaveBeenCalledWith("u-alice", "admin");
+    // Still recorded, just without the email it could not load.
+    expect(recordedEvent()).toMatchObject({ action: "user.role_changed", entityId: "u-alice" });
+    logged.mockRestore();
+  });
+
+  it("still saves permissions when the lookup done for the log fails", async () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    actAs(ADMIN);
+    storageMock.getUserPermissions
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValue(new Error("connection reset"));
+    storageMock.upsertUserPermissions.mockResolvedValue({ userId: "u-alice" });
+
+    const { status } = await patch("/api/users/u-alice/permissions", { canViewMaintenance: true });
+
+    expect(status).toBe(200);
+    expect(storageMock.upsertUserPermissions).toHaveBeenCalled();
+    logged.mockRestore();
+  });
+
+  it("still answers the caller when the audit write fails", async () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    actAs(ADMIN);
+    storageMock.getUser.mockResolvedValueOnce(ADMIN).mockResolvedValue(ALICE);
+    storageMock.updateUserRole.mockResolvedValue({ ...ALICE, role: "admin" });
+    storageMock.createAuditEvent.mockRejectedValue(new Error("audit table is missing"));
+
+    const { status, body } = await patch("/api/users/u-alice/role", { role: "admin" });
+
+    // The change itself succeeded. Failing the request because the record of it
+    // could not be written would be the worse outcome of the two.
+    expect(status).toBe(200);
+    expect(body.role).toBe("admin");
+    logged.mockRestore();
   });
 });

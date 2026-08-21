@@ -5,17 +5,19 @@
 
 > ## ⚠️ Status: mostly resolved — kept only until the last findings close
 >
-> **Reviewed July 30, 2026.** This audit was written *before* any fixes were made, and the findings below are preserved in their original wording for the record. Most are now closed. **Delete this file once the remaining ones are done.**
+> **Reviewed August 21, 2026.** This audit was written *before* any fixes were made, and the findings below are preserved in their original wording for the record. Most are now closed. **Delete this file once the remaining two are done.**
 >
-> **Still open**
+> **Still open** — both are tracked as project tasks
 > - 🟢 No error boundary in the frontend — section 2
 > - 🟢 `throw err` after the error response in middleware — section 2
 >
 > **Resolved** — everything else, including both HIGH `uploads/` and `.gitignore` findings, the unauthenticated JotForm webhook, the permissions endpoint, public upload access, both session-store settings, all TypeScript errors, the Replit-only login dependency, and file uploads not surviving a deployment.
 >
+> **Re-scanned August 21, 2026** with dependency, static-analysis and sensitive-data tooling, plus a manual sweep of every tracked file. No credentials are present anywhere in the repository. Two static-analysis "hardcoded secret" hits are placeholder connection strings inside error messages, and two "tainted redirect" hits are the logout redirect, whose origin is built from a fixed scheme rather than from user input. Two dependency advisories remain — `drizzle-orm`, and `vite` in the dev-only build tooling — and both are tracked as project tasks.
+>
 > **No longer applicable.** The Monday.com finding (section 1) is closed because the integration itself has been removed. Note also that the audit describes the app as it was in July 2026: it now uses the standard `pg` driver rather than Neon's, keeps uploads in a private Supabase bucket rather than on disk, and no longer depends on anything Replit-specific at runtime.
 >
-> A separately discovered bug that this audit missed is tracked in `CLAUDE.md`: residents cannot see their own maintenance requests, because `submittedBy` stores an email while the filter compares against a user ID.
+> A separately discovered bug that this audit missed — residents not seeing their own maintenance requests — has since been fixed: `submittedBy` and the ownership check both use the email address, and `server/__tests__/ownership.test.ts` covers it. `README.md` holds the current list of known issues; prefer it over this file, which is a historical record.
 
 ---
 
