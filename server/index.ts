@@ -1,6 +1,60 @@
-import express, { type Request, Response, NextFunction } from "express";
+import express from "express";
+import type { Server } from "http";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
+import { apiNotFound, errorHandler, logError } from "./errors";
+
+// Set once the server is listening, so a fatal fault can stop accepting new
+// connections before the process goes away.
+let httpServer: Server | undefined;
+let shuttingDown = false;
+
+/**
+ * Last resort for a fault that escaped every request-level handler.
+ *
+ * Node cannot guarantee anything about the process after an uncaught
+ * exception -- a connection pool, a transaction, or a module's internal state
+ * may be half-updated -- so continuing to serve risks giving staff answers that
+ * are quietly wrong, which is worse than a short restart. Instead: log it, stop
+ * taking new work, let the requests already in flight finish, and exit so the
+ * platform starts a clean process.
+ *
+ * This is not the mechanism that keeps one bad request from becoming an
+ * outage; request failures are caught in the routes and by the Express error
+ * handler, and never reach here.
+ */
+function shutdownAfterFatalError(context: string, err: unknown): void {
+  logError(context, err);
+
+  if (shuttingDown) return;
+  shuttingDown = true;
+
+  const exit = () => process.exit(1);
+
+  // A connection that never closes must not keep a broken process alive.
+  const forceExit = setTimeout(exit, 10_000);
+  forceExit.unref();
+
+  if (httpServer) {
+    httpServer.close(exit);
+  } else {
+    exit();
+  }
+}
+
+process.on("uncaughtException", (error) => {
+  shutdownAfterFatalError("Uncaught exception", error);
+});
+
+/**
+ * A rejected promise nobody awaited is a bug, but unlike an uncaught exception
+ * it does not imply the process is unsound, so this logs and keeps serving.
+ * Every request path is wrapped, so a rejection here is background work rather
+ * than someone's unanswered request.
+ */
+process.on("unhandledRejection", (reason) => {
+  logError("Unhandled promise rejection", reason);
+});
 
 const app = express();
 
@@ -55,13 +109,7 @@ app.use((req, res, next) => {
 
   const server = await registerRoutes(app);
 
-  app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
-    const status = err.status || err.statusCode || 500;
-    const message = err.message || "Internal Server Error";
-
-    res.status(status).json({ message });
-    throw err;
-  });
+  app.use("/api", apiNotFound);
 
   // importantly only setup vite in development and after
   // setting up all the other routes so the catch-all route
@@ -72,11 +120,19 @@ app.use((req, res, next) => {
     serveStatic(app);
   }
 
+  // Registered last, after the Vite and static layers, so their failures reach
+  // it too. See errorHandler for why the position matters.
+  app.use(errorHandler);
+
   // ALWAYS serve the app on the port specified in the environment variable PORT
   // Other ports are firewalled. Default to 5000 if not specified.
   // this serves both the API and the client.
   // It is the only port that is not firewalled.
   const port = parseInt(process.env.PORT || '5000', 10);
+
+  // Published so a fatal fault can drain in-flight requests before exiting.
+  httpServer = server;
+
   server.listen({
     port,
     host: "0.0.0.0",

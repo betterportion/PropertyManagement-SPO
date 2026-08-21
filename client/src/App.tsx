@@ -9,6 +9,7 @@ import ThemeToggle from "@/components/ThemeToggle";
 import UserMenu from "@/components/UserMenu";
 import { ThemeProvider } from "@/providers/ThemeProvider";
 import { useAuth } from "@/hooks/useAuth";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import NotFound from "@/pages/not-found";
 import Landing from "@/pages/Landing";
 import AdminDashboard from "@/pages/AdminDashboard";
@@ -102,7 +103,12 @@ function AppContent() {
             </div>
           </header>
           <main className="flex-1 overflow-y-auto">
-            <Router />
+            {/* Scoped to the page body so one broken page leaves the sidebar
+                and header working -- the user can navigate away instead of
+                being stuck. Keyed on the route so it clears when they do. */}
+            <ErrorBoundary variant="inline" resetKey={location}>
+              <Router />
+            </ErrorBoundary>
           </main>
         </div>
       </div>

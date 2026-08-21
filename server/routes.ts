@@ -17,6 +17,7 @@ import {
   type AuthContext,
 } from "./authz";
 import { z } from "zod";
+import { sendError, logError } from "./errors";
 import multer from "multer";
 import { createMondayItem, updateMondayItem } from "./monday";
 import path from "path";
@@ -182,8 +183,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const permissions = await storage.getUserPermissions(userId);
       res.json({ ...user, permissions });
     } catch (error) {
-      console.error("Error fetching user:", error);
-      res.status(500).json({ message: "Failed to fetch user" });
+      sendError(res, error, "Failed to fetch user");
     }
   });
 
@@ -196,8 +196,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const users = await storage.getAllUsers();
       res.json(users);
     } catch (error) {
-      console.error("Error fetching users:", error);
-      res.status(500).json({ message: "Failed to fetch users" });
+      sendError(res, error, "Failed to fetch users");
     }
   });
 
@@ -211,8 +210,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = await storage.updateUserRole(req.params.id, validatedData.role);
       res.json(user);
     } catch (error) {
-      console.error("Error updating user role:", error);
-      res.status(500).json({ message: "Failed to update user role" });
+      sendError(res, error, "Failed to update user role");
     }
   });
 
@@ -226,8 +224,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = await storage.updateUserActiveStatus(req.params.id, isActive);
       res.json(user);
     } catch (error) {
-      console.error("Error updating user status:", error);
-      res.status(500).json({ message: "Failed to update user status" });
+      sendError(res, error, "Failed to update user status");
     }
   });
 
@@ -245,8 +242,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       res.json(permissions);
     } catch (error) {
-      console.error("Error fetching permissions:", error);
-      res.status(500).json({ message: "Failed to fetch permissions" });
+      sendError(res, error, "Failed to fetch permissions");
     }
   });
 
@@ -266,8 +262,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
       res.json(permissions);
     } catch (error) {
-      console.error("Error updating permissions:", error);
-      res.status(500).json({ message: "Failed to update permissions" });
+      sendError(res, error, "Failed to update permissions");
     }
   });
 
@@ -284,8 +279,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
       res.json(user);
     } catch (error) {
-      console.error("Error creating user:", error);
-      res.status(500).json({ message: "Failed to create user" });
+      sendError(res, error, "Failed to create user");
     }
   });
 
@@ -298,8 +292,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       await storage.deleteUser(req.params.id);
       res.json({ success: true });
     } catch (error) {
-      console.error("Error deleting user:", error);
-      res.status(500).json({ message: "Failed to delete user" });
+      sendError(res, error, "Failed to delete user");
     }
   });
 
@@ -319,8 +312,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       );
       res.json(filteredRequests);
     } catch (error) {
-      console.error("Error fetching maintenance requests:", error);
-      res.status(500).json({ message: "Failed to fetch maintenance requests" });
+      sendError(res, error, "Failed to fetch maintenance requests");
     }
   });
 
@@ -339,8 +331,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       res.json(request);
     } catch (error) {
-      console.error("Error fetching maintenance request:", error);
-      res.status(500).json({ message: "Failed to fetch maintenance request" });
+      sendError(res, error, "Failed to fetch maintenance request");
     }
   });
 
@@ -385,8 +376,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       res.json(request);
     } catch (error) {
-      console.error("Error creating maintenance request:", error);
-      res.status(500).json({ message: "Failed to create maintenance request" });
+      sendError(res, error, "Failed to create maintenance request");
     }
   });
 
@@ -420,8 +410,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ).catch((err) => console.error("Monday.com async update failed:", err));
       }
     } catch (error) {
-      console.error("Error updating maintenance request:", error);
-      res.status(500).json({ message: "Failed to update maintenance request" });
+      sendError(res, error, "Failed to update maintenance request");
     }
   });
 
@@ -442,8 +431,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       await storage.deleteMaintenanceRequest(req.params.id);
       res.json({ success: true });
     } catch (error) {
-      console.error("Error deleting maintenance request:", error);
-      res.status(500).json({ message: "Failed to delete maintenance request" });
+      sendError(res, error, "Failed to delete maintenance request");
     }
   });
 
@@ -468,8 +456,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const contacts = await storage.getRequestContacts(req.params.id);
       res.json(contacts);
     } catch (error) {
-      console.error("Error fetching request contacts:", error);
-      res.status(500).json({ message: "Failed to fetch linked contacts" });
+      sendError(res, error, "Failed to fetch linked contacts");
     }
   });
 
@@ -486,8 +473,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       await storage.linkContactToRequest(req.params.id, req.params.contactId);
       res.json({ success: true });
     } catch (error) {
-      console.error("Error linking contact:", error);
-      res.status(500).json({ message: "Failed to link contact" });
+      sendError(res, error, "Failed to link contact");
     }
   });
 
@@ -504,8 +490,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       await storage.unlinkContactFromRequest(req.params.id, req.params.contactId);
       res.json({ success: true });
     } catch (error) {
-      console.error("Error unlinking contact:", error);
-      res.status(500).json({ message: "Failed to unlink contact" });
+      sendError(res, error, "Failed to unlink contact");
     }
   });
 
@@ -529,8 +514,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       );
       res.json(filteredRooms);
     } catch (error) {
-      console.error("Error fetching walkthrough rooms:", error);
-      res.status(500).json({ message: "Failed to fetch walkthrough rooms" });
+      sendError(res, error, "Failed to fetch walkthrough rooms");
     }
   });
 
@@ -554,8 +538,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const room = await storage.createWalkthroughRoom(validatedData);
       res.json(room);
     } catch (error) {
-      console.error("Error creating walkthrough room:", error);
-      res.status(500).json({ message: "Failed to create walkthrough room" });
+      sendError(res, error, "Failed to create walkthrough room");
     }
   });
 
@@ -586,8 +569,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const room = await storage.updateWalkthroughRoom(req.params.id, validatedData);
       res.json(room);
     } catch (error) {
-      console.error("Error updating walkthrough room:", error);
-      res.status(500).json({ message: "Failed to update walkthrough room" });
+      sendError(res, error, "Failed to update walkthrough room");
     }
   });
 
@@ -608,8 +590,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       await storage.deleteWalkthroughRoom(req.params.id);
       res.json({ success: true });
     } catch (error) {
-      console.error("Error deleting walkthrough room:", error);
-      res.status(500).json({ message: "Failed to delete walkthrough room" });
+      sendError(res, error, "Failed to delete walkthrough room");
     }
   });
 
@@ -624,8 +605,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const photos = await storage.getAllWalkthroughPhotos();
       res.json(filterByRegion(ctx, photos));
     } catch (error) {
-      console.error("Error fetching walkthrough photos:", error);
-      res.status(500).json({ message: "Failed to fetch walkthrough photos" });
+      sendError(res, error, "Failed to fetch walkthrough photos");
     }
   });
 
@@ -639,8 +619,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const photos = await storage.getWalkthroughPhotosByRoom(req.params.roomId);
       res.json(filterByRegion(ctx, photos));
     } catch (error) {
-      console.error("Error fetching room photos:", error);
-      res.status(500).json({ message: "Failed to fetch room photos" });
+      sendError(res, error, "Failed to fetch room photos");
     }
   });
 
@@ -658,8 +637,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const photo = await storage.createWalkthroughPhoto(validatedData);
       res.json(photo);
     } catch (error) {
-      console.error("Error creating walkthrough photo:", error);
-      res.status(500).json({ message: "Failed to create walkthrough photo" });
+      sendError(res, error, "Failed to create walkthrough photo");
     }
   });
 
@@ -682,8 +660,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const photo = await storage.updateWalkthroughPhoto(req.params.id, validatedData);
       res.json(photo);
     } catch (error) {
-      console.error("Error updating walkthrough photo:", error);
-      res.status(500).json({ message: "Failed to update walkthrough photo" });
+      sendError(res, error, "Failed to update walkthrough photo");
     }
   });
 
@@ -704,8 +681,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       await storage.deleteWalkthroughPhoto(req.params.id);
       res.json({ success: true });
     } catch (error) {
-      console.error("Error deleting walkthrough photo:", error);
-      res.status(500).json({ message: "Failed to delete walkthrough photo" });
+      sendError(res, error, "Failed to delete walkthrough photo");
     }
   });
 
@@ -720,8 +696,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const assets = await storage.getAllAssets();
       res.json(filterByRegion(ctx, assets));
     } catch (error) {
-      console.error("Error fetching assets:", error);
-      res.status(500).json({ message: "Failed to fetch assets" });
+      sendError(res, error, "Failed to fetch assets");
     }
   });
 
@@ -739,8 +714,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const asset = await storage.createAsset(validatedData);
       res.json(asset);
     } catch (error) {
-      console.error("Error creating asset:", error);
-      res.status(500).json({ message: "Failed to create asset" });
+      sendError(res, error, "Failed to create asset");
     }
   });
 
@@ -763,8 +737,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const asset = await storage.updateAsset(req.params.id, validatedData);
       res.json(asset);
     } catch (error) {
-      console.error("Error updating asset:", error);
-      res.status(500).json({ message: "Failed to update asset" });
+      sendError(res, error, "Failed to update asset");
     }
   });
 
@@ -785,8 +758,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       await storage.deleteAsset(req.params.id);
       res.json({ success: true });
     } catch (error) {
-      console.error("Error deleting asset:", error);
-      res.status(500).json({ message: "Failed to delete asset" });
+      sendError(res, error, "Failed to delete asset");
     }
   });
 
@@ -804,8 +776,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       next();
     } catch (error) {
-      console.error("Error checking upload permission:", error);
-      res.status(500).json({ message: "Failed to verify upload permission." });
+      sendError(res, error, "Failed to verify upload permission.");
     }
   };
 
@@ -826,8 +797,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       await putUpload(filename, req.file.buffer);
       res.json({ url: `/uploads/${filename}`, filename });
     } catch (error) {
-      console.error("Error uploading file:", error);
-      res.status(500).json({ message: "Failed to upload file" });
+      sendError(res, error, "Failed to upload file");
     }
   });
 
@@ -910,8 +880,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       await putUpload(filename, req.file.buffer);
       res.json({ url: `/uploads/${filename}`, filename, originalName: req.file.originalname });
     } catch (error) {
-      console.error("Error uploading document:", error);
-      res.status(500).json({ message: "Failed to upload document" });
+      sendError(res, error, "Failed to upload document");
     }
   });
 
@@ -934,8 +903,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       );
       res.json(filteredPhotos);
     } catch (error) {
-      console.error("Error fetching asset photos:", error);
-      res.status(500).json({ message: "Failed to fetch asset photos" });
+      sendError(res, error, "Failed to fetch asset photos");
     }
   });
 
@@ -956,8 +924,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const photos = await storage.getAssetPhotosByAsset(req.params.assetId);
       res.json(photos);
     } catch (error) {
-      console.error("Error fetching asset photos:", error);
-      res.status(500).json({ message: "Failed to fetch asset photos" });
+      sendError(res, error, "Failed to fetch asset photos");
     }
   });
 
@@ -981,8 +948,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const photo = await storage.createAssetPhoto(validatedData);
       res.json(photo);
     } catch (error) {
-      console.error("Error creating asset photo:", error);
-      res.status(500).json({ message: "Failed to create asset photo" });
+      sendError(res, error, "Failed to create asset photo");
     }
   });
 
@@ -1007,8 +973,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       await storage.deleteAssetPhoto(req.params.id);
       res.json({ success: true });
     } catch (error) {
-      console.error("Error deleting asset photo:", error);
-      res.status(500).json({ message: "Failed to delete asset photo" });
+      sendError(res, error, "Failed to delete asset photo");
     }
   });
 
@@ -1023,8 +988,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const contacts = await storage.getAllMaintenanceContacts();
       res.json(filterByRegion(ctx, contacts));
     } catch (error) {
-      console.error("Error fetching contacts:", error);
-      res.status(500).json({ message: "Failed to fetch contacts" });
+      sendError(res, error, "Failed to fetch contacts");
     }
   });
 
@@ -1042,8 +1006,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const contact = await storage.createMaintenanceContact(validatedData);
       res.json(contact);
     } catch (error) {
-      console.error("Error creating contact:", error);
-      res.status(500).json({ message: "Failed to create contact" });
+      sendError(res, error, "Failed to create contact");
     }
   });
 
@@ -1066,8 +1029,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const contact = await storage.updateMaintenanceContact(req.params.id, validatedData);
       res.json(contact);
     } catch (error) {
-      console.error("Error updating contact:", error);
-      res.status(500).json({ message: "Failed to update contact" });
+      sendError(res, error, "Failed to update contact");
     }
   });
 
@@ -1088,8 +1050,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       await storage.deleteMaintenanceContact(req.params.id);
       res.json({ success: true });
     } catch (error) {
-      console.error("Error deleting contact:", error);
-      res.status(500).json({ message: "Failed to delete contact" });
+      sendError(res, error, "Failed to delete contact");
     }
   });
 
@@ -1104,8 +1065,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const invoices = await storage.getAllInvoices();
       res.json(filterByRegion(ctx, invoices));
     } catch (error) {
-      console.error("Error fetching invoices:", error);
-      res.status(500).json({ message: "Failed to fetch invoices" });
+      sendError(res, error, "Failed to fetch invoices");
     }
   });
 
@@ -1123,8 +1083,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const invoice = await storage.createInvoice(validatedData);
       res.json(invoice);
     } catch (error) {
-      console.error("Error creating invoice:", error);
-      res.status(500).json({ message: "Failed to create invoice" });
+      sendError(res, error, "Failed to create invoice");
     }
   });
 
@@ -1147,8 +1106,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const invoice = await storage.updateInvoice(req.params.id, validatedData);
       res.json(invoice);
     } catch (error) {
-      console.error("Error updating invoice:", error);
-      res.status(500).json({ message: "Failed to update invoice" });
+      sendError(res, error, "Failed to update invoice");
     }
   });
 
@@ -1169,8 +1127,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       await storage.deleteInvoice(req.params.id);
       res.json({ success: true });
     } catch (error) {
-      console.error("Error deleting invoice:", error);
-      res.status(500).json({ message: "Failed to delete invoice" });
+      sendError(res, error, "Failed to delete invoice");
     }
   });
 
@@ -1185,8 +1142,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const billingRecords = await storage.getAllBillingRecords();
       res.json(filterByRegion(ctx, billingRecords));
     } catch (error) {
-      console.error("Error fetching billing records:", error);
-      res.status(500).json({ message: "Failed to fetch billing records" });
+      sendError(res, error, "Failed to fetch billing records");
     }
   });
 
@@ -1222,8 +1178,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const record = await storage.createBillingRecord(validatedData);
       res.json(record);
     } catch (error) {
-      console.error("Error creating billing record:", error);
-      res.status(500).json({ message: "Failed to create billing record" });
+      sendError(res, error, "Failed to create billing record");
     }
   });
 
@@ -1246,8 +1201,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const record = await storage.updateBillingRecord(req.params.id, validatedData);
       res.json(record);
     } catch (error) {
-      console.error("Error updating billing record:", error);
-      res.status(500).json({ message: "Failed to update billing record" });
+      sendError(res, error, "Failed to update billing record");
     }
   });
 
@@ -1268,8 +1222,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       await storage.deleteBillingRecord(req.params.id);
       res.json({ success: true });
     } catch (error) {
-      console.error("Error deleting billing record:", error);
-      res.status(500).json({ message: "Failed to delete billing record" });
+      sendError(res, error, "Failed to delete billing record");
     }
   });
 
@@ -1284,8 +1237,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const properties = await storage.getAllProperties();
       res.json(filterByRegion(ctx, properties));
     } catch (error) {
-      console.error("Error fetching properties:", error);
-      res.status(500).json({ message: "Failed to fetch properties" });
+      sendError(res, error, "Failed to fetch properties");
     }
   });
 
@@ -1304,12 +1256,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const address = `${validatedData.streetAddress}, ${validatedData.city}, ${validatedData.state} ${validatedData.zipCode}`;
       const property = await storage.createProperty({ ...validatedData, address });
       res.json(property);
-    } catch (error: any) {
-      console.error("Error creating property:", error);
-      if (error.name === 'ZodError') {
-        return res.status(400).json({ message: "Validation error", errors: error.errors });
-      }
-      res.status(500).json({ message: "Failed to create property", error: error.message });
+    } catch (error) {
+      // Validation failures are turned into a 400 by sendError. The raw error
+      // message is deliberately not echoed back -- it used to be, and for a
+      // database fault that meant returning column and constraint names.
+      sendError(res, error, "Failed to create property");
     }
   });
 
@@ -1342,8 +1293,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const property = await storage.updateProperty(req.params.id, updateData);
       res.json(property);
     } catch (error) {
-      console.error("Error updating property:", error);
-      res.status(500).json({ message: "Failed to update property" });
+      sendError(res, error, "Failed to update property");
     }
   });
 
@@ -1364,8 +1314,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       await storage.deleteProperty(req.params.id);
       res.json({ success: true });
     } catch (error) {
-      console.error("Error deleting property:", error);
-      res.status(500).json({ message: "Failed to delete property" });
+      sendError(res, error, "Failed to delete property");
     }
   });
 
@@ -1381,51 +1330,56 @@ export async function registerRoutes(app: Express): Promise<Server> {
     // ownership -- any active user who knows a filename can fetch it.
     // Filenames are random, so this is not trivially guessable, but tying each
     // upload back to the record that owns it is tracked separately.
-    const ctx = await requireActiveUser(req, res);
-    if (!ctx) return;
-
-    const requested = req.params.filename;
-
-    // Reject anything that is not a bare filename, so a crafted key cannot
-    // reach outside the uploads prefix in the bucket.
-    if (!requested || requested !== path.basename(requested) || requested.startsWith(".")) {
-      return res.status(400).json({ message: "Invalid filename" });
-    }
-
+    // The whole body is wrapped, because Express 4 does not forward a rejected
+    // promise from an async handler to the error middleware. An unwrapped
+    // failure here -- the account lookup below reaches the database -- would
+    // leave the browser waiting until it timed out.
     try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+
+      const requested = req.params.filename;
+
+      // Reject anything that is not a bare filename, so a crafted key cannot
+      // reach outside the uploads prefix in the bucket.
+      if (!requested || requested !== path.basename(requested) || requested.startsWith(".")) {
+        return res.status(400).json({ message: "Invalid filename" });
+      }
+
       if (!(await uploadExists(requested))) {
         return res.status(404).json({ message: "File not found" });
       }
+
+      // "private" keeps authenticated content out of shared/proxy caches.
+      res.setHeader("Cache-Control", "private, max-age=3600");
+      res.setHeader("Content-Type", contentTypeFor(requested));
+
+      const stream = openUploadStream(requested);
+
+      // If the client disconnects part way through, stop pulling bytes out of
+      // the bucket instead of leaving the download running.
+      res.on("close", () => stream.destroy());
+
+      stream.on("error", (error) => {
+        logError("Error streaming uploaded file", error);
+        // Detach first, so no further bytes can race the response below.
+        stream.unpipe(res);
+        if (res.headersSent) {
+          // Part of the file has already gone out, so the only honest signal
+          // left is to break the connection rather than end it normally and
+          // let the client treat a truncated file as complete. This is why the
+          // stream error is handled here instead of through sendError, which
+          // ends such a response cleanly.
+          res.destroy();
+        } else {
+          res.status(500).json({ message: "Failed to load file" });
+        }
+      });
+
+      stream.pipe(res);
     } catch (error) {
-      console.error("Error checking uploaded file:", error);
-      return res.status(500).json({ message: "Failed to load file" });
+      sendError(res, error, "Failed to load file");
     }
-
-    // "private" keeps authenticated content out of shared/proxy caches.
-    res.setHeader("Cache-Control", "private, max-age=3600");
-    res.setHeader("Content-Type", contentTypeFor(requested));
-
-    const stream = openUploadStream(requested);
-
-    // If the client disconnects part way through, stop pulling bytes out of
-    // the bucket instead of leaving the download running.
-    res.on("close", () => stream.destroy());
-
-    stream.on("error", (error) => {
-      console.error("Error streaming uploaded file:", error);
-      // Detach first, so no further bytes can race the response below.
-      stream.unpipe(res);
-      if (res.headersSent) {
-        // Part of the file has already gone out, so the only honest signal
-        // left is to break the connection rather than end it normally and
-        // let the client treat a truncated file as complete.
-        res.destroy();
-      } else {
-        res.status(500).json({ message: "Failed to load file" });
-      }
-    });
-
-    stream.pipe(res);
   });
 
   // ─── JotForm Webhook ───────────────────────────────────────────────────────
@@ -1546,8 +1500,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log(`[JotForm] Created maintenance request ${request.id}: "${title}" (${priority} priority)`);
       res.status(200).json({ success: true, id: request.id });
     } catch (error) {
-      console.error('[JotForm] Webhook processing error:', error);
-      res.status(500).json({ message: 'Failed to process JotForm submission' });
+      sendError(res, error, 'Failed to process JotForm submission');
     }
   });
 
@@ -1580,7 +1533,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         },
       });
     } catch (error) {
-      res.status(500).json({ message: 'Failed to get config' });
+      sendError(res, error, "Failed to load configuration");
     }
   });
 

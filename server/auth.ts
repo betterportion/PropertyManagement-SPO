@@ -165,10 +165,19 @@ export async function setupAuth(app: Express) {
     tokens: client.TokenEndpointResponse & client.TokenEndpointResponseHelpers,
     verified: passport.AuthenticateCallback
   ) => {
-    const user = {};
-    updateUserSession(user, tokens);
-    await upsertUser(tokens.claims());
-    verified(null, user);
+    // Passport waits for `verified` to be called and has no way to observe a
+    // rejected promise. Without this catch, a failure while saving the user
+    // would leave the login callback hanging until the browser gave up, with
+    // no error shown; handing the error to Passport turns it into a failed
+    // login instead.
+    try {
+      const user = {};
+      updateUserSession(user, tokens);
+      await upsertUser(tokens.claims());
+      verified(null, user);
+    } catch (error) {
+      verified(error instanceof Error ? error : new Error(String(error)));
+    }
   };
 
   const registeredStrategies = new Set<string>();
