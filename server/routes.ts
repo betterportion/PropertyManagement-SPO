@@ -20,7 +20,6 @@ import {
 import { z } from "zod";
 import { sendError, logError } from "./errors";
 import multer from "multer";
-import { createMondayItem, updateMondayItem } from "./monday";
 import path from "path";
 import crypto from "crypto";
 import { fileTypeFromBuffer } from "file-type";
@@ -40,6 +39,7 @@ import {
   IMAGE_UPLOAD_MAX_BYTES,
   DOCUMENT_UPLOAD_MAX_BYTES,
 } from "./uploadLimits";
+import { uploadRateLimit, webhookRateLimit } from "./security";
 import {
   insertMaintenanceRequestSchema,
   insertWalkthroughRoomSchema,
@@ -362,22 +362,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         submittedBy: ctx.user.email || "Unknown",
       });
 
-      createMondayItem({
-        title: request.title,
-        description: request.description,
-        category: request.category,
-        priority: request.priority,
-        status: request.status,
-        region: request.region,
-        buildingAddress: request.buildingAddress,
-        location: request.location,
-        submittedBy: request.submittedBy,
-      }).then(async (mondayItemId) => {
-        if (mondayItemId) {
-          await storage.updateMaintenanceRequest(request.id, { mondayItemId });
-        }
-      }).catch((err) => console.error("Monday.com async create failed:", err));
-
       res.json(request);
     } catch (error) {
       sendError(res, error, "Failed to create maintenance request");
@@ -402,17 +386,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const request = await storage.updateMaintenanceRequest(req.params.id, validatedData);
       res.json(request);
-
-      if (existingRequest.mondayItemId && (validatedData.status || validatedData.priority)) {
-        updateMondayItem(
-          existingRequest.mondayItemId,
-          existingRequest.region,
-          {
-            status: validatedData.status ?? undefined,
-            priority: validatedData.priority ?? undefined,
-          }
-        ).catch((err) => console.error("Monday.com async update failed:", err));
-      }
     } catch (error) {
       sendError(res, error, "Failed to update maintenance request");
     }
@@ -833,7 +806,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   }
 
   // File Upload Route (images)
-  app.post('/api/upload', isAuthenticated, requireUploadPermission, ...guardedUpload(upload.single('file'), IMAGE_UPLOAD_MAX_BYTES), async (req: any, res) => {
+  app.post('/api/upload', isAuthenticated, uploadRateLimit, requireUploadPermission, ...guardedUpload(upload.single('file'), IMAGE_UPLOAD_MAX_BYTES), async (req: any, res) => {
     try {
       if (!req.file) {
         return res.status(400).json({ message: "No file uploaded" });
@@ -916,7 +889,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return allowed.includes(detected.ext);
   }
 
-  app.post('/api/upload-doc', isAuthenticated, requireUploadPermission, ...guardedUpload(docUpload.single('file'), DOCUMENT_UPLOAD_MAX_BYTES), async (req: any, res) => {
+  app.post('/api/upload-doc', isAuthenticated, uploadRateLimit, requireUploadPermission, ...guardedUpload(docUpload.single('file'), DOCUMENT_UPLOAD_MAX_BYTES), async (req: any, res) => {
     try {
       if (!req.file) {
         return res.status(400).json({ message: "No file uploaded" });
@@ -1462,7 +1435,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Called by JotForm's servers, so it cannot use session auth. It is guarded
   // by a shared secret instead, passed as ?secret=... on the webhook URL.
   // Configure in JotForm: Settings → Integrations → WebHooks → add this URL
-  app.post('/api/webhooks/jotform', async (req, res) => {
+  app.post('/api/webhooks/jotform', webhookRateLimit, async (req, res) => {
     try {
       // Fail closed. If no secret is configured the endpoint is disabled
       // entirely, rather than silently accepting anonymous submissions.
@@ -1553,25 +1526,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         region,
         buildingAddress,
         submittedBy,
-        mondayItemId: null,
       });
-
-      // Async Monday.com sync (non-blocking)
-      createMondayItem({
-        title: request.title,
-        description: request.description,
-        category: request.category,
-        priority: request.priority,
-        status: request.status,
-        region: request.region,
-        buildingAddress: request.buildingAddress,
-        location: request.location,
-        submittedBy: request.submittedBy,
-      }).then(async (mondayItemId) => {
-        if (mondayItemId) {
-          await storage.updateMaintenanceRequest(request.id, { mondayItemId });
-        }
-      }).catch((err) => console.error('[JotForm] Monday.com sync failed:', err));
 
       console.log(`[JotForm] Created maintenance request ${request.id}: "${title}" (${priority} priority)`);
       res.status(200).json({ success: true, id: request.id });

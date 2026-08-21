@@ -32,7 +32,6 @@ npm install
 | `OIDC_PROVIDER_NAME` | No | Internal login strategy prefix only; defaults to `replitauth` |
 | `OIDC_SCOPES` | No | Space-separated scopes; defaults to `openid email profile offline_access` |
 | `ISSUER_URL` | No | Legacy alias for `OIDC_ISSUER_URL`; still honoured |
-| `MONDAY_API_KEY` | No | Monday.com sync; the feature is silently skipped if unset |
 | `JOTFORM_WEBHOOK_SECRET` | Recommended | Shared secret for the JotForm webhook endpoint |
 | `JOTFORM_FIELD_*` | No | JotForm field ID mappings (TITLE, DESCRIPTION, CATEGORY, PRIORITY, LOCATION, EMAIL, REGION, BUILDING) |
 | `JOTFORM_DEFAULT_*` | No | Fallback values for JotForm submissions (REGION, BUILDING, LOCATION) |
@@ -50,8 +49,9 @@ npm run dev
 ```
 
 ### Notes for running outside Replit
-- Authentication is standard OpenID Connect and is configurable — see "Swapping the identity provider" below. It defaults to Replit Auth, which requires `REPL_ID`.
-- Uploaded files are stored in Replit App Storage, so they survive restarts and publishes. Running outside Replit requires replacing `server/objectStorage.ts` with an equivalent backed by your own object store.
+- Authentication is standard OpenID Connect and is configurable — see "Swapping the identity provider" below. On Replit it defaults to Replit Auth using `REPL_ID`. Anywhere else, `OIDC_ISSUER_URL` and `OIDC_CLIENT_ID` must be set, and the server says so at startup if they are not.
+- Uploaded files go to the local filesystem in development and to a private Supabase Storage bucket in production, chosen with `STORAGE_DRIVER`.
+- The app is an ordinary Node service and depends on nothing Replit-specific at runtime. `GET /api/health` is the health check; `SIGTERM` triggers a graceful shutdown.
 
 ## Swapping the identity provider
 
@@ -83,6 +83,18 @@ The practical migration path is therefore:
 3. Have each user sign in once — their account re-links by email automatically.
 
 Anyone whose record has no email, or who signs in with a different email than the one stored, arrives as a brand-new account with default resident permissions and has to be re-granted access by an admin.
+
+## Recent Changes (August 21, 2026)
+- **Runs anywhere**: The app no longer depends on anything Replit-specific at runtime. The Replit Vite plugins are loaded only inside a Replit workspace and are imported dynamically, so `npm run build` works on any host; `reusePort` was dropped from the listen call because it is Linux-specific and unnecessary
+- **Production install is smaller and safer**: `log()` moved to `server/logger.ts` and static file serving to `server/static.ts`, so the built server bundle no longer imports Vite. Only production dependencies are needed to run it
+- **Startup validation**: `server/config.ts` checks everything the server cannot run without and reports *all* problems at once, instead of failing hours later at the first login or upload. Off Replit, an explicit `OIDC_CLIENT_ID` and `OIDC_ISSUER_URL` are required
+- **Health check**: `GET /api/health` returns 200 only when the process is serving *and* the database answers, 503 otherwise. Unauthenticated, and deliberately reveals no configuration
+- **Graceful shutdown**: `SIGTERM`/`SIGINT` stop new connections, let in-flight requests finish, close the database pool, then exit — with a 15-second cap so an idle keep-alive connection cannot stall a deploy
+- **Security headers**: Helmet with a production Content Security Policy, HSTS, and `frame-ancestors 'none'`. The theme script moved out of `index.html` to `client/public/theme-init.js` so inline scripts can be forbidden outright. Session cookies are `secure` and proxy-aware in production
+- **Rate limits**: The JotForm webhook (the one endpoint open to the internet) and both upload endpoints are rate limited, keyed per user where there is one so colleagues sharing an office IP do not block each other
+- **Response bodies are no longer logged in production** — they contain resident names, addresses and vendor contact details
+- **Monday.com removed**: The integration, its API key, and the `monday_item_id` column are gone. It was unused and each maintenance request was making an outbound call to a third party that no longer had a board to write to
+- **Dependency audit**: `npm audit fix` applied — 21 advisories down to 6, all remaining ones in dev-only build tooling. The one production advisory left is `drizzle-orm`, whose fix is a major version upgrade and is deliberately out of scope here
 
 ## Recent Changes (July 30, 2026)
 - **Portable Login**: Authentication is no longer hard-wired to Replit. The issuer, client ID and secret, scopes, and strategy naming all moved into configuration inside `server/auth.ts`, defaulting to the current Replit values so sign-in behaviour is unchanged. `server/replitAuth.ts` was renamed to `server/auth.ts` because it is no longer provider-specific

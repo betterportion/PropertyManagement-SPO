@@ -26,11 +26,13 @@ On top of the role, each user has a row of fine-grained permissions (view/manage
 
 **Backend** — Express on Node 20, TypeScript with ESM, Passport with `openid-client` for OpenID Connect login, `express-session` backed by PostgreSQL.
 
-**Database** — PostgreSQL (Neon serverless driver) with Drizzle ORM and Drizzle Kit. The schema is the single source of truth and lives in `shared/schema.ts`.
+**Database** — PostgreSQL over the standard `pg` driver, with Drizzle ORM and Drizzle Kit. Any Postgres works: Supabase, Render, RDS, or one you run yourself. The schema is the single source of truth and lives in `shared/schema.ts`.
 
-**File storage** — Replit App Storage (object storage backed by Google Cloud Storage) holds uploaded photos and documents, so they survive restarts and publishes.
+**File storage** — either the local filesystem (development) or a private Supabase Storage bucket (production), chosen with `STORAGE_DRIVER`.
 
-**Integrations** — Monday.com (maintenance requests sync to regional boards) and JotForm (a webhook turns form submissions into maintenance requests). Both are optional.
+**Integrations** — JotForm: a webhook turns form submissions into maintenance requests. Optional.
+
+**Hosting** — an ordinary Node service. It needs a Postgres connection string and the environment variables below, and nothing specific to any one hosting provider.
 
 ---
 
@@ -64,7 +66,6 @@ Three variables are required before the app will start:
 | `OIDC_CLIENT_SECRET` | No | Client secret, if your provider issues one |
 | `OIDC_PROVIDER_NAME` | No | Internal login strategy label. Defaults to `replitauth` |
 | `OIDC_SCOPES` | No | Space-separated scopes. Defaults to `openid email profile offline_access` |
-| `MONDAY_API_KEY` | No | Monday.com sync. The feature is skipped silently if unset |
 | `JOTFORM_WEBHOOK_SECRET` | Recommended | Shared secret for the JotForm webhook. **Without it the webhook is disabled and returns 503** |
 | `JOTFORM_FIELD_*` | No | JotForm field ID mappings (TITLE, DESCRIPTION, CATEGORY, PRIORITY, LOCATION, EMAIL, REGION, BUILDING) |
 | `JOTFORM_DEFAULT_*` | No | Fallback values for JotForm submissions (REGION, BUILDING, LOCATION) |
@@ -103,7 +104,11 @@ The app serves the API and the frontend together on a single port (5000 by defau
 | `npm run check` | TypeScript type check. Should always pass with zero errors |
 | `npm run db:push` | Push `shared/schema.ts` to the database. **Run this after any schema change** |
 
-There is no test suite and no linter configured yet.
+| `npm run test` | Run the test suite (Vitest) |
+| `npm run db:generate` | Generate a migration from a schema change |
+| `npm run db:migrate` | Apply pending migrations |
+
+There is no linter configured yet.
 
 ---
 
@@ -122,10 +127,13 @@ server/                 Express backend
   routes.ts             Every API endpoint
   auth.ts               OpenID Connect login — the only provider-aware file
   storage.ts            All database access, behind one interface
-  db.ts                 Drizzle + Neon connection
-  monday.ts             Monday.com integration
-  objectStorage.ts      Replit App Storage — where uploaded files are kept
-  vite.ts               Dev server / static file wiring
+  db.ts                 Drizzle over the standard pg pool
+  config.ts             Boot-time configuration checks and OIDC settings
+  security.ts           Security headers and rate limits
+  health.ts             GET /api/health for the hosting platform
+  objectStorage/        Where uploaded files are kept (local or Supabase)
+  static.ts             Serves the built client in production
+  vite.ts               Dev server wiring (development only)
 shared/
   schema.ts             Drizzle tables and Zod types — the source of truth
 scripts/                One-off maintenance scripts
@@ -138,15 +146,21 @@ Path aliases: `@/` → `client/src/`, `@shared/` → `shared/`, `@assets/` → `
 
 ## Deployment
 
-The app is deployed on Replit using **autoscale**:
+The app is an ordinary Node web service. Any host that can run Node 20 and reach a Postgres database will do.
 
-- Build: `npm run build`
-- Run: `npm run start`
-- Port 5000 internally, exposed on port 80
+- **Build:** `npm run build`
+- **Start:** `npm run start`
+- **Health check:** `GET /api/health` — returns 200 when the process is serving *and* the database answers, 503 otherwise
+- **Port:** taken from `PORT`, listening on `0.0.0.0`. Defaults to 5000
 
-Autoscale rebuilds the container on every publish and may run several instances at once. Uploaded files are kept in App Storage rather than on the container, so they are unaffected by this.
+The build produces `dist/index.js` (server) and `dist/public/` (frontend). The server bundle depends only on production dependencies — Vite and the other build tools are not needed at runtime, so `npm ci --omit=dev` is enough to run it.
 
-Files that were uploaded before the move to App Storage were copied across with `node scripts/migrate-uploads-to-object-storage.mjs`. That script is safe to re-run — it verifies every file arrives byte for byte and never deletes the local copies.
+**Before the first start on a new host**, set at least `DATABASE_URL`, `SESSION_SECRET`, `STORAGE_DRIVER`, `OIDC_ISSUER_URL` and `OIDC_CLIENT_ID`. If anything required is missing the server refuses to start and prints every missing value at once, rather than failing later when someone tries to log in or upload a file.
+
+Two things to know about running more than one instance:
+
+- **Uploads must not use `STORAGE_DRIVER=local`.** Local files live on one instance's disk and disappear when the host replaces it. Use `supabase`.
+- **Shutdown is graceful.** On `SIGTERM` the server stops accepting connections, lets in-flight requests finish, closes the database pool, and exits — so a rolling deploy does not cut anyone off mid-request.
 
 ---
 

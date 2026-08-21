@@ -459,7 +459,7 @@ export default function Maintenance() {
 
           <div className="space-y-5 py-1">
             <p className="text-muted-foreground text-sm">
-              Connect a JotForm form so that submissions automatically create maintenance requests in this system and sync to Monday.com.
+              Connect a JotForm form so that submissions automatically create maintenance requests in this system.
             </p>
 
             <div className="space-y-2">

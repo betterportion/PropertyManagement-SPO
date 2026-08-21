@@ -85,11 +85,6 @@ vi.mock("../auth", () => ({
   getUserId: () => activeUserId.value,
 }));
 
-vi.mock("../monday", () => ({
-  createMondayItem: vi.fn().mockResolvedValue(null),
-  updateMondayItem: vi.fn().mockResolvedValue(null),
-}));
-
 vi.mock("../objectStorage", () => ({
   generateStorageKey: vi.fn(),
   isSafeStorageKey: vi.fn(() => true),

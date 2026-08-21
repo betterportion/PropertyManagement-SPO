@@ -9,29 +9,12 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <title>Property Management Dashboard</title>
     <meta name="description" content="Professional property management dashboard for tracking maintenance requests, assets, billing, and resident information.">
-    <script>
-      // Apply the saved theme before React paints so there is no light/dark flash.
-      // Keep the storage key in sync with client/src/providers/ThemeProvider.tsx.
-      (function () {
-        var stored = null;
-        try {
-          stored = localStorage.getItem("spo-portal-theme");
-        } catch (e) {
-          /* private mode / storage disabled — fall back to following the device */
-        }
-        // Anything unrecognized means "follow the device", exactly as ThemeProvider decides.
-        if (stored !== "light" && stored !== "dark") stored = "system";
-        var prefersDark = false;
-        try {
-          prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-        } catch (e) {
-          /* matchMedia unavailable */
-        }
-        var isDark = stored === "dark" || (stored === "system" && prefersDark);
-        document.documentElement.classList.toggle("dark", isDark);
-        document.documentElement.style.colorScheme = isDark ? "dark" : "light";
-      })();
-    </script>
+    <!--
+      Blocking on purpose: it must run before the first paint or the page
+      flashes the wrong theme. Kept out of the HTML so that the production
+      Content Security Policy can forbid inline scripts (see server/security.ts).
+    -->
+    <script src="/theme-init.js"></script>
   </head>
   <body>
     <div id="root"></div>

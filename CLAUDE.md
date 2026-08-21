@@ -34,14 +34,18 @@ There is no test suite and no linter. `npm run check` is the only automated gate
 
 | File | Responsibility |
 |---|---|
-| `index.ts` | Entry point. JSON body parsing (captures `rawBody` for webhooks), API request logging, global error handler, Vite/static wiring, listens on `PORT`. |
+| `index.ts` | Entry point. Validates configuration before anything else loads, sets `trust proxy`, security headers, JSON body parsing (captures `rawBody` for webhooks), API request logging, graceful shutdown, listens on `PORT`. |
+| `config.ts` | Every environment variable the server cannot run without, checked once at boot and reported together. Also owns the OIDC provider settings. |
 | `routes.ts` | Every API endpoint. One large file, ~54 handlers. |
-| `auth.ts` | OpenID Connect login. **The only file that knows which identity provider is in use.** |
+| `auth.ts` | OpenID Connect login and the session store. Reads its provider settings from `config.ts`. |
+| `security.ts` | Helmet headers including the production CSP, plus the upload and webhook rate limits. |
+| `health.ts` | `GET /api/health` for the hosting platform. Unauthenticated, so it reveals nothing. |
 | `storage.ts` | Every database query, behind a single `IStorage` interface exported as `storage`. |
-| `db.ts` | Drizzle + Neon connection pool. Throws at import time if `DATABASE_URL` is missing. |
-| `monday.ts` | Monday.com integration. |
-| `objectStorage.ts` | Replit App Storage helpers. The only file that talks to the storage bucket. |
-| `vite.ts` | Dev middleware in development, static file serving in production. |
+| `db.ts` | Drizzle over the standard `pg` pool, plus `pingDatabase` and `closeDatabase`. Throws at import time if `DATABASE_URL` is missing. |
+| `objectStorage/` | File storage behind a `FileStore` interface: `local.ts` for development, `supabase.ts` for production. The only code that talks to a bucket. |
+| `logger.ts` | `log()`. Separate from `vite.ts` so the production bundle never imports Vite. |
+| `static.ts` | Serves the built client in production. |
+| `vite.ts` | Dev middleware only. Imported dynamically, and only in development — see the note in the file. |
 
 **Route handlers never touch the database directly.** They go through `storage`. Keep it that way — it is the only reason the data layer is testable and swappable.
 
@@ -65,7 +69,7 @@ Defined in `shared/schema.ts` using Drizzle, with Zod insert schemas generated b
 | `sessions` | Express session store | Managed by `connect-pg-simple`, not by app code |
 | `users` | Accounts. `role` is `admin` / `regional_administrator` / `resident`, plus `isActive` | `id` is the identity provider's subject claim; `email` is unique |
 | `user_permissions` | One row per user, thirteen boolean flags plus `allowedRegions` (text array) | `userId` unique, cascades on user delete |
-| `maintenance_requests` | The core workflow. Priority includes a `wishlist` level; status is pending/in_progress/completed/cancelled | `mondayItemId` links to Monday.com; `submittedBy` stores an **email**, see gotchas |
+| `maintenance_requests` | The core workflow. Priority includes a `wishlist` level; status is pending/in_progress/completed/cancelled | `submittedBy` stores an **email**, see gotchas |
 | `walkthrough_rooms` | Inspection room templates, ordered by `displayOrder` | `propertyId` → `properties` (loose, no FK); `buildingAddress` kept for backward compatibility |
 | `walkthrough_photos` | Photos attached to a room, with condition and free-form `questionAnswers` JSON | `roomId` → `walkthrough_rooms`, cascades |
 | `assets` | Fixed and movable assets, with age, serial, purchase price, asset tag | `propertyId` → `properties` (loose, no FK) |
@@ -163,7 +167,7 @@ Both generate the stored filename server-side — the client's filename is only 
 
 Objects are keyed as `uploads/<filename>`, deliberately mirroring the URL path, so the URLs already saved in the database keep resolving unchanged.
 
-The files that predate this were copied into the bucket by `scripts/migrate-uploads-to-object-storage.mjs`, which is idempotent, verifies each file byte for byte, and leaves the local copies alone. Re-run it if local `uploads/` files ever reappear (for example when restoring a backup).
+Files uploaded before the move to the current storage layout have not been carried across, so their links no longer resolve. Nothing in the app depends on them.
 
 ### Upload limits
 
@@ -181,8 +185,6 @@ Reading files back goes through `GET /uploads/:filename`, which is **authenticat
 ---
 
 ## Integrations
-
-**Monday.com** (`server/monday.ts`) — maintenance requests are mirrored to one board per region. Board IDs and priority column IDs are hardcoded maps keyed by region name, so a region whose name is not in the map is silently skipped. Calls are fire-and-forget: failures are logged and never block the API response. Disabled entirely when `MONDAY_API_KEY` is unset. There is a defensive fix in `getApiKey()` for a doubled key value.
 
 **JotForm** (`POST /api/webhooks/jotform`) — turns form submissions into maintenance requests. It **fails closed**: with no `JOTFORM_WEBHOOK_SECRET` configured it returns 503 rather than accepting anonymous submissions, and the secret is compared in constant time via `secretsMatch()`. Field IDs map through `JOTFORM_FIELD_*` variables with keyword auto-detection as a fallback, and `JOTFORM_DEFAULT_*` supplies values for missing fields. `GET /api/webhooks/jotform/config` exposes the current mapping to the admin setup dialog.
 
@@ -206,7 +208,6 @@ Reading files back goes through `GET /uploads/:filename`, which is **authenticat
 3. **The maintenance-request routes omit the admin bypass.** They gate on the permissions row alone, so an admin without a `user_permissions` row gets a 403 on the maintenance pages even though every other module lets them through.
 4. **No frontend error boundary.** Any render error blanks the whole page.
 5. **`throw err` after responding** in the `index.ts` error handler can take the process down.
-6. **Monday.com board IDs are hardcoded** in source rather than configured.
 
 `docs/PRE_GITHUB_AUDIT.md` tracks these with full detail and marks what has already been fixed.
 

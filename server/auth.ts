@@ -7,49 +7,24 @@ import memoize from "memoizee";
 import connectPg from "connect-pg-simple";
 import { pool } from "./db";
 import { storage } from "./storage";
+import { authProvider, isProduction } from "./config";
 
 /**
- * ---------------------------------------------------------------------------
- * Identity provider configuration
- * ---------------------------------------------------------------------------
- * This is the ONLY place in the server that knows which login provider is in
- * use. Every default below reproduces Replit Auth exactly, so nothing changes
- * while the app runs on Replit.
- *
- * To move to a different OpenID Connect provider (Auth0, Okta, Google, Keycloak,
- * Authentik, ...), set the OIDC_* environment variables. No code outside this
- * file needs to change.
+ * Login is standard OpenID Connect. Which provider is in use is decided
+ * entirely by the OIDC_* variables read in server/config.ts -- nothing outside
+ * that file and this one needs to change to move to another provider.
  *
  * See the "Swapping the identity provider" section of replit.md for the full
  * procedure, including what happens to existing accounts.
  */
-const authProvider = {
-  /** Discovery root of the provider, e.g. https://your-tenant.auth0.com */
-  issuerUrl:
-    process.env.OIDC_ISSUER_URL ??
-    process.env.ISSUER_URL ??
-    "https://replit.com/oidc",
-
-  /** On Replit this is REPL_ID; elsewhere it is the client ID your provider issues. */
-  clientId: process.env.OIDC_CLIENT_ID ?? process.env.REPL_ID,
-
-  /** Replit uses a public client (PKCE, no secret). Most other providers issue one. */
-  clientSecret: process.env.OIDC_CLIENT_SECRET,
-
-  /** Internal passport strategy prefix only; never shown to users. */
-  name: process.env.OIDC_PROVIDER_NAME ?? "replitauth",
-
-  /** offline_access is what allows sessions to refresh without re-prompting. */
-  scopes: (process.env.OIDC_SCOPES ?? "openid email profile offline_access")
-    .split(/\s+/)
-    .filter(Boolean),
-};
-
 const getOidcConfig = memoize(
   async () => {
-    if (!authProvider.clientId) {
+    // validateConfiguration() has already rejected both of these at boot; the
+    // checks remain so this module still fails clearly if it is ever used
+    // outside the normal startup path.
+    if (!authProvider.clientId || !authProvider.issuerUrl) {
       throw new Error(
-        "No OIDC client ID is configured. Set OIDC_CLIENT_ID, or REPL_ID when running on Replit.",
+        "No login provider is configured. Set OIDC_ISSUER_URL and OIDC_CLIENT_ID.",
       );
     }
     return await client.discovery(
@@ -85,11 +60,21 @@ export function getSession() {
     // still works: passport writes state into the session, which marks it
     // dirty and causes it to be saved.
     saveUninitialized: false,
+    // Cookies must not travel over plain HTTP in production. This relies on
+    // `trust proxy` being set, because behind a reverse proxy the connection to
+    // this process is HTTP even though the visitor's connection is HTTPS --
+    // without it express-session sees an insecure request and refuses to send
+    // the cookie at all, and nobody can log in.
+    proxy: isProduction,
     cookie: {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: 'lax',
+      secure: isProduction,
+      // "lax" still sends the cookie on the top-level redirect back from the
+      // identity provider, which is what makes login work; "strict" would drop
+      // it and loop the user back to the login page.
+      sameSite: "lax",
       maxAge: sessionTtl,
+      path: "/",
     },
   });
 }

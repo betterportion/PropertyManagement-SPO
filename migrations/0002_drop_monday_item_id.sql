@@ -1,0 +1,1 @@
+ALTER TABLE "maintenance_requests" DROP COLUMN "monday_item_id";

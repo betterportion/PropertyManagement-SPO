@@ -106,3 +106,39 @@ pool.on("error", (error) => {
 });
 
 export const db = drizzle(pool, { schema });
+
+/**
+ * Releases every pooled connection. Called during shutdown so the database sees
+ * connections closed properly instead of waiting for them to time out, which on
+ * a plan with a low connection limit can otherwise leave the replacement
+ * instance unable to connect while the old ones linger.
+ */
+export async function closeDatabase(): Promise<void> {
+  await pool.end();
+}
+
+/**
+ * A cheap round trip used by the health check to prove the database is
+ * genuinely reachable, not merely configured.
+ *
+ * The timeout matters: a database that accepts connections but never answers
+ * would otherwise leave the health request hanging until the platform's own
+ * probe gave up, which reads as "no response" rather than "database down".
+ */
+export async function pingDatabase(timeoutMs = 3_000): Promise<boolean> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    await Promise.race([
+      pool.query("SELECT 1"),
+      new Promise((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error("Database ping timed out")), timeoutMs);
+      }),
+    ]);
+    return true;
+  } catch (error) {
+    logError("Database health check failed", error);
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
