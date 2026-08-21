@@ -251,15 +251,28 @@ export const billingRecords = pgTable("billing_records", {
   contractInvoiceUrl: varchar("contract_invoice_url"),
   coiUrl: varchar("coi_url"),
   w9Url: varchar("w9_url"),
+  // Billing records were previously visible to every user who held the billing
+  // permission, because there was nothing on the row to scope them by. The
+  // column defaults to "" so an existing database can adopt it without a
+  // backfill step; an empty region is treated as inaccessible to non-admins,
+  // which fails closed rather than exposing legacy rows.
+  region: varchar("region").notNull().default(""),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
-export const insertBillingRecordSchema = createInsertSchema(billingRecords).omit({
-  id: true,
-  createdAt: true,
-  updatedAt: true,
-});
+export const insertBillingRecordSchema = createInsertSchema(billingRecords)
+  .omit({
+    id: true,
+    createdAt: true,
+    updatedAt: true,
+  })
+  // The column default makes region optional for inserts, but a record created
+  // through the API must always name its region -- otherwise new rows would be
+  // born invisible to everyone except admins.
+  .extend({
+    region: z.string().min(1, "Region is required"),
+  });
 
 export type BillingRecord = typeof billingRecords.$inferSelect;
 export type InsertBillingRecord = z.infer<typeof insertBillingRecordSchema>;

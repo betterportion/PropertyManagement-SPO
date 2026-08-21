@@ -2,7 +2,20 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { setupAuth, isAuthenticated, getUserId } from "./auth";
-import { normalizeRegion, normalizeRegions } from "./migrateRegions";
+import {
+  loadAuthContext,
+  requireActiveUser,
+  requirePermission,
+  requireStaff,
+  requireAdmin,
+  requireRegion,
+  requireRegionMove,
+  requireMaintenanceRequestAccess,
+  canReadMaintenanceRequest,
+  filterByRegion,
+  filterByRelatedRegion,
+  type AuthContext,
+} from "./authz";
 import { z } from "zod";
 import multer from "multer";
 import { createMondayItem, updateMondayItem } from "./monday";
@@ -63,6 +76,10 @@ const roleUpdateSchema = z.object({
   role: z.enum(["admin", "regional_administrator", "resident"]),
 });
 
+const statusUpdateSchema = z.object({
+  isActive: z.boolean(),
+});
+
 const permissionsUpdateSchema = z.object({
   canViewMaintenance: z.boolean().optional(),
   canManageMaintenance: z.boolean().optional(),
@@ -80,19 +97,6 @@ const permissionsUpdateSchema = z.object({
   allowedRegions: z.array(z.string()).optional(),
 });
 
-function filterByRegion<T extends { region?: string | null }>(items: T[], rawAllowedRegions: string[] | null): T[] {
-  if (!rawAllowedRegions || rawAllowedRegions.length === 0) {
-    return [];
-  }
-  // Normalise stored allowedRegions so legacy kebab-case values (e.g. "west-central")
-  // match Title Case values stored in data records (e.g. "West Central").
-  const allowedRegions = normalizeRegions(rawAllowedRegions);
-  if (allowedRegions.includes("all")) {
-    return items;
-  }
-  return items.filter(item => item.region && allowedRegions.includes(normalizeRegion(item.region)));
-}
-
 // Constant-time string comparison, so a wrong secret cannot be discovered by
 // measuring how long the comparison takes.
 function secretsMatch(provided: string, expected: string): boolean {
@@ -102,13 +106,57 @@ function secretsMatch(provided: string, expected: string): boolean {
   return crypto.timingSafeEqual(a, b);
 }
 
-function canAccessRegion(region: string | null | undefined, rawAllowedRegions: string[] | null, isAdmin: boolean): boolean {
-  if (isAdmin) return true;
-  if (!region) return false;
-  if (!rawAllowedRegions || rawAllowedRegions.length === 0) return false;
-  // Normalise both sides so legacy kebab-case allowedRegions match Title Case record regions.
-  const allowedRegions = normalizeRegions(rawAllowedRegions);
-  return allowedRegions.includes(normalizeRegion(region));
+/**
+ * Shared guard for linking and unlinking a vendor contact on a maintenance
+ * request. Both sides of the relationship are checked: it is not enough to
+ * reach the request if the contact belongs to another region, because linking
+ * exposes that contact's details to everyone who can read the request.
+ *
+ * Returns false having already sent a response when access is denied.
+ */
+/**
+ * Region guard for a walkthrough room, whose region comes from the property it
+ * belongs to rather than from the room itself.
+ *
+ * Fails closed for non-admins when the region cannot be resolved -- an
+ * unattached room, or one pointing at a property that no longer exists. This
+ * matches how the room list filters, so a room that a user cannot see in the
+ * list is also one they cannot edit or delete by ID.
+ */
+async function requireRoomRegion(
+  res: import("express").Response,
+  ctx: AuthContext,
+  propertyId: string | null | undefined,
+): Promise<boolean> {
+  if (ctx.isAdmin) return true;
+
+  const property = propertyId ? await storage.getProperty(propertyId) : undefined;
+  // requireRegion rejects an undefined region, which is the behaviour we want
+  // here, and keeps the denial message consistent with every other route.
+  return requireRegion(res, ctx, property?.region);
+}
+
+async function resolveContactLink(
+  res: import("express").Response,
+  ctx: AuthContext,
+  requestId: string,
+  contactId: string,
+): Promise<boolean> {
+  const request = await storage.getMaintenanceRequest(requestId);
+  if (!request) {
+    res.status(404).json({ message: "Maintenance request not found" });
+    return false;
+  }
+  if (!requireRegion(res, ctx, request.region)) return false;
+
+  const contact = await storage.getMaintenanceContact(contactId);
+  if (!contact) {
+    res.status(404).json({ message: "Contact not found" });
+    return false;
+  }
+  if (!requireRegion(res, ctx, contact.region)) return false;
+
+  return true;
 }
 
 export async function registerRoutes(app: Express): Promise<Server> {
@@ -121,6 +169,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!user) {
         return res.status(404).json({ message: "User not found" });
       }
+
+      // This is the one endpoint a deactivated user may still reach, so the
+      // client can tell them their account is inactive instead of failing with
+      // an unexplained error on every other request. Their permissions are
+      // withheld, because the UI builds its navigation from them and every
+      // other endpoint will reject them anyway.
+      if (!user.isActive) {
+        return res.json({ ...user, permissions: undefined });
+      }
+
       const permissions = await storage.getUserPermissions(userId);
       res.json({ ...user, permissions });
     } catch (error) {
@@ -131,11 +189,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get('/api/users', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = getUserId(req);
-      const currentUser = await storage.getUser(userId);
-      if (currentUser?.role !== "admin") {
-        return res.status(403).json({ message: "Forbidden" });
-      }
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireAdmin(res, ctx)) return;
+
       const users = await storage.getAllUsers();
       res.json(users);
     } catch (error) {
@@ -146,11 +203,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch('/api/users/:id/role', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = getUserId(req);
-      const currentUser = await storage.getUser(userId);
-      if (currentUser?.role !== "admin") {
-        return res.status(403).json({ message: "Forbidden" });
-      }
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireAdmin(res, ctx)) return;
+
       const validatedData = roleUpdateSchema.parse(req.body);
       const user = await storage.updateUserRole(req.params.id, validatedData.role);
       res.json(user);
@@ -162,12 +218,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch('/api/users/:id/status', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = getUserId(req);
-      const currentUser = await storage.getUser(userId);
-      if (currentUser?.role !== "admin") {
-        return res.status(403).json({ message: "Forbidden" });
-      }
-      const { isActive } = req.body;
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireAdmin(res, ctx)) return;
+
+      const { isActive } = statusUpdateSchema.parse(req.body);
       const user = await storage.updateUserActiveStatus(req.params.id, isActive);
       res.json(user);
     } catch (error) {
@@ -179,10 +234,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get('/api/users/:id/permissions', isAuthenticated, async (req: any, res) => {
     try {
       // A user may read only their own permissions. Admins may read anyone's.
-      const userId = getUserId(req);
-      const currentUser = await storage.getUser(userId);
-      const isAdmin = currentUser?.role === "admin";
-      if (!isAdmin && req.params.id !== userId) {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!ctx.isAdmin && req.params.id !== ctx.userId) {
         return res.status(403).json({ message: "Forbidden" });
       }
       const permissions = await storage.getUserPermissions(req.params.id);
@@ -198,11 +252,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch('/api/users/:id/permissions', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = getUserId(req);
-      const currentUser = await storage.getUser(userId);
-      if (currentUser?.role !== "admin") {
-        return res.status(403).json({ message: "Forbidden" });
-      }
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireAdmin(res, ctx)) return;
+
       const validatedData = permissionsUpdateSchema.parse(req.body);
       const filteredData = Object.fromEntries(
         Object.entries(validatedData).filter(([_, v]) => v !== undefined)
@@ -220,11 +273,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post('/api/users', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = getUserId(req);
-      const currentUser = await storage.getUser(userId);
-      if (currentUser?.role !== "admin") {
-        return res.status(403).json({ message: "Forbidden" });
-      }
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireAdmin(res, ctx)) return;
+
       const validatedData = insertUserSchema.parse(req.body);
       const user = await storage.upsertUser({
         id: req.body.id || undefined,
@@ -239,11 +291,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.delete('/api/users/:id', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = getUserId(req);
-      const currentUser = await storage.getUser(userId);
-      if (currentUser?.role !== "admin") {
-        return res.status(403).json({ message: "Forbidden" });
-      }
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireAdmin(res, ctx)) return;
+
       await storage.deleteUser(req.params.id);
       res.json({ success: true });
     } catch (error) {
@@ -255,25 +306,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Maintenance Requests Routes
   app.get('/api/maintenance-requests', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = getUserId(req);
-      const currentUser = await storage.getUser(userId);
-      const permissions = await storage.getUserPermissions(userId);
-      
-      if (!currentUser?.isActive || (!permissions?.canViewMaintenance && !permissions?.canManageMaintenance)) {
-        return res.status(403).json({ message: "Forbidden" });
-      }
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requirePermission(res, ctx, "canViewMaintenance", "canManageMaintenance")) return;
 
       const requests = await storage.getAllMaintenanceRequests();
-      const allowedRegions = permissions?.allowedRegions || [];
-      const isAdmin = currentUser?.role === "admin";
-      const isResident = currentUser?.role === "resident";
-      
-      // Residents only see their own requests
-      const filteredRequests = isAdmin
-        ? requests
-        : isResident
-          ? requests.filter(r => r.submittedBy === userId)
-          : filterByRegion(requests, allowedRegions);
+
+      // One rule, applied to the list and to the detail route alike, so the two
+      // can never disagree about what a user is allowed to see.
+      const filteredRequests = requests.filter((request) =>
+        canReadMaintenanceRequest(ctx, request),
+      );
       res.json(filteredRequests);
     } catch (error) {
       console.error("Error fetching maintenance requests:", error);
@@ -283,32 +326,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get('/api/maintenance-requests/:id', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = getUserId(req);
-      const currentUser = await storage.getUser(userId);
-      const permissions = await storage.getUserPermissions(userId);
-      
-      if (!currentUser?.isActive || (!permissions?.canViewMaintenance && !permissions?.canManageMaintenance)) {
-        return res.status(403).json({ message: "Forbidden" });
-      }
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requirePermission(res, ctx, "canViewMaintenance", "canManageMaintenance")) return;
 
       const request = await storage.getMaintenanceRequest(req.params.id);
       if (!request) {
         return res.status(404).json({ message: "Maintenance request not found" });
       }
-      
-      const allowedRegions = permissions?.allowedRegions || [];
-      const isAdmin = currentUser?.role === "admin";
-      const isResident = currentUser?.role === "resident";
 
-      // Residents may only read their own requests
-      if (isResident && request.submittedBy !== currentUser?.email) {
-        return res.status(403).json({ message: "Forbidden" });
-      }
+      if (!requireMaintenanceRequestAccess(res, ctx, request)) return;
 
-      if (!isAdmin && !isResident && request.region && !allowedRegions.includes(request.region)) {
-        return res.status(403).json({ message: "Forbidden - Region not accessible" });
-      }
-      
       res.json(request);
     } catch (error) {
       console.error("Error fetching maintenance request:", error);
@@ -318,23 +346,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post('/api/maintenance-requests', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = getUserId(req);
-      const currentUser = await storage.getUser(userId);
-      const permissions = await storage.getUserPermissions(userId);
-      
-      if (!currentUser?.isActive || (!permissions?.canViewMaintenance && !permissions?.canManageMaintenance)) {
-        return res.status(403).json({ message: "Forbidden" });
-      }
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requirePermission(res, ctx, "canViewMaintenance", "canManageMaintenance")) return;
 
       const validatedData = insertMaintenanceRequestSchema.parse(req.body);
-      
-      if (validatedData.region && !canAccessRegion(validatedData.region, permissions?.allowedRegions || [], currentUser?.role === "admin")) {
-        return res.status(403).json({ message: "Forbidden - Cannot create in this region" });
+
+      // Residents are scoped by ownership rather than by region -- they are
+      // never assigned regions, and they can only ever read back the requests
+      // they submitted, so a region check here would block them entirely
+      // without preventing any cross-region disclosure.
+      if (!ctx.isResident) {
+        if (!requireRegion(res, ctx, validatedData.region, "Forbidden - Cannot create in this region")) return;
       }
-      
+
+      // The submitter is taken from the session, never from the request body,
+      // so a caller cannot file a request in someone else's name.
       const request = await storage.createMaintenanceRequest({
         ...validatedData,
-        submittedBy: currentUser.email || "Unknown",
+        submittedBy: ctx.user.email || "Unknown",
       });
 
       createMondayItem({
@@ -362,31 +392,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch('/api/maintenance-requests/:id', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = getUserId(req);
-      const currentUser = await storage.getUser(userId);
-      const permissions = await storage.getUserPermissions(userId);
-      
-      if (!currentUser?.isActive || !permissions?.canManageMaintenance) {
-        return res.status(403).json({ message: "Forbidden" });
-      }
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageMaintenance")) return;
 
       const existingRequest = await storage.getMaintenanceRequest(req.params.id);
       if (!existingRequest) {
         return res.status(404).json({ message: "Maintenance request not found" });
       }
-      
-      if (!canAccessRegion(existingRequest.region, permissions?.allowedRegions || [], currentUser?.role === "admin")) {
-        return res.status(403).json({ message: "Forbidden - Region not accessible" });
-      }
 
       const validatedData = insertMaintenanceRequestSchema.partial().parse(req.body);
-      
-      if (validatedData.region && validatedData.region !== existingRequest.region) {
-        if (!canAccessRegion(validatedData.region, permissions?.allowedRegions || [], currentUser?.role === "admin")) {
-          return res.status(403).json({ message: "Forbidden - Cannot move to this region" });
-        }
-      }
-      
+
+      if (!requireRegionMove(res, ctx, existingRequest.region, validatedData.region)) return;
+
       const request = await storage.updateMaintenanceRequest(req.params.id, validatedData);
       res.json(request);
 
@@ -408,22 +427,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.delete('/api/maintenance-requests/:id', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = getUserId(req);
-      const currentUser = await storage.getUser(userId);
-      const permissions = await storage.getUserPermissions(userId);
-      
-      if (!currentUser?.isActive || !permissions?.canManageMaintenance) {
-        return res.status(403).json({ message: "Forbidden" });
-      }
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageMaintenance")) return;
 
       const existingRequest = await storage.getMaintenanceRequest(req.params.id);
       if (!existingRequest) {
         return res.status(404).json({ message: "Maintenance request not found" });
       }
-      
-      if (!canAccessRegion(existingRequest.region, permissions?.allowedRegions || [], currentUser?.role === "admin")) {
-        return res.status(403).json({ message: "Forbidden - Region not accessible" });
-      }
+
+      if (!requireRegion(res, ctx, existingRequest.region)) return;
 
       await storage.deleteMaintenanceRequest(req.params.id);
       res.json({ success: true });
@@ -436,25 +450,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Linked Contacts for a Maintenance Request
   app.get('/api/maintenance-requests/:id/contacts', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = getUserId(req);
-      const currentUser = await storage.getUser(userId);
-      const permissions = await storage.getUserPermissions(userId);
-
-      if (!currentUser?.isActive || (!permissions?.canViewMaintenance && !permissions?.canManageMaintenance)) {
-        return res.status(403).json({ message: "Forbidden" });
-      }
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requirePermission(res, ctx, "canViewMaintenance", "canManageMaintenance")) return;
 
       const request = await storage.getMaintenanceRequest(req.params.id);
       if (!request) {
         return res.status(404).json({ message: "Maintenance request not found" });
       }
 
-      const isResident = currentUser?.role === "resident";
-
-      // Residents may only view contacts on their own requests
-      if (isResident && request.submittedBy !== currentUser?.email) {
-        return res.status(403).json({ message: "Forbidden" });
-      }
+      // Vendor contact details are only reachable through a request the caller
+      // is already allowed to read: residents through ownership, staff through
+      // region. Previously any signed-in user could read the contacts on any
+      // request by guessing its ID.
+      if (!requireMaintenanceRequestAccess(res, ctx, request)) return;
 
       const contacts = await storage.getRequestContacts(req.params.id);
       res.json(contacts);
@@ -466,11 +475,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post('/api/maintenance-requests/:id/contacts/:contactId', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = getUserId(req);
-      const currentUser = await storage.getUser(userId);
-      if (!currentUser?.isActive || currentUser.role === "resident") {
-        return res.status(403).json({ message: "Forbidden" });
-      }
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageMaintenance")) return;
+
+      const linkable = await resolveContactLink(res, ctx, req.params.id, req.params.contactId);
+      if (!linkable) return;
+
       await storage.linkContactToRequest(req.params.id, req.params.contactId);
       res.json({ success: true });
     } catch (error) {
@@ -481,11 +493,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.delete('/api/maintenance-requests/:id/contacts/:contactId', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = getUserId(req);
-      const currentUser = await storage.getUser(userId);
-      if (!currentUser?.isActive || currentUser.role === "resident") {
-        return res.status(403).json({ message: "Forbidden" });
-      }
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageMaintenance")) return;
+
+      const linkable = await resolveContactLink(res, ctx, req.params.id, req.params.contactId);
+      if (!linkable) return;
+
       await storage.unlinkContactFromRequest(req.params.id, req.params.contactId);
       res.json({ success: true });
     } catch (error) {
@@ -497,23 +512,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Walkthrough Rooms Routes
   app.get('/api/walkthrough-rooms', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = getUserId(req);
-      const currentUser = await storage.getUser(userId);
-      const permissions = await storage.getUserPermissions(userId);
-      
-      if (!currentUser?.isActive || (!permissions?.canViewWalkthroughs && !permissions?.canManageWalkthroughs)) {
-        return res.status(403).json({ message: "Forbidden" });
-      }
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canViewWalkthroughs", "canManageWalkthroughs")) return;
 
       const rooms = await storage.getAllWalkthroughRooms();
       const properties = await storage.getAllProperties();
-      const allowedRegions = permissions?.allowedRegions || [];
-      const isAdmin = currentUser?.role === "admin";
-      
-      const filteredRooms = isAdmin ? rooms : rooms.filter(room => {
-        const property = properties.find(p => p.id === room.propertyId);
-        return property && allowedRegions.includes(property.region);
-      });
+
+      // A room has no region of its own; it inherits the region of the
+      // property it belongs to.
+      const filteredRooms = filterByRelatedRegion(
+        ctx,
+        rooms,
+        (room) => properties.find((p) => p.id === room.propertyId)?.region,
+      );
       res.json(filteredRooms);
     } catch (error) {
       console.error("Error fetching walkthrough rooms:", error);
@@ -523,23 +536,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post('/api/walkthrough-rooms', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = getUserId(req);
-      const currentUser = await storage.getUser(userId);
-      const permissions = await storage.getUserPermissions(userId);
-      
-      if (!currentUser?.isActive || !permissions?.canManageWalkthroughs) {
-        return res.status(403).json({ message: "Forbidden" });
-      }
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageWalkthroughs")) return;
 
       const validatedData = insertWalkthroughRoomSchema.parse(req.body);
-      
+
       if (validatedData.propertyId) {
         const property = await storage.getProperty(validatedData.propertyId);
-        if (property && !canAccessRegion(property.region, permissions?.allowedRegions || [], currentUser?.role === "admin")) {
-          return res.status(403).json({ message: "Forbidden - Cannot create in this region" });
+        if (!property) {
+          return res.status(404).json({ message: "Property not found" });
         }
+        if (!requireRegion(res, ctx, property.region, "Forbidden - Cannot create in this region")) return;
       }
-      
+
       const room = await storage.createWalkthroughRoom(validatedData);
       res.json(room);
     } catch (error) {
@@ -550,35 +561,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch('/api/walkthrough-rooms/:id', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = getUserId(req);
-      const currentUser = await storage.getUser(userId);
-      const permissions = await storage.getUserPermissions(userId);
-      
-      if (!currentUser?.isActive || !permissions?.canManageWalkthroughs) {
-        return res.status(403).json({ message: "Forbidden" });
-      }
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageWalkthroughs")) return;
 
       const existingRoom = await storage.getWalkthroughRoom(req.params.id);
       if (!existingRoom) {
         return res.status(404).json({ message: "Walkthrough room not found" });
       }
-      
-      if (existingRoom.propertyId) {
-        const property = await storage.getProperty(existingRoom.propertyId);
-        if (property && !canAccessRegion(property.region, permissions?.allowedRegions || [], currentUser?.role === "admin")) {
-          return res.status(403).json({ message: "Forbidden - Region not accessible" });
-        }
-      }
+
+      if (!(await requireRoomRegion(res, ctx, existingRoom.propertyId))) return;
 
       const validatedData = insertWalkthroughRoomSchema.partial().parse(req.body);
-      
+
       if (validatedData.propertyId && validatedData.propertyId !== existingRoom.propertyId) {
         const targetProperty = await storage.getProperty(validatedData.propertyId);
-        if (targetProperty && !canAccessRegion(targetProperty.region, permissions?.allowedRegions || [], currentUser?.role === "admin")) {
-          return res.status(403).json({ message: "Forbidden - Cannot move to this region" });
+        if (!targetProperty) {
+          return res.status(404).json({ message: "Property not found" });
         }
+        if (!requireRegion(res, ctx, targetProperty.region, "Forbidden - Cannot move to this region")) return;
       }
-      
+
       const room = await storage.updateWalkthroughRoom(req.params.id, validatedData);
       res.json(room);
     } catch (error) {
@@ -589,25 +593,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.delete('/api/walkthrough-rooms/:id', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = getUserId(req);
-      const currentUser = await storage.getUser(userId);
-      const permissions = await storage.getUserPermissions(userId);
-      
-      if (!currentUser?.isActive || !permissions?.canManageWalkthroughs) {
-        return res.status(403).json({ message: "Forbidden" });
-      }
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageWalkthroughs")) return;
 
       const existingRoom = await storage.getWalkthroughRoom(req.params.id);
       if (!existingRoom) {
         return res.status(404).json({ message: "Walkthrough room not found" });
       }
-      
-      if (existingRoom.propertyId) {
-        const property = await storage.getProperty(existingRoom.propertyId);
-        if (property && !canAccessRegion(property.region, permissions?.allowedRegions || [], currentUser?.role === "admin")) {
-          return res.status(403).json({ message: "Forbidden - Region not accessible" });
-        }
-      }
+
+      if (!(await requireRoomRegion(res, ctx, existingRoom.propertyId))) return;
 
       await storage.deleteWalkthroughRoom(req.params.id);
       res.json({ success: true });
@@ -620,19 +616,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Walkthrough Photos Routes
   app.get('/api/walkthrough-photos', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = getUserId(req);
-      const currentUser = await storage.getUser(userId);
-      const permissions = await storage.getUserPermissions(userId);
-      
-      if (!currentUser?.isActive || (!permissions?.canViewWalkthroughs && !permissions?.canManageWalkthroughs)) {
-        return res.status(403).json({ message: "Forbidden" });
-      }
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canViewWalkthroughs", "canManageWalkthroughs")) return;
 
       const photos = await storage.getAllWalkthroughPhotos();
-      const allowedRegions = permissions?.allowedRegions || [];
-      const isAdmin = currentUser?.role === "admin";
-      const filteredPhotos = isAdmin ? photos : filterByRegion(photos, allowedRegions);
-      res.json(filteredPhotos);
+      res.json(filterByRegion(ctx, photos));
     } catch (error) {
       console.error("Error fetching walkthrough photos:", error);
       res.status(500).json({ message: "Failed to fetch walkthrough photos" });
@@ -641,19 +631,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get('/api/walkthrough-photos/room/:roomId', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = getUserId(req);
-      const currentUser = await storage.getUser(userId);
-      const permissions = await storage.getUserPermissions(userId);
-      
-      if (!currentUser?.isActive || (!permissions?.canViewWalkthroughs && !permissions?.canManageWalkthroughs)) {
-        return res.status(403).json({ message: "Forbidden" });
-      }
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canViewWalkthroughs", "canManageWalkthroughs")) return;
 
       const photos = await storage.getWalkthroughPhotosByRoom(req.params.roomId);
-      const allowedRegions = permissions?.allowedRegions || [];
-      const isAdmin = currentUser?.role === "admin";
-      const filteredPhotos = isAdmin ? photos : filterByRegion(photos, allowedRegions);
-      res.json(filteredPhotos);
+      res.json(filterByRegion(ctx, photos));
     } catch (error) {
       console.error("Error fetching room photos:", error);
       res.status(500).json({ message: "Failed to fetch room photos" });
@@ -662,20 +646,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post('/api/walkthrough-photos', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = getUserId(req);
-      const currentUser = await storage.getUser(userId);
-      const permissions = await storage.getUserPermissions(userId);
-      
-      if (!currentUser?.isActive || !permissions?.canManageWalkthroughs) {
-        return res.status(403).json({ message: "Forbidden" });
-      }
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageWalkthroughs")) return;
 
       const validatedData = insertWalkthroughPhotoSchema.parse(req.body);
-      
-      if (validatedData.region && !canAccessRegion(validatedData.region, permissions?.allowedRegions || [], currentUser?.role === "admin")) {
-        return res.status(403).json({ message: "Forbidden - Cannot create in this region" });
-      }
-      
+
+      if (!requireRegion(res, ctx, validatedData.region, "Forbidden - Cannot create in this region")) return;
+
       const photo = await storage.createWalkthroughPhoto(validatedData);
       res.json(photo);
     } catch (error) {
@@ -686,31 +665,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch('/api/walkthrough-photos/:id', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = getUserId(req);
-      const currentUser = await storage.getUser(userId);
-      const permissions = await storage.getUserPermissions(userId);
-      
-      if (!currentUser?.isActive || !permissions?.canManageWalkthroughs) {
-        return res.status(403).json({ message: "Forbidden" });
-      }
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageWalkthroughs")) return;
 
       const existingPhoto = await storage.getWalkthroughPhoto(req.params.id);
       if (!existingPhoto) {
         return res.status(404).json({ message: "Walkthrough photo not found" });
       }
-      
-      if (!canAccessRegion(existingPhoto.region, permissions?.allowedRegions || [], currentUser?.role === "admin")) {
-        return res.status(403).json({ message: "Forbidden - Region not accessible" });
-      }
 
       const validatedData = insertWalkthroughPhotoSchema.partial().parse(req.body);
-      
-      if (validatedData.region && validatedData.region !== existingPhoto.region) {
-        if (!canAccessRegion(validatedData.region, permissions?.allowedRegions || [], currentUser?.role === "admin")) {
-          return res.status(403).json({ message: "Forbidden - Cannot move to this region" });
-        }
-      }
-      
+
+      if (!requireRegionMove(res, ctx, existingPhoto.region, validatedData.region)) return;
+
       const photo = await storage.updateWalkthroughPhoto(req.params.id, validatedData);
       res.json(photo);
     } catch (error) {
@@ -721,22 +689,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.delete('/api/walkthrough-photos/:id', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = getUserId(req);
-      const currentUser = await storage.getUser(userId);
-      const permissions = await storage.getUserPermissions(userId);
-      
-      if (!currentUser?.isActive || !permissions?.canManageWalkthroughs) {
-        return res.status(403).json({ message: "Forbidden" });
-      }
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageWalkthroughs")) return;
 
       const existingPhoto = await storage.getWalkthroughPhoto(req.params.id);
       if (!existingPhoto) {
         return res.status(404).json({ message: "Walkthrough photo not found" });
       }
-      
-      if (!canAccessRegion(existingPhoto.region, permissions?.allowedRegions || [], currentUser?.role === "admin")) {
-        return res.status(403).json({ message: "Forbidden - Region not accessible" });
-      }
+
+      if (!requireRegion(res, ctx, existingPhoto.region)) return;
 
       await storage.deleteWalkthroughPhoto(req.params.id);
       res.json({ success: true });
@@ -749,19 +712,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Assets Routes
   app.get('/api/assets', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = getUserId(req);
-      const currentUser = await storage.getUser(userId);
-      const permissions = await storage.getUserPermissions(userId);
-      
-      if (!currentUser?.isActive || (!permissions?.canViewAssets && !permissions?.canManageAssets)) {
-        return res.status(403).json({ message: "Forbidden" });
-      }
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canViewAssets", "canManageAssets")) return;
 
       const assets = await storage.getAllAssets();
-      const allowedRegions = permissions?.allowedRegions || [];
-      const isAdmin = currentUser?.role === "admin";
-      const filteredAssets = isAdmin ? assets : filterByRegion(assets, allowedRegions);
-      res.json(filteredAssets);
+      res.json(filterByRegion(ctx, assets));
     } catch (error) {
       console.error("Error fetching assets:", error);
       res.status(500).json({ message: "Failed to fetch assets" });
@@ -770,20 +727,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post('/api/assets', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = getUserId(req);
-      const currentUser = await storage.getUser(userId);
-      const permissions = await storage.getUserPermissions(userId);
-      
-      if (!currentUser?.isActive || !permissions?.canManageAssets) {
-        return res.status(403).json({ message: "Forbidden" });
-      }
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageAssets")) return;
 
       const validatedData = insertAssetSchema.parse(req.body);
-      
-      if (validatedData.region && !canAccessRegion(validatedData.region, permissions?.allowedRegions || [], currentUser?.role === "admin")) {
-        return res.status(403).json({ message: "Forbidden - Cannot create in this region" });
-      }
-      
+
+      if (!requireRegion(res, ctx, validatedData.region, "Forbidden - Cannot create in this region")) return;
+
       const asset = await storage.createAsset(validatedData);
       res.json(asset);
     } catch (error) {
@@ -794,31 +746,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch('/api/assets/:id', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = getUserId(req);
-      const currentUser = await storage.getUser(userId);
-      const permissions = await storage.getUserPermissions(userId);
-      
-      if (!currentUser?.isActive || !permissions?.canManageAssets) {
-        return res.status(403).json({ message: "Forbidden" });
-      }
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageAssets")) return;
 
       const existingAsset = await storage.getAsset(req.params.id);
       if (!existingAsset) {
         return res.status(404).json({ message: "Asset not found" });
       }
-      
-      if (!canAccessRegion(existingAsset.region, permissions?.allowedRegions || [], currentUser?.role === "admin")) {
-        return res.status(403).json({ message: "Forbidden - Region not accessible" });
-      }
 
       const validatedData = insertAssetSchema.partial().parse(req.body);
-      
-      if (validatedData.region && validatedData.region !== existingAsset.region) {
-        if (!canAccessRegion(validatedData.region, permissions?.allowedRegions || [], currentUser?.role === "admin")) {
-          return res.status(403).json({ message: "Forbidden - Cannot move to this region" });
-        }
-      }
-      
+
+      if (!requireRegionMove(res, ctx, existingAsset.region, validatedData.region)) return;
+
       const asset = await storage.updateAsset(req.params.id, validatedData);
       res.json(asset);
     } catch (error) {
@@ -829,22 +770,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.delete('/api/assets/:id', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = getUserId(req);
-      const currentUser = await storage.getUser(userId);
-      const permissions = await storage.getUserPermissions(userId);
-      
-      if (!currentUser?.isActive || !permissions?.canManageAssets) {
-        return res.status(403).json({ message: "Forbidden" });
-      }
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageAssets")) return;
 
       const existingAsset = await storage.getAsset(req.params.id);
       if (!existingAsset) {
         return res.status(404).json({ message: "Asset not found" });
       }
-      
-      if (!canAccessRegion(existingAsset.region, permissions?.allowedRegions || [], currentUser?.role === "admin")) {
-        return res.status(403).json({ message: "Forbidden - Region not accessible" });
-      }
+
+      if (!requireRegion(res, ctx, existingAsset.region)) return;
 
       await storage.deleteAsset(req.params.id);
       res.json({ success: true });
@@ -859,12 +795,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // file-storage access (residents are not permitted to upload directly).
   const requireUploadPermission: import("express").RequestHandler = async (req: any, res, next) => {
     try {
-      const userId = getUserId(req);
-      const currentUser = await storage.getUser(userId);
-      if (!currentUser?.isActive) {
+      const ctx = await loadAuthContext(req);
+      if (!ctx) {
         return res.status(403).json({ message: "Your account is not active." });
       }
-      if (currentUser.role === "resident") {
+      if (ctx.isResident) {
         return res.status(403).json({ message: "Residents are not permitted to upload files." });
       }
       next();
@@ -983,23 +918,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Asset Photos Routes
   app.get('/api/asset-photos', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = getUserId(req);
-      const currentUser = await storage.getUser(userId);
-      const permissions = await storage.getUserPermissions(userId);
-      
-      if (!currentUser?.isActive || (!permissions?.canViewAssets && !permissions?.canManageAssets)) {
-        return res.status(403).json({ message: "Forbidden" });
-      }
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canViewAssets", "canManageAssets")) return;
 
       const photos = await storage.getAllAssetPhotos();
       const assets = await storage.getAllAssets();
-      const allowedRegions = permissions?.allowedRegions || [];
-      const isAdmin = currentUser?.role === "admin";
-      
-      const filteredPhotos = isAdmin ? photos : photos.filter(photo => {
-        const asset = assets.find(a => a.id === photo.assetId);
-        return asset && asset.region && allowedRegions.includes(asset.region);
-      });
+
+      // A photo inherits the region of the asset it documents.
+      const filteredPhotos = filterByRelatedRegion(
+        ctx,
+        photos,
+        (photo) => assets.find((a) => a.id === photo.assetId)?.region,
+      );
       res.json(filteredPhotos);
     } catch (error) {
       console.error("Error fetching asset photos:", error);
@@ -1009,24 +941,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get('/api/asset-photos/asset/:assetId', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = getUserId(req);
-      const currentUser = await storage.getUser(userId);
-      const permissions = await storage.getUserPermissions(userId);
-      
-      if (!currentUser?.isActive || (!permissions?.canViewAssets && !permissions?.canManageAssets)) {
-        return res.status(403).json({ message: "Forbidden" });
-      }
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canViewAssets", "canManageAssets")) return;
 
       const asset = await storage.getAsset(req.params.assetId);
       if (!asset) {
         return res.status(404).json({ message: "Asset not found" });
       }
-      
-      const allowedRegions = permissions?.allowedRegions || [];
-      const isAdmin = currentUser?.role === "admin";
-      if (!isAdmin && asset.region && !allowedRegions.includes(asset.region)) {
-        return res.status(403).json({ message: "Forbidden - Region not accessible" });
-      }
+
+      if (!requireRegion(res, ctx, asset.region)) return;
 
       const photos = await storage.getAssetPhotosByAsset(req.params.assetId);
       res.json(photos);
@@ -1038,21 +963,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post('/api/asset-photos', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = getUserId(req);
-      const currentUser = await storage.getUser(userId);
-      const permissions = await storage.getUserPermissions(userId);
-      
-      if (!currentUser?.isActive || !permissions?.canManageAssets) {
-        return res.status(403).json({ message: "Forbidden" });
-      }
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageAssets")) return;
 
       const validatedData = insertAssetPhotoSchema.parse(req.body);
-      
+
+      // A missing parent is a 404, not a silent pass: without this an unknown
+      // assetId used to skip the region check entirely.
       const parentAsset = await storage.getAsset(validatedData.assetId);
-      if (parentAsset && !canAccessRegion(parentAsset.region, permissions?.allowedRegions || [], currentUser?.role === "admin")) {
-        return res.status(403).json({ message: "Forbidden - Cannot create in this region" });
+      if (!parentAsset) {
+        return res.status(404).json({ message: "Asset not found" });
       }
-      
+      if (!requireRegion(res, ctx, parentAsset.region, "Forbidden - Cannot create in this region")) return;
+
       const photo = await storage.createAssetPhoto(validatedData);
       res.json(photo);
     } catch (error) {
@@ -1063,23 +988,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.delete('/api/asset-photos/:id', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = getUserId(req);
-      const currentUser = await storage.getUser(userId);
-      const permissions = await storage.getUserPermissions(userId);
-      
-      if (!currentUser?.isActive || !permissions?.canManageAssets) {
-        return res.status(403).json({ message: "Forbidden" });
-      }
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageAssets")) return;
 
       const existingPhoto = await storage.getAssetPhoto(req.params.id);
       if (!existingPhoto) {
         return res.status(404).json({ message: "Asset photo not found" });
       }
-      
+
       const parentAsset = await storage.getAsset(existingPhoto.assetId);
-      if (parentAsset && !canAccessRegion(parentAsset.region, permissions?.allowedRegions || [], currentUser?.role === "admin")) {
-        return res.status(403).json({ message: "Forbidden - Region not accessible" });
+      if (!parentAsset) {
+        return res.status(404).json({ message: "Asset not found" });
       }
+      if (!requireRegion(res, ctx, parentAsset.region)) return;
 
       await storage.deleteAssetPhoto(req.params.id);
       res.json({ success: true });
@@ -1092,19 +1015,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Maintenance Contacts Routes
   app.get('/api/contacts', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = getUserId(req);
-      const currentUser = await storage.getUser(userId);
-      const permissions = await storage.getUserPermissions(userId);
-      const isAdmin = currentUser?.role === "admin";
-
-      if (!currentUser?.isActive || (!isAdmin && !permissions?.canViewContacts && !permissions?.canManageContacts)) {
-        return res.status(403).json({ message: "Forbidden" });
-      }
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canViewContacts", "canManageContacts")) return;
 
       const contacts = await storage.getAllMaintenanceContacts();
-      const allowedRegions = permissions?.allowedRegions || [];
-      const filteredContacts = isAdmin ? contacts : filterByRegion(contacts, allowedRegions);
-      res.json(filteredContacts);
+      res.json(filterByRegion(ctx, contacts));
     } catch (error) {
       console.error("Error fetching contacts:", error);
       res.status(500).json({ message: "Failed to fetch contacts" });
@@ -1113,21 +1030,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post('/api/contacts', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = getUserId(req);
-      const currentUser = await storage.getUser(userId);
-      const permissions = await storage.getUserPermissions(userId);
-      const isAdmin = currentUser?.role === "admin";
-
-      if (!currentUser?.isActive || (!isAdmin && !permissions?.canManageContacts)) {
-        return res.status(403).json({ message: "Forbidden" });
-      }
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageContacts")) return;
 
       const validatedData = insertMaintenanceContactSchema.parse(req.body);
-      
-      if (validatedData.region && !canAccessRegion(validatedData.region, permissions?.allowedRegions || [], currentUser?.role === "admin")) {
-        return res.status(403).json({ message: "Forbidden - Cannot create in this region" });
-      }
-      
+
+      if (!requireRegion(res, ctx, validatedData.region, "Forbidden - Cannot create in this region")) return;
+
       const contact = await storage.createMaintenanceContact(validatedData);
       res.json(contact);
     } catch (error) {
@@ -1138,32 +1049,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch('/api/contacts/:id', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = getUserId(req);
-      const currentUser = await storage.getUser(userId);
-      const permissions = await storage.getUserPermissions(userId);
-      const isAdmin = currentUser?.role === "admin";
-
-      if (!currentUser?.isActive || (!isAdmin && !permissions?.canManageContacts)) {
-        return res.status(403).json({ message: "Forbidden" });
-      }
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageContacts")) return;
 
       const existingContact = await storage.getMaintenanceContact(req.params.id);
       if (!existingContact) {
         return res.status(404).json({ message: "Contact not found" });
       }
-      
-      if (!canAccessRegion(existingContact.region, permissions?.allowedRegions || [], currentUser?.role === "admin")) {
-        return res.status(403).json({ message: "Forbidden - Region not accessible" });
-      }
 
       const validatedData = insertMaintenanceContactSchema.partial().parse(req.body);
-      
-      if (validatedData.region && validatedData.region !== existingContact.region) {
-        if (!canAccessRegion(validatedData.region, permissions?.allowedRegions || [], currentUser?.role === "admin")) {
-          return res.status(403).json({ message: "Forbidden - Cannot move to this region" });
-        }
-      }
-      
+
+      if (!requireRegionMove(res, ctx, existingContact.region, validatedData.region)) return;
+
       const contact = await storage.updateMaintenanceContact(req.params.id, validatedData);
       res.json(contact);
     } catch (error) {
@@ -1174,23 +1073,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.delete('/api/contacts/:id', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = getUserId(req);
-      const currentUser = await storage.getUser(userId);
-      const permissions = await storage.getUserPermissions(userId);
-      const isAdmin = currentUser?.role === "admin";
-
-      if (!currentUser?.isActive || (!isAdmin && !permissions?.canManageContacts)) {
-        return res.status(403).json({ message: "Forbidden" });
-      }
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageContacts")) return;
 
       const existingContact = await storage.getMaintenanceContact(req.params.id);
       if (!existingContact) {
         return res.status(404).json({ message: "Contact not found" });
       }
-      
-      if (!canAccessRegion(existingContact.region, permissions?.allowedRegions || [], currentUser?.role === "admin")) {
-        return res.status(403).json({ message: "Forbidden - Region not accessible" });
-      }
+
+      if (!requireRegion(res, ctx, existingContact.region)) return;
 
       await storage.deleteMaintenanceContact(req.params.id);
       res.json({ success: true });
@@ -1203,19 +1096,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Invoices Routes
   app.get('/api/invoices', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = getUserId(req);
-      const currentUser = await storage.getUser(userId);
-      const permissions = await storage.getUserPermissions(userId);
-      
-      if (!currentUser?.isActive || (!permissions?.canViewBilling && !permissions?.canManageBilling)) {
-        return res.status(403).json({ message: "Forbidden" });
-      }
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canViewBilling", "canManageBilling")) return;
 
       const invoices = await storage.getAllInvoices();
-      const allowedRegions = permissions?.allowedRegions || [];
-      const isAdmin = currentUser?.role === "admin";
-      const filteredInvoices = isAdmin ? invoices : filterByRegion(invoices, allowedRegions);
-      res.json(filteredInvoices);
+      res.json(filterByRegion(ctx, invoices));
     } catch (error) {
       console.error("Error fetching invoices:", error);
       res.status(500).json({ message: "Failed to fetch invoices" });
@@ -1224,20 +1111,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post('/api/invoices', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = getUserId(req);
-      const currentUser = await storage.getUser(userId);
-      const permissions = await storage.getUserPermissions(userId);
-      
-      if (!currentUser?.isActive || !permissions?.canManageBilling) {
-        return res.status(403).json({ message: "Forbidden" });
-      }
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageBilling")) return;
 
       const validatedData = insertInvoiceSchema.parse(req.body);
-      
-      if (validatedData.region && !canAccessRegion(validatedData.region, permissions?.allowedRegions || [], currentUser?.role === "admin")) {
-        return res.status(403).json({ message: "Forbidden - Cannot create in this region" });
-      }
-      
+
+      if (!requireRegion(res, ctx, validatedData.region, "Forbidden - Cannot create in this region")) return;
+
       const invoice = await storage.createInvoice(validatedData);
       res.json(invoice);
     } catch (error) {
@@ -1248,31 +1130,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch('/api/invoices/:id', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = getUserId(req);
-      const currentUser = await storage.getUser(userId);
-      const permissions = await storage.getUserPermissions(userId);
-      
-      if (!currentUser?.isActive || !permissions?.canManageBilling) {
-        return res.status(403).json({ message: "Forbidden" });
-      }
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageBilling")) return;
 
       const existingInvoice = await storage.getInvoice(req.params.id);
       if (!existingInvoice) {
         return res.status(404).json({ message: "Invoice not found" });
       }
-      
-      if (!canAccessRegion(existingInvoice.region, permissions?.allowedRegions || [], currentUser?.role === "admin")) {
-        return res.status(403).json({ message: "Forbidden - Region not accessible" });
-      }
 
       const validatedData = insertInvoiceSchema.partial().parse(req.body);
-      
-      if (validatedData.region && validatedData.region !== existingInvoice.region) {
-        if (!canAccessRegion(validatedData.region, permissions?.allowedRegions || [], currentUser?.role === "admin")) {
-          return res.status(403).json({ message: "Forbidden - Cannot move to this region" });
-        }
-      }
-      
+
+      if (!requireRegionMove(res, ctx, existingInvoice.region, validatedData.region)) return;
+
       const invoice = await storage.updateInvoice(req.params.id, validatedData);
       res.json(invoice);
     } catch (error) {
@@ -1283,22 +1154,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.delete('/api/invoices/:id', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = getUserId(req);
-      const currentUser = await storage.getUser(userId);
-      const permissions = await storage.getUserPermissions(userId);
-      
-      if (!currentUser?.isActive || !permissions?.canManageBilling) {
-        return res.status(403).json({ message: "Forbidden" });
-      }
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageBilling")) return;
 
       const existingInvoice = await storage.getInvoice(req.params.id);
       if (!existingInvoice) {
         return res.status(404).json({ message: "Invoice not found" });
       }
-      
-      if (!canAccessRegion(existingInvoice.region, permissions?.allowedRegions || [], currentUser?.role === "admin")) {
-        return res.status(403).json({ message: "Forbidden - Region not accessible" });
-      }
+
+      if (!requireRegion(res, ctx, existingInvoice.region)) return;
 
       await storage.deleteInvoice(req.params.id);
       res.json({ success: true });
@@ -1311,17 +1177,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Billing Records Routes
   app.get('/api/billing', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = getUserId(req);
-      const currentUser = await storage.getUser(userId);
-      const permissions = await storage.getUserPermissions(userId);
-      const isAdmin = currentUser?.role === "admin";
-
-      if (!currentUser?.isActive || (!isAdmin && !permissions?.canViewBilling && !permissions?.canManageBilling)) {
-        return res.status(403).json({ message: "Forbidden" });
-      }
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canViewBilling", "canManageBilling")) return;
 
       const billingRecords = await storage.getAllBillingRecords();
-      res.json(billingRecords);
+      res.json(filterByRegion(ctx, billingRecords));
     } catch (error) {
       console.error("Error fetching billing records:", error);
       res.status(500).json({ message: "Failed to fetch billing records" });
@@ -1330,17 +1192,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post('/api/billing', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = getUserId(req);
-      const currentUser = await storage.getUser(userId);
-      const permissions = await storage.getUserPermissions(userId);
-      const isAdmin = currentUser?.role === "admin";
-
-      if (!currentUser?.isActive || (!isAdmin && !permissions?.canManageBilling)) {
-        return res.status(403).json({ message: "Forbidden" });
-      }
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageBilling")) return;
 
       const { createContact, ...rest } = req.body;
       const validatedData = insertBillingRecordSchema.parse(rest);
+
+      if (!requireRegion(res, ctx, validatedData.region, "Forbidden - Cannot create in this region")) return;
 
       // If createContact is true and no contactId, create a new contact from the billing info
       if (createContact && !validatedData.contactId) {
@@ -1350,7 +1210,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           service: "",
           phone: validatedData.phone,
           email: validatedData.email,
-          region: "",
+          // Inherit the billing record's region rather than creating the
+          // contact with an empty one, which would have made it invisible to
+          // every non-admin in the contacts list.
+          region: validatedData.region,
           buildingAddress: "",
         });
         (validatedData as any).contactId = newContact.id;
@@ -1366,14 +1229,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch('/api/billing/:id', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = getUserId(req);
-      const currentUser = await storage.getUser(userId);
-      const permissions = await storage.getUserPermissions(userId);
-      const isAdmin = currentUser?.role === "admin";
-
-      if (!currentUser?.isActive || (!isAdmin && !permissions?.canManageBilling)) {
-        return res.status(403).json({ message: "Forbidden" });
-      }
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageBilling")) return;
 
       const existingRecord = await storage.getBillingRecord(req.params.id);
       if (!existingRecord) {
@@ -1381,6 +1240,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const validatedData = insertBillingRecordSchema.partial().parse(req.body);
+
+      if (!requireRegionMove(res, ctx, existingRecord.region, validatedData.region)) return;
+
       const record = await storage.updateBillingRecord(req.params.id, validatedData);
       res.json(record);
     } catch (error) {
@@ -1391,19 +1253,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.delete('/api/billing/:id', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = getUserId(req);
-      const currentUser = await storage.getUser(userId);
-      const permissions = await storage.getUserPermissions(userId);
-      const isAdmin = currentUser?.role === "admin";
-
-      if (!currentUser?.isActive || (!isAdmin && !permissions?.canManageBilling)) {
-        return res.status(403).json({ message: "Forbidden" });
-      }
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageBilling")) return;
 
       const existingRecord = await storage.getBillingRecord(req.params.id);
       if (!existingRecord) {
         return res.status(404).json({ message: "Billing record not found" });
       }
+
+      if (!requireRegion(res, ctx, existingRecord.region)) return;
 
       await storage.deleteBillingRecord(req.params.id);
       res.json({ success: true });
@@ -1416,19 +1276,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Properties Routes
   app.get('/api/properties', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = getUserId(req);
-      const currentUser = await storage.getUser(userId);
-      const permissions = await storage.getUserPermissions(userId);
-      const isAdmin = currentUser?.role === "admin";
-      
-      if (!currentUser?.isActive || (!isAdmin && !permissions?.canViewProperties && !permissions?.canManageProperties)) {
-        return res.status(403).json({ message: "Forbidden" });
-      }
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canViewProperties", "canManageProperties")) return;
 
       const properties = await storage.getAllProperties();
-      const allowedRegions = permissions?.allowedRegions || [];
-      const filteredProperties = isAdmin ? properties : filterByRegion(properties, allowedRegions);
-      res.json(filteredProperties);
+      res.json(filterByRegion(ctx, properties));
     } catch (error) {
       console.error("Error fetching properties:", error);
       res.status(500).json({ message: "Failed to fetch properties" });
@@ -1437,21 +1291,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post('/api/properties', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = getUserId(req);
-      const currentUser = await storage.getUser(userId);
-      const permissions = await storage.getUserPermissions(userId);
-      const isAdmin = currentUser?.role === "admin";
-      
-      if (!currentUser?.isActive || (!isAdmin && !permissions?.canManageProperties)) {
-        return res.status(403).json({ message: "Forbidden" });
-      }
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageProperties")) return;
 
       const validatedData = insertPropertySchema.parse(req.body);
-      
-      if (validatedData.region && !canAccessRegion(validatedData.region, permissions?.allowedRegions || [], currentUser?.role === "admin")) {
-        return res.status(403).json({ message: "Forbidden - Cannot create in this region" });
-      }
-      
+
+      if (!requireRegion(res, ctx, validatedData.region, "Forbidden - Cannot create in this region")) return;
+
       // Compute full address from components
       const address = `${validatedData.streetAddress}, ${validatedData.city}, ${validatedData.state} ${validatedData.zipCode}`;
       const property = await storage.createProperty({ ...validatedData, address });
@@ -1467,32 +1315,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch('/api/properties/:id', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = getUserId(req);
-      const currentUser = await storage.getUser(userId);
-      const permissions = await storage.getUserPermissions(userId);
-      const isAdmin = currentUser?.role === "admin";
-      
-      if (!currentUser?.isActive || (!isAdmin && !permissions?.canManageProperties)) {
-        return res.status(403).json({ message: "Forbidden" });
-      }
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageProperties")) return;
 
       const existingProperty = await storage.getProperty(req.params.id);
       if (!existingProperty) {
         return res.status(404).json({ message: "Property not found" });
       }
-      
-      if (!canAccessRegion(existingProperty.region, permissions?.allowedRegions || [], currentUser?.role === "admin")) {
-        return res.status(403).json({ message: "Forbidden - Region not accessible" });
-      }
 
       const validatedData = insertPropertySchema.partial().parse(req.body);
-      
-      if (validatedData.region && validatedData.region !== existingProperty.region) {
-        if (!canAccessRegion(validatedData.region, permissions?.allowedRegions || [], currentUser?.role === "admin")) {
-          return res.status(403).json({ message: "Forbidden - Cannot move to this region" });
-        }
-      }
-      
+
+      if (!requireRegionMove(res, ctx, existingProperty.region, validatedData.region)) return;
+
       // If address components are being updated, recompute the full address
       let updateData: Partial<InsertPropertyWithAddress> = { ...validatedData };
       if (validatedData.streetAddress || validatedData.city || validatedData.state || validatedData.zipCode) {
@@ -1513,23 +1349,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.delete('/api/properties/:id', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = getUserId(req);
-      const currentUser = await storage.getUser(userId);
-      const permissions = await storage.getUserPermissions(userId);
-      const isAdmin = currentUser?.role === "admin";
-      
-      if (!currentUser?.isActive || (!isAdmin && !permissions?.canManageProperties)) {
-        return res.status(403).json({ message: "Forbidden" });
-      }
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageProperties")) return;
 
       const existingProperty = await storage.getProperty(req.params.id);
       if (!existingProperty) {
         return res.status(404).json({ message: "Property not found" });
       }
-      
-      if (!canAccessRegion(existingProperty.region, permissions?.allowedRegions || [], currentUser?.role === "admin")) {
-        return res.status(403).json({ message: "Forbidden - Region not accessible" });
-      }
+
+      if (!requireRegion(res, ctx, existingProperty.region)) return;
 
       await storage.deleteProperty(req.params.id);
       res.json({ success: true });
@@ -1544,6 +1374,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // photos as well as W-9s, COIs and contract invoices, so they must never be
   // downloadable by an anonymous visitor who guesses a filename.
   app.get('/uploads/:filename', isAuthenticated, async (req, res) => {
+    // A session alone is not enough: a deactivated account keeps its cookie
+    // until it expires, and must not be able to keep pulling documents.
+    //
+    // Note this is still filename-level authorization, not per-record
+    // ownership -- any active user who knows a filename can fetch it.
+    // Filenames are random, so this is not trivially guessable, but tying each
+    // upload back to the record that owns it is tracked separately.
+    const ctx = await requireActiveUser(req, res);
+    if (!ctx) return;
+
     const requested = req.params.filename;
 
     // Reject anything that is not a bare filename, so a crafted key cannot
@@ -1714,8 +1554,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Return current webhook config info (admin + regional_administrator)
   app.get('/api/webhooks/jotform/config', isAuthenticated, async (req: any, res) => {
     try {
-      const currentUser = await storage.getUser(getUserId(req));
-      if (currentUser?.role !== 'admin' && currentUser?.role !== 'regional_administrator') {
+      // This response names which JotForm environment variables are set, so it
+      // is deliberately narrower than the rest of the API: administrators only,
+      // and only while their account is still active.
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!ctx.isAdmin && ctx.user.role !== 'regional_administrator') {
         return res.status(403).json({ message: 'Admin or regional administrator only' });
       }
       res.json({

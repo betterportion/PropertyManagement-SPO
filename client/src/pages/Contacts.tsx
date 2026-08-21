@@ -34,6 +34,10 @@ const invoiceFormSchema = z.object({
   email: z.string().min(1, "Email is required").email("Valid email required"),
   phone: z.string().min(1, "Phone is required"),
   invoiceCost: z.string().min(1, "Invoice cost is required"),
+  // Billing records are scoped by region on the server. Without a region a
+  // record would be saved but then hidden from everyone except an admin, so
+  // the field is required here rather than left to a silent default.
+  region: z.string().min(1, "Region is required"),
 });
 
 export default function Contacts() {
@@ -191,7 +195,7 @@ export default function Contacts() {
 
   const invoiceForm = useForm<z.infer<typeof invoiceFormSchema>>({
     resolver: zodResolver(invoiceFormSchema),
-    defaultValues: { companyName: "", email: "", phone: "", invoiceCost: "" },
+    defaultValues: { companyName: "", email: "", phone: "", invoiceCost: "", region: "" },
   });
 
   const createBillingMutation = useMutation({
@@ -243,6 +247,7 @@ export default function Contacts() {
       email: data.email,
       phone: data.phone,
       invoiceCost: data.invoiceCost,
+      region: data.region,
       contractInvoiceUrl: contractInvoiceUrl ?? undefined,
       coiUrl: coiUrl ?? undefined,
       w9Url: w9Url ?? undefined,
@@ -556,6 +561,31 @@ export default function Contacts() {
                     )}
                   />
                 </div>
+
+                <FormField
+                  control={invoiceForm.control}
+                  name="region"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Region</FormLabel>
+                      <Select onValueChange={field.onChange} value={field.value}>
+                        <FormControl>
+                          <SelectTrigger data-testid="select-invoice-region">
+                            <SelectValue placeholder="Select region" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {REGIONS.map((region) => (
+                            <SelectItem key={region} value={region}>
+                              {region}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
 
                 {/* Document Uploads */}
                 <div className="space-y-3">

@@ -28,6 +28,50 @@ export function normalizeRegions(regions: string[]): string[] {
   return regions.map(normalizeRegion);
 }
 
+/**
+ * Idempotent startup migration: give existing billing records a region.
+ *
+ * Billing records gained a region column so they could be filtered like every
+ * other record type. Rows created before that change have an empty region,
+ * which the authorization layer treats as inaccessible to non-admins. Where a
+ * row is linked to a maintenance contact, that contact's region is the correct
+ * value; rows with no linked contact are left empty for an admin to set, since
+ * guessing a region would be worse than showing nothing.
+ */
+export async function backfillBillingRegions(): Promise<void> {
+  try {
+    const { billingRecords, maintenanceContacts } = await import("@shared/schema");
+    const { eq, and } = await import("drizzle-orm");
+
+    // Only rows that still have no region. Once backfilled, this selects
+    // nothing and the migration costs a single indexed query per boot.
+    const rows = await db
+      .select({ id: billingRecords.id, contactRegion: maintenanceContacts.region })
+      .from(billingRecords)
+      .innerJoin(maintenanceContacts, eq(maintenanceContacts.id, billingRecords.contactId))
+      .where(eq(billingRecords.region, ""));
+
+    for (const row of rows) {
+      if (!row.contactRegion) continue;
+      const updated = await db
+        .update(billingRecords)
+        .set({ region: row.contactRegion, updatedAt: new Date() })
+        // Only touch rows that are still empty, so this stays idempotent and
+        // never overwrites a region an admin has since corrected by hand.
+        .where(and(eq(billingRecords.id, row.id), eq(billingRecords.region, "")))
+        .returning({ id: billingRecords.id });
+
+      if (updated.length > 0) {
+        console.log(`[billing-region-backfill] ${row.id} → ${row.contactRegion}`);
+      }
+    }
+  } catch (err) {
+    // Non-fatal: an un-backfilled row is hidden from non-admins, which is the
+    // safe direction to fail in.
+    console.error("[billing-region-backfill] failed (non-fatal):", err);
+  }
+}
+
 export async function migrateRegionsToTitleCase(): Promise<void> {
   try {
     const rows = await db.select().from(userPermissions);

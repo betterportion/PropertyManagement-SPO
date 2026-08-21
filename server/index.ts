@@ -48,8 +48,10 @@ app.use((req, res, next) => {
 
 (async () => {
   // Normalise any legacy kebab-case allowedRegions rows to Title Case on every boot.
-  const { migrateRegionsToTitleCase } = await import("./migrateRegions");
+  const { migrateRegionsToTitleCase, backfillBillingRegions } = await import("./migrateRegions");
   await migrateRegionsToTitleCase();
+  // Give pre-existing billing records the region they now need to be visible.
+  await backfillBillingRegions();
 
   const server = await registerRoutes(app);
 
