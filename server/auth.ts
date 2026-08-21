@@ -5,6 +5,7 @@ import session from "express-session";
 import type { Express, Request, RequestHandler } from "express";
 import memoize from "memoizee";
 import connectPg from "connect-pg-simple";
+import { pool } from "./db";
 import { storage } from "./storage";
 
 /**
@@ -64,10 +65,15 @@ export function getSession() {
   const sessionTtl = 7 * 24 * 60 * 60 * 1000;
   const pgStore = connectPg(session);
   const sessionStore = new pgStore({
-    conString: process.env.DATABASE_URL,
-    // Create the sessions table on demand so a fresh database does not crash
-    // the app on startup.
-    createTableIfMissing: true,
+    // Shares the application's connection pool rather than opening a second
+    // one. Two pools against a managed database means two sets of connections
+    // counting towards the plan's limit, and the SSL and sizing rules in
+    // server/db.ts would have to be repeated here to match.
+    pool,
+    // The sessions table is part of the schema and is created by a migration.
+    // Creating it on demand here would race between instances on startup and
+    // would leave the schema files no longer describing the real database.
+    createTableIfMissing: false,
     ttl: sessionTtl,
     tableName: "sessions",
   });

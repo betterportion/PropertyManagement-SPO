@@ -3,12 +3,12 @@
 // touched), fires several large concurrent uploads, and verifies the server
 // stays up and over-budget requests get a clear 503.
 import crypto from "crypto";
-import { Pool } from "@neondatabase/serverless";
-import ws from "ws";
-import { neonConfig } from "@neondatabase/serverless";
-neonConfig.webSocketConstructor = ws as any;
+import pg from "pg";
 
-const pool = new Pool({ connectionString: process.env.DATABASE_URL || process.env.NEON_DATABASE_URL });
+const pool = new pg.Pool({
+  connectionString: process.env.DATABASE_URL || process.env.NEON_DATABASE_URL,
+  ssl: { rejectUnauthorized: true },
+});
 const base = `https://${process.env.REPLIT_DEV_DOMAIN}`;
 
 function signCookie(sid: string): string {

@@ -35,9 +35,12 @@ import {
   type InsertProperty,
   type InsertPropertyWithAddress,
   type RequestContact,
+  uploads,
+  type Upload,
+  type InsertUpload,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, or, desc } from "drizzle-orm";
 
 // Helper function to filter out undefined values from partial updates
 function filterUndefined<T extends Record<string, any>>(obj: T): Partial<T> {
@@ -149,7 +152,27 @@ export interface IStorage {
   unlinkContactFromRequest(requestId: string, contactId: string): Promise<void>;
   updateProperty(id: string, data: Partial<InsertPropertyWithAddress>): Promise<Property>;
   deleteProperty(id: string): Promise<void>;
+
+  // Uploaded Files
+  createUpload(upload: InsertUpload): Promise<Upload>;
+  getUploadByStorageKey(storageKey: string): Promise<Upload | undefined>;
+  findUploadReferences(url: string): Promise<UploadReference[]>;
 }
+
+/**
+ * A record that points at an uploaded file. Downloads are authorized against
+ * these: whoever may read the record may read the file it displays.
+ *
+ * There is no column linking a file back to its record, because a photo is
+ * uploaded before the record that will show it exists. The link only exists in
+ * the direction the application writes it -- record to URL -- so this searches
+ * that way round.
+ */
+export type UploadReference =
+  | { kind: "maintenanceRequest"; record: MaintenanceRequest }
+  | { kind: "walkthroughPhoto"; record: WalkthroughPhoto }
+  | { kind: "assetPhoto"; record: AssetPhoto }
+  | { kind: "billingRecord"; record: BillingRecord };
 
 export class DatabaseStorage implements IStorage {
   async getUser(id: string): Promise<User | undefined> {
@@ -568,6 +591,44 @@ export class DatabaseStorage implements IStorage {
     await db
       .delete(requestContacts)
       .where(and(eq(requestContacts.requestId, requestId), eq(requestContacts.contactId, contactId)));
+  }
+
+  async createUpload(upload: InsertUpload): Promise<Upload> {
+    const [created] = await db.insert(uploads).values(upload).returning();
+    return created;
+  }
+
+  async getUploadByStorageKey(storageKey: string): Promise<Upload | undefined> {
+    const [found] = await db.select().from(uploads).where(eq(uploads.storageKey, storageKey));
+    return found;
+  }
+
+  async findUploadReferences(url: string): Promise<UploadReference[]> {
+    // Each of these is the full set of columns in which the application stores
+    // an uploaded file's URL. A new column holding one has to be added here, or
+    // downloads of those files will be refused to everyone but the uploader.
+    const [requests, walkthrough, asset, billing] = await Promise.all([
+      db.select().from(maintenanceRequests).where(eq(maintenanceRequests.photoUrl, url)),
+      db.select().from(walkthroughPhotos).where(eq(walkthroughPhotos.imageUrl, url)),
+      db.select().from(assetPhotos).where(eq(assetPhotos.imageUrl, url)),
+      db
+        .select()
+        .from(billingRecords)
+        .where(
+          or(
+            eq(billingRecords.contractInvoiceUrl, url),
+            eq(billingRecords.coiUrl, url),
+            eq(billingRecords.w9Url, url),
+          ),
+        ),
+    ]);
+
+    return [
+      ...requests.map((record) => ({ kind: "maintenanceRequest" as const, record })),
+      ...walkthrough.map((record) => ({ kind: "walkthroughPhoto" as const, record })),
+      ...asset.map((record) => ({ kind: "assetPhoto" as const, record })),
+      ...billing.map((record) => ({ kind: "billingRecord" as const, record })),
+    ];
   }
 }
 

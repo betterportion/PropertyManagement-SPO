@@ -24,10 +24,10 @@
  * indirection.
  */
 import type { Request, Response } from "express";
-import { storage } from "./storage";
+import { storage, type UploadReference } from "./storage";
 import { getUserId } from "./auth";
 import { normalizeRegion, normalizeRegions } from "./migrateRegions";
-import type { User, UserPermissions } from "@shared/schema";
+import type { Upload, User, UserPermissions } from "@shared/schema";
 
 /** Names of the boolean permission columns on the user_permissions table. */
 export type PermissionName =
@@ -254,6 +254,84 @@ export function canReadMaintenanceRequest(
   if (ctx.isAdmin) return true;
   if (ctx.isResident) return ownsRecord(ctx, request.submittedBy);
   return canAccessRegion(ctx, request.region);
+}
+
+/**
+ * Whether the user may read the file a record displays.
+ *
+ * The rule is that a file inherits the visibility of the record pointing at it:
+ * if you are entitled to see the maintenance request, you are entitled to see
+ * its photo. Anything else would either hide a photo from someone looking at
+ * the record it belongs to, or invent a second, separate rule to keep in step
+ * with the first.
+ */
+export async function canReadUploadReference(
+  ctx: AuthContext,
+  reference: UploadReference,
+): Promise<boolean> {
+  switch (reference.kind) {
+    case "maintenanceRequest":
+      return canReadMaintenanceRequest(ctx, reference.record);
+
+    case "walkthroughPhoto":
+      return (
+        !ctx.isResident &&
+        hasPermission(ctx, "canViewWalkthroughs", "canManageWalkthroughs") &&
+        canAccessRegion(ctx, reference.record.region)
+      );
+
+    case "assetPhoto": {
+      if (ctx.isResident) return false;
+      if (!hasPermission(ctx, "canViewAssets", "canManageAssets")) return false;
+      // A photo carries no region of its own; it inherits the asset's. A
+      // missing asset resolves to no region, which canAccessRegion denies.
+      const asset = await storage.getAsset(reference.record.assetId);
+      return canAccessRegion(ctx, asset?.region);
+    }
+
+    case "billingRecord":
+      return (
+        !ctx.isResident &&
+        hasPermission(ctx, "canViewBilling", "canManageBilling") &&
+        canAccessRegion(ctx, reference.record.region)
+      );
+  }
+}
+
+/**
+ * Whether the user may download a stored file.
+ *
+ * A file inherits the visibility of whatever record points at it. The one
+ * exception is a file nothing points at yet: uploading happens before the
+ * record that will display it is saved, so for that window the uploader is the
+ * only possible claim, and without it the preview shown while filling in the
+ * form would be refused.
+ *
+ * That exception ends the moment a record references the file. Otherwise
+ * uploading would grant permanent personal access to a document: the uploader
+ * would keep reading a vendor's tax form after losing billing permission,
+ * after being moved out of the region, or after being demoted to a resident.
+ * Access has to follow the record, not the person who happened to attach it.
+ */
+export async function canReadUpload(
+  ctx: AuthContext,
+  storageKey: string,
+  upload: Upload | undefined,
+): Promise<boolean> {
+  if (ctx.isAdmin) return true;
+
+  const references = await storage.findUploadReferences(`/uploads/${storageKey}`);
+
+  if (references.length === 0) {
+    return upload?.uploadedBy === ctx.userId;
+  }
+
+  for (const reference of references) {
+    if (await canReadUploadReference(ctx, reference)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /** `canReadMaintenanceRequest`, but sends 403 and returns false. */

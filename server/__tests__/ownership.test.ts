@@ -91,10 +91,13 @@ vi.mock("../monday", () => ({
 }));
 
 vi.mock("../objectStorage", () => ({
-  generateUploadFilename: vi.fn(),
+  generateStorageKey: vi.fn(),
+  isSafeStorageKey: vi.fn(() => true),
   putUpload: vi.fn(),
   uploadExists: vi.fn(),
+  removeUpload: vi.fn(),
   openUploadStream: vi.fn(),
+  createUploadSignedUrl: vi.fn(),
   contentTypeFor: vi.fn(),
 }));
 

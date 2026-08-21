@@ -12,6 +12,7 @@ import {
   requireRegionMove,
   requireMaintenanceRequestAccess,
   canReadMaintenanceRequest,
+  canReadUpload,
   filterByRegion,
   filterByRelatedRegion,
   type AuthContext,
@@ -25,10 +26,13 @@ import crypto from "crypto";
 import { fileTypeFromBuffer } from "file-type";
 import AdmZip from "adm-zip";
 import {
-  generateUploadFilename,
+  generateStorageKey,
+  isSafeStorageKey,
   putUpload,
   uploadExists,
+  removeUpload,
   openUploadStream,
+  createUploadSignedUrl,
   contentTypeFor,
 } from "./objectStorage";
 import {
@@ -774,11 +778,59 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (ctx.isResident) {
         return res.status(403).json({ message: "Residents are not permitted to upload files." });
       }
+      // Handed to the upload handler so it can record who stored the file
+      // without resolving the same user a second time.
+      req.uploadContext = ctx;
       next();
     } catch (error) {
       sendError(res, error, "Failed to verify upload permission.");
     }
   };
+
+  /**
+   * Stores an uploaded file and records what it is.
+   *
+   * The key is random, so the row written here is the only place the name the
+   * person chose survives, and the only link between a file and whoever put it
+   * there. The bytes go first, because a row describing a file that was never
+   * stored would offer a download that always fails.
+   *
+   * The two writes cannot be made one atomic step -- a bucket does not join a
+   * database transaction -- so if the row fails the object is deleted again.
+   * Without that, a failed upload would leave a file nobody has a record of:
+   * invisible in the app, unreachable by name, and still taking up space.
+   */
+  async function storeUploadedFile(
+    file: Express.Multer.File,
+    uploadedBy: string,
+  ): Promise<{ url: string; filename: string; originalName: string }> {
+    const storageKey = generateStorageKey(file.originalname);
+    const contentType = contentTypeFor(file.originalname);
+
+    await putUpload(storageKey, file.buffer, { contentType, originalName: file.originalname });
+
+    try {
+      await storage.createUpload({
+        storageKey,
+        originalName: file.originalname,
+        contentType,
+        sizeBytes: file.size,
+        uploadedBy,
+      });
+    } catch (error) {
+      try {
+        await removeUpload(storageKey);
+      } catch (cleanupError) {
+        // Reported, not thrown: the upload failure below is the one the caller
+        // needs to hear about, and hiding it behind a cleanup error would make
+        // the real problem harder to find.
+        logError("Failed to remove an orphaned upload after its record could not be saved", cleanupError);
+      }
+      throw error;
+    }
+
+    return { url: `/uploads/${storageKey}`, filename: storageKey, originalName: file.originalname };
+  }
 
   // File Upload Route (images)
   app.post('/api/upload', isAuthenticated, requireUploadPermission, ...guardedUpload(upload.single('file'), IMAGE_UPLOAD_MAX_BYTES), async (req: any, res) => {
@@ -793,9 +845,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           message: "File contents do not match the file extension. The file was not saved.",
         });
       }
-      const filename = generateUploadFilename(req.file.originalname);
-      await putUpload(filename, req.file.buffer);
-      res.json({ url: `/uploads/${filename}`, filename });
+      res.json(await storeUploadedFile(req.file, req.uploadContext.userId));
     } catch (error) {
       sendError(res, error, "Failed to upload file");
     }
@@ -876,9 +926,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           message: "File contents do not match the file extension. The file was not saved.",
         });
       }
-      const filename = generateUploadFilename(req.file.originalname);
-      await putUpload(filename, req.file.buffer);
-      res.json({ url: `/uploads/${filename}`, filename, originalName: req.file.originalname });
+      res.json(await storeUploadedFile(req.file, req.uploadContext.userId));
     } catch (error) {
       sendError(res, error, "Failed to upload document");
     }
@@ -1326,10 +1374,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     // A session alone is not enough: a deactivated account keeps its cookie
     // until it expires, and must not be able to keep pulling documents.
     //
-    // Note this is still filename-level authorization, not per-record
-    // ownership -- any active user who knows a filename can fetch it.
-    // Filenames are random, so this is not trivially guessable, but tying each
-    // upload back to the record that owns it is tracked separately.
     // The whole body is wrapped, because Express 4 does not forward a rejected
     // promise from an async handler to the error middleware. An unwrapped
     // failure here -- the account lookup below reaches the database -- would
@@ -1342,19 +1386,51 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Reject anything that is not a bare filename, so a crafted key cannot
       // reach outside the uploads prefix in the bucket.
-      if (!requested || requested !== path.basename(requested) || requested.startsWith(".")) {
+      if (!isSafeStorageKey(requested)) {
         return res.status(400).json({ message: "Invalid filename" });
+      }
+
+      const upload = await storage.getUploadByStorageKey(requested);
+
+      // Authorized before existence is checked, so that a refusal looks the
+      // same whether or not the file is there. Otherwise the difference between
+      // 403 and 404 would confirm which filenames are real.
+      if (!(await canReadUpload(ctx, requested, upload))) {
+        return res.status(403).json({ message: "Forbidden" });
       }
 
       if (!(await uploadExists(requested))) {
         return res.status(404).json({ message: "File not found" });
       }
 
+      // Where the store can issue one, hand the browser a short-lived direct
+      // link instead of relaying the bytes. The link expires quickly, and it is
+      // only ever produced after the check above has passed.
+      const signedUrl = await createUploadSignedUrl(requested);
+      if (signedUrl) {
+        // The redirect itself must never be cached: it carries a credential
+        // that stops working, and the next request has to be re-authorized.
+        res.setHeader("Cache-Control", "private, no-store");
+        return res.redirect(302, signedUrl);
+      }
+
       // "private" keeps authenticated content out of shared/proxy caches.
       res.setHeader("Cache-Control", "private, max-age=3600");
-      res.setHeader("Content-Type", contentTypeFor(requested));
+      res.setHeader("Content-Type", upload?.contentType ?? contentTypeFor(requested));
 
-      const stream = openUploadStream(requested);
+      if (upload?.originalName) {
+        // Offers the file under the name the person chose rather than the
+        // random key. Quotes and control characters are stripped from the
+        // plain form because an unescaped one would let a filename inject a
+        // header; the encoded form carries the exact name.
+        const fallback = upload.originalName.replace(/[^\w.\- ]/g, "_");
+        res.setHeader(
+          "Content-Disposition",
+          `inline; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(upload.originalName)}`,
+        );
+      }
+
+      const stream = await openUploadStream(requested);
 
       // If the client disconnects part way through, stop pulling bytes out of
       // the bucket instead of leaving the download running.

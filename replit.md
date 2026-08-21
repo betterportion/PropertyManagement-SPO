@@ -16,8 +16,15 @@ npm install
 
 | Variable | Required | Notes |
 |---|---|---|
-| `DATABASE_URL` | **Yes** | PostgreSQL connection string (Neon serverless) |
+| `DATABASE_URL` | **Yes** | PostgreSQL connection string. Any Postgres works (Supabase, Neon, RDS, self-hosted) |
 | `SESSION_SECRET` | **Yes** | Long random string used to sign session cookies |
+| `STORAGE_DRIVER` | **In production** | Where uploads are kept: `local` or `supabase`. Defaults to `local` in development; the server refuses to start without it in production rather than silently lose files |
+| `SUPABASE_URL` | When `STORAGE_DRIVER=supabase` | Project URL, e.g. `https://abcdefgh.supabase.co` |
+| `SUPABASE_SERVICE_ROLE_KEY` | When `STORAGE_DRIVER=supabase` | Server-only secret; bypasses all access rules, so it must never reach the browser |
+| `SUPABASE_STORAGE_BUCKET` | No | Defaults to `uploads`. The bucket must be **private** |
+| `DATABASE_SSL` | No | `require` (default for remote hosts), `no-verify`, or `disable` |
+| `DATABASE_POOL_MAX` | No | Maximum simultaneous database connections; defaults to 10 |
+| `UPLOAD_DIR` | No | Folder for uploads when `STORAGE_DRIVER=local`; defaults to `uploads` |
 | `REPL_ID` | On Replit only | Auto-provided by Replit; used as the OIDC client ID unless `OIDC_CLIENT_ID` is set |
 | `OIDC_ISSUER_URL` | No | Identity provider discovery root. Defaults to `https://replit.com/oidc` |
 | `OIDC_CLIENT_ID` | No | Client ID from your identity provider. Overrides `REPL_ID` |
@@ -186,7 +193,9 @@ Preferred communication style: Simple, everyday language.
     - `billingRecords`: Resident billing with amount, description, payment status.
     - `properties`: Property records with address components.
 - **ORM Strategy**: Drizzle ORM for type safety and performance, Zod schemas for validation.
-- **Connection Management**: Neon's Pool for connection pooling, environment-based `DATABASE_URL`.
+- **Connection Management**: the standard `pg` driver's connection pool, configured from `DATABASE_URL`. Nothing is tied to a particular hosting provider, so the same code runs against Supabase, Neon, RDS or a self-hosted server.
+- **Schema Changes**: committed SQL migrations in `migrations/`. `npm run db:generate` writes a migration from the schema, `npm run db:migrate` applies pending ones, and `npm run db:baseline` records the existing schema as already applied when pointing at a database that predates migrations.
+- **File Storage**: one interface in `server/objectStorage/` with two drivers, chosen by `STORAGE_DRIVER` -- a local folder for development and a private Supabase bucket for production. Object keys are random; the uploaded filename is kept in the `uploads` table. Downloads are authorized against the record that references the file, then served as a short-lived signed link where the driver supports one.
 
 ## External Dependencies
 

@@ -307,6 +307,35 @@ export type InsertProperty = z.infer<typeof insertPropertySchema>;
 // Type for creating/updating properties with computed address
 export type InsertPropertyWithAddress = InsertProperty & { address: string };
 
+// Uploaded Files
+//
+// One row per stored object. The stored key is random, so this is where the
+// name the person chose is kept -- without it a download could only ever be
+// offered as "a1b2c3....pdf".
+//
+// It also records who uploaded the file. A photo is uploaded before the record
+// it belongs to exists, so for a short while there is nothing else to authorize
+// a download against; the uploader is allowed to see their own file, and
+// everyone else has to be entitled to the record that ends up referencing it.
+export const uploads = pgTable("uploads", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  // The object key in the bucket, and the last segment of the /uploads/ URL.
+  storageKey: varchar("storage_key").notNull().unique(),
+  originalName: varchar("original_name").notNull(),
+  contentType: varchar("content_type").notNull(),
+  sizeBytes: integer("size_bytes").notNull(),
+  uploadedBy: varchar("uploaded_by").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertUploadSchema = createInsertSchema(uploads).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type Upload = typeof uploads.$inferSelect;
+export type InsertUpload = z.infer<typeof insertUploadSchema>;
+
 // Request Contacts (join table for linking maintenance contacts to requests)
 export const requestContacts = pgTable("request_contacts", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
