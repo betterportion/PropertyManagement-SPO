@@ -21,10 +21,20 @@ It is a single Express server that serves both the REST API and the React fronte
 | `npm run dev` | Development server with hot reload |
 | `npm run build` | Vite builds the client, esbuild bundles the server into `dist/` |
 | `npm run start` | Run the production build |
+| `npm run lint` | ESLint. **Must stay at zero errors**; warnings are allowed |
 | `npm run check` | TypeScript check. **Must stay at zero errors** |
+| `npm test` | Vitest. Needs no database, no bucket, no secrets |
 | `npm run db:push` | Push `shared/schema.ts` to the database |
 
-There is no test suite and no linter. `npm run check` is the only automated gate — always run it before finishing.
+**The gate is `npm run lint && npm run check && npm test && npm run build`.** Run all four before finishing. `.github/workflows/ci.yml` runs the same four on every push and pull request.
+
+The linter catches mistakes, not style — formatting rules are off on purpose, so nothing here should ever produce a large reformatting diff. The ~10 remaining warnings are React Compiler advice, mostly in the generated `components/ui/` files.
+
+The tests are weighted towards authorization. If you change anything in `server/authz.ts`, in a route's guards, or in who may read an upload, add a test for it in `server/__tests__/authz.test.ts` (the rule on its own) or `server/__tests__/routeAccess.test.ts` (the rule over real HTTP, through the real login guard).
+
+Two conventions in that suite, both of which exist because of a real miss:
+- **Never re-implement the code under test inside the test.** `region.test.ts` used to hold its own copy of the region rules; it passed while the real rule drifted.
+- **Assert the refused work never happened.** A 403 alone does not prove the check ran before the write — `expect(putUpload).not.toHaveBeenCalled()` does.
 
 ---
 
@@ -85,7 +95,7 @@ Defined in `shared/schema.ts` using Drizzle, with Zod insert schemas generated b
 1. Edit `shared/schema.ts`.
 2. Run `npm run db:push` — **always**, in the same change. There is no migration folder; the schema is pushed directly.
 3. Update the matching `storage.ts` methods and the `IStorage` interface together.
-4. Run `npm run check`.
+4. Run the full gate: `npm run lint && npm run check && npm test && npm run build`.
 
 ---
 
@@ -223,7 +233,7 @@ Reading files back goes through `GET /uploads/:filename`, which is **authenticat
 
 **Always:**
 - Run `npm run db:push` in the same change as any `shared/schema.ts` edit.
-- Run `npm run check` before finishing, and keep it at zero errors.
+- Run `npm run lint && npm run check && npm test && npm run build` before finishing, and keep lint and check at zero errors.
 - Invalidate the relevant TanStack Query keys after a mutation — caching is set to never refetch on its own.
 - Apply the admin bypass in any new permission check.
 - Use `getUserId(req)` rather than reading provider claims.

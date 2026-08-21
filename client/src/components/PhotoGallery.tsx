@@ -4,7 +4,6 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Upload, X, Save, Calendar } from "lucide-react";
-import { format } from "date-fns";
 import type { WalkthroughPhoto } from "@shared/schema";
 import { EmptyState } from "@/components/states";
 import { formatDate } from "@/lib/format";

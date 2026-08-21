@@ -1,5 +1,10 @@
 import { defineConfig } from "vitest/config";
 import path from "path";
+import { fileURLToPath } from "url";
+
+// `__dirname` does not exist in an ES module, and Vite's native config loader
+// no longer shims it.
+const rootDir = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
   test: {
@@ -13,8 +18,8 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      "@shared": path.resolve(__dirname, "shared"),
-      "@": path.resolve(__dirname, "client/src"),
+      "@shared": path.resolve(rootDir, "shared"),
+      "@": path.resolve(rootDir, "client/src"),
     },
   },
 });

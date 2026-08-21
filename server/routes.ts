@@ -1302,7 +1302,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!requireRegionMove(res, ctx, existingProperty.region, validatedData.region)) return;
 
       // If address components are being updated, recompute the full address
-      let updateData: Partial<InsertPropertyWithAddress> = { ...validatedData };
+      const updateData: Partial<InsertPropertyWithAddress> = { ...validatedData };
       if (validatedData.streetAddress || validatedData.city || validatedData.state || validatedData.zipCode) {
         const streetAddress = validatedData.streetAddress || existingProperty.streetAddress;
         const city = validatedData.city || existingProperty.city;

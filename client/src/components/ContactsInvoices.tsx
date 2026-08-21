@@ -16,7 +16,7 @@ interface ContactsInvoicesProps {
   onViewInvoice?: (id: string) => void;
 }
 
-export default function ContactsInvoices({ contacts, invoices, onAddContact, onEditContact }: ContactsInvoicesProps) {
+export default function ContactsInvoices({ contacts, invoices, onEditContact }: ContactsInvoicesProps) {
   return (
     <Tabs defaultValue="contacts" className="w-full">
       <TabsList className="grid w-full grid-cols-2" data-testid="tabs-contacts-invoices">

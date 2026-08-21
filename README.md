@@ -101,14 +101,69 @@ The app serves the API and the frontend together on a single port (5000 by defau
 | `npm run dev` | Start in development with hot reloading |
 | `npm run build` | Build the frontend with Vite and bundle the server with esbuild into `dist/` |
 | `npm run start` | Run the production build |
+| `npm run lint` | ESLint over the server, the client and the shared code |
 | `npm run check` | TypeScript type check. Should always pass with zero errors |
+| `npm test` | Run the test suite (Vitest) |
 | `npm run db:push` | Push `shared/schema.ts` to the database. **Run this after any schema change** |
-
-| `npm run test` | Run the test suite (Vitest) |
 | `npm run db:generate` | Generate a migration from a schema change |
 | `npm run db:migrate` | Apply pending migrations |
 
-There is no linter configured yet.
+---
+
+## Checks before you push
+
+Four commands, in this order. All four must pass:
+
+```bash
+npm run lint     # mistakes: unused variables, conditional hooks, dead code
+npm run check    # TypeScript
+npm test         # the test suite
+npm run build    # the production build actually builds
+```
+
+`.github/workflows/ci.yml` runs exactly these four on every push and every pull
+request, so anything you skip locally will be caught there instead. CI needs no
+secrets and never touches the database, the file store or the login provider.
+
+### About the linter
+
+It is configured to catch mistakes, not to enforce a style. Formatting rules
+are deliberately left off: switching them on would reformat the whole codebase
+in one commit and bury every real change afterwards.
+
+`npm run lint` must report **zero errors**. Warnings are allowed, and there are
+currently about ten. They come from the React Compiler rules and mostly point
+at the generated `components/ui/` files, which are upstream shadcn/ui code we
+do not hand-edit. They are worth reading, but they do not block a merge.
+
+### About the tests
+
+`npm test` needs no database, no storage bucket, no login provider and no
+secrets — everything external is replaced with a stand-in — so it is safe to
+run anywhere and takes a couple of seconds.
+
+The suite is weighted towards **who is allowed to do what**, because that is
+where a mistake is expensive and silent:
+
+| File | Covers |
+|---|---|
+| `server/__tests__/authz.test.ts` | The permission and region rules on their own: the admin bypass, region matching including the legacy format, resident ownership |
+| `server/__tests__/routeAccess.test.ts` | The same rules over real HTTP, through the real login guard and the real route handlers |
+| `server/__tests__/ownership.test.ts` | A resident reaching another resident's maintenance request |
+| `server/__tests__/uploadAccess.test.ts` | Which attachments a given account may read |
+| `server/__tests__/objectStorage.test.ts` | Storage keys, including the ones that try to escape the uploads folder |
+| `server/__tests__/errors.test.ts` | Failures becoming clean responses instead of stack traces |
+| `server/__tests__/region.test.ts` | Turning region names into one canonical form |
+
+Two habits worth keeping when you add to them:
+
+- **Test the real module, not a copy of it.** An earlier version of
+  `region.test.ts` re-implemented the region rules inside the test file. The
+  tests passed for months while the rule that actually runs drifted away from
+  them.
+- **Assert that refused work never happened**, not just that the status code
+  was 403. `expect(putUpload).not.toHaveBeenCalled()` is what proves the check
+  ran *before* the file was written rather than after.
 
 ---
 

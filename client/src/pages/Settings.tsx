@@ -27,7 +27,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { insertUserSchema, type User, type UserPermissions } from "@shared/schema";
 import { z } from "zod";
 import { Section, Container, PageHeader, PageStack } from "@/components/layout/page";
-import { LoadingState, EmptyState } from "@/components/states";
+import { EmptyState } from "@/components/states";
 import { formatDate, formatValue } from "@/lib/format";
 
 const ALL_REGIONS = [
@@ -64,8 +64,15 @@ export default function Settings() {
   const { toast } = useToast();
   const { user: currentUser } = useAuth();
 
+  const isAdmin = (currentUser as any)?.role === "admin";
+
   const { data: users, isLoading } = useQuery({
     queryKey: ["/api/users"],
+    // The whole page is admin-only, and the hooks below must run on every
+    // render (see the note further down), so the query is switched off rather
+    // than skipped. Otherwise every non-admin who lands here fires a request
+    // the server is only going to refuse.
+    enabled: isAdmin,
   });
 
   const { data: userPermissionsData } = useQuery<UserPermissions>({
@@ -146,16 +153,6 @@ export default function Settings() {
     }
   };
 
-  if ((currentUser as any)?.role !== "admin") {
-    return (
-      <div className="flex flex-col items-center justify-center h-full">
-        <AlertCircle className="h-12 w-12 text-destructive mb-4" />
-        <h2 className="text-2xl font-semibold mb-2">Access Denied</h2>
-        <p className="text-muted-foreground">You do not have permission to access this page.</p>
-      </div>
-    );
-  }
-
   const updateRoleMutation = useMutation({
     mutationFn: async ({ id, role }: { id: string; role: "admin" | "regional_administrator" | "resident" }) => {
       await apiRequest("PATCH", `/api/users/${id}/role`, { role });
@@ -231,6 +228,24 @@ export default function Settings() {
       isActive: true,
     },
   });
+
+  // Deliberately below every hook above. React requires a component to call
+  // the same hooks in the same order on every render, and `currentUser` is
+  // undefined on the first render while the account is still loading. Bailing
+  // out earlier meant the first render ran fewer hooks than the second, which
+  // crashes the page for an admin who opens Settings directly.
+  //
+  // This is a convenience only -- the server refuses these endpoints to
+  // non-admins regardless of what the page decides to draw.
+  if (!isAdmin) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full">
+        <AlertCircle className="h-12 w-12 text-destructive mb-4" />
+        <h2 className="text-2xl font-semibold mb-2">Access Denied</h2>
+        <p className="text-muted-foreground">You do not have permission to access this page.</p>
+      </div>
+    );
+  }
 
   const filteredUsers = (users as User[] || []).filter((user) =>
     user.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||

@@ -1,4 +1,4 @@
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -29,24 +29,37 @@ const assetIcons = {
   Furniture: Sofa,
 };
 
-export default function AssetTracker({ assets, properties, onEdit, onDelete, onPhotos }: AssetTrackerProps) {
-  const fixedAssets = assets.filter((a) => a.type === "fixed");
-  const movableAssets = assets.filter((a) => a.type === "movable");
+function getPropertyForAsset(asset: Asset, properties: Property[]) {
+  if (asset.propertyId) {
+    return properties.find(p => p.id === asset.propertyId) || null;
+  }
+  return properties.find(p => p.address === asset.buildingAddress) || null;
+}
 
-  const getPropertyForAsset = (asset: Asset) => {
-    if (asset.propertyId) {
-      return properties.find(p => p.id === asset.propertyId) || null;
-    }
-    return properties.find(p => p.address === asset.buildingAddress) || null;
-  };
+interface AssetListProps {
+  items: Asset[];
+  properties: Property[];
+  onEdit?: (id: string) => void;
+  onDelete?: (id: string) => void;
+  onPhotos?: (id: string) => void;
+}
 
-  const AssetList = ({ items }: { items: Asset[] }) => (
+/**
+ * Deliberately declared here rather than inside AssetTracker.
+ *
+ * A component defined during a render is a brand new component type on every
+ * render, so React throws the previous one away and mounts this one from
+ * scratch. In practice that closed any open row menu and dropped scroll
+ * position whenever the parent re-rendered.
+ */
+function AssetList({ items, properties, onEdit, onDelete, onPhotos }: AssetListProps) {
+  return (
     <div className="space-y-4">
       {items.length === 0 ? (
         <EmptyState title="This asset list is clear" description="Assets added to this category will appear here with their property and service details." />
       ) : items.map((asset) => {
         const Icon = assetIcons[asset.category as keyof typeof assetIcons] || Sofa;
-        const property = getPropertyForAsset(asset);
+        const property = getPropertyForAsset(asset, properties);
         return (
           <Card key={asset.id} className="hover-elevate" data-testid={`card-asset-${asset.id}`}>
             <CardContent className="p-4">
@@ -122,6 +135,12 @@ export default function AssetTracker({ assets, properties, onEdit, onDelete, onP
       })}
     </div>
   );
+}
+
+export default function AssetTracker({ assets, properties, onEdit, onDelete, onPhotos }: AssetTrackerProps) {
+  const fixedAssets = assets.filter((a) => a.type === "fixed");
+  const movableAssets = assets.filter((a) => a.type === "movable");
+  const listProps = { properties, onEdit, onDelete, onPhotos };
 
   return (
     <div>
@@ -135,10 +154,10 @@ export default function AssetTracker({ assets, properties, onEdit, onDelete, onP
           </TabsTrigger>
         </TabsList>
         <TabsContent value="fixed" className="mt-6">
-          <AssetList items={fixedAssets} />
+          <AssetList items={fixedAssets} {...listProps} />
         </TabsContent>
         <TabsContent value="movable" className="mt-6">
-          <AssetList items={movableAssets} />
+          <AssetList items={movableAssets} {...listProps} />
         </TabsContent>
       </Tabs>
     </div>

@@ -17,7 +17,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { insertMaintenanceContactSchema, type MaintenanceContact, type Property, type BillingRecord } from "@shared/schema";
 import { z } from "zod";
 import { Section, Container, PageHeader, PageStack } from "@/components/layout/page";
-import { LoadingState, EmptyState } from "@/components/states";
+import { LoadingState } from "@/components/states";
 
 const REGIONS = [
   "East Central",
@@ -160,14 +160,6 @@ export default function Contacts() {
     }
   };
 
-  const handleAddPropertyChange = (propertyId: string) => {
-    const property = properties.find(p => p.id === propertyId);
-    if (property) {
-      form.setValue("buildingAddress", property.address!);
-      form.setValue("region", property.region);
-    }
-  };
-
   const handleEditPropertyChange = (propertyId: string) => {
     const property = properties.find(p => p.id === propertyId);
     if (property) {
@@ -242,7 +234,7 @@ export default function Contacts() {
   };
 
   const onInvoiceSubmit = (data: z.infer<typeof invoiceFormSchema>) => {
-    let payload: Record<string, unknown> = {
+    const payload: Record<string, unknown> = {
       companyName: data.companyName,
       email: data.email,
       phone: data.phone,
