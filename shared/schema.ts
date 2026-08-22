@@ -341,6 +341,8 @@ export type InsertUpload = z.infer<typeof insertUploadSchema>;
 // someone's access, who moved money, who took a document out of the system.
 // Nothing here is used by the application at runtime -- it exists so that a
 // question asked weeks later ("who deactivated this account?") has an answer.
+// Routine events are retained for two years; account and permission events are
+// kept indefinitely by the daily retention job in server/audit.ts.
 //
 // It deliberately stores no request bodies. Details are written field by field
 // by the calling route, and `server/audit.ts` scrubs anything whose name looks

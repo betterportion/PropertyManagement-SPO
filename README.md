@@ -235,6 +235,8 @@ limit 50;
 
 Two guarantees, both covered by tests: it never stores a credential, and a failure to write it never fails the user's request. Entries do contain names, filenames and email addresses — that is what makes the log worth reading — but each one is length-capped before it is stored.
 
+Routine entries (document downloads, uploads, invoice and billing changes, and maintenance status changes) are retained for **two years**. Account and permission history (user creation/deletion, role and status changes, and permission changes) is kept indefinitely because it is rare and most likely to be needed later. The server runs this cleanup automatically once a day, deleting routine rows in batches of at most 1,000 so it does not issue one large table-locking delete. There is no in-app clear-log action.
+
 ### Financial data
 
 The portal **never** stores raw bank account numbers, routing numbers, card numbers, CVVs or ACH credentials. Any future payments work goes through QuickBooks, Stripe or an equivalent processor, and this database keeps only references, statuses, dates and amounts. The reasoning is in `CLAUDE.md` under "Financial data" — treat it as a standing rule, not a preference.

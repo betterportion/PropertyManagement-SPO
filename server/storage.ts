@@ -41,7 +41,7 @@ import {
   type InsertAuditEvent,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, or, desc } from "drizzle-orm";
+import { eq, and, or, desc, asc, inArray, lt, notInArray } from "drizzle-orm";
 
 // Helper function to filter out undefined values from partial updates
 function filterUndefined<T extends Record<string, any>>(obj: T): Partial<T> {
@@ -156,6 +156,12 @@ export interface IStorage {
 
   // Audit log
   createAuditEvent(event: InsertAuditEvent): Promise<AuditEvent>;
+  /** Deletes at most one bounded batch of expired, non-protected events. */
+  deleteExpiredAuditEvents(
+    before: Date,
+    protectedActions: readonly string[],
+    batchSize: number,
+  ): Promise<number>;
 
   // Uploaded Files
   createUpload(upload: InsertUpload): Promise<Upload>;
@@ -600,6 +606,35 @@ export class DatabaseStorage implements IStorage {
   async createAuditEvent(event: InsertAuditEvent): Promise<AuditEvent> {
     const [created] = await db.insert(auditLog).values(event).returning();
     return created;
+  }
+
+  async deleteExpiredAuditEvents(
+    before: Date,
+    protectedActions: readonly string[],
+    batchSize: number,
+  ): Promise<number> {
+    // Select a bounded set of IDs first. PostgreSQL has no portable DELETE ...
+    // LIMIT syntax, and deleting by this small list keeps each transaction
+    // short enough not to hold a table-wide lock during working hours.
+    const expired = await db
+      .select({ id: auditLog.id })
+      .from(auditLog)
+      .where(
+        and(
+          lt(auditLog.createdAt, before),
+          notInArray(auditLog.action, [...protectedActions]),
+        ),
+      )
+      .orderBy(asc(auditLog.createdAt))
+      .limit(batchSize);
+
+    if (expired.length === 0) return 0;
+
+    const ids = expired.map(({ id }) => id);
+    const deleted = await db.delete(auditLog).where(inArray(auditLog.id, ids)).returning({
+      id: auditLog.id,
+    });
+    return deleted.length;
   }
 
   async createUpload(upload: InsertUpload): Promise<Upload> {

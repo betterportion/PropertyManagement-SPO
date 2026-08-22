@@ -224,6 +224,8 @@ Photo downloads are deliberately not recorded — every list view pulls dozens, 
 
 When you add an event, add it to `AUDIT_ACTIONS` rather than passing a bare string, and write a `summary` a non-technical reader can understand.
 
+Routine audit events are retained for **two years**. Account and permission events (`user.created`, `user.deleted`, `user.role_changed`, `user.status_changed`, and `user.permissions_changed`) are kept indefinitely because they are rare and most likely to be needed later. The server runs retention cleanup automatically once a day; each delete is capped at 1,000 rows to avoid one large table-locking statement. There is no user-facing clear-log action.
+
 ---
 
 ## Integrations

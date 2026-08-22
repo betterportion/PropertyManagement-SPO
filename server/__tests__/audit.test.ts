@@ -10,10 +10,22 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 vi.mock("../db", () => ({ db: {}, pool: {} }));
 
-const { createAuditEvent } = vi.hoisted(() => ({ createAuditEvent: vi.fn() }));
-vi.mock("../storage", () => ({ storage: { createAuditEvent } }));
+const { createAuditEvent, deleteExpiredAuditEvents } = vi.hoisted(() => ({
+  createAuditEvent: vi.fn(),
+  deleteExpiredAuditEvents: vi.fn(),
+}));
+vi.mock("../storage", () => ({ storage: { createAuditEvent, deleteExpiredAuditEvents } }));
 
-import { recordAuditEvent, scrubDetails, changedFields, AUDIT_ACTIONS } from "../audit";
+import {
+  recordAuditEvent,
+  scrubDetails,
+  changedFields,
+  AUDIT_ACTIONS,
+  AUDIT_ACTIONS_KEPT_INDEFINITELY,
+  AUDIT_RETENTION_BATCH_SIZE,
+  auditRetentionCutoff,
+  purgeExpiredAuditEvents,
+} from "../audit";
 import type { AuthContext } from "../authz";
 
 const ACTOR = {
@@ -31,6 +43,8 @@ const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
 beforeEach(() => {
   createAuditEvent.mockReset();
   createAuditEvent.mockResolvedValue({ id: "evt-1" });
+  deleteExpiredAuditEvents.mockReset();
+  deleteExpiredAuditEvents.mockResolvedValue(0);
 });
 
 afterEach(() => {
@@ -224,5 +238,28 @@ describe("changedFields", () => {
 
   it("does not report a numeric value re-submitted as a string", () => {
     expect(changedFields({ amount: 100 }, { amount: "100" })).toEqual([]);
+  });
+});
+
+describe("audit retention", () => {
+  it("uses a two-year cutoff", () => {
+    expect(auditRetentionCutoff(new Date("2026-08-21T12:34:56.000Z")).toISOString()).toBe(
+      "2024-08-21T12:34:56.000Z",
+    );
+  });
+
+  it("deletes in bounded batches while protecting account and permission history", async () => {
+    deleteExpiredAuditEvents.mockResolvedValueOnce(AUDIT_RETENTION_BATCH_SIZE).mockResolvedValueOnce(4);
+
+    await expect(purgeExpiredAuditEvents(new Date("2026-08-21T00:00:00.000Z"))).resolves.toBe(
+      AUDIT_RETENTION_BATCH_SIZE + 4,
+    );
+
+    expect(deleteExpiredAuditEvents).toHaveBeenCalledTimes(2);
+    for (const [cutoff, protectedActions, batchSize] of deleteExpiredAuditEvents.mock.calls) {
+      expect(cutoff).toEqual(new Date("2024-08-21T00:00:00.000Z"));
+      expect(protectedActions).toEqual(AUDIT_ACTIONS_KEPT_INDEFINITELY);
+      expect(batchSize).toBe(AUDIT_RETENTION_BATCH_SIZE);
+    }
   });
 });

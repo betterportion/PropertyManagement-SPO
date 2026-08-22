@@ -2,6 +2,28 @@ import { storage } from "./storage";
 import { logError } from "./errors";
 import type { AuthContext } from "./authz";
 
+/** Routine audit events are retained for this long. This is an organisation policy. */
+export const AUDIT_RETENTION_YEARS = 2;
+
+/** A cleanup run never deletes more than this many rows at once. */
+export const AUDIT_RETENTION_BATCH_SIZE = 1_000;
+
+/** Cleanup runs daily; `unref` means it cannot keep a shutting-down process alive. */
+export const AUDIT_RETENTION_INTERVAL_MS = 24 * 60 * 60 * 1_000;
+
+/**
+ * Account and permission history is rare and is the history most likely to be
+ * needed years later. These actions are deliberately excluded from routine
+ * retention cleanup.
+ */
+export const AUDIT_ACTIONS_KEPT_INDEFINITELY = [
+  "user.created",
+  "user.deleted",
+  "user.role_changed",
+  "user.status_changed",
+  "user.permissions_changed",
+] as const;
+
 /**
  * ---------------------------------------------------------------------------
  * Audit log
@@ -34,6 +56,10 @@ import type { AuthContext } from "./authz";
  * it must not contain is anything unbounded: a summary is truncated before it is
  * stored, so a caller that interpolates a hostile 2MB filename writes a short
  * row rather than a large one.
+ *
+ * Routine entries are retained for two years. Account and permission history
+ * is kept indefinitely because it is rare and is the history most likely to be
+ * needed later. A daily background job removes routine entries in batches.
  */
 
 /**
@@ -126,6 +152,66 @@ export const AUDIT_ACTIONS = {
 } as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[keyof typeof AUDIT_ACTIONS];
+
+/**
+ * Calculates the age cutoff without depending on when the process started.
+ * Passing `now` also makes the retention boundary straightforward to test.
+ */
+export function auditRetentionCutoff(now = new Date()): Date {
+  const cutoff = new Date(now);
+  cutoff.setUTCFullYear(cutoff.getUTCFullYear() - AUDIT_RETENTION_YEARS);
+  return cutoff;
+}
+
+/**
+ * Removes one or more bounded batches of expired routine events.
+ *
+ * This is intentionally not exposed as an HTTP action. Audit history must not
+ * be erasable by someone using the portal.
+ */
+export async function purgeExpiredAuditEvents(now = new Date()): Promise<number> {
+  const cutoff = auditRetentionCutoff(now);
+  let deleted = 0;
+
+  while (true) {
+    const batch = await storage.deleteExpiredAuditEvents(
+      cutoff,
+      AUDIT_ACTIONS_KEPT_INDEFINITELY,
+      AUDIT_RETENTION_BATCH_SIZE,
+    );
+    deleted += batch;
+    if (batch < AUDIT_RETENTION_BATCH_SIZE) return deleted;
+  }
+}
+
+function runScheduledAuditCleanup(): void {
+  // As with audit writes, cleanup must never turn a database hiccup into an
+  // unhandled rejection or a server startup failure.
+  try {
+    void Promise.resolve(purgeExpiredAuditEvents())
+      .then((deleted) => {
+        if (deleted > 0) {
+          console.info(`[audit] Removed ${deleted} expired routine event(s)`);
+        }
+      })
+      .catch((error) => {
+        logError("Failed to purge expired audit events", error);
+      });
+  } catch (error) {
+    logError("Failed to start audit retention cleanup", error);
+  }
+}
+
+/**
+ * Starts the daily retention job and runs it once immediately. The immediate
+ * pass means a newly restarted instance does not need to wait a full day.
+ */
+export function startAuditLogRetentionJob(): NodeJS.Timeout {
+  runScheduledAuditCleanup();
+  const timer = setInterval(runScheduledAuditCleanup, AUDIT_RETENTION_INTERVAL_MS);
+  timer.unref();
+  return timer;
+}
 
 export interface AuditEventInput {
   action: AuditAction;
