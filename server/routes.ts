@@ -1669,7 +1669,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Called by JotForm's servers, so it cannot use session auth. It is guarded
   // by a shared secret instead, passed as ?secret=... on the webhook URL.
   // Configure in JotForm: Settings → Integrations → WebHooks → add this URL
-  app.post('/api/webhooks/jotform', webhookRateLimit, async (req, res) => {
+  //
+  // JotForm delivers submissions as multipart/form-data, which the JSON and
+  // urlencoded parsers upstream do not read — without this parser req.body
+  // arrives empty and every submission silently degrades to its defaults.
+  // Text fields only: JotForm sends uploaded files as links inside rawRequest,
+  // never as file parts, so a request carrying an actual file part is refused.
+  // The limits bound what an unauthenticated caller can make this parser hold
+  // in memory; the rate limit above it bounds how often they can try.
+  const jotformFormParser = multer({
+    limits: { fields: 100, fieldSize: 256 * 1024, fileSize: 1 },
+  }).none();
+
+  app.post('/api/webhooks/jotform', webhookRateLimit, jotformFormParser, async (req, res) => {
     try {
       // Fail closed. If no secret is configured the endpoint is disabled
       // entirely, rather than silently accepting anonymous submissions.
