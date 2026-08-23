@@ -131,8 +131,8 @@ are deliberately left off: switching them on would reformat the whole codebase
 in one commit and bury every real change afterwards.
 
 `npm run lint` must report **zero errors**. Warnings are allowed, and there are
-currently about ten. They come from the React Compiler rules and mostly point
-at the generated `components/ui/` files, which are upstream shadcn/ui code we
+currently seven. They come from the React Compiler rules, partly pointing at
+the generated `components/ui/` files, which are upstream shadcn/ui code we
 do not hand-edit. They are worth reading, but they do not block a merge.
 
 ### About the tests
@@ -231,7 +231,8 @@ Worth understanding before changing anything server-side.
 
 The `audit_log` table records the actions somebody may have to account for later: user and permission changes, maintenance status changes, invoice and billing changes, and document uploads and downloads. Photo views are deliberately not recorded — there are far too many of them and they would bury everything else.
 
-Nothing in the app displays it yet. Read it with SQL:
+Admins can read it in the app: Settings shows the activity trail, backed by
+`GET /api/audit-log`. It can also be read directly with SQL:
 
 ```sql
 select created_at, actor_email, action, summary
@@ -277,10 +278,7 @@ Two things to know about running more than one instance:
 - **Deleting a photo or document leaves the file in storage.** The record disappears from the app, but the file stays in the bucket and keeps costing space.
 - **Files uploaded before the current storage layout are unreachable.** Their links no longer resolve. Nothing in the app depends on them.
 - **The JotForm webhook is turned off** until `JOTFORM_WEBHOOK_SECRET` is set. It returns 503 rather than accepting unauthenticated submissions.
-- **No error boundary in the frontend**, so an unexpected display error shows a blank page rather than a message.
-- **Two dependency advisories remain**: `drizzle-orm`, and `vite` in the dev-only build tooling.
-
-The full list, including lower-priority items, is in [`docs/PRE_GITHUB_AUDIT.md`](docs/PRE_GITHUB_AUDIT.md).
+- **One dependency advisory remains**: `drizzle-orm`. Its fix is a major version upgrade and is tracked as its own piece of work.
 
 ---
 
@@ -292,4 +290,4 @@ The full list, including lower-priority items, is in [`docs/PRE_GITHUB_AUDIT.md`
 | [`docs/PRODUCTION_MIGRATION.md`](docs/PRODUCTION_MIGRATION.md) | The staging-first runbook for standing up Supabase, Google Workspace login and Render |
 | [`replit.md`](replit.md) | Replit-specific setup and the change log |
 | [`design_guidelines.md`](design_guidelines.md) | Typography, spacing, layout and component design rules |
-| [`docs/PRE_GITHUB_AUDIT.md`](docs/PRE_GITHUB_AUDIT.md) | The original security and reliability audit, with each finding marked resolved or open |
+| [`docs/ONBOARDING_AUDIT.md`](docs/ONBOARDING_AUDIT.md) | The post-GitHub onboarding audit: what runs, what Replit provisioned, and the remaining migration work |
