@@ -94,6 +94,11 @@ The practical migration path is therefore:
 
 Anyone whose record has no email, or who signs in with a different email than the one stored, arrives as a brand-new account with default resident permissions and has to be re-granted access by an admin.
 
+## Recent Changes (August 23, 2026) — Post-GitHub onboarding pass
+- **Test gate repaired**: `region.test.ts` and `ownership.test.ts` crashed at import on any machine without `DATABASE_URL` (including GitHub CI) because `migrateRegions.ts` loads the real database module; both now stub it like the other suites. `npm test` once again needs no database
+- **Dead code removed**: 25 unused `components/ui` primitives, `PropertySelector.tsx`, `WalkthroughGallery.tsx`, the Replit-only `scripts/upload-concurrency-test.ts`, and 33 npm packages nothing imports (including the whole Radix/vendor cascade the deleted primitives dragged in)
+- **Docs corrected against the code**: the error boundary and the non-re-throwing error handler exist (both were listed as open issues); the audit log *is* readable in Settings; one dependency advisory remains, not two; counts refreshed. `docs/PRE_GITHUB_AUDIT.md` deleted per its own instruction; `docs/ONBOARDING_AUDIT.md` added with the full findings and the remaining migration work
+
 ## Recent Changes (August 21, 2026) — Part 3
 - **Handoff documentation**: `README.md` and `CLAUDE.md` rewritten to describe the app as it actually is now — the local/Supabase storage drivers, the committed migrations, the audit log, and the current known issues. `.env.example` regrouped by purpose and no longer written as if Replit were the only host
 - **Production runbook**: `docs/PRODUCTION_MIGRATION.md` — a staging-first sequence for Supabase, Google Workspace login and Render, including exactly what has to be configured inside Google Workspace and what happens to existing accounts during a provider switch. No external infrastructure has been created; the runbook is instructions, not a record

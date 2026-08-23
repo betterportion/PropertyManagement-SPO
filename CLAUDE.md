@@ -31,7 +31,7 @@ It is a single Express server that serves both the REST API and the React fronte
 
 **The gate is `npm run lint && npm run check && npm test && npm run build`.** Run all four before finishing. `.github/workflows/ci.yml` runs the same four on every push and pull request.
 
-The linter catches mistakes, not style — formatting rules are off on purpose, so nothing here should ever produce a large reformatting diff. The ~10 remaining warnings are React Compiler advice, mostly in the generated `components/ui/` files.
+The linter catches mistakes, not style — formatting rules are off on purpose, so nothing here should ever produce a large reformatting diff. The 7 remaining warnings are React Compiler advice, partly in the generated `components/ui/` files.
 
 The tests are weighted towards authorization. If you change anything in `server/authz.ts`, in a route's guards, or in who may read an upload, add a test for it in `server/__tests__/authz.test.ts` (the rule on its own) or `server/__tests__/routeAccess.test.ts` (the rule over real HTTP, through the real login guard).
 
@@ -50,7 +50,7 @@ Three conventions in that suite, all of which exist because of a real miss:
 |---|---|
 | `index.ts` | Entry point. Validates configuration before anything else loads, sets `trust proxy`, security headers, JSON body parsing (captures `rawBody` for webhooks), API request logging, graceful shutdown, listens on `PORT`. |
 | `config.ts` | Every environment variable the server cannot run without, checked once at boot and reported together. Also owns the OIDC provider settings. |
-| `routes.ts` | Every API endpoint. One large file, ~54 handlers. |
+| `routes.ts` | Every API endpoint. One large file, ~55 handlers. |
 | `auth.ts` | OpenID Connect login and the session store. Reads its provider settings from `config.ts`. |
 | `authz.ts` | Who may do what: `requireActiveUser`, `requirePermission`, the region helpers, upload and maintenance ownership. |
 | `audit.ts` | Records the actions somebody may have to account for later. See "Audit log" below. |
@@ -73,7 +73,7 @@ Three conventions in that suite, all of which exist because of a real miss:
 - **Server state** is TanStack Query, configured in `lib/queryClient.ts` with `staleTime: Infinity`, no refetch on focus, and no retries. This means **you must invalidate queries manually after a mutation** or the UI will show stale data.
 - The default query function derives the URL by joining the query key with `/`, so `queryKey: ["/api/assets"]` fetches `/api/assets`.
 - `apiRequest(method, url, data)` is the mutation helper. It throws on non-2xx.
-- **UI** is shadcn/ui in `components/ui/` (47 generated primitives). Treat those as generated — build new things in `components/` instead of editing them.
+- **UI** is shadcn/ui in `components/ui/` (22 generated primitives; the unused ones were removed — add any you need back from shadcn rather than hand-writing them). Treat those as generated — build new things in `components/` instead of editing them.
 - **Do not put an early return between hook calls.** A guard like `if (!isAdmin) return <AccessDenied />` placed above a `useQuery` changes the hook count once the auth query resolves, and React throws. Compute the guard from hooks, then return below all of them. This crashed the Settings page once already.
 - Path aliases: `@/` → `client/src/`, `@shared/` → `shared/`, `@assets/` → `attached_assets/`.
 
@@ -90,7 +90,7 @@ Defined in `shared/schema.ts` using Drizzle, with Zod insert schemas generated b
 | `user_permissions` | One row per user, thirteen boolean flags plus `allowedRegions` (text array) | `userId` unique, cascades on user delete |
 | `maintenance_requests` | The core workflow. Priority includes a `wishlist` level; status is pending/in_progress/completed/cancelled | `submittedBy` stores an **email**, see gotchas |
 | `walkthrough_rooms` | Inspection room templates, ordered by `displayOrder` | `propertyId` → `properties` (loose, no FK); `buildingAddress` kept for backward compatibility |
-| `walkthrough_photos` | Photos attached to a room, with condition and free-form `questionAnswers` JSON | `roomId` → `walkthrough_rooms`, cascades |
+| `walkthrough_photos` | Photos attached to a room, with condition. The `questionAnswers` JSON column is vestigial — nothing reads or writes it | `roomId` → `walkthrough_rooms`, cascades |
 | `assets` | Fixed and movable assets, with age, serial, purchase price, asset tag | `propertyId` → `properties` (loose, no FK) |
 | `asset_photos` | Photos attached to an asset | `assetId` → `assets`, cascades |
 | `maintenance_contacts` | Vendors | Referenced by invoices and request links |
@@ -194,7 +194,7 @@ Because uploads are buffered in memory, `server/uploadLimits.ts` bounds them. It
 `guardedUpload()` wraps each upload route with two things:
 
 - **A ceiling on total in-flight upload bytes**, 64MB by default and configurable with `MAX_UPLOAD_BYTES_IN_FLIGHT`. Capacity is reserved from the request's `Content-Length` *before* the body is read and released when the response finishes or the client disconnects. Requests that would exceed the ceiling get `503` with `Retry-After`, so a burst degrades into a retry rather than an out-of-memory crash.
-- **Local handling of multer's own errors.** An oversized file returns `413` with the limit stated. This matters beyond tidiness: the global error handler in `server/index.ts` re-throws after responding, so an upload error that reached it would take the process down.
+- **Local handling of multer's own errors.** An oversized file returns `413` with the limit stated, rather than the generic message the final error handler in `server/errors.ts` would produce.
 
 Any new upload route should go through `guardedUpload()` too, and its permission check must sit **before** the multer middleware — otherwise a caller with no right to upload still gets their whole body read into memory.
 
@@ -208,7 +208,7 @@ Any new upload route should go through `guardedUpload()` too, and its permission
 
 `server/audit.ts` records the actions somebody may need to account for later: **user and permission changes, maintenance status changes, invoice and billing changes, and document uploads and downloads.** `AUDIT_ACTIONS` is the full vocabulary.
 
-Nothing in the application reads the log back — that is deliberate, and building reporting on top of it is a separate piece of work. Read it with SQL:
+Admins read it in the app: the activity trail in Settings, backed by `GET /api/audit-log` and `client/src/components/ActivityLog.tsx`. Reporting beyond that is a separate piece of work. It can also be read with SQL:
 
 ```sql
 select created_at, actor_email, action, summary from audit_log order by created_at desc limit 50;
@@ -240,19 +240,18 @@ Routine audit events are retained for **two years**. Account and permission even
 - **Validation**: parse request bodies with the Zod schema from `shared/schema.ts` (`insertXSchema.parse(...)`, or `.partial().parse(...)` for PATCH). Do not trust `req.body` directly.
 - **Typing**: handlers are typed `async (req: any, res)`. That is the existing convention; do not spend effort changing it, but do not let it stop you using `getUserId(req)`.
 - **Test IDs**: interactive elements carry `data-testid` attributes. Keep adding them.
-- **Dates**: `date-fns` on the frontend; Drizzle `timestamp` columns with `defaultNow()` on the backend.
+- **Dates**: format at the render boundary with `formatDate`/`formatDateTime` from `client/src/lib/format.ts`; Drizzle `timestamp` columns with `defaultNow()` on the backend.
 - **Forms**: React Hook Form with the Zod resolver, using the shared insert schemas.
 
 ---
 
 ## Known open issues
 
-1. **No frontend error boundary.** Any render error blanks the whole page.
-2. **`throw err` after responding** in the `index.ts` error handler can take the process down.
-3. **Deleting a photo or document leaves the file in storage.** The database row goes; the object stays and keeps costing space.
-4. **Files uploaded before the current storage layout are unreachable.** Their URLs no longer resolve. Nothing in the app depends on them.
-5. **Out-of-region records answer 403 rather than 404**, which confirms the record exists. Knowingly accepted.
-6. **Two dependency advisories remain** — `drizzle-orm` (fix needs a version bump) and `vite` (fix needs a major upgrade, dev tooling only).
+1. **Deleting a photo or document leaves the file in storage.** The database row goes; the object stays and keeps costing space.
+2. **Files uploaded before the current storage layout are unreachable.** Their URLs no longer resolve. Nothing in the app depends on them.
+3. **Out-of-region records answer 403 rather than 404**, which confirms the record exists. Knowingly accepted.
+4. **One dependency advisory remains** — `drizzle-orm`; the fix is a major version upgrade, tracked as its own piece of work.
+5. **`walkthrough_photos.question_answers` is a vestigial column** — nothing reads or writes it. Removing it needs a migration, and a check that the production database holds no data in it first.
 
 **`submittedBy` holds an email address, not a user ID.** Both the create route and the JotForm webhook write an email, and `ownsRecord` in `authz.ts` compares against `ctx.user.email` to match. That is consistent today, and resident visibility works — but it is the kind of thing a well-meaning "let's key this on user ID" change breaks silently on both sides at once. `server/__tests__/ownership.test.ts` covers it.
 
