@@ -278,7 +278,6 @@ Two things to know about running more than one instance:
 - **Deleting a photo or document leaves the file in storage.** The record disappears from the app, but the file stays in the bucket and keeps costing space.
 - **Files uploaded before the current storage layout are unreachable.** Their links no longer resolve. Nothing in the app depends on them.
 - **The JotForm webhook is turned off** until `JOTFORM_WEBHOOK_SECRET` is set. It returns 503 rather than accepting unauthenticated submissions.
-- **One dependency advisory remains**: `drizzle-orm`. Its fix is a major version upgrade and is tracked as its own piece of work.
 
 ---
 
