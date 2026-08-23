@@ -26,6 +26,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { insertUserSchema, type User, type UserPermissions } from "@shared/schema";
 import { z } from "zod";
+import { ActivityLog } from "@/components/ActivityLog";
 import { Section, Container, PageHeader, PageStack } from "@/components/layout/page";
 import { EmptyState } from "@/components/states";
 import { formatDate, formatValue } from "@/lib/format";
@@ -454,6 +455,10 @@ export default function Settings() {
           data-testid="users-table"
         />
       </Card>
+
+      {/* Admin-only, like the rest of this page -- and enforced again by the
+          server, which refuses the activity log to anyone else. */}
+      <ActivityLog />
 
       <Dialog open={isPermissionsDialogOpen} onOpenChange={(open) => {
         setIsPermissionsDialogOpen(open);

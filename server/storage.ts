@@ -41,7 +41,7 @@ import {
   type InsertAuditEvent,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, or, desc, asc, inArray, lt, notInArray } from "drizzle-orm";
+import { eq, and, or, desc, asc, inArray, lt, gte, ilike, count, notInArray } from "drizzle-orm";
 
 // Helper function to filter out undefined values from partial updates
 function filterUndefined<T extends Record<string, any>>(obj: T): Partial<T> {
@@ -156,6 +156,8 @@ export interface IStorage {
 
   // Audit log
   createAuditEvent(event: InsertAuditEvent): Promise<AuditEvent>;
+  /** One page of activity, newest first, plus the total the filters match. */
+  listAuditEvents(query: AuditEventQuery): Promise<AuditEventPage>;
   /** Deletes at most one bounded batch of expired, non-protected events. */
   deleteExpiredAuditEvents(
     before: Date,
@@ -178,6 +180,32 @@ export interface IStorage {
  * the direction the application writes it -- record to URL -- so this searches
  * that way round.
  */
+/**
+ * Which slice of the activity trail to read.
+ *
+ * `limit` and `offset` are required rather than optional: the table grows
+ * without bound and there is no caller that wants all of it. `to` is exclusive,
+ * so a caller asking for a whole day passes the following midnight and does not
+ * have to reason about how precise a timestamp is.
+ */
+export interface AuditEventQuery {
+  /** Partial, case-insensitive match against the stored actor email. */
+  actorEmail?: string;
+  action?: string;
+  /** Inclusive lower bound on when the event happened. */
+  from?: Date;
+  /** Exclusive upper bound on when the event happened. */
+  to?: Date;
+  limit: number;
+  offset: number;
+}
+
+export interface AuditEventPage {
+  events: AuditEvent[];
+  /** How many rows the filters match in total, for the page count. */
+  total: number;
+}
+
 export type UploadReference =
   | { kind: "maintenanceRequest"; record: MaintenanceRequest }
   | { kind: "walkthroughPhoto"; record: WalkthroughPhoto }
@@ -606,6 +634,38 @@ export class DatabaseStorage implements IStorage {
   async createAuditEvent(event: InsertAuditEvent): Promise<AuditEvent> {
     const [created] = await db.insert(auditLog).values(event).returning();
     return created;
+  }
+
+  async listAuditEvents(query: AuditEventQuery): Promise<AuditEventPage> {
+    const conditions = [];
+    if (query.from) conditions.push(gte(auditLog.createdAt, query.from));
+    if (query.to) conditions.push(lt(auditLog.createdAt, query.to));
+    if (query.action) conditions.push(eq(auditLog.action, query.action));
+    if (query.actorEmail) {
+      // A search box, so a partial match. The wildcards a user could type are
+      // escaped: "%" typed into the box means the character, not "everything".
+      const escaped = query.actorEmail.replace(/([\\%_])/g, "\\$1");
+      conditions.push(ilike(auditLog.actorEmail, `%${escaped}%`));
+    }
+    const where = conditions.length > 0 ? and(...conditions) : undefined;
+
+    // The count runs alongside the page rather than after it, and is what lets
+    // the page show "of 12,480" without ever selecting 12,480 rows.
+    const [events, [counted]] = await Promise.all([
+      db
+        .select()
+        .from(auditLog)
+        .where(where)
+        // id breaks the tie: two events recorded in the same millisecond would
+        // otherwise be free to swap places between pages and be shown twice or
+        // not at all.
+        .orderBy(desc(auditLog.createdAt), desc(auditLog.id))
+        .limit(query.limit)
+        .offset(query.offset),
+      db.select({ value: count() }).from(auditLog).where(where),
+    ]);
+
+    return { events, total: Number(counted?.value ?? 0) };
   }
 
   async deleteExpiredAuditEvents(

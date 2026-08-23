@@ -1,6 +1,7 @@
 import { storage } from "./storage";
 import { logError } from "./errors";
 import type { AuthContext } from "./authz";
+import { AUDIT_ACTIONS, type AuditAction } from "@shared/audit";
 
 /** Routine audit events are retained for this long. This is an organisation policy. */
 export const AUDIT_RETENTION_YEARS = 2;
@@ -132,26 +133,13 @@ export function scrubDetails(value: unknown, depth = 0): unknown {
 /**
  * The set of actions the portal records. Kept as one list so the names stay
  * consistent and so anyone reading the table can see the full vocabulary in one
- * place. Format is `<thing>.<past tense verb>`.
+ * place.
+ *
+ * Defined in `shared/audit.ts` and re-exported here: the settings page filters
+ * by action and needs the same list, and two copies of it would drift.
  */
-export const AUDIT_ACTIONS = {
-  USER_CREATED: "user.created",
-  USER_DELETED: "user.deleted",
-  USER_ROLE_CHANGED: "user.role_changed",
-  USER_STATUS_CHANGED: "user.status_changed",
-  USER_PERMISSIONS_CHANGED: "user.permissions_changed",
-  MAINTENANCE_STATUS_CHANGED: "maintenance_request.status_changed",
-  INVOICE_CREATED: "invoice.created",
-  INVOICE_UPDATED: "invoice.updated",
-  INVOICE_DELETED: "invoice.deleted",
-  BILLING_RECORD_CREATED: "billing_record.created",
-  BILLING_RECORD_UPDATED: "billing_record.updated",
-  BILLING_RECORD_DELETED: "billing_record.deleted",
-  DOCUMENT_UPLOADED: "document.uploaded",
-  DOCUMENT_DOWNLOADED: "document.downloaded",
-} as const;
-
-export type AuditAction = (typeof AUDIT_ACTIONS)[keyof typeof AUDIT_ACTIONS];
+export { AUDIT_ACTIONS };
+export type { AuditAction };
 
 /**
  * Calculates the age cutoff without depending on when the process started.

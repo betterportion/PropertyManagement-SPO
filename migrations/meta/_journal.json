@@ -29,6 +29,13 @@
       "when": 1787350029128,
       "tag": "0003_add_audit_log",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1787420636046,
+      "tag": "0004_add_audit_log_filter_indexes",
+      "breakpoints": true
     }
   ]
 }

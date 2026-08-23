@@ -372,6 +372,12 @@ export const auditLog = pgTable(
     index("IDX_audit_log_created_at").on(table.createdAt),
     index("IDX_audit_log_entity").on(table.entityType, table.entityId),
     index("IDX_audit_log_actor").on(table.actorId),
+    // The activity page filters by action and by the actor's email address,
+    // always newest-first. The table only grows, so those two filters need
+    // indexes of their own -- the actor index above is on the ID, which is not
+    // what anybody types into a search box.
+    index("IDX_audit_log_action").on(table.action, table.createdAt),
+    index("IDX_audit_log_actor_email").on(table.actorEmail),
   ],
 );
 

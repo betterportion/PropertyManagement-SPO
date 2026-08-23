@@ -20,6 +20,7 @@ import {
 import { z } from "zod";
 import { sendError, logError } from "./errors";
 import { recordAuditEvent, auditLookup, changedFields, AUDIT_ACTIONS } from "./audit";
+import { AUDIT_ACTION_VALUES } from "@shared/audit";
 import multer from "multer";
 import path from "path";
 import crypto from "crypto";
@@ -101,6 +102,49 @@ const permissionsUpdateSchema = z.object({
   canViewProperties: z.boolean().optional(),
   canManageProperties: z.boolean().optional(),
   allowedRegions: z.array(z.string()).optional(),
+});
+
+/** How many activity rows one request may ask for, and how many it gets by default. */
+const AUDIT_LOG_MAX_PAGE_SIZE = 100;
+const AUDIT_LOG_DEFAULT_PAGE_SIZE = 25;
+
+/** An absent filter and an empty one mean the same thing to the page. */
+const blankAsAbsent = <T extends z.ZodTypeAny>(schema: T) =>
+  z.preprocess((value) => (value === "" ? undefined : value), schema.optional());
+
+/** A calendar day, read as UTC so the boundary does not move with the reader. */
+const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected a date as YYYY-MM-DD");
+
+const ONE_DAY_MS = 24 * 60 * 60 * 1_000;
+
+/** Midnight beginning the given day. */
+function startOfUtcDay(day: string): Date {
+  return new Date(`${day}T00:00:00.000Z`);
+}
+
+/** Midnight ending the given day, i.e. the start of the day after it. */
+function nextUtcDay(day: string): Date {
+  return new Date(startOfUtcDay(day).getTime() + ONE_DAY_MS);
+}
+
+/**
+ * Filters for the activity page. Everything is optional except the bounds on
+ * the page size, which are not negotiable: the audit table only ever grows, so
+ * a request must never be able to ask for all of it.
+ */
+const auditLogQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(AUDIT_LOG_MAX_PAGE_SIZE)
+    .default(AUDIT_LOG_DEFAULT_PAGE_SIZE),
+  /** Part of an email address, matched against the actor as it was recorded. */
+  actor: blankAsAbsent(z.string().trim().max(320)),
+  action: blankAsAbsent(z.enum(AUDIT_ACTION_VALUES as [string, ...string[]])),
+  from: blankAsAbsent(isoDate),
+  to: blankAsAbsent(isoDate),
 });
 
 // Constant-time string comparison, so a wrong secret cannot be discovered by
@@ -355,6 +399,42 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ success: true });
     } catch (error) {
       sendError(res, error, "Failed to delete user");
+    }
+  });
+
+  /**
+   * The activity trail, for the Settings page.
+   *
+   * Administrators only, and deliberately not opened up to regional
+   * administrators: the trail names who did what across every region, so it is
+   * not something to scope by region -- it is something to withhold.
+   *
+   * Always a page. The table grows for the life of the portal and there is no
+   * request that should be able to ask for the whole of it.
+   */
+  app.get('/api/audit-log', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireAdmin(res, ctx)) return;
+
+      const { page, pageSize, actor, action, from, to } = auditLogQuerySchema.parse(req.query);
+
+      const { events, total } = await storage.listAuditEvents({
+        actorEmail: actor,
+        action,
+        from: from ? startOfUtcDay(from) : undefined,
+        // The end of the range is a day the reader picked, and they mean it
+        // inclusively -- so the bound sent down is the following midnight,
+        // which the storage layer treats as exclusive.
+        to: to ? nextUtcDay(to) : undefined,
+        limit: pageSize,
+        offset: (page - 1) * pageSize,
+      });
+
+      res.json({ events, total, page, pageSize });
+    } catch (error) {
+      sendError(res, error, "Failed to fetch the activity log");
     }
   });
 

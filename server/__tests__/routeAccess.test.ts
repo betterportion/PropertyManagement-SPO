@@ -262,6 +262,7 @@ describe("requests with no session", () => {
   const protectedEndpoints: [string, string][] = [
     ["GET", "/api/auth/user"],
     ["GET", "/api/users"],
+    ["GET", "/api/audit-log"],
     ["GET", "/api/maintenance-requests"],
     ["GET", "/api/maintenance-requests/req-west"],
     ["GET", "/api/maintenance-requests/req-west/contacts"],
@@ -1007,5 +1008,136 @@ describe("what reaches the audit log", () => {
     expect(status).toBe(200);
     expect(body.role).toBe("admin");
     logged.mockRestore();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Reading the audit log back
+// ---------------------------------------------------------------------------
+
+describe("who may read the activity log", () => {
+  const EVENT = {
+    id: "evt-1",
+    createdAt: "2026-08-20T09:00:00.000Z",
+    actorId: ADMIN.id,
+    actorEmail: ADMIN.email,
+    action: "invoice.deleted",
+    entityType: "invoice",
+    entityId: "inv-1",
+    summary: "Deleted invoice INV-1",
+    details: null,
+  };
+
+  beforeEach(() => {
+    storageMock.listAuditEvents.mockResolvedValue({ events: [EVENT], total: 1 });
+  });
+
+  it("gives an administrator a page of activity", async () => {
+    actAs(ADMIN);
+    const { status, body } = await get("/api/audit-log");
+    expect(status).toBe(200);
+    expect(body).toMatchObject({ total: 1, page: 1, pageSize: 25 });
+    expect(body.events).toHaveLength(1);
+  });
+
+  it("gives an administrator holding no permissions row the same page", async () => {
+    actAs(ADMIN, undefined);
+    expect((await get("/api/audit-log")).status).toBe(200);
+  });
+
+  it("refuses a regional administrator, however broad their permissions", async () => {
+    // The trail names who did what across every region, so it is withheld
+    // rather than filtered down to the regions they administer.
+    actAs(STAFF, {
+      ...ALL_MAINTENANCE,
+      canManageUsers: true,
+      canViewBilling: true,
+      allowedRegions: ["West Central", "East Central"],
+    });
+    const { status } = await get("/api/audit-log");
+    expect(status).toBe(403);
+    expect(storageMock.listAuditEvents).not.toHaveBeenCalled();
+  });
+
+  it("refuses a resident", async () => {
+    actAs(ALICE);
+    expect((await get("/api/audit-log")).status).toBe(403);
+    expect(storageMock.listAuditEvents).not.toHaveBeenCalled();
+  });
+
+  it("refuses a deactivated administrator", async () => {
+    actAs({ ...ADMIN, isActive: false });
+    expect((await get("/api/audit-log")).status).toBe(403);
+    expect(storageMock.listAuditEvents).not.toHaveBeenCalled();
+  });
+});
+
+describe("paging and filtering the activity log", () => {
+  beforeEach(() => {
+    actAs(ADMIN);
+    storageMock.listAuditEvents.mockResolvedValue({ events: [], total: 0 });
+  });
+
+  /** The query the route asked the storage layer for. */
+  const askedFor = () => storageMock.listAuditEvents.mock.calls[0][0];
+
+  it("asks for a bounded page even when the caller asks for none", async () => {
+    await get("/api/audit-log");
+    expect(askedFor()).toMatchObject({ limit: 25, offset: 0 });
+  });
+
+  it("turns a page number into an offset", async () => {
+    await get("/api/audit-log?page=3&pageSize=10");
+    expect(askedFor()).toMatchObject({ limit: 10, offset: 20 });
+  });
+
+  it("refuses a page size larger than the cap rather than serving the whole table", async () => {
+    const { status } = await get("/api/audit-log?pageSize=100000");
+    expect(status).toBe(400);
+    expect(storageMock.listAuditEvents).not.toHaveBeenCalled();
+  });
+
+  it("refuses a page size or page number that is not a positive whole number", async () => {
+    expect((await get("/api/audit-log?page=0")).status).toBe(400);
+    expect((await get("/api/audit-log?pageSize=-5")).status).toBe(400);
+    expect((await get("/api/audit-log?page=all")).status).toBe(400);
+    expect(storageMock.listAuditEvents).not.toHaveBeenCalled();
+  });
+
+  it("passes the person and action filters through", async () => {
+    await get("/api/audit-log?actor=admin%40example.com&action=invoice.deleted");
+    expect(askedFor()).toMatchObject({
+      actorEmail: "admin@example.com",
+      action: "invoice.deleted",
+    });
+  });
+
+  it("refuses an action outside the recorded vocabulary", async () => {
+    const { status } = await get("/api/audit-log?action=invoice.exploded");
+    expect(status).toBe(400);
+    expect(storageMock.listAuditEvents).not.toHaveBeenCalled();
+  });
+
+  it("treats an empty filter as no filter at all", async () => {
+    const { status } = await get("/api/audit-log?actor=&action=&from=&to=");
+    expect(status).toBe(200);
+    expect(askedFor().actorEmail).toBeUndefined();
+    expect(askedFor().action).toBeUndefined();
+    expect(askedFor().from).toBeUndefined();
+    expect(askedFor().to).toBeUndefined();
+  });
+
+  it("includes the whole of the day the reader chose as the end of the range", async () => {
+    await get("/api/audit-log?from=2026-08-01&to=2026-08-31");
+    const { from, to } = askedFor();
+    expect(from.toISOString()).toBe("2026-08-01T00:00:00.000Z");
+    // Exclusive, and the day after the one asked for -- an event recorded at
+    // 23:59 on the 31st is inside the range the reader described.
+    expect(to.toISOString()).toBe("2026-09-01T00:00:00.000Z");
+  });
+
+  it("refuses a date that is not a calendar day", async () => {
+    expect((await get("/api/audit-log?from=last-tuesday")).status).toBe(400);
+    expect((await get("/api/audit-log?to=2026-13-45x")).status).toBe(400);
   });
 });
