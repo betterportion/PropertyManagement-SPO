@@ -52,6 +52,11 @@ const {
 // Module mocks
 // ---------------------------------------------------------------------------
 
+// routes.ts reaches the real database module through authz.ts → migrateRegions,
+// and db.ts throws at import when DATABASE_URL is unset. Storage is already
+// mocked below, so the database itself is never used here.
+vi.mock("../db", () => ({ db: {}, pool: {} }));
+
 vi.mock("../storage", () => ({
   storage: {
     getUser: mockGetUser,

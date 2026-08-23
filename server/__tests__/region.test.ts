@@ -1,4 +1,10 @@
-import { describe, it, expect } from "vitest";
+import { vi, describe, it, expect } from "vitest";
+
+// migrateRegions imports the real database module at load time, which throws
+// without DATABASE_URL. These tests only exercise the pure normalisation
+// helpers, so the database is stubbed out the same way authz.test.ts does it.
+vi.mock("../db", () => ({ db: {}, pool: {} }));
+
 import { normalizeRegion, normalizeRegions, KEBAB_TO_TITLE } from "../migrateRegions";
 
 // ---------------------------------------------------------------------------
