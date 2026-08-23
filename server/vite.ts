@@ -15,7 +15,11 @@ import { nanoid } from "nanoid";
 const viteLogger = createLogger();
 
 export async function setupVite(app: Express, server: Server) {
+  // Merge rather than replace: vite.config.ts sets server.fs.{strict,deny} to
+  // keep the dev server from serving dotfiles, and a wholesale replacement of
+  // `server` would silently drop those restrictions.
   const serverOptions = {
+    ...viteConfig.server,
     middlewareMode: true,
     hmr: { server },
     allowedHosts: true as const,
@@ -24,13 +28,9 @@ export async function setupVite(app: Express, server: Server) {
   const vite = await createViteServer({
     ...viteConfig,
     configFile: false,
-    customLogger: {
-      ...viteLogger,
-      error: (msg, options) => {
-        viteLogger.error(msg, options);
-        process.exit(1);
-      },
-    },
+    // Log Vite errors without exiting: a request-scoped error such as an
+    // fs.deny refusal must not take the whole dev server down with it.
+    customLogger: viteLogger,
     server: serverOptions,
     appType: "custom",
   });
