@@ -5,7 +5,7 @@
 /*
  * SPO Design System tokens.
  *
- * Source of truth: attached_assets/spo-design-system_1786056605884.md (§2, §10).
+ * Source of truth: docs/spo-design-system.md (§2, §10).
  * CSS variables hold bare HSL triplets and are consumed as hsl(var(--token)).
  * Never hardcode a brand hex in a component — dark mode reads from these.
  *

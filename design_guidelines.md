@@ -6,12 +6,7 @@ The portal follows the **SPO Design System**, the shared specification used acro
 suite of SPO applications. That document is the authority for every value — colors,
 type scale, spacing, radius, component behavior, states and data display:
 
-**`attached_assets/spo-design-system_1786056605884.md`**
-
-> **Note:** that document is not tracked in this repository — `attached_assets/` is
-> gitignored except for the logo. Until it is recovered from the Replit workspace
-> (or another home is found for it), the live `/styleguide` page is the closest
-> in-repo reference.
+**[`docs/spo-design-system.md`](docs/spo-design-system.md)**
 
 This file only records the decisions specific to this portal. Where the two disagree,
 the SPO Design System wins, except for the portal-specific choices listed below.
