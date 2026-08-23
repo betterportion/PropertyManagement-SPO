@@ -23,7 +23,7 @@ It is a single Express server that serves both the REST API and the React fronte
 | `npm run start` | Run the production build |
 | `npm run lint` | ESLint. **Must stay at zero errors**; warnings are allowed |
 | `npm run check` | TypeScript check. **Must stay at zero errors** |
-| `npm test` | Vitest. Needs no database, no bucket, no secrets |
+| `npm test` | Vitest. Needs no database, no bucket, no secrets. `auditRetention.integration.test.ts` is the one test that uses a real database, and skips unless `TEST_DATABASE_URL` or `DATABASE_URL` is set |
 | `npm run db:generate` | Write a migration from a `shared/schema.ts` change |
 | `npm run db:migrate` | Apply pending migrations |
 | `npm run db:baseline -- <tag>` | Record existing tables as already migrated, through `<tag>` (a database that predates `migrations/`). Bare, it records only `0000` |
