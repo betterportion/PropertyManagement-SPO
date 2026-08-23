@@ -242,7 +242,7 @@ Preferred communication style: Simple, everyday language.
 ### Key NPM Packages
 - `pg`: PostgreSQL client.
 - `@supabase/storage-js`: Supabase Storage client (used directly rather than the full `supabase-js` client).
-- `drizzle-orm`, `drizzle-kit`: ORM and migration tools.
+- `drizzle-orm`, `drizzle-kit`: ORM and migration tools. `drizzle-kit` still *declares* the deprecated `@esbuild-kit/esm-loader` but no longer loads it (it uses `tsx`), so the `overrides` block in `package.json` pins that chain's `esbuild` to a patched version to keep `npm audit` clean. Remove the override only once `drizzle-kit` drops the declaration.
 - `express`, `express-session`: Server framework and session management.
 - `passport`, `openid-client`: Authentication middleware.
 - `react`, `react-dom`: Frontend framework.
