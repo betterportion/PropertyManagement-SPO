@@ -96,7 +96,7 @@ Defined in `shared/schema.ts` using Drizzle, with Zod insert schemas generated b
 | `maintenance_contacts` | Vendors | Referenced by invoices and request links |
 | `invoices` | Invoice records with amount, status, due/paid dates | `contactId` and `maintenanceRequestId`, both set-null on delete |
 | `billing_records` | Vendor billing with three document URLs (contract/invoice, COI, W-9) | `contactId` is a plain column, **not** a foreign key |
-| `properties` | Property records. `address` is computed from the four address parts and is unique | Referenced loosely by rooms and assets |
+| `properties` | Property records. `address` is computed from the four address parts and is unique; `chapter` (free text) records which SPO chapter uses the property | Referenced loosely by rooms and assets |
 | `request_contacts` | Join table linking contacts to maintenance requests | Both sides cascade |
 | `uploads` | One row per stored file: random storage key, original name, content type, size, uploader | `uploadedBy` is a user ID; no FK, so the row outlives the account |
 | `audit_log` | Append-only record of access, money and document events | Actor stored as plain columns, deliberately no FK |

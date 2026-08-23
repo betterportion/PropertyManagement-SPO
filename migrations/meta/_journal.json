@@ -36,6 +36,13 @@
       "when": 1787420636046,
       "tag": "0004_add_audit_log_filter_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1787493094062,
+      "tag": "0005_add_property_chapter",
+      "breakpoints": true
     }
   ]
 }

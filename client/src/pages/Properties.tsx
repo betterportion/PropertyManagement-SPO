@@ -39,11 +39,25 @@ export default function Properties() {
   const [editingProperty, setEditingProperty] = useState<Property | null>(null);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [deletingPropertyId, setDeletingPropertyId] = useState<string | null>(null);
+  const [regionFilter, setRegionFilter] = useState("all");
+  const [chapterFilter, setChapterFilter] = useState("all");
   const { toast } = useToast();
 
   const { data: properties, isLoading } = useQuery<Property[]>({
     queryKey: ["/api/properties"],
   });
+
+  // Chapter is free text, so the filter offers the values actually in use
+  // rather than a fixed list.
+  const chapters = Array.from(
+    new Set((properties || []).map((p) => p.chapter).filter((c): c is string => !!c)),
+  ).sort();
+
+  const visibleProperties = (properties || []).filter(
+    (p) =>
+      (regionFilter === "all" || p.region === regionFilter) &&
+      (chapterFilter === "all" || p.chapter === chapterFilter),
+  );
 
   const createPropertyMutation = useMutation({
     mutationFn: async (data: InsertProperty) => {
@@ -119,6 +133,7 @@ export default function Properties() {
       state: "",
       zipCode: "",
       region: "",
+      chapter: "",
       propertyManager: "",
       bedrooms: undefined,
       bathrooms: undefined,
@@ -139,6 +154,7 @@ export default function Properties() {
       state: property.state,
       zipCode: property.zipCode,
       region: property.region,
+      chapter: property.chapter || "",
       propertyManager: property.propertyManager || "",
       bedrooms: property.bedrooms || undefined,
       bathrooms: property.bathrooms || undefined,
@@ -163,7 +179,31 @@ export default function Properties() {
       <PageStack>
       <PageHeader title="Properties" description="Maintain the homes and locations that anchor your operations." />
 
-      <div className="flex justify-end">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap">
+          <Select value={regionFilter} onValueChange={setRegionFilter}>
+            <SelectTrigger className="w-44" data-testid="select-filter-region">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All regions</SelectItem>
+              {REGIONS.map((region) => (
+                <SelectItem key={region} value={region}>{region}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={chapterFilter} onValueChange={setChapterFilter}>
+            <SelectTrigger className="w-44" data-testid="select-filter-chapter">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All chapters</SelectItem>
+              {chapters.map((chapter) => (
+                <SelectItem key={chapter} value={chapter}>{chapter}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
         <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
           <DialogTrigger asChild>
             <Button data-testid="button-add-property">
@@ -272,6 +312,20 @@ export default function Properties() {
 
                 <FormField
                   control={addForm.control}
+                  name="chapter"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Chapter (Optional)</FormLabel>
+                      <FormControl>
+                        <Input {...field} value={field.value || ""} placeholder="Which chapter uses this property" data-testid="input-property-chapter" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={addForm.control}
                   name="propertyManager"
                   render={({ field }) => (
                     <FormItem>
@@ -345,9 +399,11 @@ export default function Properties() {
         <LoadingState message="Loading properties..." />
       ) : properties && properties.length === 0 ? (
         <EmptyState title="Your property directory is ready for its first home" description="Add a property to start connecting rooms, assets, contacts, and walkthroughs." />
+      ) : visibleProperties.length === 0 ? (
+        <EmptyState title="No properties in that region or chapter" description="Every property is filtered out right now — pick a different region or chapter, or set both back to All." />
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {(properties || []).map((property) => (
+          {visibleProperties.map((property) => (
             <Card key={property.id} className="hover-elevate" data-testid={`card-property-${property.id}`}>
               <CardContent className="p-4">
                 <div className="flex items-start justify-between gap-4">
@@ -365,6 +421,9 @@ export default function Properties() {
                       </p>
                       <div className="flex items-center gap-2 mt-2 flex-wrap">
                         <Badge variant="secondary">{property.region}</Badge>
+                        {property.chapter && (
+                          <Badge variant="secondary" data-testid={`badge-property-chapter-${property.id}`}>{property.chapter}</Badge>
+                        )}
                         {(property.bedrooms || property.bathrooms) && (
                           <Badge variant="secondary">
                             {property.bedrooms ? `${property.bedrooms} bed` : ''}{property.bedrooms && property.bathrooms ? ', ' : ''}{property.bathrooms ? `${property.bathrooms} bath` : ''}
@@ -498,6 +557,20 @@ export default function Properties() {
                         ))}
                       </SelectContent>
                     </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={editForm.control}
+                name="chapter"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Chapter (Optional)</FormLabel>
+                    <FormControl>
+                      <Input {...field} value={field.value || ""} placeholder="Which chapter uses this property" />
+                    </FormControl>
                     <FormMessage />
                   </FormItem>
                 )}

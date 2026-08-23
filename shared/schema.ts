@@ -286,6 +286,10 @@ export const properties = pgTable("properties", {
   zipCode: varchar("zip_code").notNull(),
   address: varchar("address").notNull().unique(), // Computed: streetAddress, city, state zipCode
   region: varchar("region").notNull(),
+  // Which SPO chapter uses the property. Free text: chapter names vary and
+  // are typed by admins, so the Properties page filter builds its options
+  // from the values actually stored rather than a fixed list.
+  chapter: varchar("chapter"),
   propertyManager: varchar("property_manager"),
   bedrooms: integer("bedrooms"),
   bathrooms: numeric("bathrooms", { precision: 3, scale: 1 }),
