@@ -6,7 +6,9 @@ checked against code; documentation was treated as unverified. Where a doc and
 the code disagree, the discrepancy is called out with file:line.
 
 > **Status update (2026-08-23, branch `onboarding-fixes`):** the findings below
-> describe commit `d585158` as audited. On this branch the following have since
+> describe commit `d585158` as audited — every count and command output in this
+> document (lint warnings, file counts, test totals) reflects that commit,
+> before the fixes on this branch. On this branch the following have since
 > been APPLIED: the §1 test-gate fix (both suites now stub the db module;
 > `npm test` passes with no `DATABASE_URL`), the §4 deletions rows 1-7
 > (25 ui primitives, 2 dead components, the Replit load-test script,
@@ -197,7 +199,7 @@ Sorted by confidence × lines removed. Nothing was deleted this session. "Grep" 
 | 5 | **Dead component `PropertySelector`** | `client/src/components/PropertySelector.tsx` | 31 | `grep -rn "PropertySelector" client/src \| grep -v PropertySelector.tsx` → 0 | Nothing. | **High** |
 | 6 | **One-off Replit load-test script** | `scripts/upload-concurrency-test.ts` | ~90 | `grep -rn "upload-concurrency" package.json scripts docs *.md .github .replit` → 0. Depends on `REPLIT_DEV_DOMAIN` (line 12), which no longer exists for you. | Nothing — not an npm script, not imported, not documented. | **High** |
 | 7 | **Historical audit doc past its own expiry** | `docs/PRE_GITHUB_AUDIT.md` | 308 | Self-declared: "Delete this file once the remaining two are done" (`PRE_GITHUB_AUDIT.md:8`); both are done in code (§3.4 items 1-2). Referenced by `README.md:283,295` (links would need removing). | Two README links break. | Medium (doc, not code) |
-| 8 | **Vestigial DB column `question_answers`** | `shared/schema.ts:128` (`walkthrough_photos`) | 1 + migration | `grep -rn "questionAnswers\|question_answers" server/ client/ shared/ scripts/` → only `shared/schema.ts:128`. Never written, never read. | Requires a generated migration to drop; any data already in the column in the Replit DB is lost (contents unverified from here). `CLAUDE.md:93` still documents it as a feature. | Medium |
+| 8 | **Unused DB column `question_answers`** | `shared/schema.ts:128` (`walkthrough_photos`) | 1 + migration | `grep -rn "questionAnswers\|question_answers" server/ client/ shared/ scripts/` → only `shared/schema.ts:128`; no code names it and the UI never sends or displays it. Caveat: it is not `.omit()`-ed from `insertWalkthroughPhotoSchema` (`shared/schema.ts:135`), so `POST /api/walkthrough-photos` (`routes.ts:761` → spread insert `storage.ts:408`) would accept and store a value passed explicitly. | Requires a generated migration to drop plus an `.omit()` in the insert schema; any data already in the column in the Replit DB is lost (contents unverified from here). | Medium |
 | 9 | **Replit dev-plugin devDependencies** | `package.json:98-100` (`@replit/vite-plugin-*` ×3) | — | Loaded only when `REPL_ID` is set (`vite.config.ts:12`) — i.e. never again, unless you keep developing inside Replit. | `vite.config.ts:16-22` would need its dynamic-import block removed in the same change, or dev inside Replit breaks. | Medium (deliberate portability shim) |
 | 10 | **`scripts/post-merge.sh`** | `scripts/post-merge.sh` | 18 | Only referenced by `.replit:52-53` (`[postMerge]`) — a Replit-only hook. Not a git hook (`.git/hooks/` has none). | Nothing off Replit. Goes together with `.replit` itself if you abandon the workspace. | Medium |
 | 11 | Minor: `EM_DASH` exported but never imported (`client/src/lib/format.ts:10`, used internally); `AUDIT_ACTION_LABELS` exported but only consumed via `auditActionLabel()` (`shared/audit.ts:41`); `getOidcConfig` re-validates config already rejected at boot (`server/auth.ts:22-29`, self-described as unreachable in normal startup) | — | ~0 | greps in §3 of the working notes | Nothing (export-keyword-level trivia). | High confidence, negligible value |

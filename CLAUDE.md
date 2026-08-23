@@ -90,7 +90,7 @@ Defined in `shared/schema.ts` using Drizzle, with Zod insert schemas generated b
 | `user_permissions` | One row per user, thirteen boolean flags plus `allowedRegions` (text array) | `userId` unique, cascades on user delete |
 | `maintenance_requests` | The core workflow. Priority includes a `wishlist` level; status is pending/in_progress/completed/cancelled | `submittedBy` stores an **email**, see gotchas |
 | `walkthrough_rooms` | Inspection room templates, ordered by `displayOrder` | `propertyId` → `properties` (loose, no FK); `buildingAddress` kept for backward compatibility |
-| `walkthrough_photos` | Photos attached to a room, with condition. The `questionAnswers` JSON column is vestigial — nothing reads or writes it | `roomId` → `walkthrough_rooms`, cascades |
+| `walkthrough_photos` | Photos attached to a room, with condition. The `questionAnswers` JSON column is unused by the app: no code references it by name and the UI never sends or shows it, but it survives the insert schema, so an API caller could still store a value | `roomId` → `walkthrough_rooms`, cascades |
 | `assets` | Fixed and movable assets, with age, serial, purchase price, asset tag | `propertyId` → `properties` (loose, no FK) |
 | `asset_photos` | Photos attached to an asset | `assetId` → `assets`, cascades |
 | `maintenance_contacts` | Vendors | Referenced by invoices and request links |
@@ -251,7 +251,7 @@ Routine audit events are retained for **two years**. Account and permission even
 2. **Files uploaded before the current storage layout are unreachable.** Their URLs no longer resolve. Nothing in the app depends on them.
 3. **Out-of-region records answer 403 rather than 404**, which confirms the record exists. Knowingly accepted.
 4. **One dependency advisory remains** — `drizzle-orm`; the fix is a major version upgrade, tracked as its own piece of work.
-5. **`walkthrough_photos.question_answers` is a vestigial column** — nothing reads or writes it. Removing it needs a migration, and a check that the production database holds no data in it first.
+5. **`walkthrough_photos.question_answers` is an unused column** — no code references it by name and the UI never sends or displays it, but it is not omitted from `insertWalkthroughPhotoSchema`, so the API accepts and stores a value passed explicitly. Removing it needs a migration, an `.omit()` in the insert schema, and a check that the database holds no data in it first.
 
 **`submittedBy` holds an email address, not a user ID.** Both the create route and the JotForm webhook write an email, and `ownsRecord` in `authz.ts` compares against `ctx.user.email` to match. That is consistent today, and resident visibility works — but it is the kind of thing a well-meaning "let's key this on user ID" change breaks silently on both sides at once. `server/__tests__/ownership.test.ts` covers it.
 

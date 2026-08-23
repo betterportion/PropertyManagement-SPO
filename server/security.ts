@@ -40,8 +40,8 @@ export function securityHeaders(): RequestHandler {
             // theme applied before first paint) is served from /theme-init.js
             // for exactly this reason. Keep it that way.
             scriptSrc: ["'self'"],
-            // Inline styles cannot be avoided here -- Radix and framer-motion
-            // both position elements by writing style attributes at runtime.
+            // Inline styles cannot be avoided here -- Radix positions
+            // elements by writing style attributes at runtime.
             styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
             fontSrc: ["'self'", "https://fonts.gstatic.com", "data:"],
             // blob: and data: cover the local preview shown while a photo is
