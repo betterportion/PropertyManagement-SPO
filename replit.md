@@ -94,6 +94,10 @@ The practical migration path is therefore:
 
 Anyone whose record has no email, or who signs in with a different email than the one stored, arrives as a brand-new account with default resident permissions and has to be re-granted access by an admin.
 
+## Recent Changes (August 23, 2026) — Part 2: Replit development support removed
+- Development has moved to GitHub for good, so the Replit-only tooling is gone: the three `@replit/vite-plugin-*` devDependencies and their loader in `vite.config.ts`, the `.replit` workspace config, and `scripts/post-merge.sh` (only ever invoked by `.replit`'s postMerge hook). The historical record of what the Replit workspace provisioned (database module, object-storage bucket) lives in `docs/ONBOARDING_AUDIT.md`
+- Login is unchanged: the `OIDC_*` configuration and its Replit Auth defaults in `server/config.ts` still work exactly as documented in "Swapping the identity provider" above
+
 ## Recent Changes (August 23, 2026) — Post-GitHub onboarding pass
 - **Test gate repaired**: `region.test.ts` and `ownership.test.ts` crashed at import on any machine without `DATABASE_URL` (including GitHub CI) because `migrateRegions.ts` loads the real database module; both now stub it like the other suites. `npm test` once again needs no database
 - **Dead code removed**: 25 unused `components/ui` primitives, `PropertySelector.tsx`, `WalkthroughGallery.tsx`, the Replit-only `scripts/upload-concurrency-test.ts`, and 33 npm packages nothing imports (including the whole Radix/vendor cascade the deleted primitives dragged in)
