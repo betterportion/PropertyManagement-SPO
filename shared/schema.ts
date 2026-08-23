@@ -125,7 +125,6 @@ export const walkthroughPhotos = pgTable("walkthrough_photos", {
   region: varchar("region").notNull(),
   buildingAddress: varchar("building_address").notNull(),
   location: varchar("location").notNull(),
-  questionAnswers: jsonb("question_answers"),
   uploadedBy: varchar("uploaded_by").notNull(),
   uploadedDate: timestamp("uploaded_date").defaultNow(),
   createdAt: timestamp("created_at").defaultNow(),
