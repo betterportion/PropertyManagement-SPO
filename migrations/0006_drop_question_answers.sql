@@ -1,0 +1,1 @@
+ALTER TABLE "walkthrough_photos" DROP COLUMN "question_answers";

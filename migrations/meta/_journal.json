@@ -43,6 +43,13 @@
       "when": 1787493094062,
       "tag": "0005_add_property_chapter",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1787495347699,
+      "tag": "0006_drop_question_answers",
+      "breakpoints": true
     }
   ]
 }
