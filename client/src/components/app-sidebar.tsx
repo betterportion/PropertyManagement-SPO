@@ -75,13 +75,17 @@ export function AppSidebar({ role, currentPath }: AppSidebarProps) {
   return (
     <Sidebar>
       <SidebarHeader className="h-16 justify-center border-b border-sidebar-border px-4 py-0">
-        <div className="flex items-center gap-3">
+        <Link
+          href="/"
+          className="flex items-center gap-3 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          data-testid="link-sidebar-home"
+        >
           <img src={spoLogo} alt="SPO logo" className="h-9 w-9 shrink-0 object-contain" />
           <div className="min-w-0">
             <h2 className="truncate text-sm font-semibold leading-tight">Property Management Portal</h2>
             <p className="truncate text-xs text-muted-foreground">Saint Paul's Outreach, Inc.</p>
           </div>
-        </div>
+        </Link>
       </SidebarHeader>
 
       <SidebarContent>
