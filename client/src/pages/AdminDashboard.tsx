@@ -73,6 +73,7 @@ export default function AdminDashboard() {
           <StatGrid>
             <StatTile
               label="Properties"
+              href="/properties"
               value={propertiesQuery.data?.length ?? 0}
               hint="Properties on file"
               icon={Building2}
@@ -80,6 +81,7 @@ export default function AdminDashboard() {
             />
             <StatTile
               label="Active requests"
+              href="/maintenance"
               value={activeRequests.length}
               hint="Reported and not yet finished"
               icon={Wrench}
@@ -87,6 +89,7 @@ export default function AdminDashboard() {
             />
             <StatTile
               label="Open invoices"
+              href="/contacts"
               value={openInvoices.length}
               hint="Awaiting payment"
               icon={DollarSign}
@@ -94,6 +97,7 @@ export default function AdminDashboard() {
             />
             <StatTile
               label="Tracked assets"
+              href="/assets"
               value={assetsQuery.data?.length ?? 0}
               hint="Appliances and equipment"
               icon={Package}
