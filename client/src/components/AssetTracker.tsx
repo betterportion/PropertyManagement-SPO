@@ -19,6 +19,10 @@ interface AssetTrackerProps {
   onEdit?: (id: string) => void;
   onDelete?: (id: string) => void;
   onPhotos?: (id: string) => void;
+  /** "list" (default) or the photo-first "gallery" grid. */
+  view?: "list" | "gallery";
+  /** assetId → cover photo URL, used by the gallery view. */
+  coverPhotos?: Record<string, string>;
 }
 
 const assetIcons = {
@@ -137,10 +141,84 @@ function AssetList({ items, properties, onEdit, onDelete, onPhotos }: AssetListP
   );
 }
 
-export default function AssetTracker({ assets, properties, onEdit, onDelete, onPhotos }: AssetTrackerProps) {
+interface AssetGalleryProps {
+  items: Asset[];
+  properties: Property[];
+  coverPhotos: Record<string, string>;
+  onPhotos?: (id: string) => void;
+}
+
+/**
+ * Marketplace-style photo grid: square cover photo, then name / price-or-age /
+ * property in that order. Clicking a tile opens the asset's photo dialog.
+ */
+function AssetGallery({ items, properties, coverPhotos, onPhotos }: AssetGalleryProps) {
+  if (items.length === 0) {
+    return (
+      <EmptyState title="This asset list is clear" description="Assets added to this category will appear here with their property and service details." />
+    );
+  }
+  return (
+    <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+      {items.map((asset) => {
+        const Icon = assetIcons[asset.category as keyof typeof assetIcons] || Sofa;
+        const property = getPropertyForAsset(asset, properties);
+        const cover = coverPhotos[asset.id];
+        const place = [property?.name ?? asset.buildingAddress, asset.location]
+          .filter(Boolean)
+          .join(" · ");
+        return (
+          <button
+            key={asset.id}
+            type="button"
+            onClick={() => onPhotos?.(asset.id)}
+            className="group text-left focus-visible:outline-none"
+            data-testid={`tile-asset-${asset.id}`}
+          >
+            <div className="aspect-square overflow-hidden rounded-lg border border-border bg-muted transition-shadow group-hover:shadow-md group-focus-visible:ring-2 group-focus-visible:ring-ring dark:group-hover:shadow-[0_0_0_1px_rgba(255,255,255,0.12),0_2px_16px_rgba(255,255,255,0.08)]">
+              {cover ? (
+                <img src={cover} alt={asset.name} className="h-full w-full object-cover" />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center">
+                  <Icon className="h-10 w-10 text-muted-foreground" />
+                </div>
+              )}
+            </div>
+            <p className="mt-2 truncate font-medium" data-testid={`text-asset-name-${asset.id}`}>
+              {asset.name}
+            </p>
+            <p className="text-sm">
+              {asset.type === "fixed"
+                ? `${asset.ageInYears} ${asset.ageInYears === 1 ? "year" : "years"} old`
+                : formatCurrency(asset.purchasePrice)}
+            </p>
+            {place && <p className="truncate text-sm text-muted-foreground">{place}</p>}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+export default function AssetTracker({
+  assets,
+  properties,
+  onEdit,
+  onDelete,
+  onPhotos,
+  view = "list",
+  coverPhotos = {},
+}: AssetTrackerProps) {
   const fixedAssets = assets.filter((a) => a.type === "fixed");
   const movableAssets = assets.filter((a) => a.type === "movable");
   const listProps = { properties, onEdit, onDelete, onPhotos };
+
+  const renderItems = (items: Asset[]) =>
+    view === "gallery" ? (
+      <AssetGallery items={items} properties={properties} coverPhotos={coverPhotos} onPhotos={onPhotos} />
+    ) : (
+      <AssetList items={items} {...listProps} />
+    );
 
   return (
     <div>
@@ -154,10 +232,10 @@ export default function AssetTracker({ assets, properties, onEdit, onDelete, onP
           </TabsTrigger>
         </TabsList>
         <TabsContent value="fixed" className="mt-6">
-          <AssetList items={fixedAssets} {...listProps} />
+          {renderItems(fixedAssets)}
         </TabsContent>
         <TabsContent value="movable" className="mt-6">
-          <AssetList items={movableAssets} {...listProps} />
+          {renderItems(movableAssets)}
         </TabsContent>
       </Tabs>
     </div>
