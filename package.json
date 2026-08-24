@@ -16,6 +16,7 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:baseline": "tsx scripts/baseline-migrations.ts",
+    "db:seed": "tsx scripts/seed-demo-data.ts",
     "db:push": "drizzle-kit push"
   },
   "dependencies": {

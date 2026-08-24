@@ -27,6 +27,7 @@ It is a single Express server that serves both the REST API and the React fronte
 | `npm run db:generate` | Write a migration from a `shared/schema.ts` change |
 | `npm run db:migrate` | Apply pending migrations |
 | `npm run db:baseline -- <tag>` | Record existing tables as already migrated, through `<tag>` (a database that predates `migrations/`). Bare, it records only `0000` |
+| `npm run db:seed` | Demo data for an **empty** database, written through the real storage layer. Refuses to run if any properties exist. Optional `SEED_ADMIN_EMAIL` pre-creates an admin account that re-links on first sign-in |
 | `npm run db:push` | Push the schema directly, without a migration. Development only |
 
 **The gate is `npm run lint && npm run check && npm test && npm run build`.** Run all four before finishing. `.github/workflows/ci.yml` runs the same four on every push and pull request.
