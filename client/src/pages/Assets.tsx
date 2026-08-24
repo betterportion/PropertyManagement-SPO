@@ -13,7 +13,7 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { Plus, Trash2, Image } from "lucide-react";
+import { Plus, Trash2, Image, List, LayoutGrid } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { insertAssetSchema, type Asset, type Property, type AssetPhoto } from "@shared/schema";
@@ -65,6 +65,13 @@ const assetFormSchema = insertAssetSchema.extend({
 export default function Assets() {
   const [selectedRegion, setSelectedRegion] = useState("all");
   const [selectedBuilding, setSelectedBuilding] = useState("all");
+  const [view, setView] = useState<"list" | "gallery">(
+    () => (localStorage.getItem("assets-view") === "gallery" ? "gallery" : "list"),
+  );
+  const changeView = (next: "list" | "gallery") => {
+    setView(next);
+    localStorage.setItem("assets-view", next);
+  };
   const [editingAsset, setEditingAsset] = useState<Asset | null>(null);
   const [deletingAssetId, setDeletingAssetId] = useState<string | null>(null);
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
@@ -79,6 +86,17 @@ export default function Assets() {
   const { data: assetsData, isLoading } = useQuery<Asset[]>({
     queryKey: ["/api/assets"],
   });
+
+  // Only fetched for the gallery view. Photos come back newest-first, so the
+  // first photo seen per asset is its cover.
+  const { data: allPhotos = [] } = useQuery<AssetPhoto[]>({
+    queryKey: ["/api/asset-photos"],
+    enabled: view === "gallery",
+  });
+  const coverPhotos: Record<string, string> = {};
+  for (const photo of allPhotos) {
+    coverPhotos[photo.assetId] ??= photo.imageUrl;
+  }
 
   const { data: properties = [] } = useQuery<Property[]>({
     queryKey: ["/api/properties"],
@@ -160,6 +178,7 @@ export default function Assets() {
     },
     onSuccess: () => {
       refetchPhotos();
+      queryClient.invalidateQueries({ queryKey: ["/api/asset-photos"] });
       toast({ title: "Photo uploaded successfully" });
     },
     onError: () => {
@@ -173,6 +192,7 @@ export default function Assets() {
     },
     onSuccess: () => {
       refetchPhotos();
+      queryClient.invalidateQueries({ queryKey: ["/api/asset-photos"] });
       toast({ title: "Photo deleted successfully" });
     },
     onError: () => {
@@ -263,6 +283,7 @@ export default function Assets() {
         uploadedBy: typedUser?.email || "Unknown",
       });
       queryClient.invalidateQueries({ queryKey: ["/api/assets"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/asset-photos"] });
       setIsAddDialogOpen(false);
       addForm.reset();
       setAddPhotoUrl(null);
@@ -297,9 +318,31 @@ export default function Assets() {
       <PageHeader title="Asset Tracking" description="Keep fixed and movable assets accountable across every property." />
 
       <div className="flex flex-wrap items-center justify-between gap-4">
-        <div className="flex flex-wrap gap-4">
+        <div className="flex flex-wrap items-center gap-4">
           <RegionSelector selectedRegion={selectedRegion} onRegionChange={setSelectedRegion} />
           <BuildingSelector selectedBuilding={selectedBuilding} onBuildingChange={setSelectedBuilding} buildings={buildings} />
+          <div className="flex items-center rounded-md border border-border p-0.5">
+            <Button
+              size="icon"
+              variant={view === "list" ? "secondary" : "ghost"}
+              aria-pressed={view === "list"}
+              aria-label="List view"
+              onClick={() => changeView("list")}
+              data-testid="button-view-list"
+            >
+              <List className="h-4 w-4" />
+            </Button>
+            <Button
+              size="icon"
+              variant={view === "gallery" ? "secondary" : "ghost"}
+              aria-pressed={view === "gallery"}
+              aria-label="Gallery view"
+              onClick={() => changeView("gallery")}
+              data-testid="button-view-gallery"
+            >
+              <LayoutGrid className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
 
         <Dialog open={isAddDialogOpen} onOpenChange={(open) => { setIsAddDialogOpen(open); if (!open) { addForm.reset(); setAddPhotoUrl(null); } }}>
@@ -559,6 +602,8 @@ export default function Assets() {
         <AssetTracker
           assets={assets}
           properties={properties}
+          view={view}
+          coverPhotos={coverPhotos}
           onEdit={canManage ? handleEdit : undefined}
           onDelete={canManage ? (id) => setDeletingAssetId(id) : undefined}
           onPhotos={(id) => {
