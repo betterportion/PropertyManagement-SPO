@@ -105,6 +105,7 @@ The app serves the API and the frontend together on a single port (5000 by defau
 | `npm run db:generate` | Write a migration file from a change to `shared/schema.ts` |
 | `npm run db:migrate` | Apply pending migrations. **This is how schema changes reach production** |
 | `npm run db:baseline -- <tag>` | Record existing tables as already migrated, through `<tag>`, for a database that predates `migrations/` |
+| `npm run db:seed` | Fill an **empty** database with demo data (properties, requests, vendors, photos). Refuses to run if any properties exist. `SEED_ADMIN_EMAIL=you@spo.org` pre-creates an admin so your first sign-in skips the SQL promotion |
 | `npm run db:push` | Push the schema directly with no migration. Development experiments only |
 
 ---
