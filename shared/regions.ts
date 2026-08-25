@@ -42,3 +42,8 @@ export const CHAPTERS_BY_REGION: Record<string, string[]> = {
 export function chaptersForRegion(region: string | null | undefined): string[] {
   return (region && CHAPTERS_BY_REGION[region]) || [];
 }
+
+/** Every chapter across all regions, de-duplicated and sorted. */
+export const ALL_CHAPTERS: string[] = Array.from(
+  new Set(Object.values(CHAPTERS_BY_REGION).flat()),
+).sort();
