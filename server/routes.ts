@@ -54,6 +54,7 @@ import {
   insertPropertySchema,
   insertUserSchema,
   insertMaintenanceScheduleSchema,
+  insertResidentSchema,
   type InsertPropertyWithAddress,
 } from "@shared/schema";
 import { STANDARD_SCHEDULE_TEMPLATES, addMonths } from "./schedules";
@@ -1321,6 +1322,96 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ created: created.length, schedules: created });
     } catch (error) {
       sendError(res, error, "Failed to apply the standard schedule");
+    }
+  });
+
+  // Residents Routes
+  //
+  // The roster of who lives in each house. It is gated on the property
+  // permissions -- someone who can see or manage houses can see or manage who
+  // lives in them -- and region/buildingAddress are always taken from the parent
+  // property, never the body, so they cannot drift from the house.
+  app.get('/api/residents', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canViewProperties", "canManageProperties")) return;
+
+      const roster = await storage.getAllResidents();
+      res.json(filterByRegion(ctx, roster));
+    } catch (error) {
+      sendError(res, error, "Failed to fetch residents");
+    }
+  });
+
+  app.post('/api/residents', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageProperties")) return;
+
+      const property = await storage.getProperty(req.body.propertyId);
+      if (!property) {
+        return res.status(404).json({ message: "Property not found" });
+      }
+      if (!requireRegion(res, ctx, property.region, "Forbidden - Cannot create in this region")) return;
+
+      // region/buildingAddress come from the property, not the caller.
+      const validatedData = insertResidentSchema.parse({
+        ...req.body,
+        region: property.region,
+        buildingAddress: property.address,
+      });
+      const resident = await storage.createResident(validatedData);
+      res.json(resident);
+    } catch (error) {
+      sendError(res, error, "Failed to add resident");
+    }
+  });
+
+  app.patch('/api/residents/:id', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageProperties")) return;
+
+      const existing = await storage.getResident(req.params.id);
+      if (!existing) {
+        return res.status(404).json({ message: "Resident not found" });
+      }
+      if (!requireRegion(res, ctx, existing.region)) return;
+
+      // The house a resident belongs to is fixed here, so its property and
+      // therefore its region/buildingAddress are not editable.
+      const { propertyId: _p, region: _r, buildingAddress: _b, ...editable } = req.body ?? {};
+      const validatedData = insertResidentSchema.partial().parse(editable);
+      const resident = await storage.updateResident(req.params.id, validatedData);
+      res.json(resident);
+    } catch (error) {
+      sendError(res, error, "Failed to update resident");
+    }
+  });
+
+  app.delete('/api/residents/:id', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageProperties")) return;
+
+      const existing = await storage.getResident(req.params.id);
+      if (!existing) {
+        return res.status(404).json({ message: "Resident not found" });
+      }
+      if (!requireRegion(res, ctx, existing.region)) return;
+
+      await storage.deleteResident(req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      sendError(res, error, "Failed to remove resident");
     }
   });
 

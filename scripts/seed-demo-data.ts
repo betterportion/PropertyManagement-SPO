@@ -278,6 +278,40 @@ async function seed(): Promise<void> {
   }
   console.log(`Seeded ${scheduleRows.length} maintenance schedules`);
 
+  // ── Residents ─────────────────────────────────────────────────────────────
+  // A handful of current residents per house, plus one who has moved out, so
+  // the Current / Former tabs both show something.
+  const residentRows: Array<{
+    property: (typeof properties)[number];
+    firstName: string;
+    lastName: string;
+    email: string;
+    movedInDaysAgo: number;
+    movedOutDaysAgo?: number;
+  }> = [
+    { property: properties[0], firstName: "Michael", lastName: "Fisher", email: "michael.fisher@spo.org", movedInDaysAgo: 320 },
+    { property: properties[0], firstName: "Daniel", lastName: "Nguyen", email: "daniel.nguyen@spo.org", movedInDaysAgo: 320 },
+    { property: properties[0], firstName: "Peter", lastName: "Okafor", email: "peter.okafor@spo.org", movedInDaysAgo: 55 },
+    { property: properties[1], firstName: "Rachel", lastName: "Bauer", email: "rachel.bauer@spo.org", movedInDaysAgo: 300 },
+    { property: properties[1], firstName: "Sofia", lastName: "Marchetti", email: "sofia.marchetti@spo.org", movedInDaysAgo: 300 },
+    { property: properties[2], firstName: "Grace", lastName: "Sullivan", email: "grace.sullivan@spo.org", movedInDaysAgo: 60 },
+    { property: properties[0], firstName: "Thomas", lastName: "Reilly", email: "thomas.reilly@spo.org", movedInDaysAgo: 700, movedOutDaysAgo: 40 },
+  ];
+  for (const row of residentRows) {
+    await storage.createResident({
+      propertyId: row.property.id,
+      firstName: row.firstName,
+      lastName: row.lastName,
+      email: row.email,
+      moveInDate: daysFromNow(-row.movedInDaysAgo),
+      moveOutDate: row.movedOutDaysAgo ? daysFromNow(-row.movedOutDaysAgo) : null,
+      isActive: row.movedOutDaysAgo === undefined,
+      region: row.property.region,
+      buildingAddress: row.property.address,
+    });
+  }
+  console.log(`Seeded ${residentRows.length} residents`);
+
   // ── Optional pre-created admin ────────────────────────────────────────────
   const adminEmail = process.env.SEED_ADMIN_EMAIL?.trim();
   if (adminEmail) {

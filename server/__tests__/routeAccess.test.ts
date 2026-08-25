@@ -1338,3 +1338,79 @@ describe("maintenance schedules", () => {
     );
   });
 });
+
+describe("residents", () => {
+  const WEST_PROPERTY = { id: "prop-west", name: "Cleveland House", region: "West Central", address: "1 Main St" };
+  const EAST_PROPERTY = { id: "prop-east", name: "Como House", region: "East Central", address: "2 River Rd" };
+  const ALL_PROPERTIES = { canViewProperties: true, canManageProperties: true };
+
+  it("refuses a resident the roster list", async () => {
+    // A resident holds maintenance permissions but not the property permission.
+    actAs(ALICE, ALL_MAINTENANCE);
+    const { status } = await get("/api/residents");
+    expect(status).toBe(403);
+  });
+
+  it("takes region and building from the property, ignoring the body", async () => {
+    actAs(STAFF, { ...ALL_PROPERTIES, allowedRegions: ["West Central"] });
+    storageMock.getProperty.mockResolvedValue(WEST_PROPERTY);
+    storageMock.createResident.mockImplementation(async (data: Record<string, unknown>) => ({ id: "res-1", ...data }));
+
+    const { status } = await request("POST", "/api/residents", {
+      body: {
+        propertyId: WEST_PROPERTY.id,
+        firstName: "Maria",
+        lastName: "Gonzalez",
+        email: "maria@spo.org",
+        region: "East Central", // spoofed — must be ignored
+        buildingAddress: "999 Evil St", // spoofed — must be ignored
+      },
+    });
+
+    expect(status).toBe(200);
+    expect(storageMock.createResident).toHaveBeenCalledWith(
+      expect.objectContaining({ region: "West Central", buildingAddress: "1 Main St" }),
+    );
+  });
+
+  it("refuses adding a resident to a property in another region", async () => {
+    actAs(STAFF, { ...ALL_PROPERTIES, allowedRegions: ["West Central"] });
+    storageMock.getProperty.mockResolvedValue(EAST_PROPERTY);
+
+    const { status } = await request("POST", "/api/residents", {
+      body: { propertyId: EAST_PROPERTY.id, firstName: "A", lastName: "B", email: "ab@spo.org" },
+    });
+
+    expect(status).toBe(403);
+    expect(storageMock.createResident).not.toHaveBeenCalled();
+  });
+
+  it("rejects an invalid email address", async () => {
+    actAs(STAFF, { ...ALL_PROPERTIES, allowedRegions: ["West Central"] });
+    storageMock.getProperty.mockResolvedValue(WEST_PROPERTY);
+
+    const { status } = await request("POST", "/api/residents", {
+      body: { propertyId: WEST_PROPERTY.id, firstName: "A", lastName: "B", email: "not-an-email" },
+    });
+
+    expect(status).toBe(400);
+    expect(storageMock.createResident).not.toHaveBeenCalled();
+  });
+
+  it("does not let a patch move a resident to another house or region", async () => {
+    actAs(STAFF, { ...ALL_PROPERTIES, allowedRegions: ["West Central"] });
+    storageMock.getResident.mockResolvedValue({ id: "res-1", region: "West Central", propertyId: WEST_PROPERTY.id });
+    storageMock.updateResident.mockImplementation(async (id: string, patch: Record<string, unknown>) => ({ id, ...patch }));
+
+    const { status } = await request("PATCH", "/api/residents/res-1", {
+      body: { isActive: false, propertyId: EAST_PROPERTY.id, region: "East Central", buildingAddress: "999 Evil St" },
+    });
+
+    expect(status).toBe(200);
+    const patch = storageMock.updateResident.mock.calls[0][1];
+    expect(patch).not.toHaveProperty("propertyId");
+    expect(patch).not.toHaveProperty("region");
+    expect(patch).not.toHaveProperty("buildingAddress");
+    expect(patch).toMatchObject({ isActive: false });
+  });
+});
