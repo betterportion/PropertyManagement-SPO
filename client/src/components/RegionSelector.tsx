@@ -6,14 +6,18 @@ interface RegionSelectorProps {
   onRegionChange: (value: string) => void;
 }
 
+// The value is the region exactly as it is stored on records ("West Central"),
+// so a page can filter with `record.region === selectedRegion` directly. Earlier
+// these were kebab-case ids, which silently matched nothing on the pages that
+// compared against the stored Title Case value.
 const regions = [
   { id: "all", name: "All Regions" },
-  { id: "west-central", name: "West Central" },
-  { id: "east-central", name: "East Central" },
-  { id: "north-west", name: "North West" },
-  { id: "south-west", name: "South West" },
-  { id: "north-east", name: "North East" },
-  { id: "south-east", name: "South East" },
+  { id: "West Central", name: "West Central" },
+  { id: "East Central", name: "East Central" },
+  { id: "North West", name: "North West" },
+  { id: "South West", name: "South West" },
+  { id: "North East", name: "North East" },
+  { id: "South East", name: "South East" },
 ];
 
 export default function RegionSelector({ selectedRegion, onRegionChange }: RegionSelectorProps) {

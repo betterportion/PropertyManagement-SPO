@@ -113,7 +113,7 @@ export default function Maintenance() {
   const filteredRequests = requests.filter((r) => {
     const matchesSearch = r.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       r.location.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesRegion = selectedRegion === "all" || r.region.toLowerCase().replace(/\s+/g, '-') === selectedRegion;
+    const matchesRegion = selectedRegion === "all" || r.region === selectedRegion;
     const matchesBuilding = selectedBuilding === "all" || r.buildingAddress === selectedBuilding;
     return matchesSearch && matchesRegion && matchesBuilding;
   });

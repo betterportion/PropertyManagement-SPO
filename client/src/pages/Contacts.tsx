@@ -265,7 +265,7 @@ export default function Contacts() {
   };
 
   const contacts = (contactsData || []).filter((contact) => {
-    const matchesRegion = selectedRegion === "all" || contact.region.toLowerCase().replace(/\s+/g, '-') === selectedRegion;
+    const matchesRegion = selectedRegion === "all" || contact.region === selectedRegion;
     const matchesBuilding = selectedBuilding === "all" || contact.buildingAddress === selectedBuilding;
     return matchesRegion && matchesBuilding;
   });
