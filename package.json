@@ -17,7 +17,8 @@
     "db:migrate": "drizzle-kit migrate",
     "db:baseline": "tsx scripts/baseline-migrations.ts",
     "db:seed": "tsx scripts/seed-demo-data.ts",
-    "db:push": "drizzle-kit push"
+    "db:push": "drizzle-kit push",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
@@ -65,6 +66,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",
+    "@playwright/test": "^1.62.1",
     "@tailwindcss/typography": "^0.5.15",
     "@types/adm-zip": "^0.5.8",
     "@types/connect-pg-simple": "^7.0.3",
