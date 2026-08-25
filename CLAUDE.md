@@ -243,6 +243,7 @@ Routine audit events are retained for **two years**. Account and permission even
 - **Test IDs**: interactive elements carry `data-testid` attributes. Keep adding them.
 - **Dates**: format at the render boundary with `formatDate`/`formatDateTime` from `client/src/lib/format.ts`; Drizzle `timestamp` columns with `defaultNow()` on the backend.
 - **Forms**: React Hook Form with the Zod resolver, using the shared insert schemas.
+- **The `overrides` block in `package.json` is load-bearing.** `drizzle-kit` still *declares* the deprecated `@esbuild-kit/esm-loader` but no longer loads it (it uses `tsx`), so the override pins that chain's `esbuild` to a patched version to keep `npm audit` clean. Remove the override only once `drizzle-kit` drops the declaration.
 
 ---
 
