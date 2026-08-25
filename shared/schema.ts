@@ -361,6 +361,55 @@ export type InsertProperty = z.infer<typeof insertPropertySchema>;
 // Type for creating/updating properties with computed address
 export type InsertPropertyWithAddress = InsertProperty & { address: string };
 
+// Preventive & Safety Maintenance Schedules
+//
+// A recurring upkeep task for a house -- a furnace serviced yearly, smoke and
+// CO detectors tested twice a year, gutters cleaned before winter. `category`
+// separates the two halves of the feature: "safety" tasks drive the dedicated
+// safety-compliance view; "preventive" tasks are ordinary upkeep.
+//
+// region and buildingAddress are denormalised from the property, exactly as on
+// assets and walkthrough photos, so the same region-scoped authorization
+// applies without a join. When a schedule comes due a daily job turns it into
+// an ordinary maintenance request; `lastGeneratedForDue` records the due date
+// it last generated one for, so a schedule that stays overdue does not spawn a
+// fresh request every day.
+export const maintenanceSchedules = pgTable("maintenance_schedules", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  propertyId: varchar("property_id").notNull().references(() => properties.id, { onDelete: "cascade" }),
+  assetId: varchar("asset_id").references(() => assets.id, { onDelete: "set null" }),
+  title: varchar("title").notNull(),
+  category: varchar("category", { enum: ["safety", "preventive"] }).notNull(),
+  intervalMonths: integer("interval_months").notNull(),
+  lastCompletedDate: timestamp("last_completed_date"),
+  nextDueDate: timestamp("next_due_date").notNull(),
+  lastGeneratedForDue: timestamp("last_generated_for_due"),
+  notes: text("notes"),
+  isActive: boolean("is_active").notNull().default(true),
+  region: varchar("region").notNull(),
+  buildingAddress: varchar("building_address").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertMaintenanceScheduleSchema = createInsertSchema(maintenanceSchedules)
+  .omit({
+    id: true,
+    // Server-owned: advanced by "mark done" and by the generation job, never
+    // set from a request body.
+    lastGeneratedForDue: true,
+    createdAt: true,
+    updatedAt: true,
+  })
+  .extend({
+    intervalMonths: nonNegativeInt.refine((n) => n >= 1, "Must recur at least every month"),
+    lastCompletedDate: dateFromClient.nullish(),
+    nextDueDate: dateFromClient,
+  });
+
+export type MaintenanceSchedule = typeof maintenanceSchedules.$inferSelect;
+export type InsertMaintenanceSchedule = z.infer<typeof insertMaintenanceScheduleSchema>;
+
 // Uploaded Files
 //
 // One row per stored object. The stored key is random, so this is where the

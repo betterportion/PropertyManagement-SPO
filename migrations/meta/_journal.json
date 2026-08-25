@@ -50,6 +50,13 @@
       "when": 1787495347699,
       "tag": "0006_drop_question_answers",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1787643609802,
+      "tag": "0007_add_maintenance_schedules",
+      "breakpoints": true
     }
   ]
 }

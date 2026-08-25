@@ -245,6 +245,39 @@ async function seed(): Promise<void> {
   }
   console.log("Seeded 3 billing records");
 
+  // ── Preventive & safety schedules ─────────────────────────────────────────
+  // A realistic mix of overdue / due-soon / up-to-date across the first houses.
+  const daysFromNow = (n: number) => new Date(Date.now() + n * 24 * 60 * 60 * 1000);
+  const scheduleRows: Array<{
+    property: (typeof properties)[number];
+    title: string;
+    category: "safety" | "preventive";
+    intervalMonths: number;
+    dueInDays: number;
+    lastDoneDaysAgo?: number;
+  }> = [
+    { property: properties[0], title: "Smoke & CO detector test", category: "safety", intervalMonths: 6, dueInDays: -12, lastDoneDaysAgo: 195 },
+    { property: properties[0], title: "Fire extinguisher check", category: "safety", intervalMonths: 12, dueInDays: 21, lastDoneDaysAgo: 344 },
+    { property: properties[0], title: "Furnace / heating service", category: "preventive", intervalMonths: 12, dueInDays: 190, lastDoneDaysAgo: 175 },
+    { property: properties[1], title: "Dryer vent cleaning", category: "safety", intervalMonths: 12, dueInDays: -40, lastDoneDaysAgo: 405 },
+    { property: properties[1], title: "HVAC filter change", category: "preventive", intervalMonths: 3, dueInDays: 8, lastDoneDaysAgo: 82 },
+    { property: properties[2], title: "Fire extinguisher check", category: "safety", intervalMonths: 12, dueInDays: 250, lastDoneDaysAgo: 115 },
+    { property: properties[2], title: "Gutter cleaning", category: "preventive", intervalMonths: 12, dueInDays: 30 },
+  ];
+  for (const row of scheduleRows) {
+    await storage.createMaintenanceSchedule({
+      propertyId: row.property.id,
+      title: row.title,
+      category: row.category,
+      intervalMonths: row.intervalMonths,
+      nextDueDate: daysFromNow(row.dueInDays),
+      lastCompletedDate: row.lastDoneDaysAgo ? daysFromNow(-row.lastDoneDaysAgo) : null,
+      region: row.property.region,
+      buildingAddress: row.property.address,
+    });
+  }
+  console.log(`Seeded ${scheduleRows.length} maintenance schedules`);
+
   // ── Optional pre-created admin ────────────────────────────────────────────
   const adminEmail = process.env.SEED_ADMIN_EMAIL?.trim();
   if (adminEmail) {
