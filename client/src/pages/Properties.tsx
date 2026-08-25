@@ -14,7 +14,7 @@ import { Plus, Building2, MapPin, MoreVertical } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { insertPropertySchema, type Property, type InsertProperty } from "@shared/schema";
-import { REGIONS, chaptersForRegion } from "@shared/regions";
+import { REGIONS, chaptersForRegion, ALL_CHAPTERS } from "@shared/regions";
 import { z } from "zod";
 import { Section, Container, PageHeader, PageStack } from "@/components/layout/page";
 import { LoadingState, EmptyState } from "@/components/states";
@@ -39,11 +39,10 @@ export default function Properties() {
     queryKey: ["/api/properties"],
   });
 
-  // Chapter is free text, so the filter offers the values actually in use
-  // rather than a fixed list.
-  const chapters = Array.from(
-    new Set((properties || []).map((p) => p.chapter).filter((c): c is string => !!c)),
-  ).sort();
+  // The chapter filter offers the official chapters (every one when no region is
+  // picked, or just the chosen region's), so the full catalogue is visible even
+  // for chapters no property uses yet.
+  const chapters = regionFilter === "all" ? ALL_CHAPTERS : chaptersForRegion(regionFilter);
 
   const visibleProperties = (properties || []).filter(
     (p) =>
@@ -173,7 +172,7 @@ export default function Properties() {
 
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div className="flex items-center gap-2 flex-wrap">
-          <Select value={regionFilter} onValueChange={setRegionFilter}>
+          <Select value={regionFilter} onValueChange={(v) => { setRegionFilter(v); setChapterFilter("all"); }}>
             <SelectTrigger className="w-44" data-testid="select-filter-region" aria-label="Filter by region">
               <SelectValue />
             </SelectTrigger>

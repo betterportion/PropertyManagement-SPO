@@ -20,7 +20,9 @@ test.describe("properties — region and chapter filters", () => {
     expect(total).toBeGreaterThan(0);
 
     await page.getByTestId("select-filter-chapter").click();
-    await page.getByRole("option", { name: fixtures.propertyChapter }).click();
+    // exact match: some chapters are substrings of others ("University of
+    // St. Thomas" vs "... - Houston"), and the filter now lists all of them.
+    await page.getByRole("option", { name: fixtures.propertyChapter, exact: true }).click();
 
     // There are no more cards than before, and every remaining card actually
     // shows the chosen chapter — so the filter really narrowed the list.
