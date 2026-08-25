@@ -36,8 +36,18 @@ export const authProvider = {
   /** Internal passport strategy prefix only; never shown to users. */
   name: process.env.OIDC_PROVIDER_NAME ?? "replitauth",
 
-  /** offline_access is what allows sessions to refresh without re-prompting. */
-  scopes: (process.env.OIDC_SCOPES ?? "openid email profile offline_access")
+  /**
+   * The default omits offline_access on purpose. It is a standard OIDC scope
+   * (Replit used it, and it is what yields a refresh token for silent session
+   * renewal), but Google -- the V1 provider -- rejects it outright: an
+   * authorization request carrying it is bounced to Google's oauth error page,
+   * so the default of every other provider would have blocked Google login
+   * entirely. A provider that supports it can opt back in via OIDC_SCOPES; on
+   * Google the trade-off is that a session ends when its access token expires
+   * and the user signs in again (Google issues refresh tokens through
+   * access_type=offline, not through this scope).
+   */
+  scopes: (process.env.OIDC_SCOPES ?? "openid email profile")
     .split(/\s+/)
     .filter(Boolean),
 };
