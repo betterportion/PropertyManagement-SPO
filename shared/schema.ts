@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, timestamp, jsonb, index, boolean, integer, numeric } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, timestamp, jsonb, index, uniqueIndex, boolean, integer, numeric } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -402,6 +402,98 @@ export const insertResidentSchema = createInsertSchema(residents)
 
 export type Resident = typeof residents.$inferSelect;
 export type InsertResident = z.infer<typeof insertResidentSchema>;
+
+// Rent payments
+//
+// One row per resident per month. Rent is billed monthly (decided with SPO,
+// issue #43); "flat per house" is an ergonomic concern, not a schema one -- the
+// generate action fills the same amount for every resident in a house, but the
+// amount lives on each row so a scholarship or a partial month is just a
+// different number. The unique index on (residentId, period) keeps that action
+// idempotent: re-running it never creates a second charge for the same month.
+//
+// This is finance data: it is gated to regional leads (admins + regional
+// administrators), not to the property permission the roster uses, and it holds
+// amounts, statuses, dates and a free-text reference ONLY -- never a bank
+// account, routing, or card number (see the financial-data rule in CLAUDE.md).
+export const rentPayments = pgTable(
+  "rent_payments",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    residentId: varchar("resident_id").notNull().references(() => residents.id, { onDelete: "cascade" }),
+    propertyId: varchar("property_id").notNull(),
+    // The month being billed, as "YYYY-MM".
+    period: varchar("period").notNull(),
+    amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),
+    status: varchar("status", { enum: ["unpaid", "paid", "waived"] }).notNull().default("unpaid"),
+    paidDate: timestamp("paid_date"),
+    // How it was paid, e.g. "check #1234" or a QuickBooks/Ramp reference. Never
+    // an account or card number.
+    reference: varchar("reference"),
+    notes: text("notes"),
+    region: varchar("region").notNull(),
+    buildingAddress: varchar("building_address").notNull(),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [uniqueIndex("IDX_rent_payment_resident_period").on(table.residentId, table.period)],
+);
+
+export const insertRentPaymentSchema = createInsertSchema(rentPayments)
+  .omit({
+    id: true,
+    createdAt: true,
+    updatedAt: true,
+  })
+  .extend({
+    period: z.string().regex(/^\d{4}-\d{2}$/, "Use a YYYY-MM month"),
+    amount: nonNegativeAmount,
+    paidDate: dateFromClient.nullish(),
+  });
+
+export type RentPayment = typeof rentPayments.$inferSelect;
+export type InsertRentPayment = z.infer<typeof insertRentPaymentSchema>;
+
+// Security deposits
+//
+// One deposit per resident (unique). Tracks the current status and any
+// deductions as a note (decided with SPO, issue #43) -- enough to drive the
+// departing-resident email (#41) without an itemised ledger. Same finance
+// gating and same financial-data rule as rent: amounts, statuses, dates and
+// notes only, never bank/card details.
+export const securityDeposits = pgTable(
+  "security_deposits",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    residentId: varchar("resident_id").notNull().references(() => residents.id, { onDelete: "cascade" }),
+    propertyId: varchar("property_id").notNull(),
+    amountHeld: numeric("amount_held", { precision: 12, scale: 2 }).notNull(),
+    status: varchar("status", { enum: ["held", "returned", "partially_returned", "withheld"] }).notNull().default("held"),
+    amountReturned: numeric("amount_returned", { precision: 12, scale: 2 }),
+    returnedDate: timestamp("returned_date"),
+    deductionsNotes: text("deductions_notes"),
+    region: varchar("region").notNull(),
+    buildingAddress: varchar("building_address").notNull(),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [uniqueIndex("IDX_security_deposit_resident").on(table.residentId)],
+);
+
+export const insertSecurityDepositSchema = createInsertSchema(securityDeposits)
+  .omit({
+    id: true,
+    createdAt: true,
+    updatedAt: true,
+  })
+  .extend({
+    amountHeld: nonNegativeAmount,
+    amountReturned: nonNegativeAmount.nullish(),
+    returnedDate: dateFromClient.nullish(),
+  });
+
+export type SecurityDeposit = typeof securityDeposits.$inferSelect;
+export type InsertSecurityDeposit = z.infer<typeof insertSecurityDepositSchema>;
 
 // Preventive & Safety Maintenance Schedules
 //

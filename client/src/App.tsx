@@ -18,6 +18,7 @@ import Walkthroughs from "@/pages/Walkthroughs";
 import Assets from "@/pages/Assets";
 import Safety from "@/pages/Safety";
 import Residents from "@/pages/Residents";
+import Finances from "@/pages/Finances";
 import Contacts from "@/pages/Contacts";
 import Properties from "@/pages/Properties";
 import ResidentDashboard from "@/pages/ResidentDashboard";
@@ -46,6 +47,7 @@ function Router() {
         <Route path="/" component={AdminDashboard} />
         <Route path="/properties" component={Properties} />
         <Route path="/residents" component={Residents} />
+        <Route path="/finances" component={Finances} />
         <Route path="/maintenance" component={Maintenance} />
         <Route path="/walkthroughs" component={Walkthroughs} />
         <Route path="/assets" component={Assets} />

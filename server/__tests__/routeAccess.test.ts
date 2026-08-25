@@ -1414,3 +1414,129 @@ describe("residents", () => {
     expect(patch).toMatchObject({ isActive: false });
   });
 });
+
+describe("resident finances (regional leads only)", () => {
+  const WEST_PROPERTY = { id: "prop-west", name: "Cleveland House", region: "West Central", address: "1 Main St" };
+  const WEST_RESIDENT = { id: "res-w", propertyId: "prop-west", region: "West Central", buildingAddress: "1 Main St", firstName: "Maria", lastName: "Diaz", isActive: true };
+  const EAST_RESIDENT = { id: "res-e", propertyId: "prop-east", region: "East Central", buildingAddress: "2 River Rd", firstName: "Sam", lastName: "Cole", isActive: true };
+
+  it("refuses a resident the rent list even with every permission", async () => {
+    actAs(ALICE, { canViewProperties: true, canManageProperties: true, canViewMaintenance: true });
+    const { status } = await get("/api/rent-payments");
+    expect(status).toBe(403);
+  });
+
+  it("takes region and property from the resident on a rent charge, ignoring the body", async () => {
+    actAs(STAFF, { allowedRegions: ["West Central"] });
+    storageMock.getResident.mockResolvedValue(WEST_RESIDENT);
+    storageMock.createRentPayment.mockImplementation(async (data: Record<string, unknown>) => ({ id: "rp-1", ...data }));
+
+    const { status } = await request("POST", "/api/rent-payments", {
+      body: { residentId: WEST_RESIDENT.id, period: "2026-08", amount: 500, region: "East Central", propertyId: "prop-evil", buildingAddress: "999 Evil St" },
+    });
+
+    expect(status).toBe(200);
+    expect(storageMock.createRentPayment).toHaveBeenCalledWith(
+      expect.objectContaining({ region: "West Central", propertyId: "prop-west", buildingAddress: "1 Main St", amount: "500" }),
+    );
+  });
+
+  it("refuses recording rent for a resident in another region", async () => {
+    actAs(STAFF, { allowedRegions: ["West Central"] });
+    storageMock.getResident.mockResolvedValue(EAST_RESIDENT);
+
+    const { status } = await request("POST", "/api/rent-payments", {
+      body: { residentId: EAST_RESIDENT.id, period: "2026-08", amount: 500 },
+    });
+
+    expect(status).toBe(403);
+    expect(storageMock.createRentPayment).not.toHaveBeenCalled();
+  });
+
+  it("generates charges only for current residents who lack one, using the given amount", async () => {
+    actAs(STAFF, { allowedRegions: ["West Central"] });
+    storageMock.getProperty.mockResolvedValue(WEST_PROPERTY);
+    storageMock.getResidentsByProperty.mockResolvedValue([
+      { ...WEST_RESIDENT, id: "res-a", isActive: true },
+      { ...WEST_RESIDENT, id: "res-b", isActive: true },
+      { ...WEST_RESIDENT, id: "res-gone", isActive: false }, // moved out — skipped
+    ]);
+    // res-a already has a charge for the month; res-b does not.
+    storageMock.getRentPaymentForResidentPeriod.mockImplementation(async (id: string) => (id === "res-a" ? { id: "existing" } : undefined));
+    storageMock.createRentPayment.mockImplementation(async (data: Record<string, unknown>) => ({ id: "new", ...data }));
+
+    const { status, body } = await request("POST", "/api/rent-payments/generate", {
+      body: { propertyId: WEST_PROPERTY.id, period: "2026-08", amount: 450 },
+    });
+
+    expect(status).toBe(200);
+    expect(body.created).toBe(1); // only res-b
+    expect(storageMock.createRentPayment).toHaveBeenCalledTimes(1);
+    expect(storageMock.createRentPayment).toHaveBeenCalledWith(expect.objectContaining({ residentId: "res-b", amount: "450" }));
+  });
+
+  it("refuses to generate rent without an amount when the house has no prior charge", async () => {
+    actAs(STAFF, { allowedRegions: ["West Central"] });
+    storageMock.getProperty.mockResolvedValue(WEST_PROPERTY);
+    storageMock.getLatestRentAmountForProperty.mockResolvedValue(undefined);
+
+    const { status } = await request("POST", "/api/rent-payments/generate", {
+      body: { propertyId: WEST_PROPERTY.id, period: "2026-08" },
+    });
+
+    expect(status).toBe(400);
+    expect(storageMock.createRentPayment).not.toHaveBeenCalled();
+  });
+
+  it("does not let a rent patch change the resident, house, month or region", async () => {
+    actAs(STAFF, { allowedRegions: ["West Central"] });
+    storageMock.getRentPayment.mockResolvedValue({ id: "rp-1", region: "West Central" });
+    storageMock.updateRentPayment.mockImplementation(async (id: string, patch: Record<string, unknown>) => ({ id, ...patch }));
+
+    const { status } = await request("PATCH", "/api/rent-payments/rp-1", {
+      body: { status: "paid", residentId: "res-evil", propertyId: "prop-evil", period: "1999-01", region: "East Central" },
+    });
+
+    expect(status).toBe(200);
+    const patch = storageMock.updateRentPayment.mock.calls[0][1];
+    for (const forbidden of ["residentId", "propertyId", "period", "region", "buildingAddress"]) {
+      expect(patch).not.toHaveProperty(forbidden);
+    }
+    expect(patch).toMatchObject({ status: "paid" });
+  });
+
+  it("refuses a resident the deposit list", async () => {
+    actAs(ALICE, { canManageProperties: true });
+    const { status } = await get("/api/security-deposits");
+    expect(status).toBe(403);
+  });
+
+  it("refuses a second deposit for a resident who already has one", async () => {
+    actAs(STAFF, { allowedRegions: ["West Central"] });
+    storageMock.getResident.mockResolvedValue(WEST_RESIDENT);
+    storageMock.getSecurityDepositByResident.mockResolvedValue({ id: "dep-existing" });
+
+    const { status } = await request("POST", "/api/security-deposits", {
+      body: { residentId: WEST_RESIDENT.id, amountHeld: 300 },
+    });
+
+    expect(status).toBe(409);
+    expect(storageMock.createSecurityDeposit).not.toHaveBeenCalled();
+  });
+
+  it("takes region and property from the resident on a deposit, ignoring the body", async () => {
+    actAs(STAFF, { allowedRegions: ["West Central"] });
+    storageMock.getResident.mockResolvedValue(WEST_RESIDENT);
+    storageMock.getSecurityDepositByResident.mockResolvedValue(undefined);
+    storageMock.createSecurityDeposit.mockImplementation(async (data: Record<string, unknown>) => ({ id: "dep-1", ...data }));
+
+    const { status } = await request("POST", "/api/security-deposits", {
+      body: { residentId: WEST_RESIDENT.id, amountHeld: 300, region: "East Central", propertyId: "prop-evil" },
+    });
+
+    expect(status).toBe(200);
+    expect(storageMock.createSecurityDeposit).toHaveBeenCalledWith(
+      expect.objectContaining({ region: "West Central", propertyId: "prop-west", amountHeld: "300" }),
+    );
+  });
+});
