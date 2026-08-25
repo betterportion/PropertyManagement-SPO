@@ -55,6 +55,8 @@ import {
   insertUserSchema,
   insertMaintenanceScheduleSchema,
   insertResidentSchema,
+  insertRentPaymentSchema,
+  insertSecurityDepositSchema,
   type InsertPropertyWithAddress,
 } from "@shared/schema";
 import { STANDARD_SCHEDULE_TEMPLATES, addMonths } from "./schedules";
@@ -1412,6 +1414,227 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ success: true });
     } catch (error) {
       sendError(res, error, "Failed to remove resident");
+    }
+  });
+
+  // Resident Finances: rent payments and security deposits
+  //
+  // Finance data is regional-leads-only (decided with SPO, issue #43): staff
+  // pass, residents are refused outright, and everything is region-scoped. There
+  // is no separate finance permission because the only non-resident roles are
+  // exactly the leads this should reach. propertyId/region/buildingAddress are
+  // always taken from the resident (which already carries them), never the body.
+  app.get('/api/rent-payments', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+
+      const payments = await storage.getAllRentPayments();
+      res.json(filterByRegion(ctx, payments));
+    } catch (error) {
+      sendError(res, error, "Failed to fetch rent payments");
+    }
+  });
+
+  app.post('/api/rent-payments', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+
+      const resident = await storage.getResident(req.body.residentId);
+      if (!resident) {
+        return res.status(404).json({ message: "Resident not found" });
+      }
+      if (!requireRegion(res, ctx, resident.region, "Forbidden - Cannot record in this region")) return;
+
+      const validatedData = insertRentPaymentSchema.parse({
+        ...req.body,
+        propertyId: resident.propertyId,
+        region: resident.region,
+        buildingAddress: resident.buildingAddress,
+      });
+      const payment = await storage.createRentPayment(validatedData);
+      res.json(payment);
+    } catch (error) {
+      sendError(res, error, "Failed to record rent payment");
+    }
+  });
+
+  // Records a month's rent for a whole house in one action: an unpaid charge for
+  // every current resident who does not already have one for that month. The
+  // amount is "flat per house" -- taken from the body, or defaulted to the last
+  // amount charged for the house so it need not be retyped each month.
+  app.post('/api/rent-payments/generate', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+
+      const { propertyId, period } = req.body ?? {};
+      if (!/^\d{4}-\d{2}$/.test(period ?? "")) {
+        return res.status(400).json({ message: "Use a YYYY-MM month" });
+      }
+      const property = await storage.getProperty(propertyId);
+      if (!property) {
+        return res.status(404).json({ message: "Property not found" });
+      }
+      if (!requireRegion(res, ctx, property.region, "Forbidden - Cannot record in this region")) return;
+
+      const amount = req.body.amount ?? (await storage.getLatestRentAmountForProperty(property.id));
+      if (amount === undefined || amount === null || amount === "") {
+        return res.status(400).json({ message: "Enter an amount -- there is no previous rent for this house to copy." });
+      }
+
+      const roster = await storage.getResidentsByProperty(property.id);
+      const current = roster.filter((r) => r.isActive);
+      const created = [];
+      for (const resident of current) {
+        const existing = await storage.getRentPaymentForResidentPeriod(resident.id, period);
+        if (existing) continue;
+        created.push(
+          await storage.createRentPayment(
+            insertRentPaymentSchema.parse({
+              residentId: resident.id,
+              propertyId: property.id,
+              period,
+              amount,
+              region: property.region,
+              buildingAddress: property.address,
+            }),
+          ),
+        );
+      }
+      res.json({ created: created.length, payments: created });
+    } catch (error) {
+      sendError(res, error, "Failed to record rent for the house");
+    }
+  });
+
+  app.patch('/api/rent-payments/:id', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+
+      const existing = await storage.getRentPayment(req.params.id);
+      if (!existing) {
+        return res.status(404).json({ message: "Rent payment not found" });
+      }
+      if (!requireRegion(res, ctx, existing.region)) return;
+
+      // The resident, house, month and region are fixed once a charge exists;
+      // only its status and payment details are editable here.
+      const { residentId: _r, propertyId: _p, period: _pe, region: _re, buildingAddress: _b, ...editable } = req.body ?? {};
+      const validatedData = insertRentPaymentSchema.partial().parse(editable);
+      const payment = await storage.updateRentPayment(req.params.id, validatedData);
+      res.json(payment);
+    } catch (error) {
+      sendError(res, error, "Failed to update rent payment");
+    }
+  });
+
+  app.delete('/api/rent-payments/:id', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+
+      const existing = await storage.getRentPayment(req.params.id);
+      if (!existing) {
+        return res.status(404).json({ message: "Rent payment not found" });
+      }
+      if (!requireRegion(res, ctx, existing.region)) return;
+
+      await storage.deleteRentPayment(req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      sendError(res, error, "Failed to delete rent payment");
+    }
+  });
+
+  app.get('/api/security-deposits', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+
+      const deposits = await storage.getAllSecurityDeposits();
+      res.json(filterByRegion(ctx, deposits));
+    } catch (error) {
+      sendError(res, error, "Failed to fetch security deposits");
+    }
+  });
+
+  app.post('/api/security-deposits', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+
+      const resident = await storage.getResident(req.body.residentId);
+      if (!resident) {
+        return res.status(404).json({ message: "Resident not found" });
+      }
+      if (!requireRegion(res, ctx, resident.region, "Forbidden - Cannot record in this region")) return;
+
+      // One deposit per resident.
+      const already = await storage.getSecurityDepositByResident(resident.id);
+      if (already) {
+        return res.status(409).json({ message: "This resident already has a deposit on file." });
+      }
+
+      const validatedData = insertSecurityDepositSchema.parse({
+        ...req.body,
+        propertyId: resident.propertyId,
+        region: resident.region,
+        buildingAddress: resident.buildingAddress,
+      });
+      const deposit = await storage.createSecurityDeposit(validatedData);
+      res.json(deposit);
+    } catch (error) {
+      sendError(res, error, "Failed to record security deposit");
+    }
+  });
+
+  app.patch('/api/security-deposits/:id', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+
+      const existing = await storage.getSecurityDeposit(req.params.id);
+      if (!existing) {
+        return res.status(404).json({ message: "Security deposit not found" });
+      }
+      if (!requireRegion(res, ctx, existing.region)) return;
+
+      const { residentId: _r, propertyId: _p, region: _re, buildingAddress: _b, ...editable } = req.body ?? {};
+      const validatedData = insertSecurityDepositSchema.partial().parse(editable);
+      const deposit = await storage.updateSecurityDeposit(req.params.id, validatedData);
+      res.json(deposit);
+    } catch (error) {
+      sendError(res, error, "Failed to update security deposit");
+    }
+  });
+
+  app.delete('/api/security-deposits/:id', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+
+      const existing = await storage.getSecurityDeposit(req.params.id);
+      if (!existing) {
+        return res.status(404).json({ message: "Security deposit not found" });
+      }
+      if (!requireRegion(res, ctx, existing.region)) return;
+
+      await storage.deleteSecurityDeposit(req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      sendError(res, error, "Failed to delete security deposit");
     }
   });
 

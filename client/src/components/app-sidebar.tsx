@@ -1,4 +1,4 @@
-import { Home, Wrench, Camera, Package, Users, UsersRound, Settings, Building2, Palette, ShieldCheck } from "lucide-react";
+import { Home, Wrench, Camera, Package, Users, UsersRound, Banknote, Settings, Building2, Palette, ShieldCheck } from "lucide-react";
 import { Link } from "wouter";
 import {
   Sidebar,
@@ -27,6 +27,7 @@ const adminMenuItems: NavItem[] = [
   { title: "Dashboard", url: "/", icon: Home },
   { title: "Properties", url: "/properties", icon: Building2 },
   { title: "Residents", url: "/residents", icon: UsersRound },
+  { title: "Finances", url: "/finances", icon: Banknote },
   { title: "Maintenance", url: "/maintenance", icon: Wrench },
   { title: "Safety", url: "/safety", icon: ShieldCheck },
   { title: "Maint Contacts & Invoices", url: "/contacts", icon: Users },

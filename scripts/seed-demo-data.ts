@@ -297,20 +297,74 @@ async function seed(): Promise<void> {
     { property: properties[2], firstName: "Grace", lastName: "Sullivan", email: "grace.sullivan@spo.org", movedInDaysAgo: 60 },
     { property: properties[0], firstName: "Thomas", lastName: "Reilly", email: "thomas.reilly@spo.org", movedInDaysAgo: 700, movedOutDaysAgo: 40 },
   ];
+  const residents = [];
   for (const row of residentRows) {
-    await storage.createResident({
-      propertyId: row.property.id,
-      firstName: row.firstName,
-      lastName: row.lastName,
-      email: row.email,
-      moveInDate: daysFromNow(-row.movedInDaysAgo),
-      moveOutDate: row.movedOutDaysAgo ? daysFromNow(-row.movedOutDaysAgo) : null,
-      isActive: row.movedOutDaysAgo === undefined,
-      region: row.property.region,
-      buildingAddress: row.property.address,
-    });
+    residents.push(
+      await storage.createResident({
+        propertyId: row.property.id,
+        firstName: row.firstName,
+        lastName: row.lastName,
+        email: row.email,
+        moveInDate: daysFromNow(-row.movedInDaysAgo),
+        moveOutDate: row.movedOutDaysAgo ? daysFromNow(-row.movedOutDaysAgo) : null,
+        isActive: row.movedOutDaysAgo === undefined,
+        region: row.property.region,
+        buildingAddress: row.property.address,
+      }),
+    );
   }
   console.log(`Seeded ${residentRows.length} residents`);
+
+  // ── Resident finances: rent + deposits ─────────────────────────────────────
+  // A flat house rent for the current month, with a realistic paid/unpaid mix,
+  // and a deposit per current resident (one already returned).
+  const period = (() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  })();
+  const rentByProperty = new Map<string, number>([
+    [properties[0].id, 550],
+    [properties[1].id, 600],
+    [properties[2].id, 525],
+  ]);
+  let rentCount = 0;
+  for (const [i, resident] of residents.entries()) {
+    if (!resident.isActive) continue;
+    const amount = rentByProperty.get(resident.propertyId);
+    if (amount === undefined) continue;
+    const paid = i % 3 !== 0; // roughly two-thirds paid
+    await storage.createRentPayment({
+      residentId: resident.id,
+      propertyId: resident.propertyId,
+      period,
+      amount: String(amount),
+      status: paid ? "paid" : "unpaid",
+      paidDate: paid ? daysFromNow(-2) : null,
+      reference: paid ? "check" : null,
+      region: resident.region,
+      buildingAddress: resident.buildingAddress,
+    });
+    rentCount += 1;
+  }
+  console.log(`Seeded ${rentCount} rent payments for ${period}`);
+
+  let depositCount = 0;
+  for (const [i, resident] of residents.entries()) {
+    const returned = !resident.isActive; // the moved-out resident's deposit is back
+    await storage.createSecurityDeposit({
+      residentId: resident.id,
+      propertyId: resident.propertyId,
+      amountHeld: String(500 + (i % 2) * 50),
+      status: returned ? "partially_returned" : "held",
+      amountReturned: returned ? "425" : null,
+      returnedDate: returned ? daysFromNow(-38) : null,
+      deductionsNotes: returned ? "$75 held back for a wall repair in the shared bathroom." : null,
+      region: resident.region,
+      buildingAddress: resident.buildingAddress,
+    });
+    depositCount += 1;
+  }
+  console.log(`Seeded ${depositCount} security deposits`);
 
   // ── Optional pre-created admin ────────────────────────────────────────────
   const adminEmail = process.env.SEED_ADMIN_EMAIL?.trim();

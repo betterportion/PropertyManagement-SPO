@@ -11,6 +11,8 @@ import {
   billingRecords,
   properties,
   residents,
+  rentPayments,
+  securityDeposits,
   maintenanceSchedules,
   requestContacts,
   type User,
@@ -39,6 +41,10 @@ import {
   type InsertMaintenanceSchedule,
   type Resident,
   type InsertResident,
+  type RentPayment,
+  type InsertRentPayment,
+  type SecurityDeposit,
+  type InsertSecurityDeposit,
   uploads,
   type Upload,
   type InsertUpload,
@@ -149,6 +155,26 @@ export interface IStorage {
   getResidentsByProperty(propertyId: string): Promise<Resident[]>;
   updateResident(id: string, data: Partial<InsertResident>): Promise<Resident>;
   deleteResident(id: string): Promise<void>;
+
+  // Rent Payments
+  createRentPayment(payment: InsertRentPayment): Promise<RentPayment>;
+  getRentPayment(id: string): Promise<RentPayment | undefined>;
+  getAllRentPayments(): Promise<RentPayment[]>;
+  getRentPaymentsByProperty(propertyId: string): Promise<RentPayment[]>;
+  /** The payment a resident already has for a month, if any. */
+  getRentPaymentForResidentPeriod(residentId: string, period: string): Promise<RentPayment | undefined>;
+  /** The most recent amount charged for a house, used to default the next month. */
+  getLatestRentAmountForProperty(propertyId: string): Promise<string | undefined>;
+  updateRentPayment(id: string, data: Partial<InsertRentPayment>): Promise<RentPayment>;
+  deleteRentPayment(id: string): Promise<void>;
+
+  // Security Deposits
+  createSecurityDeposit(deposit: InsertSecurityDeposit): Promise<SecurityDeposit>;
+  getSecurityDeposit(id: string): Promise<SecurityDeposit | undefined>;
+  getAllSecurityDeposits(): Promise<SecurityDeposit[]>;
+  getSecurityDepositByResident(residentId: string): Promise<SecurityDeposit | undefined>;
+  updateSecurityDeposit(id: string, data: Partial<InsertSecurityDeposit>): Promise<SecurityDeposit>;
+  deleteSecurityDeposit(id: string): Promise<void>;
 
   // Maintenance Contacts
   createMaintenanceContact(contact: InsertMaintenanceContact): Promise<MaintenanceContact>;
@@ -593,6 +619,93 @@ export class DatabaseStorage implements IStorage {
 
   async deleteResident(id: string): Promise<void> {
     await db.delete(residents).where(eq(residents.id, id));
+  }
+
+  // Rent Payments Implementation
+  async createRentPayment(paymentData: InsertRentPayment): Promise<RentPayment> {
+    const [payment] = await db.insert(rentPayments).values(paymentData).returning();
+    return payment;
+  }
+
+  async getRentPayment(id: string): Promise<RentPayment | undefined> {
+    const [payment] = await db.select().from(rentPayments).where(eq(rentPayments.id, id));
+    return payment;
+  }
+
+  async getAllRentPayments(): Promise<RentPayment[]> {
+    return await db.select().from(rentPayments).orderBy(desc(rentPayments.period));
+  }
+
+  async getRentPaymentsByProperty(propertyId: string): Promise<RentPayment[]> {
+    return await db
+      .select()
+      .from(rentPayments)
+      .where(eq(rentPayments.propertyId, propertyId))
+      .orderBy(desc(rentPayments.period));
+  }
+
+  async getRentPaymentForResidentPeriod(residentId: string, period: string): Promise<RentPayment | undefined> {
+    const [payment] = await db
+      .select()
+      .from(rentPayments)
+      .where(and(eq(rentPayments.residentId, residentId), eq(rentPayments.period, period)));
+    return payment;
+  }
+
+  async getLatestRentAmountForProperty(propertyId: string): Promise<string | undefined> {
+    const [payment] = await db
+      .select()
+      .from(rentPayments)
+      .where(eq(rentPayments.propertyId, propertyId))
+      .orderBy(desc(rentPayments.createdAt))
+      .limit(1);
+    return payment?.amount;
+  }
+
+  async updateRentPayment(id: string, data: Partial<InsertRentPayment>): Promise<RentPayment> {
+    const [payment] = await db
+      .update(rentPayments)
+      .set({ ...filterUndefined(data), updatedAt: new Date() })
+      .where(eq(rentPayments.id, id))
+      .returning();
+    return payment;
+  }
+
+  async deleteRentPayment(id: string): Promise<void> {
+    await db.delete(rentPayments).where(eq(rentPayments.id, id));
+  }
+
+  // Security Deposits Implementation
+  async createSecurityDeposit(depositData: InsertSecurityDeposit): Promise<SecurityDeposit> {
+    const [deposit] = await db.insert(securityDeposits).values(depositData).returning();
+    return deposit;
+  }
+
+  async getSecurityDeposit(id: string): Promise<SecurityDeposit | undefined> {
+    const [deposit] = await db.select().from(securityDeposits).where(eq(securityDeposits.id, id));
+    return deposit;
+  }
+
+  async getAllSecurityDeposits(): Promise<SecurityDeposit[]> {
+    return await db.select().from(securityDeposits).orderBy(desc(securityDeposits.createdAt));
+  }
+
+  async getSecurityDepositByResident(residentId: string): Promise<SecurityDeposit | undefined> {
+    const [deposit] = await db.select().from(securityDeposits).where(eq(securityDeposits.residentId, residentId));
+    return deposit;
+  }
+
+  async updateSecurityDeposit(id: string, data: Partial<InsertSecurityDeposit>): Promise<SecurityDeposit> {
+    const [deposit] = await db
+      .update(securityDeposits)
+      .set({ ...filterUndefined(data), updatedAt: new Date() })
+      .where(eq(securityDeposits.id, id))
+      .returning();
+    return deposit;
+  }
+
+  async deleteSecurityDeposit(id: string): Promise<void> {
+    await db.delete(securityDeposits).where(eq(securityDeposits.id, id));
   }
 
   // Asset Photos Implementation
