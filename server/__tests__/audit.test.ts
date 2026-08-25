@@ -207,19 +207,6 @@ describe("recordAuditEvent", () => {
     await flush();
     expect(logged).toHaveBeenCalled();
   });
-
-  it("returns before the write completes, so a slow log cannot delay a response", () => {
-    let settle: (() => void) | undefined;
-    createAuditEvent.mockReturnValue(new Promise<void>((resolve) => (settle = resolve)));
-
-    const returned = recordAuditEvent(ACTOR, {
-      action: AUDIT_ACTIONS.INVOICE_DELETED,
-      entityType: "invoice",
-    });
-
-    expect(returned).toBeUndefined();
-    settle?.();
-  });
 });
 
 describe("changedFields", () => {

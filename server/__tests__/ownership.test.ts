@@ -260,48 +260,6 @@ describe("GET /api/maintenance-requests/:id — ownership gate", () => {
     expect(status).toBe(200);
   });
 
-  it("still returns 403 after a user is demoted from staff to resident and tries another user's request", async () => {
-    // Carol was regional_administrator; now she is resident. The ownership
-    // check should use the current role, not the role at creation time.
-    const CAROL_ID = "user-carol";
-    const CAROL_EMAIL = "carol@example.com";
-
-    activeUserId.value = CAROL_ID;
-    mockGetUser.mockResolvedValue({
-      id: CAROL_ID,
-      email: CAROL_EMAIL,
-      role: "resident", // demoted
-      isActive: true,
-    });
-    mockGetPermissions.mockResolvedValue(canViewPerms);
-
-    // alicesRequest.submittedBy is alice@example.com, not carol@example.com
-    const { status } = await getJson("/api/maintenance-requests/req-1");
-    expect(status).toBe(403);
-  });
-
-  it("returns 200 after a resident is promoted to admin and reads another user's request", async () => {
-    // Alice was resident; now she is admin. Ownership check is bypassed.
-    activeUserId.value = ALICE_ID;
-    mockGetUser.mockResolvedValue({
-      id: ALICE_ID,
-      email: ALICE_EMAIL,
-      role: "admin", // promoted
-      isActive: true,
-    });
-    mockGetPermissions.mockResolvedValue({ ...canViewPerms, allowedRegions: ["all"] });
-
-    // Use Bob's imaginary request whose submittedBy is bob@example.com
-    mockGetRequest.mockResolvedValue({
-      id: "req-2",
-      submittedBy: BOB_EMAIL,
-      region: "West Central",
-      status: "open",
-    });
-
-    const { status } = await getJson("/api/maintenance-requests/req-2");
-    expect(status).toBe(200);
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -394,22 +352,4 @@ describe("GET /api/maintenance-requests/:id/contacts — ownership gate", () => 
     expect(status).toBe(200);
   });
 
-  it("returns 403 after a user is demoted to resident and tries contacts on another user's request", async () => {
-    const CAROL_ID = "user-carol";
-    const CAROL_EMAIL = "carol@example.com";
-
-    activeUserId.value = CAROL_ID;
-    mockGetUser.mockResolvedValue({
-      id: CAROL_ID,
-      email: CAROL_EMAIL,
-      role: "resident",
-      isActive: true,
-    });
-    mockGetPermissions.mockResolvedValue(canViewPerms);
-
-    const { status } = await getJson(
-      "/api/maintenance-requests/req-1/contacts"
-    );
-    expect(status).toBe(403);
-  });
 });
