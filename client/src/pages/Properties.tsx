@@ -14,6 +14,7 @@ import { Plus, Building2, MapPin, MoreVertical } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { insertPropertySchema, type Property, type InsertProperty } from "@shared/schema";
+import { REGIONS, chaptersForRegion } from "@shared/regions";
 import { z } from "zod";
 import { Section, Container, PageHeader, PageStack } from "@/components/layout/page";
 import { LoadingState, EmptyState } from "@/components/states";
@@ -24,15 +25,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
-const REGIONS = [
-  "East Central",
-  "National",
-  "North East",
-  "North West",
-  "South East",
-  "South West",
-  "West Central",
-];
 
 export default function Properties() {
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
@@ -293,7 +285,7 @@ export default function Properties() {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Region</FormLabel>
-                      <Select onValueChange={field.onChange} value={field.value}>
+                      <Select onValueChange={(v) => { field.onChange(v); addForm.setValue("chapter", ""); }} value={field.value}>
                         <FormControl>
                           <SelectTrigger data-testid="select-property-region">
                             <SelectValue placeholder="Select a region" />
@@ -313,15 +305,27 @@ export default function Properties() {
                 <FormField
                   control={addForm.control}
                   name="chapter"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Chapter (Optional)</FormLabel>
-                      <FormControl>
-                        <Input {...field} value={field.value || ""} placeholder="Which chapter uses this property" data-testid="input-property-chapter" />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
+                  render={({ field }) => {
+                    const regionChapters = chaptersForRegion(addForm.watch("region"));
+                    return (
+                      <FormItem>
+                        <FormLabel>Chapter (Optional)</FormLabel>
+                        <Select onValueChange={field.onChange} value={field.value || ""} disabled={regionChapters.length === 0}>
+                          <FormControl>
+                            <SelectTrigger data-testid="select-property-chapter">
+                              <SelectValue placeholder={regionChapters.length === 0 ? "Pick a region first" : "Select a chapter"} />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {regionChapters.map((c) => (
+                              <SelectItem key={c} value={c}>{c}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    );
+                  }}
                 />
 
                 <FormField
@@ -545,7 +549,7 @@ export default function Properties() {
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Region</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value}>
+                    <Select onValueChange={(v) => { field.onChange(v); editForm.setValue("chapter", ""); }} value={field.value}>
                       <FormControl>
                         <SelectTrigger>
                           <SelectValue placeholder="Select a region" />
@@ -565,15 +569,27 @@ export default function Properties() {
               <FormField
                 control={editForm.control}
                 name="chapter"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Chapter (Optional)</FormLabel>
-                    <FormControl>
-                      <Input {...field} value={field.value || ""} placeholder="Which chapter uses this property" />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
+                render={({ field }) => {
+                  const regionChapters = chaptersForRegion(editForm.watch("region"));
+                  return (
+                    <FormItem>
+                      <FormLabel>Chapter (Optional)</FormLabel>
+                      <Select onValueChange={field.onChange} value={field.value || ""} disabled={regionChapters.length === 0}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder={regionChapters.length === 0 ? "Pick a region first" : "Select a chapter"} />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {regionChapters.map((c) => (
+                            <SelectItem key={c} value={c}>{c}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  );
+                }}
               />
 
               <FormField

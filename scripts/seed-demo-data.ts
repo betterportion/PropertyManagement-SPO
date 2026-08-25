@@ -60,13 +60,15 @@ async function seed(): Promise<void> {
   }
 
   // ── Properties ────────────────────────────────────────────────────────────
+  // Region + chapter pairs come from the official SPO Regions map (see
+  // shared/regions.ts). Each chapter belongs to its property's region.
   const propertyRows = [
-    { name: "Cleveland House", streetAddress: "1472 Cleveland Ave N", city: "St Paul", state: "MN", zipCode: "55108", region: "East Central", chapter: "University of St. Thomas", propertyManager: "Sarah Jenkins", bedrooms: 5, bathrooms: "2.0", squareFootage: 2400 },
-    { name: "Como Men's House", streetAddress: "981 Como Ave", city: "St Paul", state: "MN", zipCode: "55103", region: "East Central", chapter: "University of Minnesota", propertyManager: "Sarah Jenkins", bedrooms: 6, bathrooms: "2.5", squareFootage: 2800 },
-    { name: "Dinkytown Women's House", streetAddress: "615 8th Ave SE", city: "Minneapolis", state: "MN", zipCode: "55414", region: "West Central", chapter: "University of Minnesota", propertyManager: "Mark Otto", bedrooms: 4, bathrooms: "2.0", squareFootage: 1900 },
-    { name: "Franciscan Commons", streetAddress: "210 University Blvd", city: "Steubenville", state: "OH", zipCode: "43952", region: "North East", chapter: "Franciscan University", propertyManager: "Angela Ruiz", bedrooms: 7, bathrooms: "3.0", squareFootage: 3200 },
-    { name: "Aggieland House", streetAddress: "504 College Main St", city: "College Station", state: "TX", zipCode: "77840", region: "South West", chapter: "Texas A&M", propertyManager: "Mark Otto", bedrooms: 5, bathrooms: "2.0", squareFootage: 2200 },
-    { name: "Badger House", streetAddress: "122 Langdon St", city: "Madison", state: "WI", zipCode: "53703", region: "North West", chapter: "UW–Madison", propertyManager: null, bedrooms: 6, bathrooms: "2.5", squareFootage: 2600 },
+    { name: "Cleveland House", streetAddress: "1472 Cleveland Ave N", city: "St Paul", state: "MN", zipCode: "55108", region: "Northwest", chapter: "University of St. Thomas", propertyManager: "Sarah Jenkins", bedrooms: 5, bathrooms: "2.0", squareFootage: 2400 },
+    { name: "Como Men's House", streetAddress: "981 Como Ave", city: "St Paul", state: "MN", zipCode: "55103", region: "Northwest", chapter: "University of Minnesota", propertyManager: "Sarah Jenkins", bedrooms: 6, bathrooms: "2.5", squareFootage: 2800 },
+    { name: "Dinkytown Women's House", streetAddress: "615 8th Ave SE", city: "Minneapolis", state: "MN", zipCode: "55414", region: "Northwest", chapter: "Twin Cities Young Adults", propertyManager: "Mark Otto", bedrooms: 4, bathrooms: "2.0", squareFootage: 1900 },
+    { name: "Buckeye House", streetAddress: "210 University Blvd", city: "Columbus", state: "OH", zipCode: "43210", region: "East Central", chapter: "Ohio State University", propertyManager: "Angela Ruiz", bedrooms: 7, bathrooms: "3.0", squareFootage: 3200 },
+    { name: "Aggieland House", streetAddress: "504 College Main St", city: "College Station", state: "TX", zipCode: "77840", region: "Southwest", chapter: "Bryan College Station Young Adults", propertyManager: "Mark Otto", bedrooms: 5, bathrooms: "2.0", squareFootage: 2200 },
+    { name: "Jayhawk House", streetAddress: "1301 Massachusetts St", city: "Lawrence", state: "KS", zipCode: "66044", region: "West Central", chapter: "University of Kansas", propertyManager: null, bedrooms: 6, bathrooms: "2.5", squareFootage: 2600 },
   ];
 
   const properties = [];
@@ -78,7 +80,7 @@ async function seed(): Promise<void> {
       }),
     );
   }
-  const [cleveland, como, dinkytown, franciscan, aggieland, badger] = properties;
+  const [cleveland, como, dinkytown, buckeye, aggieland, jayhawk] = properties;
   console.log(`Seeded ${properties.length} properties`);
 
   // ── Vendor contacts ───────────────────────────────────────────────────────
@@ -87,7 +89,7 @@ async function seed(): Promise<void> {
     { name: "Rita Moreno", company: "TwinCities HVAC", service: "HVAC", phone: "612-555-0177", email: "dispatch@tchvac.com", region: como.region, buildingAddress: como.address },
     { name: "Dave Kowalski", company: "Kowalski Electric", service: "Electrical", phone: "608-555-0101", email: "dave@kowalskielectric.com", region: dinkytown.region, buildingAddress: dinkytown.address },
     { name: "Maria Santos", company: "Santos Appliance Repair", service: "Appliance", phone: "979-555-0166", email: "maria@santosrepair.com", region: aggieland.region, buildingAddress: aggieland.address },
-    { name: "Ed Harmon", company: "Harmon Roofing & Gutters", service: "Structural", phone: "740-555-0133", email: "ed@harmonroofing.com", region: franciscan.region, buildingAddress: franciscan.address },
+    { name: "Ed Harmon", company: "Harmon Roofing & Gutters", service: "Structural", phone: "740-555-0133", email: "ed@harmonroofing.com", region: buckeye.region, buildingAddress: buckeye.address },
   ];
   const contacts = [];
   for (const row of contactRows) {
@@ -100,13 +102,13 @@ async function seed(): Promise<void> {
     { title: "Kitchen faucet dripping constantly", description: "The cold tap drips even when fully closed. Bucket is filling overnight.", category: "Plumbing", priority: "high", status: "pending", property: cleveland, submittedBy: "joe.miller@spo.org" },
     { title: "Furnace making banging noise", description: "Loud metal bang when the heat kicks in, from the basement unit.", category: "HVAC", priority: "urgent", status: "in_progress", property: como, submittedBy: "sam.oconnor@spo.org" },
     { title: "Bedroom window won't latch", description: "Second-floor north bedroom window closes but the latch doesn't catch.", category: "Structural", priority: "medium", status: "pending", property: dinkytown, submittedBy: "clare.hughes@spo.org" },
-    { title: "Dryer not heating", description: "Runs a full cycle but clothes come out cold and damp.", category: "Appliance", priority: "high", status: "in_progress", property: franciscan, submittedBy: "ben.walsh@spo.org" },
+    { title: "Dryer not heating", description: "Runs a full cycle but clothes come out cold and damp.", category: "Appliance", priority: "high", status: "in_progress", property: buckeye, submittedBy: "ben.walsh@spo.org" },
     { title: "Porch light flickering", description: "Front porch fixture flickers; new bulb did not fix it.", category: "Electrical", priority: "low", status: "completed", property: aggieland, submittedBy: "luke.tran@spo.org" },
     { title: "Basement smells musty after rain", description: "Noticeable after last week's storms; no standing water visible.", category: "Structural", priority: "medium", status: "pending", property: como, submittedBy: "sam.oconnor@spo.org" },
     { title: "Garbage disposal jammed", description: "Hums but doesn't spin. Already tried the reset button.", category: "Appliance", priority: "medium", status: "completed", property: cleveland, submittedBy: "joe.miller@spo.org" },
     { title: "Add a second towel bar in shared bath", description: "Six guys, one towel bar. Not urgent, would be great to have.", category: "Other", priority: "wishlist", status: "pending", property: como, submittedBy: "sam.oconnor@spo.org" },
     { title: "Smoke detector chirping", description: "Hallway detector chirps every minute; battery replaced, still chirping.", category: "Safety Equipment", priority: "high", status: "cancelled", property: dinkytown, submittedBy: "clare.hughes@spo.org" },
-    { title: "Water heater pilot keeps going out", description: "Relit three times this week; goes out again within a day.", category: "Plumbing", priority: "urgent", status: "pending", property: badger, submittedBy: "will.chen@spo.org" },
+    { title: "Water heater pilot keeps going out", description: "Relit three times this week; goes out again within a day.", category: "Plumbing", priority: "urgent", status: "pending", property: jayhawk, submittedBy: "will.chen@spo.org" },
   ] as const;
 
   const requests = [];
@@ -174,7 +176,7 @@ async function seed(): Promise<void> {
     { name: "Whirlpool Refrigerator", category: "Appliance", type: "fixed", ageInYears: 3, serialNumber: "WRF535SWHZ-0417", purchasePrice: "1249.00", assetTagId: "SPO-A-0001", property: cleveland, location: "Kitchen", lastServiced: daysAgo(200) },
     { name: "Carrier Furnace", category: "HVAC", type: "fixed", ageInYears: 9, serialNumber: "59TP6B-2201", purchasePrice: "3400.00", assetTagId: "SPO-A-0002", property: como, location: "Basement", lastServiced: daysAgo(90) },
     { name: "LG Washer", category: "Appliance", type: "fixed", ageInYears: 2, serialNumber: "WM3400CW-8812", purchasePrice: "749.00", assetTagId: "SPO-A-0003", property: dinkytown, location: "Laundry Room", lastServiced: null },
-    { name: "Folding Tables (set of 4)", category: "Furniture", type: "movable", ageInYears: 1, serialNumber: null, purchasePrice: "320.00", assetTagId: "SPO-A-0004", property: franciscan, location: "Common Room", lastServiced: null },
+    { name: "Folding Tables (set of 4)", category: "Furniture", type: "movable", ageInYears: 1, serialNumber: null, purchasePrice: "320.00", assetTagId: "SPO-A-0004", property: buckeye, location: "Common Room", lastServiced: null },
     { name: "Snow Blower", category: "Vehicle", type: "movable", ageInYears: 5, serialNumber: "TORO-721E-3341", purchasePrice: "899.00", assetTagId: "SPO-A-0005", property: aggieland, location: "Garage", lastServiced: daysAgo(365) },
   ];
   const assets = [];

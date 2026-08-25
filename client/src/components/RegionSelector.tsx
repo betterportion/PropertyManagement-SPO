@@ -1,24 +1,15 @@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { MapPin } from "lucide-react";
+import { REGIONS } from "@shared/regions";
 
 interface RegionSelectorProps {
   selectedRegion: string;
   onRegionChange: (value: string) => void;
 }
 
-// The value is the region exactly as it is stored on records ("West Central"),
-// so a page can filter with `record.region === selectedRegion` directly. Earlier
-// these were kebab-case ids, which silently matched nothing on the pages that
-// compared against the stored Title Case value.
-const regions = [
-  { id: "all", name: "All Regions" },
-  { id: "West Central", name: "West Central" },
-  { id: "East Central", name: "East Central" },
-  { id: "North West", name: "North West" },
-  { id: "South West", name: "South West" },
-  { id: "North East", name: "North East" },
-  { id: "South East", name: "South East" },
-];
+// The value is the region exactly as it is stored on records ("Northwest"), so a
+// page can filter with `record.region === selectedRegion` directly.
+const regions = [{ id: "all", name: "All Regions" }, ...REGIONS.map((r) => ({ id: r, name: r }))];
 
 export default function RegionSelector({ selectedRegion, onRegionChange }: RegionSelectorProps) {
   return (
