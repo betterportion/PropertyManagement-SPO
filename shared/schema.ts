@@ -361,6 +361,48 @@ export type InsertProperty = z.infer<typeof insertPropertySchema>;
 // Type for creating/updating properties with computed address
 export type InsertPropertyWithAddress = InsertProperty & { address: string };
 
+// Residents
+//
+// Who is living in each house. The roster is the foundation the money features
+// (monthly rent status, security deposits -- issue #40) and the departing-
+// resident email (issue #41) hang off, but this table deliberately holds only
+// the roster itself: a person, the house they occupy, and when they moved in
+// and out. Money is a separate, permission-gated concern and lives elsewhere.
+//
+// region and buildingAddress are denormalised from the property, exactly as on
+// assets and maintenance schedules, so the same region-scoped authorization
+// applies without a join. A resident is never deleted by history: moving out
+// sets moveOutDate and clears isActive, so who lived where survives turnover.
+export const residents = pgTable("residents", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  propertyId: varchar("property_id").notNull().references(() => properties.id, { onDelete: "cascade" }),
+  firstName: varchar("first_name").notNull(),
+  lastName: varchar("last_name").notNull(),
+  email: varchar("email").notNull(),
+  moveInDate: timestamp("move_in_date"),
+  moveOutDate: timestamp("move_out_date"),
+  isActive: boolean("is_active").notNull().default(true),
+  region: varchar("region").notNull(),
+  buildingAddress: varchar("building_address").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertResidentSchema = createInsertSchema(residents)
+  .omit({
+    id: true,
+    createdAt: true,
+    updatedAt: true,
+  })
+  .extend({
+    email: z.string().email("Enter a valid email address"),
+    moveInDate: dateFromClient.nullish(),
+    moveOutDate: dateFromClient.nullish(),
+  });
+
+export type Resident = typeof residents.$inferSelect;
+export type InsertResident = z.infer<typeof insertResidentSchema>;
+
 // Preventive & Safety Maintenance Schedules
 //
 // A recurring upkeep task for a house -- a furnace serviced yearly, smoke and

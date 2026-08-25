@@ -10,6 +10,7 @@ import {
   invoices,
   billingRecords,
   properties,
+  residents,
   maintenanceSchedules,
   requestContacts,
   type User,
@@ -36,6 +37,8 @@ import {
   type InsertPropertyWithAddress,
   type MaintenanceSchedule,
   type InsertMaintenanceSchedule,
+  type Resident,
+  type InsertResident,
   uploads,
   type Upload,
   type InsertUpload,
@@ -138,6 +141,14 @@ export interface IStorage {
   /** Marks a schedule done: sets the completed date, the new next-due date, and
    *  clears the generation marker so the next cycle can generate again. */
   completeMaintenanceSchedule(id: string, completedDate: Date, nextDueDate: Date): Promise<MaintenanceSchedule>;
+
+  // Residents
+  createResident(resident: InsertResident): Promise<Resident>;
+  getResident(id: string): Promise<Resident | undefined>;
+  getAllResidents(): Promise<Resident[]>;
+  getResidentsByProperty(propertyId: string): Promise<Resident[]>;
+  updateResident(id: string, data: Partial<InsertResident>): Promise<Resident>;
+  deleteResident(id: string): Promise<void>;
 
   // Maintenance Contacts
   createMaintenanceContact(contact: InsertMaintenanceContact): Promise<MaintenanceContact>;
@@ -542,6 +553,46 @@ export class DatabaseStorage implements IStorage {
       .where(eq(maintenanceSchedules.id, id))
       .returning();
     return schedule;
+  }
+
+  // Residents Implementation
+  async createResident(residentData: InsertResident): Promise<Resident> {
+    const [resident] = await db.insert(residents).values(residentData).returning();
+    return resident;
+  }
+
+  async getResident(id: string): Promise<Resident | undefined> {
+    const [resident] = await db.select().from(residents).where(eq(residents.id, id));
+    return resident;
+  }
+
+  async getAllResidents(): Promise<Resident[]> {
+    // Current residents first, then by name, so the roster reads naturally.
+    return await db
+      .select()
+      .from(residents)
+      .orderBy(desc(residents.isActive), asc(residents.lastName), asc(residents.firstName));
+  }
+
+  async getResidentsByProperty(propertyId: string): Promise<Resident[]> {
+    return await db
+      .select()
+      .from(residents)
+      .where(eq(residents.propertyId, propertyId))
+      .orderBy(desc(residents.isActive), asc(residents.lastName), asc(residents.firstName));
+  }
+
+  async updateResident(id: string, data: Partial<InsertResident>): Promise<Resident> {
+    const [resident] = await db
+      .update(residents)
+      .set({ ...filterUndefined(data), updatedAt: new Date() })
+      .where(eq(residents.id, id))
+      .returning();
+    return resident;
+  }
+
+  async deleteResident(id: string): Promise<void> {
+    await db.delete(residents).where(eq(residents.id, id));
   }
 
   // Asset Photos Implementation
