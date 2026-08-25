@@ -57,4 +57,22 @@ test.describe("accessibility", () => {
     const violations = await seriousViolations(page);
     expect(violations, JSON.stringify(violations.map((v) => v.id), null, 2)).toEqual([]);
   });
+
+  test("the residents page has no serious violations", async ({ page }) => {
+    await page.goto("/residents");
+    await expect(page.getByRole("heading", { name: "Residents" })).toBeVisible();
+    const violations = await seriousViolations(page);
+    expect(violations, JSON.stringify(violations.map((v) => v.id), null, 2)).toEqual([]);
+  });
+
+  test("the finances page has no serious violations", async ({ page }) => {
+    await page.goto("/finances");
+    await expect(page.getByRole("heading", { name: "Finances" })).toBeVisible();
+    // Scan the Deposits tab too — it carries the deposit dialog's trigger and
+    // the money fields, the most control-heavy part of the page.
+    await page.getByTestId("tab-deposits").click();
+    await expect(page.getByTestId("button-add-deposit")).toBeVisible();
+    const violations = await seriousViolations(page);
+    expect(violations, JSON.stringify(violations.map((v) => v.id), null, 2)).toEqual([]);
+  });
 });
