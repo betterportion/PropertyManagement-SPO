@@ -10,6 +10,7 @@ import {
   invoices,
   billingRecords,
   properties,
+  maintenanceSchedules,
   requestContacts,
   type User,
   type UpsertUser,
@@ -33,6 +34,8 @@ import {
   type InsertBillingRecord,
   type Property,
   type InsertPropertyWithAddress,
+  type MaintenanceSchedule,
+  type InsertMaintenanceSchedule,
   uploads,
   type Upload,
   type InsertUpload,
@@ -41,7 +44,7 @@ import {
   type InsertAuditEvent,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, or, desc, asc, inArray, lt, gte, ilike, count, notInArray } from "drizzle-orm";
+import { eq, and, or, desc, asc, inArray, lt, lte, gte, ilike, count, notInArray } from "drizzle-orm";
 
 // Helper function to filter out undefined values from partial updates
 function filterUndefined<T extends Record<string, any>>(obj: T): Partial<T> {
@@ -120,6 +123,21 @@ export interface IStorage {
   getAssetPhotosByAsset(assetId: string): Promise<AssetPhoto[]>;
   getAllAssetPhotos(): Promise<AssetPhoto[]>;
   deleteAssetPhoto(id: string): Promise<void>;
+
+  // Maintenance Schedules
+  createMaintenanceSchedule(schedule: InsertMaintenanceSchedule): Promise<MaintenanceSchedule>;
+  getMaintenanceSchedule(id: string): Promise<MaintenanceSchedule | undefined>;
+  getAllMaintenanceSchedules(): Promise<MaintenanceSchedule[]>;
+  getMaintenanceSchedulesByProperty(propertyId: string): Promise<MaintenanceSchedule[]>;
+  updateMaintenanceSchedule(id: string, data: Partial<InsertMaintenanceSchedule>): Promise<MaintenanceSchedule>;
+  deleteMaintenanceSchedule(id: string): Promise<void>;
+  /** Active schedules whose next-due date is on or before `asOf`. */
+  getDueMaintenanceSchedules(asOf: Date): Promise<MaintenanceSchedule[]>;
+  /** Records that a request has been generated for the given due date. */
+  markMaintenanceScheduleGenerated(id: string, dueDate: Date): Promise<void>;
+  /** Marks a schedule done: sets the completed date, the new next-due date, and
+   *  clears the generation marker so the next cycle can generate again. */
+  completeMaintenanceSchedule(id: string, completedDate: Date, nextDueDate: Date): Promise<MaintenanceSchedule>;
 
   // Maintenance Contacts
   createMaintenanceContact(contact: InsertMaintenanceContact): Promise<MaintenanceContact>;
@@ -465,6 +483,65 @@ export class DatabaseStorage implements IStorage {
 
   async deleteAsset(id: string): Promise<void> {
     await db.delete(assets).where(eq(assets.id, id));
+  }
+
+  // Maintenance Schedules Implementation
+  async createMaintenanceSchedule(scheduleData: InsertMaintenanceSchedule): Promise<MaintenanceSchedule> {
+    const [schedule] = await db.insert(maintenanceSchedules).values(scheduleData).returning();
+    return schedule;
+  }
+
+  async getMaintenanceSchedule(id: string): Promise<MaintenanceSchedule | undefined> {
+    const [schedule] = await db.select().from(maintenanceSchedules).where(eq(maintenanceSchedules.id, id));
+    return schedule;
+  }
+
+  async getAllMaintenanceSchedules(): Promise<MaintenanceSchedule[]> {
+    return await db.select().from(maintenanceSchedules).orderBy(asc(maintenanceSchedules.nextDueDate));
+  }
+
+  async getMaintenanceSchedulesByProperty(propertyId: string): Promise<MaintenanceSchedule[]> {
+    return await db
+      .select()
+      .from(maintenanceSchedules)
+      .where(eq(maintenanceSchedules.propertyId, propertyId))
+      .orderBy(asc(maintenanceSchedules.nextDueDate));
+  }
+
+  async updateMaintenanceSchedule(id: string, data: Partial<InsertMaintenanceSchedule>): Promise<MaintenanceSchedule> {
+    const [schedule] = await db
+      .update(maintenanceSchedules)
+      .set({ ...filterUndefined(data), updatedAt: new Date() })
+      .where(eq(maintenanceSchedules.id, id))
+      .returning();
+    return schedule;
+  }
+
+  async deleteMaintenanceSchedule(id: string): Promise<void> {
+    await db.delete(maintenanceSchedules).where(eq(maintenanceSchedules.id, id));
+  }
+
+  async getDueMaintenanceSchedules(asOf: Date): Promise<MaintenanceSchedule[]> {
+    return await db
+      .select()
+      .from(maintenanceSchedules)
+      .where(and(eq(maintenanceSchedules.isActive, true), lte(maintenanceSchedules.nextDueDate, asOf)));
+  }
+
+  async markMaintenanceScheduleGenerated(id: string, dueDate: Date): Promise<void> {
+    await db
+      .update(maintenanceSchedules)
+      .set({ lastGeneratedForDue: dueDate, updatedAt: new Date() })
+      .where(eq(maintenanceSchedules.id, id));
+  }
+
+  async completeMaintenanceSchedule(id: string, completedDate: Date, nextDueDate: Date): Promise<MaintenanceSchedule> {
+    const [schedule] = await db
+      .update(maintenanceSchedules)
+      .set({ lastCompletedDate: completedDate, nextDueDate, lastGeneratedForDue: null, updatedAt: new Date() })
+      .where(eq(maintenanceSchedules.id, id))
+      .returning();
+    return schedule;
   }
 
   // Asset Photos Implementation

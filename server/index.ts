@@ -164,6 +164,7 @@ app.use((req, res, next) => {
   const { apiNotFound, errorHandler } = await import("./errors");
   const { serveStatic } = await import("./static");
   const { startAuditLogRetentionJob } = await import("./audit");
+  const { startScheduleGenerationJob } = await import("./schedules");
 
   // Before the rest of the API so that the platform can always tell whether
   // this instance is serving, even while other routes are being set up.
@@ -208,6 +209,7 @@ app.use((req, res, next) => {
   server.listen({ port, host: "0.0.0.0" }, () => {
     log(`serving on port ${port}`);
     startAuditLogRetentionJob();
+    startScheduleGenerationJob();
   });
 })().catch((error) => {
   // A startup failure must not leave a half-initialised process running and

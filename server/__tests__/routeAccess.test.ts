@@ -1272,3 +1272,69 @@ describe("photo attribution is taken from the session, not the body", () => {
     );
   });
 });
+
+// ---------------------------------------------------------------------------
+// 10. Maintenance schedules — region comes from the property, not the body
+// ---------------------------------------------------------------------------
+
+describe("maintenance schedules", () => {
+  const WEST_PROPERTY = { id: "prop-west", name: "Cleveland House", region: "West Central", address: "1 Main St" };
+  const EAST_PROPERTY = { id: "prop-east", name: "Como House", region: "East Central", address: "2 River Rd" };
+
+  it("refuses a resident the schedules list", async () => {
+    actAs(ALICE, ALL_MAINTENANCE);
+    const { status } = await get("/api/maintenance-schedules");
+    expect(status).toBe(403);
+  });
+
+  it("takes region and building from the property, ignoring the body", async () => {
+    actAs(STAFF, { ...ALL_MAINTENANCE, allowedRegions: ["West Central"] });
+    storageMock.getProperty.mockResolvedValue(WEST_PROPERTY);
+    storageMock.createMaintenanceSchedule.mockImplementation(async (data: Record<string, unknown>) => ({ id: "sch-1", ...data }));
+
+    const { status } = await request("POST", "/api/maintenance-schedules", {
+      body: {
+        propertyId: WEST_PROPERTY.id,
+        title: "Fire extinguisher check",
+        category: "safety",
+        intervalMonths: 12,
+        nextDueDate: "2026-06-01",
+        region: "East Central", // spoofed — must be ignored
+        buildingAddress: "999 Evil St", // spoofed — must be ignored
+      },
+    });
+
+    expect(status).toBe(200);
+    expect(storageMock.createMaintenanceSchedule).toHaveBeenCalledWith(
+      expect.objectContaining({ region: "West Central", buildingAddress: "1 Main St" }),
+    );
+  });
+
+  it("refuses creating a schedule on a property in another region", async () => {
+    actAs(STAFF, { ...ALL_MAINTENANCE, allowedRegions: ["West Central"] });
+    storageMock.getProperty.mockResolvedValue(EAST_PROPERTY);
+
+    const { status } = await request("POST", "/api/maintenance-schedules", {
+      body: { propertyId: EAST_PROPERTY.id, title: "x", category: "safety", intervalMonths: 12, nextDueDate: "2026-06-01" },
+    });
+
+    expect(status).toBe(403);
+    expect(storageMock.createMaintenanceSchedule).not.toHaveBeenCalled();
+  });
+
+  it("advances the due date when a schedule is marked done", async () => {
+    actAs(STAFF, { ...ALL_MAINTENANCE, allowedRegions: ["West Central"] });
+    storageMock.getMaintenanceSchedule.mockResolvedValue({
+      id: "sch-1", region: "West Central", intervalMonths: 12,
+    });
+    storageMock.completeMaintenanceSchedule.mockImplementation(async (id: string) => ({ id }));
+
+    const { status } = await request("POST", "/api/maintenance-schedules/sch-1/complete");
+
+    expect(status).toBe(200);
+    // The route computes the new dates and hands them to storage.
+    expect(storageMock.completeMaintenanceSchedule).toHaveBeenCalledWith(
+      "sch-1", expect.any(Date), expect.any(Date),
+    );
+  });
+});

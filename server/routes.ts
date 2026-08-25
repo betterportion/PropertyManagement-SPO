@@ -53,8 +53,10 @@ import {
   insertBillingRecordSchema,
   insertPropertySchema,
   insertUserSchema,
+  insertMaintenanceScheduleSchema,
   type InsertPropertyWithAddress,
 } from "@shared/schema";
+import { STANDARD_SCHEDULE_TEMPLATES, addMonths } from "./schedules";
 
 // Uploads are buffered in memory only long enough to be written to App Storage.
 // Nothing is written to the container filesystem, because autoscale rebuilds it
@@ -1165,6 +1167,160 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ success: true });
     } catch (error) {
       sendError(res, error, "Failed to delete asset photo");
+    }
+  });
+
+  // Preventive & Safety Maintenance Schedules
+  //
+  // Schedules are maintenance work, so they reuse the maintenance permissions
+  // and region scoping. region/buildingAddress are always taken from the parent
+  // property, never the body, so they cannot drift from the house.
+  app.get('/api/maintenance-schedules', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canViewMaintenance", "canManageMaintenance")) return;
+
+      const schedules = await storage.getAllMaintenanceSchedules();
+      res.json(filterByRegion(ctx, schedules));
+    } catch (error) {
+      sendError(res, error, "Failed to fetch maintenance schedules");
+    }
+  });
+
+  app.post('/api/maintenance-schedules', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageMaintenance")) return;
+
+      const property = await storage.getProperty(req.body.propertyId);
+      if (!property) {
+        return res.status(404).json({ message: "Property not found" });
+      }
+      if (!requireRegion(res, ctx, property.region, "Forbidden - Cannot create in this region")) return;
+
+      // region/buildingAddress come from the property, not the caller.
+      const validatedData = insertMaintenanceScheduleSchema.parse({
+        ...req.body,
+        region: property.region,
+        buildingAddress: property.address,
+      });
+      const schedule = await storage.createMaintenanceSchedule(validatedData);
+      res.json(schedule);
+    } catch (error) {
+      sendError(res, error, "Failed to create maintenance schedule");
+    }
+  });
+
+  app.patch('/api/maintenance-schedules/:id', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageMaintenance")) return;
+
+      const existing = await storage.getMaintenanceSchedule(req.params.id);
+      if (!existing) {
+        return res.status(404).json({ message: "Maintenance schedule not found" });
+      }
+      if (!requireRegion(res, ctx, existing.region)) return;
+
+      // The house a schedule belongs to is fixed at creation, so its property and
+      // therefore its region/buildingAddress are not editable here.
+      const { propertyId: _p, region: _r, buildingAddress: _b, ...editable } = req.body ?? {};
+      const validatedData = insertMaintenanceScheduleSchema.partial().parse(editable);
+      const schedule = await storage.updateMaintenanceSchedule(req.params.id, validatedData);
+      res.json(schedule);
+    } catch (error) {
+      sendError(res, error, "Failed to update maintenance schedule");
+    }
+  });
+
+  app.delete('/api/maintenance-schedules/:id', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageMaintenance")) return;
+
+      const existing = await storage.getMaintenanceSchedule(req.params.id);
+      if (!existing) {
+        return res.status(404).json({ message: "Maintenance schedule not found" });
+      }
+      if (!requireRegion(res, ctx, existing.region)) return;
+
+      await storage.deleteMaintenanceSchedule(req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      sendError(res, error, "Failed to delete maintenance schedule");
+    }
+  });
+
+  app.post('/api/maintenance-schedules/:id/complete', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageMaintenance")) return;
+
+      const existing = await storage.getMaintenanceSchedule(req.params.id);
+      if (!existing) {
+        return res.status(404).json({ message: "Maintenance schedule not found" });
+      }
+      if (!requireRegion(res, ctx, existing.region)) return;
+
+      const now = new Date();
+      const schedule = await storage.completeMaintenanceSchedule(
+        req.params.id,
+        now,
+        addMonths(now, existing.intervalMonths),
+      );
+      res.json(schedule);
+    } catch (error) {
+      sendError(res, error, "Failed to complete maintenance schedule");
+    }
+  });
+
+  app.post('/api/maintenance-schedules/apply-template', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageMaintenance")) return;
+
+      const property = await storage.getProperty(req.body.propertyId);
+      if (!property) {
+        return res.status(404).json({ message: "Property not found" });
+      }
+      if (!requireRegion(res, ctx, property.region, "Forbidden - Cannot create in this region")) return;
+
+      // Skip any template whose task already exists for this house, so applying
+      // twice does not create duplicates. New schedules are due now, so their
+      // first completion establishes the real cadence.
+      const existing = await storage.getMaintenanceSchedulesByProperty(property.id);
+      const existingTitles = new Set(existing.map((s) => s.title.toLowerCase()));
+      const now = new Date();
+      const created = [];
+      for (const template of STANDARD_SCHEDULE_TEMPLATES) {
+        if (existingTitles.has(template.title.toLowerCase())) continue;
+        created.push(
+          await storage.createMaintenanceSchedule({
+            propertyId: property.id,
+            title: template.title,
+            category: template.category,
+            intervalMonths: template.intervalMonths,
+            nextDueDate: now,
+            region: property.region,
+            buildingAddress: property.address,
+          }),
+        );
+      }
+      res.json({ created: created.length, schedules: created });
+    } catch (error) {
+      sendError(res, error, "Failed to apply the standard schedule");
     }
   });
 
