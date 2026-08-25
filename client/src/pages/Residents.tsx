@@ -113,15 +113,26 @@ export default function Residents() {
       (selectedRegion === "all" || r.region === selectedRegion) &&
       (selectedBuilding === "all" || r.buildingAddress === selectedBuilding),
   );
-  const buildings = Array.from(new Set(residents.map((r) => r.buildingAddress).filter(Boolean))).map((a) => ({ id: a, address: a }));
+  // The house filter lists every real property (optionally narrowed to the
+  // chosen region), not just houses that already have residents -- so you can
+  // pick any house and see its roster, even an empty one, and add the first
+  // resident there. The value is the property address, which is what a
+  // resident's buildingAddress holds.
+  const buildings = properties
+    .filter((p) => selectedRegion === "all" || p.region === selectedRegion)
+    .map((p) => ({ id: p.address, address: p.name }));
+  const selectedHouseName = selectedBuilding === "all"
+    ? null
+    : properties.find((p) => p.address === selectedBuilding)?.name ?? null;
 
   const renderTab = (active: boolean) => {
     const items = visible.filter((r) => r.isActive === active);
     if (items.length === 0) {
+      const where = selectedHouseName ? ` in ${selectedHouseName}` : "";
       return (
         <EmptyState
-          title={active ? "No current residents" : "No former residents"}
-          description={active ? "Add a resident to start the roster for a house." : "Residents you mark as moved out appear here."}
+          title={active ? `No current residents${where}` : `No former residents${where}`}
+          description={active ? "Use “Add resident” to start the roster for a house." : "Residents you mark as moved out appear here."}
         />
       );
     }
@@ -202,7 +213,10 @@ export default function Residents() {
 
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div className="flex flex-wrap items-center gap-4">
-              <RegionSelector selectedRegion={selectedRegion} onRegionChange={setSelectedRegion} />
+              <RegionSelector
+                selectedRegion={selectedRegion}
+                onRegionChange={(v) => { setSelectedRegion(v); setSelectedBuilding("all"); }}
+              />
               <BuildingSelector selectedBuilding={selectedBuilding} onBuildingChange={setSelectedBuilding} buildings={buildings} />
             </div>
             {canManage && (

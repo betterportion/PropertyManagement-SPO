@@ -39,4 +39,22 @@ test.describe("assets — list and gallery views", () => {
     await expect(page.getByRole("dialog")).toBeVisible();
     await expect(page.getByRole("dialog").getByText(/photo/i).first()).toBeVisible();
   });
+
+  test("filtering by a region that has assets keeps them visible", async ({ page }) => {
+    // Regression guard for the shared RegionSelector: it used to emit kebab-case
+    // values ("east-central") while records store Title Case ("East Central"),
+    // so selecting any region silently matched nothing and wiped the list.
+    test.skip(!fixtures.propertyRegion, "no seeded region in fixtures");
+    await page.getByTestId("button-view-gallery").click();
+    const tiles = page.locator('[data-testid^="tile-asset-"]');
+    const total = await tiles.count();
+    expect(total).toBeGreaterThan(0);
+
+    await page.getByTestId("select-region").click();
+    await page.getByRole("option", { name: fixtures.propertyRegion, exact: true }).click();
+
+    const filtered = await tiles.count();
+    expect(filtered).toBeGreaterThan(0);
+    expect(filtered).toBeLessThanOrEqual(total);
+  });
 });

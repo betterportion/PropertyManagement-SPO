@@ -13,10 +13,10 @@ test.describe("residents roster", () => {
 
   test("shows seeded residents grouped by house with a headcount", async ({ page }) => {
     await page.goto("/residents");
-    const firstCard = page.locator('[data-testid^="card-resident-"]').first();
-    // The demo seed adds current residents; skip cleanly if the DB was not seeded.
-    if ((await firstCard.count()) === 0) test.skip(true, "no seeded residents");
-    await expect(firstCard).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Residents" })).toBeVisible();
+    // The seed adds current residents; wait for the roster query to resolve
+    // (auto-retrying) rather than checking count() before the fetch returns.
+    await expect(page.locator('[data-testid^="card-resident-"]').first()).toBeVisible();
     await expect(page.locator('[data-testid^="headcount-"]').first()).toBeVisible();
   });
 });

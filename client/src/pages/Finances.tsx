@@ -96,9 +96,12 @@ export default function Finances() {
         (selectedBuilding === "all" || r.buildingAddress === selectedBuilding),
     );
 
-  const buildings = Array.from(
-    new Set([...payments, ...deposits].map((r) => r.buildingAddress).filter(Boolean)),
-  ).map((a) => ({ id: a, address: a }));
+  // List every real house (optionally narrowed to the region), not only houses
+  // that already have finance records, so any house is selectable. The value is
+  // the property address, matching each record's buildingAddress.
+  const buildings = properties
+    .filter((p) => selectedRegion === "all" || p.region === selectedRegion)
+    .map((p) => ({ id: p.address, address: p.name }));
 
   // ── Rent ──────────────────────────────────────────────────────────────────
   const generateMutation = useMutation({
@@ -343,7 +346,10 @@ export default function Finances() {
           />
 
           <div className="flex flex-wrap items-center gap-4">
-            <RegionSelector selectedRegion={selectedRegion} onRegionChange={setSelectedRegion} />
+            <RegionSelector
+              selectedRegion={selectedRegion}
+              onRegionChange={(v) => { setSelectedRegion(v); setSelectedBuilding("all"); }}
+            />
             <BuildingSelector selectedBuilding={selectedBuilding} onBuildingChange={setSelectedBuilding} buildings={buildings} />
           </div>
 
