@@ -15,19 +15,11 @@ import { Plus, Upload, FileText, X, Loader2 } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { insertMaintenanceContactSchema, type MaintenanceContact, type Property, type BillingRecord } from "@shared/schema";
+import { REGIONS } from "@shared/regions";
 import { z } from "zod";
 import { Section, Container, PageHeader, PageStack } from "@/components/layout/page";
 import { LoadingState } from "@/components/states";
 
-const REGIONS = [
-  "East Central",
-  "National",
-  "North East",
-  "North West",
-  "South East",
-  "South West",
-  "West Central",
-];
 
 const invoiceFormSchema = z.object({
   companyName: z.string().min(1, "Company name is required"),

@@ -25,20 +25,14 @@ import { useAuth } from "@/hooks/useAuth";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { insertUserSchema, type User, type UserPermissions } from "@shared/schema";
+import { REGIONS } from "@shared/regions";
 import { z } from "zod";
 import { ActivityLog } from "@/components/ActivityLog";
 import { Section, Container, PageHeader, PageStack } from "@/components/layout/page";
 import { EmptyState } from "@/components/states";
 import { formatDate, formatValue } from "@/lib/format";
 
-const ALL_REGIONS = [
-  { id: "West Central", name: "West Central" },
-  { id: "East Central", name: "East Central" },
-  { id: "North West", name: "North West" },
-  { id: "South West", name: "South West" },
-  { id: "North East", name: "North East" },
-  { id: "South East", name: "South East" },
-];
+const ALL_REGIONS = REGIONS.map((r) => ({ id: r, name: r }));
 
 const FEATURE_PERMISSIONS = [
   { key: "canViewMaintenance", label: "View Maintenance", section: "Maintenance" },

@@ -16,6 +16,7 @@ import { PhotoUpload } from "@/components/PhotoUpload";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { insertMaintenanceRequestSchema, type MaintenanceRequest, type Property } from "@shared/schema";
+import { REGIONS } from "@shared/regions";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -44,15 +45,6 @@ const CATEGORIES = [
   "Structural",
 ];
 
-const REGIONS = [
-  "East Central",
-  "National",
-  "North East",
-  "North West",
-  "South East",
-  "South West",
-  "West Central",
-];
 
 interface User {
   id: string;

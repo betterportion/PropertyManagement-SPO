@@ -29,4 +29,16 @@ test.describe("properties — region and chapter filters", () => {
     expect(filtered).toBeLessThanOrEqual(total);
     await expect(cards.filter({ hasText: fixtures.propertyChapter })).toHaveCount(filtered);
   });
+
+  test("the chapter field offers only the chosen region's chapters", async ({ page }) => {
+    await page.getByTestId("button-add-property").click();
+
+    await page.getByTestId("select-property-region").click();
+    await page.getByRole("option", { name: "Southwest", exact: true }).click();
+
+    await page.getByTestId("select-property-chapter").click();
+    // A Southwest chapter is offered; a Northwest one is not.
+    await expect(page.getByRole("option", { name: "Texas State University" })).toBeVisible();
+    await expect(page.getByRole("option", { name: "University of Minnesota" })).toHaveCount(0);
+  });
 });
