@@ -3,6 +3,35 @@ import { pgTable, text, varchar, timestamp, jsonb, index, boolean, integer, nume
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
+/**
+ * Field builders that reconcile three views of the same value: what a JSON
+ * client sends, what the database column stores, and what is actually valid.
+ *
+ * drizzle-zod derives its types from the column alone -- a numeric column
+ * becomes `z.string()`, a timestamp becomes `z.date()` -- but a browser form
+ * sends a number for a price and a "YYYY-MM-DD" string for a date. Left as-is
+ * the API rejects the very payloads the app produces. These coerce what the
+ * client sends, reject nonsensical values, and hand the storage layer the type
+ * the column expects.
+ */
+
+/** A non-negative amount. Accepts a number or numeric string; stored as the
+ *  string the numeric column round-trips as. Rejects NaN, Infinity, negatives. */
+const nonNegativeAmount = z.coerce
+  .number()
+  .finite("Must be a valid number")
+  .min(0, "Must be 0 or greater")
+  .transform((n: number) => String(n));
+
+/** A non-negative whole count (bedrooms, age, display order). */
+const nonNegativeInt = z.coerce
+  .number()
+  .int("Must be a whole number")
+  .min(0, "Must be 0 or greater");
+
+/** A calendar date or timestamp. Accepts the date string a form sends. */
+const dateFromClient = z.coerce.date();
+
 export const sessions = pgTable(
   "sessions",
   {
@@ -106,11 +135,15 @@ export const walkthroughRooms = pgTable("walkthrough_rooms", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
-export const insertWalkthroughRoomSchema = createInsertSchema(walkthroughRooms).omit({
-  id: true,
-  createdAt: true,
-  updatedAt: true,
-});
+export const insertWalkthroughRoomSchema = createInsertSchema(walkthroughRooms)
+  .omit({
+    id: true,
+    createdAt: true,
+    updatedAt: true,
+  })
+  .extend({
+    displayOrder: nonNegativeInt,
+  });
 
 export type WalkthroughRoom = typeof walkthroughRooms.$inferSelect;
 export type InsertWalkthroughRoom = z.infer<typeof insertWalkthroughRoomSchema>;
@@ -159,11 +192,17 @@ export const assets = pgTable("assets", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
-export const insertAssetSchema = createInsertSchema(assets).omit({
-  id: true,
-  createdAt: true,
-  updatedAt: true,
-});
+export const insertAssetSchema = createInsertSchema(assets)
+  .omit({
+    id: true,
+    createdAt: true,
+    updatedAt: true,
+  })
+  .extend({
+    ageInYears: nonNegativeInt,
+    purchasePrice: nonNegativeAmount.nullish(),
+    lastServiced: dateFromClient.nullish(),
+  });
 
 export type Asset = typeof assets.$inferSelect;
 export type InsertAsset = z.infer<typeof insertAssetSchema>;
@@ -229,11 +268,17 @@ export const invoices = pgTable("invoices", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
-export const insertInvoiceSchema = createInsertSchema(invoices).omit({
-  id: true,
-  createdAt: true,
-  updatedAt: true,
-});
+export const insertInvoiceSchema = createInsertSchema(invoices)
+  .omit({
+    id: true,
+    createdAt: true,
+    updatedAt: true,
+  })
+  .extend({
+    amount: nonNegativeAmount,
+    dueDate: dateFromClient,
+    paidDate: dateFromClient.nullish(),
+  });
 
 export type Invoice = typeof invoices.$inferSelect;
 export type InsertInvoice = z.infer<typeof insertInvoiceSchema>;
@@ -270,6 +315,7 @@ export const insertBillingRecordSchema = createInsertSchema(billingRecords)
   // born invisible to everyone except admins.
   .extend({
     region: z.string().min(1, "Region is required"),
+    invoiceCost: nonNegativeAmount,
   });
 
 export type BillingRecord = typeof billingRecords.$inferSelect;
@@ -297,12 +343,18 @@ export const properties = pgTable("properties", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
-export const insertPropertySchema = createInsertSchema(properties).omit({
-  id: true,
-  address: true, // Computed from streetAddress, city, state, zipCode
-  createdAt: true,
-  updatedAt: true,
-});
+export const insertPropertySchema = createInsertSchema(properties)
+  .omit({
+    id: true,
+    address: true, // Computed from streetAddress, city, state, zipCode
+    createdAt: true,
+    updatedAt: true,
+  })
+  .extend({
+    bedrooms: nonNegativeInt.nullish(),
+    bathrooms: nonNegativeAmount.nullish(),
+    squareFootage: nonNegativeInt.nullish(),
+  });
 
 export type Property = typeof properties.$inferSelect;
 export type InsertProperty = z.infer<typeof insertPropertySchema>;
