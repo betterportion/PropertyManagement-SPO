@@ -43,7 +43,19 @@ export default defineConfig({
   },
 
   projects: [
-    { name: "chromium", use: { ...devices["Desktop Chrome"] } },
+    // Desktop runs every spec except the mobile-only one.
+    {
+      name: "chromium",
+      use: { ...devices["Desktop Chrome"] },
+      testIgnore: /mobile\.spec\.ts/,
+    },
+    // A phone-sized viewport runs only the mobile spec, where the layout and
+    // the collapsed sidebar behave differently.
+    {
+      name: "mobile-chrome",
+      use: { ...devices["Pixel 5"] },
+      testMatch: /mobile\.spec\.ts/,
+    },
   ],
 
   webServer: {

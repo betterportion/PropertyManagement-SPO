@@ -182,7 +182,7 @@ export default function Properties() {
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div className="flex items-center gap-2 flex-wrap">
           <Select value={regionFilter} onValueChange={setRegionFilter}>
-            <SelectTrigger className="w-44" data-testid="select-filter-region">
+            <SelectTrigger className="w-44" data-testid="select-filter-region" aria-label="Filter by region">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -193,7 +193,7 @@ export default function Properties() {
             </SelectContent>
           </Select>
           <Select value={chapterFilter} onValueChange={setChapterFilter}>
-            <SelectTrigger className="w-44" data-testid="select-filter-chapter">
+            <SelectTrigger className="w-44" data-testid="select-filter-chapter" aria-label="Filter by chapter">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -442,7 +442,7 @@ export default function Properties() {
                   </div>
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <Button size="icon" variant="ghost" data-testid={`button-menu-${property.id}`}>
+                      <Button size="icon" variant="ghost" data-testid={`button-menu-${property.id}`} aria-label={`Actions for ${property.name}`}>
                         <MoreVertical className="h-4 w-4" />
                       </Button>
                     </DropdownMenuTrigger>
