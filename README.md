@@ -288,6 +288,5 @@ Two things to know about running more than one instance:
 |---|---|
 | [`CLAUDE.md`](CLAUDE.md) | Detailed architecture, data model, conventions, standing rules and gotchas — written for AI coding assistants, but the most useful document here for any engineer |
 | [`docs/PRODUCTION_MIGRATION.md`](docs/PRODUCTION_MIGRATION.md) | The staging-first runbook for standing up Supabase, Google Workspace login and Render |
-| [`replit.md`](replit.md) | Replit-specific setup and the change log |
 | [`design_guidelines.md`](design_guidelines.md) | Typography, spacing, layout and component design rules |
 | [`docs/ONBOARDING_AUDIT.md`](docs/ONBOARDING_AUDIT.md) | The post-GitHub onboarding audit: what runs, what Replit provisioned, and the remaining migration work |

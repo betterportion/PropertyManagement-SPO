@@ -14,8 +14,9 @@ import { authProvider, isProduction } from "./config";
  * entirely by the OIDC_* variables read in server/config.ts -- nothing outside
  * that file and this one needs to change to move to another provider.
  *
- * See the "Swapping the identity provider" section of replit.md for the full
- * procedure, including what happens to existing accounts.
+ * See docs/PRODUCTION_MIGRATION.md for the full provider-change procedure,
+ * including what happens to existing accounts, and the "Login" section of
+ * CLAUDE.md for the invariants to preserve when touching this file.
  */
 const getOidcConfig = memoize(
   async () => {
