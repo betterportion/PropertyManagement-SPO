@@ -1141,3 +1141,134 @@ describe("paging and filtering the activity log", () => {
     expect((await get("/api/audit-log?to=2026-13-45x")).status).toBe(400);
   });
 });
+
+// ---------------------------------------------------------------------------
+// 9. Input validation and server-owned attribution
+//
+// These do not test access control -- they test that the create endpoints
+// accept the payload the client actually sends (numbers for money, date
+// strings for dates), reject nonsensical values (negatives), and never let a
+// caller name someone else as the author of a photo.
+// ---------------------------------------------------------------------------
+
+describe("asset creation input validation", () => {
+  const baseAsset = {
+    name: "Fridge",
+    category: "Appliance",
+    type: "movable",
+    ageInYears: 2,
+    region: "West Central",
+    buildingAddress: "1 Main St",
+    location: "Kitchen",
+  };
+
+  beforeEach(() => {
+    storageMock.createAsset.mockImplementation(async (data: Record<string, unknown>) => ({ id: "asset-1", ...data }));
+  });
+
+  it("accepts purchasePrice as the number the form sends", async () => {
+    actAs(ADMIN);
+    const { status } = await request("POST", "/api/assets", { body: { ...baseAsset, purchasePrice: 450 } });
+    expect(status).toBe(200);
+    // Stored as a string, because the numeric column round-trips as one.
+    expect(storageMock.createAsset).toHaveBeenCalledWith(
+      expect.objectContaining({ purchasePrice: "450" }),
+    );
+  });
+
+  it("accepts lastServiced as the YYYY-MM-DD string the date input sends", async () => {
+    actAs(ADMIN);
+    const { status } = await request("POST", "/api/assets", {
+      body: { ...baseAsset, type: "fixed", lastServiced: "2026-01-15" },
+    });
+    expect(status).toBe(200);
+    const stored = storageMock.createAsset.mock.calls.at(-1)![0];
+    expect(stored.lastServiced).toBeInstanceOf(Date);
+    expect((stored.lastServiced as Date).toISOString()).toBe("2026-01-15T00:00:00.000Z");
+  });
+
+  it("rejects a negative purchasePrice", async () => {
+    actAs(ADMIN);
+    const { status } = await request("POST", "/api/assets", { body: { ...baseAsset, purchasePrice: -5 } });
+    expect(status).toBe(400);
+    expect(storageMock.createAsset).not.toHaveBeenCalled();
+  });
+
+  it("rejects a negative ageInYears", async () => {
+    actAs(ADMIN);
+    const { status } = await request("POST", "/api/assets", { body: { ...baseAsset, ageInYears: -1 } });
+    expect(status).toBe(400);
+    expect(storageMock.createAsset).not.toHaveBeenCalled();
+  });
+
+  it("rejects a non-numeric purchasePrice", async () => {
+    actAs(ADMIN);
+    const { status } = await request("POST", "/api/assets", { body: { ...baseAsset, purchasePrice: "abc" } });
+    expect(status).toBe(400);
+    expect(storageMock.createAsset).not.toHaveBeenCalled();
+  });
+});
+
+describe("property creation input validation", () => {
+  const baseProperty = {
+    name: "Edel House",
+    streetAddress: "1 Main St",
+    city: "Saint Paul",
+    state: "MN",
+    zipCode: "55101",
+    region: "West Central",
+  };
+
+  beforeEach(() => {
+    storageMock.createProperty.mockImplementation(async (data: Record<string, unknown>) => ({ id: "prop-1", ...data }));
+  });
+
+  it("rejects a negative bedroom count", async () => {
+    actAs(ADMIN);
+    const { status } = await request("POST", "/api/properties", { body: { ...baseProperty, bedrooms: -2 } });
+    expect(status).toBe(400);
+    expect(storageMock.createProperty).not.toHaveBeenCalled();
+  });
+});
+
+describe("photo attribution is taken from the session, not the body", () => {
+  it("stores an asset photo under the signed-in user, ignoring a spoofed uploadedBy", async () => {
+    actAs(ADMIN);
+    storageMock.getAsset.mockResolvedValue({ id: "asset-1", region: "West Central" });
+    storageMock.createAssetPhoto.mockImplementation(async (data: Record<string, unknown>) => ({ id: "photo-1", ...data }));
+
+    const { status } = await request("POST", "/api/asset-photos", {
+      body: { assetId: "asset-1", imageUrl: "/uploads/x.png", uploadedBy: "victim@example.com" },
+    });
+
+    expect(status).toBe(200);
+    expect(storageMock.createAssetPhoto).toHaveBeenCalledWith(
+      expect.objectContaining({ uploadedBy: ADMIN.email }),
+    );
+    expect(storageMock.createAssetPhoto).not.toHaveBeenCalledWith(
+      expect.objectContaining({ uploadedBy: "victim@example.com" }),
+    );
+  });
+
+  it("stores a walkthrough photo under the signed-in user, ignoring a spoofed uploadedBy", async () => {
+    actAs(ADMIN);
+    storageMock.createWalkthroughPhoto.mockImplementation(async (data: Record<string, unknown>) => ({ id: "photo-1", ...data }));
+
+    const { status } = await request("POST", "/api/walkthrough-photos", {
+      body: {
+        roomId: "room-1",
+        imageUrl: "/uploads/x.png",
+        condition: "same_as_last_walkthrough",
+        region: "West Central",
+        buildingAddress: "1 Main St",
+        location: "Kitchen",
+        uploadedBy: "victim@example.com",
+      },
+    });
+
+    expect(status).toBe(200);
+    expect(storageMock.createWalkthroughPhoto).toHaveBeenCalledWith(
+      expect.objectContaining({ uploadedBy: ADMIN.email }),
+    );
+  });
+});

@@ -762,7 +762,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       if (!requireRegion(res, ctx, validatedData.region, "Forbidden - Cannot create in this region")) return;
 
-      const photo = await storage.createWalkthroughPhoto(validatedData);
+      // Attribution comes from the session, never the body, so a caller cannot
+      // credit a photo to someone else (matches submittedBy on requests).
+      const photo = await storage.createWalkthroughPhoto({
+        ...validatedData,
+        uploadedBy: ctx.user.email || "Unknown",
+      });
       res.json(photo);
     } catch (error) {
       sendError(res, error, "Failed to create walkthrough photo");
@@ -1126,7 +1131,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       if (!requireRegion(res, ctx, parentAsset.region, "Forbidden - Cannot create in this region")) return;
 
-      const photo = await storage.createAssetPhoto(validatedData);
+      // Attribution comes from the session, never the body, so a caller cannot
+      // credit a photo to someone else (matches submittedBy on requests).
+      const photo = await storage.createAssetPhoto({
+        ...validatedData,
+        uploadedBy: ctx.user.email || "Unknown",
+      });
       res.json(photo);
     } catch (error) {
       sendError(res, error, "Failed to create asset photo");
