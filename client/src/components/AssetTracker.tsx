@@ -114,7 +114,7 @@ function AssetList({ items, properties, onEdit, onDelete, onPhotos }: AssetListP
                   </Badge>
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <Button size="icon" variant="ghost" data-testid={`button-menu-${asset.id}`}>
+                      <Button size="icon" variant="ghost" data-testid={`button-menu-${asset.id}`} aria-label={`Actions for ${asset.name}`}>
                         <MoreVertical className="h-4 w-4" />
                       </Button>
                     </DropdownMenuTrigger>
