@@ -19,6 +19,7 @@ import Assets from "@/pages/Assets";
 import Safety from "@/pages/Safety";
 import Residents from "@/pages/Residents";
 import Finances from "@/pages/Finances";
+import Tasks from "@/pages/Tasks";
 import Contacts from "@/pages/Contacts";
 import Properties from "@/pages/Properties";
 import ResidentDashboard from "@/pages/ResidentDashboard";
@@ -45,6 +46,7 @@ function Router() {
     return (
       <Switch>
         <Route path="/" component={AdminDashboard} />
+        <Route path="/tasks" component={Tasks} />
         <Route path="/properties" component={Properties} />
         <Route path="/residents" component={Residents} />
         <Route path="/finances" component={Finances} />

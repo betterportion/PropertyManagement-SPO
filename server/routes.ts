@@ -15,6 +15,7 @@ import {
   canReadUpload,
   filterByRegion,
   filterByRelatedRegion,
+  canSeeTask,
   type AuthContext,
 } from "./authz";
 import { z } from "zod";
@@ -57,9 +58,11 @@ import {
   insertResidentSchema,
   insertRentPaymentSchema,
   insertSecurityDepositSchema,
+  insertTaskSchema,
   type InsertPropertyWithAddress,
 } from "@shared/schema";
 import { STANDARD_SCHEDULE_TEMPLATES, addMonths } from "./schedules";
+import { buildActionItems } from "./actionItems";
 
 // Uploads are buffered in memory only long enough to be written to App Storage.
 // Nothing is written to the container filesystem, because autoscale rebuilds it
@@ -1704,6 +1707,144 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ success: true });
     } catch (error) {
       sendError(res, error, "Failed to delete security deposit");
+    }
+  });
+
+  // Action items + Tasks Routes
+  //
+  // "Action items" are the dashboard's derived list -- unpaid rent, deposits to
+  // return, maintenance coming due -- plus the open manual tasks the caller can
+  // see. Nothing here creates finance data; resolving a derived item happens on
+  // its own (already-audited) endpoint. This surface is regional-leads-only, the
+  // same audience and rationale as the finance routes above: requireStaff, no
+  // separate permission.
+  app.get('/api/action-items', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+
+      const [schedules, rentPayments, deposits, residents, allTasks] = await Promise.all([
+        storage.getAllMaintenanceSchedules(),
+        storage.getAllRentPayments(),
+        storage.getAllSecurityDeposits(),
+        storage.getAllResidents(),
+        storage.getAllTasks(),
+      ]);
+
+      const items = buildActionItems({
+        // Derived items are region-scoped exactly like their source lists.
+        schedules: filterByRegion(ctx, schedules),
+        rentPayments: filterByRegion(ctx, rentPayments),
+        deposits: filterByRegion(ctx, deposits),
+        // Residents are only used to tell which deposits belong to someone who
+        // moved out; they need not be filtered (the deposits already are).
+        residents,
+        tasks: allTasks.filter((t) => canSeeTask(ctx, t)),
+      });
+      res.json(items);
+    } catch (error) {
+      sendError(res, error, "Failed to load action items");
+    }
+  });
+
+  app.get('/api/tasks', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+
+      const allTasks = await storage.getAllTasks();
+      res.json(allTasks.filter((t) => canSeeTask(ctx, t)));
+    } catch (error) {
+      sendError(res, error, "Failed to fetch tasks");
+    }
+  });
+
+  app.post('/api/tasks', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+
+      const validatedData = insertTaskSchema.parse(req.body);
+
+      // Scope rules. A personal task ("just me") belongs to the creator and needs
+      // no region. A region broadcast must be a region the creator can reach. An
+      // all-regions broadcast (no region) is an admin-only announcement.
+      const assignedToUserId = validatedData.assignedToUserId ? ctx.userId : null;
+      if (!assignedToUserId) {
+        if (validatedData.region == null) {
+          if (!requireAdmin(res, ctx)) return;
+        } else if (!requireRegion(res, ctx, validatedData.region, "Forbidden - Cannot create in this region")) {
+          return;
+        }
+      }
+
+      const task = await storage.createTask({
+        ...validatedData,
+        assignedToUserId,
+        createdBy: ctx.userId,
+      });
+      res.json(task);
+    } catch (error) {
+      sendError(res, error, "Failed to create task");
+    }
+  });
+
+  app.patch('/api/tasks/:id', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+
+      const existing = await storage.getTask(req.params.id);
+      if (!existing) {
+        return res.status(404).json({ message: "Task not found" });
+      }
+      if (!canSeeTask(ctx, existing)) {
+        return res.status(403).json({ message: "Forbidden - Task not accessible" });
+      }
+
+      // Who a task is for is fixed once created; only its content and status are
+      // editable here.
+      const { region: _re, assignedToUserId: _a, createdBy: _c, completedBy: _cb, completedAt: _ca, ...editable } = req.body ?? {};
+      const validatedData = insertTaskSchema.partial().parse(editable);
+
+      // Completing a task stamps who finished it and when; reopening clears both.
+      const lifecycle =
+        validatedData.status === "done"
+          ? { completedBy: ctx.userId, completedAt: new Date() }
+          : validatedData.status === "open"
+            ? { completedBy: null, completedAt: null }
+            : {};
+
+      const task = await storage.updateTask(req.params.id, { ...validatedData, ...lifecycle });
+      res.json(task);
+    } catch (error) {
+      sendError(res, error, "Failed to update task");
+    }
+  });
+
+  app.delete('/api/tasks/:id', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+
+      const existing = await storage.getTask(req.params.id);
+      if (!existing) {
+        return res.status(404).json({ message: "Task not found" });
+      }
+      // Only the person who created a task (or an admin) may delete it.
+      if (!ctx.isAdmin && existing.createdBy !== ctx.userId) {
+        return res.status(403).json({ message: "Forbidden - Only the creator can delete this task" });
+      }
+
+      await storage.deleteTask(req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      sendError(res, error, "Failed to delete task");
     }
   });
 

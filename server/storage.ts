@@ -14,6 +14,7 @@ import {
   rentPayments,
   securityDeposits,
   maintenanceSchedules,
+  tasks,
   requestContacts,
   type User,
   type UpsertUser,
@@ -45,6 +46,8 @@ import {
   type InsertRentPayment,
   type SecurityDeposit,
   type InsertSecurityDeposit,
+  type Task,
+  type InsertTask,
   uploads,
   type Upload,
   type InsertUpload,
@@ -175,6 +178,13 @@ export interface IStorage {
   getSecurityDepositByResident(residentId: string): Promise<SecurityDeposit | undefined>;
   updateSecurityDeposit(id: string, data: Partial<InsertSecurityDeposit>): Promise<SecurityDeposit>;
   deleteSecurityDeposit(id: string): Promise<void>;
+
+  // Tasks
+  createTask(task: InsertTask & { createdBy: string }): Promise<Task>;
+  getTask(id: string): Promise<Task | undefined>;
+  getAllTasks(): Promise<Task[]>;
+  updateTask(id: string, data: Partial<Task>): Promise<Task>;
+  deleteTask(id: string): Promise<void>;
 
   // Maintenance Contacts
   createMaintenanceContact(contact: InsertMaintenanceContact): Promise<MaintenanceContact>;
@@ -706,6 +716,35 @@ export class DatabaseStorage implements IStorage {
 
   async deleteSecurityDeposit(id: string): Promise<void> {
     await db.delete(securityDeposits).where(eq(securityDeposits.id, id));
+  }
+
+  // Tasks Implementation
+  async createTask(taskData: InsertTask & { createdBy: string }): Promise<Task> {
+    const [task] = await db.insert(tasks).values(taskData).returning();
+    return task;
+  }
+
+  async getTask(id: string): Promise<Task | undefined> {
+    const [task] = await db.select().from(tasks).where(eq(tasks.id, id));
+    return task;
+  }
+
+  async getAllTasks(): Promise<Task[]> {
+    // Open tasks first, then most recently created.
+    return await db.select().from(tasks).orderBy(asc(tasks.status), desc(tasks.createdAt));
+  }
+
+  async updateTask(id: string, data: Partial<Task>): Promise<Task> {
+    const [task] = await db
+      .update(tasks)
+      .set({ ...filterUndefined(data), updatedAt: new Date() })
+      .where(eq(tasks.id, id))
+      .returning();
+    return task;
+  }
+
+  async deleteTask(id: string): Promise<void> {
+    await db.delete(tasks).where(eq(tasks.id, id));
   }
 
   // Asset Photos Implementation

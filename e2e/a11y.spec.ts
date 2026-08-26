@@ -65,6 +65,19 @@ test.describe("accessibility", () => {
     expect(violations, JSON.stringify(violations.map((v) => v.id), null, 2)).toEqual([]);
   });
 
+  test("the tasks page has no serious violations", async ({ page }) => {
+    await page.goto("/tasks");
+    await expect(page.getByRole("heading", { name: "Tasks" })).toBeVisible();
+    // Scan both tabs: the "To do" action-item rows (Resolve buttons) and the
+    // "Manage tasks" list (toggle + menu controls). The add-task dialog is not
+    // opened here, matching the other page scans -- its primary submit button
+    // uses the shared outline variant whose brand-red contrast is tracked in #35.
+    await page.getByTestId("tab-manage").click();
+    await expect(page.getByTestId("tab-todo")).toBeVisible();
+    const violations = await seriousViolations(page);
+    expect(violations, JSON.stringify(violations.map((v) => v.id), null, 2)).toEqual([]);
+  });
+
   test("the finances page has no serious violations", async ({ page }) => {
     await page.goto("/finances");
     await expect(page.getByRole("heading", { name: "Finances" })).toBeVisible();

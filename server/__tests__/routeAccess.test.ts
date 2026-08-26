@@ -1573,3 +1573,124 @@ describe("resident finances (regional leads only)", () => {
     );
   });
 });
+
+describe("tasks & action items (regional leads only)", () => {
+  // A West-Central RA. Their region comes from their permissions row.
+  const WEST = { allowedRegions: ["West Central"] };
+
+  it("refuses a resident the action-items list even with every permission", async () => {
+    actAs(ALICE, { canViewProperties: true, canManageProperties: true, canManageMaintenance: true });
+    expect((await get("/api/action-items")).status).toBe(403);
+  });
+
+  it("refuses a resident the tasks list", async () => {
+    actAs(ALICE, { canManageProperties: true });
+    expect((await get("/api/tasks")).status).toBe(403);
+  });
+
+  it("shows an RA their own-region and all-region broadcasts, but not another region's or someone else's personal task", async () => {
+    actAs(STAFF, WEST);
+    storageMock.getAllTasks.mockResolvedValue([
+      { id: "west", region: "West Central", assignedToUserId: null, createdBy: ADMIN.id, status: "open" },
+      { id: "all", region: null, assignedToUserId: null, createdBy: ADMIN.id, status: "open" },
+      { id: "east", region: "East Central", assignedToUserId: null, createdBy: ADMIN.id, status: "open" },
+      { id: "mine", region: null, assignedToUserId: STAFF.id, createdBy: STAFF.id, status: "open" },
+      { id: "theirs", region: null, assignedToUserId: ADMIN.id, createdBy: ADMIN.id, status: "open" },
+    ]);
+    const { status, body } = await get("/api/tasks");
+    expect(status).toBe(200);
+    expect(body.map((t: { id: string }) => t.id).sort()).toEqual(["all", "mine", "west"]);
+  });
+
+  it("lets an RA broadcast a task to their own region", async () => {
+    actAs(STAFF, WEST);
+    storageMock.createTask.mockImplementation(async (data: Record<string, unknown>) => ({ id: "t-1", ...data }));
+    const { status } = await request("POST", "/api/tasks", { body: { title: "Inspect furnaces", region: "West Central" } });
+    expect(status).toBe(200);
+    expect(storageMock.createTask).toHaveBeenCalledWith(
+      expect.objectContaining({ region: "West Central", assignedToUserId: null, createdBy: STAFF.id }),
+    );
+  });
+
+  it("refuses an RA broadcasting to a region they cannot reach", async () => {
+    actAs(STAFF, WEST);
+    const { status } = await request("POST", "/api/tasks", { body: { title: "x", region: "East Central" } });
+    expect(status).toBe(403);
+    expect(storageMock.createTask).not.toHaveBeenCalled();
+  });
+
+  it("refuses an RA broadcasting to all regions, but lets an admin", async () => {
+    actAs(STAFF, WEST);
+    const denied = await request("POST", "/api/tasks", { body: { title: "x", region: null } });
+    expect(denied.status).toBe(403);
+    expect(storageMock.createTask).not.toHaveBeenCalled();
+
+    actAs(ADMIN);
+    storageMock.createTask.mockImplementation(async (data: Record<string, unknown>) => ({ id: "t-2", ...data }));
+    const allowed = await request("POST", "/api/tasks", { body: { title: "All-hands notice", region: null } });
+    expect(allowed.status).toBe(200);
+    expect(storageMock.createTask).toHaveBeenCalledWith(expect.objectContaining({ region: null, createdBy: ADMIN.id }));
+  });
+
+  it("takes a personal task's owner from the actor, ignoring the body", async () => {
+    actAs(STAFF, WEST);
+    storageMock.createTask.mockImplementation(async (data: Record<string, unknown>) => ({ id: "t-3", ...data }));
+    const { status } = await request("POST", "/api/tasks", { body: { title: "Call bank", assignedToUserId: "u-someone-else" } });
+    expect(status).toBe(200);
+    // A truthy assignee means "just me" — the server pins it to the actor.
+    expect(storageMock.createTask).toHaveBeenCalledWith(expect.objectContaining({ assignedToUserId: STAFF.id }));
+  });
+
+  it("does not let a task patch change who it is for, and stamps completion", async () => {
+    actAs(STAFF, WEST);
+    storageMock.getTask.mockResolvedValue({ id: "t-1", region: "West Central", assignedToUserId: null, createdBy: STAFF.id, status: "open" });
+    storageMock.updateTask.mockImplementation(async (id: string, patch: Record<string, unknown>) => ({ id, ...patch }));
+    const { status } = await request("PATCH", "/api/tasks/t-1", {
+      body: { status: "done", region: "East Central", assignedToUserId: "u-evil", createdBy: "u-evil" },
+    });
+    expect(status).toBe(200);
+    const patch = storageMock.updateTask.mock.calls[0][1];
+    for (const forbidden of ["region", "assignedToUserId", "createdBy"]) {
+      expect(patch).not.toHaveProperty(forbidden);
+    }
+    expect(patch).toMatchObject({ status: "done", completedBy: STAFF.id });
+  });
+
+  it("refuses to patch a task in a region the RA cannot see", async () => {
+    actAs(STAFF, WEST);
+    storageMock.getTask.mockResolvedValue({ id: "t-e", region: "East Central", assignedToUserId: null, createdBy: ADMIN.id, status: "open" });
+    const { status } = await request("PATCH", "/api/tasks/t-e", { body: { status: "done" } });
+    expect(status).toBe(403);
+    expect(storageMock.updateTask).not.toHaveBeenCalled();
+  });
+
+  it("lets only the creator (or an admin) delete a task", async () => {
+    actAs(STAFF, WEST);
+    storageMock.getTask.mockResolvedValue({ id: "t-x", region: "West Central", assignedToUserId: null, createdBy: ADMIN.id, status: "open" });
+    const denied = await request("DELETE", "/api/tasks/t-x", {});
+    expect(denied.status).toBe(403);
+    expect(storageMock.deleteTask).not.toHaveBeenCalled();
+
+    actAs(ADMIN);
+    storageMock.getTask.mockResolvedValue({ id: "t-x", region: "West Central", assignedToUserId: null, createdBy: STAFF.id, status: "open" });
+    const allowed = await request("DELETE", "/api/tasks/t-x", {});
+    expect(allowed.status).toBe(200);
+    expect(storageMock.deleteTask).toHaveBeenCalledWith("t-x");
+  });
+
+  it("builds region-scoped action items for an RA", async () => {
+    actAs(STAFF, WEST);
+    storageMock.getAllMaintenanceSchedules.mockResolvedValue([]);
+    storageMock.getAllRentPayments.mockResolvedValue([
+      { id: "rp-w", status: "unpaid", period: "2026-07", amount: "700", buildingAddress: "1 Main St", region: "West Central" },
+      { id: "rp-e", status: "unpaid", period: "2026-07", amount: "700", buildingAddress: "9 Elm", region: "East Central" },
+    ]);
+    storageMock.getAllSecurityDeposits.mockResolvedValue([]);
+    storageMock.getAllResidents.mockResolvedValue([]);
+    storageMock.getAllTasks.mockResolvedValue([]);
+    const { status, body } = await get("/api/action-items");
+    expect(status).toBe(200);
+    // The East-Central rent is filtered out by region.
+    expect(body.map((i: { id: string }) => i.id)).toEqual(["rp-w"]);
+  });
+});

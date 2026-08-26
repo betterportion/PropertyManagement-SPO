@@ -226,6 +226,29 @@ export function filterByRelatedRegion<T>(
 }
 
 /**
+ * Whether a task is visible to a user.
+ *
+ * A task is not an ordinary region-scoped record, so it does not go through
+ * `filterByRegion`: its region is nullable (an all-regions broadcast), and it
+ * can be personal to one user. The rules, in order:
+ *   - admins see everything;
+ *   - you always see a task you created or one assigned to you;
+ *   - a task assigned to someone else is private to them;
+ *   - an all-regions broadcast (region null) is visible to every staff member;
+ *   - otherwise it is a region broadcast, visible to that region's leads.
+ */
+export function canSeeTask(
+  ctx: AuthContext,
+  task: { region: string | null; assignedToUserId: string | null; createdBy: string },
+): boolean {
+  if (ctx.isAdmin) return true;
+  if (task.createdBy === ctx.userId || task.assignedToUserId === ctx.userId) return true;
+  if (task.assignedToUserId) return false;
+  if (task.region === null) return true;
+  return canAccessRegion(ctx, task.region);
+}
+
+/**
  * Whether a resident submitted the record in question.
  *
  * `submittedBy` stores the submitter's email address, not their user ID — the
