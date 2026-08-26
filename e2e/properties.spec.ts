@@ -44,3 +44,31 @@ test.describe("properties — region and chapter filters", () => {
     await expect(page.getByRole("option", { name: "University of Minnesota" })).toHaveCount(0);
   });
 });
+
+test.describe("properties — leases", () => {
+  test("a seeded rented house shows its lease info on the card", async ({ page }) => {
+    await page.goto("/properties");
+    await expect(page.getByRole("heading", { name: "Properties" }).first()).toBeVisible();
+    // The seed marks a couple of houses as rented with an upcoming renewal.
+    await expect(page.locator('[data-testid^="badge-property-rented-"]').first()).toBeVisible();
+    await expect(page.locator('[data-testid^="text-property-renewal-"]').first()).toBeVisible();
+  });
+
+  test("marking a house rented with a renewal date persists to its card", async ({ page }) => {
+    await page.goto("/properties");
+    const card = page.locator('[data-testid^="card-property-"]').filter({ hasText: "Dinkytown" });
+    await expect(card).toBeVisible();
+
+    await card.locator('[data-testid^="button-menu-"]').click();
+    await page.getByRole("menuitem", { name: "Edit" }).click();
+
+    await page.getByTestId("select-property-ownership").click();
+    await page.getByRole("option", { name: "Rented (has a lease)" }).click();
+    await page.getByTestId("input-property-lease-renewal").fill("2027-01-15");
+    await page.getByRole("button", { name: "Update Property" }).click();
+
+    // The card now shows the rented badge and the renewal it just recorded.
+    await expect(card.getByText("Rented")).toBeVisible();
+    await expect(card.getByText(/Lease renewal:/)).toBeVisible();
+  });
+});

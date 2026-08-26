@@ -21,14 +21,18 @@ import type {
   SecurityDeposit,
   Resident,
   Task,
+  Property,
 } from "@shared/schema";
 
 /** How far ahead a recurring schedule becomes an action item. */
 export const SCHEDULE_LOOKAHEAD_DAYS = 30;
 
+/** How far ahead a lease renewal becomes an action item — two months. */
+export const LEASE_LOOKAHEAD_DAYS = 60;
+
 const DAY_MS = 24 * 60 * 60 * 1_000;
 
-export type ActionItemSource = "schedule" | "rent" | "deposit" | "task";
+export type ActionItemSource = "schedule" | "rent" | "deposit" | "task" | "lease";
 export type ActionItemCategory = "property" | "finance" | "general";
 
 export interface ActionItem {
@@ -52,6 +56,7 @@ export interface ActionItemInputs {
   deposits: SecurityDeposit[];
   residents: Resident[];
   tasks: Task[];
+  properties: Property[];
 }
 
 /** The last calendar day of a "YYYY-MM" period, as a UTC-midnight date. */
@@ -96,6 +101,28 @@ export function buildActionItems(inputs: ActionItemInputs, now: Date = new Date(
       dueDate: iso(due),
       overdue: due < now,
       region: s.region,
+    });
+  }
+
+  // Property — a lease renewal coming due on a rented house. Date-driven, so it
+  // re-appears each term; a house marked "not renewing" drops off (it is ending,
+  // not renewing).
+  const leaseHorizon = new Date(now.getTime() + LEASE_LOOKAHEAD_DAYS * DAY_MS);
+  for (const p of inputs.properties) {
+    if (p.ownership !== "rented") continue;
+    if (p.renewalDecision === "not_renewing") continue;
+    if (!p.leaseRenewalDate) continue;
+    const due = p.leaseRenewalDate instanceof Date ? p.leaseRenewalDate : new Date(p.leaseRenewalDate);
+    if (Number.isNaN(due.getTime()) || due > leaseHorizon) continue;
+    items.push({
+      id: p.id,
+      source: "lease",
+      category: "property",
+      title: `Lease renewal — ${p.name}`,
+      subtitle: p.address,
+      dueDate: iso(due),
+      overdue: due < now,
+      region: p.region,
     });
   }
 
