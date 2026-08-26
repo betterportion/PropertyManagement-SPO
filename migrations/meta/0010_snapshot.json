@@ -1,5 +1,5 @@
 {
-  "id": "ec9b974e-80b3-4d85-85b7-235f28657f43",
+  "id": "56aa0056-8c83-41ef-a370-551dcc572fee",
   "prevId": "d0145658-fa8f-4ed8-89c2-39ae77079e7a",
   "version": "7",
   "dialect": "postgresql",
@@ -1514,7 +1514,7 @@
           "name": "created_by",
           "type": "varchar",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "completed_by": {
           "name": "completed_by",
@@ -1568,7 +1568,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
+          "onDelete": "set null",
           "onUpdate": "no action"
         },
         "tasks_completed_by_users_id_fk": {

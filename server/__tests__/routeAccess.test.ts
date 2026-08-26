@@ -1596,10 +1596,13 @@ describe("tasks & action items (regional leads only)", () => {
       { id: "east", region: "East Central", assignedToUserId: null, createdBy: ADMIN.id, status: "open" },
       { id: "mine", region: null, assignedToUserId: STAFF.id, createdBy: STAFF.id, status: "open" },
       { id: "theirs", region: null, assignedToUserId: ADMIN.id, createdBy: ADMIN.id, status: "open" },
+      // Orphaned: its creator's account was deleted (createdBy set null). A
+      // region broadcast still follows the region rule.
+      { id: "orphan", region: "West Central", assignedToUserId: null, createdBy: null, status: "open" },
     ]);
     const { status, body } = await get("/api/tasks");
     expect(status).toBe(200);
-    expect(body.map((t: { id: string }) => t.id).sort()).toEqual(["all", "mine", "west"]);
+    expect(body.map((t: { id: string }) => t.id).sort()).toEqual(["all", "mine", "orphan", "west"]);
   });
 
   it("lets an RA broadcast a task to their own region", async () => {
