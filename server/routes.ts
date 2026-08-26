@@ -1779,11 +1779,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!ctx) return;
       if (!requireStaff(res, ctx)) return;
 
-      const [requests, schedules, properties, rentPayments, users, permissions] = await Promise.all([
+      const [requests, schedules, properties, rentPayments, tasks, users, permissions] = await Promise.all([
         storage.getAllMaintenanceRequests(),
         storage.getAllMaintenanceSchedules(),
         storage.getAllProperties(),
         storage.getAllRentPayments(),
+        storage.getAllTasks(),
         storage.getAllUsers(),
         storage.getAllUserPermissions(),
       ]);
@@ -1808,6 +1809,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           schedules: filterByRegion(ctx, schedules),
           properties: filterByRegion(ctx, properties),
           rentPayments: filterByRegion(ctx, rentPayments),
+          tasks: filterByRegion(ctx, tasks),
           staff,
         },
         regions,

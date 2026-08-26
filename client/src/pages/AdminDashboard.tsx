@@ -57,7 +57,9 @@ export default function AdminDashboard() {
     .sort((a, b) => time(b.submittedDate) - time(a.submittedDate));
   const scopedRequests = (focusedRegion ? openRequests.filter((r) => r.region === focusedRegion) : openRequests).slice(0, 5);
 
-  const safetyItems = actionItems.filter((i) => i.source === "schedule");
+  // Per-house maintenance schedules plus the region-level safety reminders
+  // (walkthroughs, utilities) — everything that belongs to safety & preventive.
+  const safetyItems = actionItems.filter((i) => i.source === "schedule" || i.category === "safety");
   const scopedSafety = (focusedRegion ? safetyItems.filter((i) => i.region === focusedRegion) : safetyItems).slice(0, 5);
 
   const handleEditRequest = (request: MaintenanceRequest) => {

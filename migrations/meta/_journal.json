@@ -85,6 +85,13 @@
       "when": 1787775205369,
       "tag": "0011_add_property_leases",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1787780076390,
+      "tag": "0012_add_task_source_key",
+      "breakpoints": true
     }
   ]
 }
