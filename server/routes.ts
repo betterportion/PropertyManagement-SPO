@@ -63,6 +63,9 @@ import {
 } from "@shared/schema";
 import { STANDARD_SCHEDULE_TEMPLATES, addMonths } from "./schedules";
 import { buildActionItems } from "./actionItems";
+import { buildRegionSummaries, type RegionStaff } from "./regionSummary";
+import { normalizeRegions } from "./migrateRegions";
+import { REGIONS } from "@shared/regions";
 
 // Uploads are buffered in memory only long enough to be written to App Storage.
 // Nothing is written to the container filesystem, because autoscale rebuilds it
@@ -1747,6 +1750,54 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(items);
     } catch (error) {
       sendError(res, error, "Failed to load action items");
+    }
+  });
+
+  // Per-region rollup for the leadership dashboard. An admin sees every region;
+  // a regional admin sees only the region(s) they are assigned. Regional-leads
+  // only, same audience as the action-items route.
+  app.get('/api/region-summary', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+
+      const [requests, schedules, properties, rentPayments, users, permissions] = await Promise.all([
+        storage.getAllMaintenanceRequests(),
+        storage.getAllMaintenanceSchedules(),
+        storage.getAllProperties(),
+        storage.getAllRentPayments(),
+        storage.getAllUsers(),
+        storage.getAllUserPermissions(),
+      ]);
+
+      // Which regions the caller may see: every region for an admin, otherwise
+      // just their own assigned regions.
+      const regions = ctx.isAdmin ? [...REGIONS] : normalizeRegions(ctx.allowedRegions);
+
+      // Regional admins and their assigned regions, for naming each region's lead.
+      const regionsByUser = new Map(permissions.map((p) => [p.userId, normalizeRegions(p.allowedRegions ?? [])]));
+      const staff: RegionStaff[] = users
+        .filter((u) => u.role === "regional_administrator" && u.isActive)
+        .map((u) => ({
+          name: [u.firstName, u.lastName].filter(Boolean).join(" ").trim() || (u.email ?? "Unnamed"),
+          email: u.email ?? null,
+          regions: regionsByUser.get(u.id) ?? [],
+        }));
+
+      const summaries = buildRegionSummaries(
+        {
+          requests: filterByRegion(ctx, requests),
+          schedules: filterByRegion(ctx, schedules),
+          properties: filterByRegion(ctx, properties),
+          rentPayments: filterByRegion(ctx, rentPayments),
+          staff,
+        },
+        regions,
+      );
+      res.json(summaries);
+    } catch (error) {
+      sendError(res, error, "Failed to load region summary");
     }
   });
 

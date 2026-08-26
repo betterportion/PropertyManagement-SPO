@@ -96,6 +96,7 @@ export interface IStorage {
   updateUserRole(id: string, role: "admin" | "regional_administrator" | "resident"): Promise<User>;
   updateUserActiveStatus(id: string, isActive: boolean): Promise<User>;
   getUserPermissions(userId: string): Promise<UserPermissions | undefined>;
+  getAllUserPermissions(): Promise<UserPermissions[]>;
   upsertUserPermissions(permissions: InsertUserPermissions): Promise<UserPermissions>;
   deleteUser(id: string): Promise<void>;
 
@@ -383,6 +384,10 @@ export class DatabaseStorage implements IStorage {
       .from(userPermissions)
       .where(eq(userPermissions.userId, userId));
     return permissions;
+  }
+
+  async getAllUserPermissions(): Promise<UserPermissions[]> {
+    return await db.select().from(userPermissions);
   }
 
   async upsertUserPermissions(permissionsData: InsertUserPermissions): Promise<UserPermissions> {

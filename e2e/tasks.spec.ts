@@ -26,9 +26,9 @@ test.describe("tasks", () => {
     await expect(page.getByText("Playwright test task").first()).toBeVisible();
   });
 
-  test("the dashboard shows the action-items panel linking to Tasks", async ({ page }) => {
+  test("the dashboard's safety & preventive panel links to Tasks", async ({ page }) => {
     await page.goto("/");
-    await expect(page.getByRole("heading", { name: "Action items" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /Safety & preventive/ })).toBeVisible();
     await page.getByTestId("button-view-tasks").click();
     await expect(page).toHaveURL(/\/tasks$/);
   });
