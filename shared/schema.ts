@@ -544,6 +544,57 @@ export const insertMaintenanceScheduleSchema = createInsertSchema(maintenanceSch
 export type MaintenanceSchedule = typeof maintenanceSchedules.$inferSelect;
 export type InsertMaintenanceSchedule = z.infer<typeof insertMaintenanceScheduleSchema>;
 
+// Tasks
+//
+// A manual to-do that lives alongside the dashboard's derived "action items"
+// (unpaid rent, deposits to return, maintenance coming due -- those are computed
+// from the real records and never stored here). A task is either a broadcast or
+// a personal note:
+//   - region set, no assignee  -> broadcast to every lead who can reach that
+//     region (an admin pushing "inspect all Southwest houses" to its RAs, or an
+//     RA leaving a note for their own region).
+//   - region NULL, no assignee -> broadcast to everyone; only an admin may
+//     create one (all-regions announcement).
+//   - assignedToUserId set      -> personal ("just me"); visible only to that
+//     person (and admins). v1 only ever assigns to the creator.
+// region is deliberately nullable here -- the one departure from the
+// "region notNull" convention -- so `canSeeTask` in server/authz.ts decides
+// visibility rather than the blanket `filterByRegion`.
+export const tasks = pgTable("tasks", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  title: varchar("title").notNull(),
+  notes: text("notes"),
+  category: varchar("category", { enum: ["general", "property", "finance"] }).notNull().default("general"),
+  status: varchar("status", { enum: ["open", "done"] }).notNull().default("open"),
+  dueDate: timestamp("due_date"),
+  region: varchar("region"),
+  assignedToUserId: varchar("assigned_to_user_id").references(() => users.id, { onDelete: "set null" }),
+  createdBy: varchar("created_by").notNull().references(() => users.id),
+  completedBy: varchar("completed_by").references(() => users.id, { onDelete: "set null" }),
+  completedAt: timestamp("completed_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertTaskSchema = createInsertSchema(tasks)
+  .omit({
+    id: true,
+    // Server-owned: taken from the authenticated actor, never a request body.
+    createdBy: true,
+    completedBy: true,
+    completedAt: true,
+    createdAt: true,
+    updatedAt: true,
+  })
+  .extend({
+    title: z.string().trim().min(1, "Enter a title").max(200, "Keep the title under 200 characters"),
+    notes: z.string().max(2000, "Keep notes under 2000 characters").nullish(),
+    dueDate: dateFromClient.nullish(),
+  });
+
+export type Task = typeof tasks.$inferSelect;
+export type InsertTask = z.infer<typeof insertTaskSchema>;
+
 // Uploaded Files
 //
 // One row per stored object. The stored key is random, so this is where the

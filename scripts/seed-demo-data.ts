@@ -298,6 +298,7 @@ async function seed(): Promise<void> {
     { property: properties[1], firstName: "Sofia", lastName: "Marchetti", email: "sofia.marchetti@spo.org", movedInDaysAgo: 300 },
     { property: properties[2], firstName: "Grace", lastName: "Sullivan", email: "grace.sullivan@spo.org", movedInDaysAgo: 60 },
     { property: properties[0], firstName: "Thomas", lastName: "Reilly", email: "thomas.reilly@spo.org", movedInDaysAgo: 700, movedOutDaysAgo: 40 },
+    { property: properties[1], firstName: "Anna", lastName: "Kowalski", email: "anna.kowalski@spo.org", movedInDaysAgo: 500, movedOutDaysAgo: 18 },
   ];
   const residents = [];
   for (const row of residentRows) {
@@ -352,7 +353,11 @@ async function seed(): Promise<void> {
 
   let depositCount = 0;
   for (const [i, resident] of residents.entries()) {
-    const returned = !resident.isActive; // the moved-out resident's deposit is back
+    // A resident who left a while ago has been settled up; one who left recently
+    // is still owed their deposit, so it stays "held" and shows on the dashboard
+    // as a "deposit to return" action item.
+    const movedOutDaysAgo = residentRows[i].movedOutDaysAgo ?? 0;
+    const returned = !resident.isActive && movedOutDaysAgo > 30;
     await storage.createSecurityDeposit({
       residentId: resident.id,
       propertyId: resident.propertyId,
@@ -381,6 +386,29 @@ async function seed(): Promise<void> {
     console.log(
       `Pre-created admin account for ${adminEmail} — the first Google sign-in with that address arrives as an admin.`,
     );
+
+    // A couple of manual tasks so the Tasks page and dashboard show both derived
+    // and hand-written items. Tasks need an owner (createdBy), so they are only
+    // seeded when there is a seeded admin to own them.
+    await storage.createTask({
+      title: "Replace furnace filters before winter",
+      notes: "Coordinate with the RA to get all Northwest houses done in one weekend.",
+      category: "property",
+      dueDate: daysFromNow(21),
+      region: properties[0].region,
+      assignedToUserId: null,
+      createdBy: admin.id,
+    });
+    await storage.createTask({
+      title: "Call the bank about the deposit account",
+      notes: null,
+      category: "finance",
+      dueDate: null,
+      region: null,
+      assignedToUserId: admin.id,
+      createdBy: admin.id,
+    });
+    console.log("Seeded 2 tasks");
   } else {
     console.log(
       "No SEED_ADMIN_EMAIL set — the first sign-in will be a resident (promote with SQL, see README).",
