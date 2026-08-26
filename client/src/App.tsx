@@ -22,6 +22,7 @@ import Finances from "@/pages/Finances";
 import Tasks from "@/pages/Tasks";
 import Contacts from "@/pages/Contacts";
 import Properties from "@/pages/Properties";
+import PropertyDetail from "@/pages/PropertyDetail";
 import ResidentDashboard from "@/pages/ResidentDashboard";
 import SubmitRequest from "@/pages/SubmitRequest";
 import MyRequests from "@/pages/MyRequests";
@@ -48,6 +49,7 @@ function Router() {
         <Route path="/" component={AdminDashboard} />
         <Route path="/tasks" component={Tasks} />
         <Route path="/properties" component={Properties} />
+        <Route path="/properties/:id" component={PropertyDetail} />
         <Route path="/residents" component={Residents} />
         <Route path="/finances" component={Finances} />
         <Route path="/maintenance" component={Maintenance} />

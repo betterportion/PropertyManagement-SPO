@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -441,8 +442,17 @@ export default function Properties() {
                       <Building2 className="h-5 w-5" />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <h4 className="font-medium text-sm" data-testid={`text-property-name-${property.id}`}>
-                        {property.name}
+                      <h4 className="font-medium text-sm">
+                        {/* The name is the link, not the whole card -- the card
+                            already holds an actions menu, and nesting a button
+                            inside a link is neither valid nor keyboard-sane. */}
+                        <Link
+                          href={`/properties/${property.id}`}
+                          className="rounded-sm hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          data-testid={`text-property-name-${property.id}`}
+                        >
+                          {property.name}
+                        </Link>
                       </h4>
                       <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
                         <MapPin className="h-3 w-3" />
