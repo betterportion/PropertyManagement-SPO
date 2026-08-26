@@ -560,6 +560,70 @@ describe("one resident reading another resident's request", () => {
   });
 });
 
+describe("submitting a maintenance request", () => {
+  const body = {
+    title: "Leaky tap",
+    description: "The kitchen tap drips overnight.",
+    category: "plumbing",
+    priority: "medium",
+    location: "Kitchen",
+  };
+
+  it("files a resident's request against their roster house, ignoring region/submitter in the body", async () => {
+    actAs(ALICE, ALL_MAINTENANCE);
+    storageMock.getActiveResidentByEmail.mockResolvedValue({ region: "West Central", buildingAddress: "1 Main St" });
+    storageMock.createMaintenanceRequest.mockImplementation(async (data: Record<string, unknown>) => ({ id: "new", ...data }));
+
+    const { status } = await request("POST", "/api/maintenance-requests", {
+      body: { ...body, region: "East Central", buildingAddress: "9 Evil Rd", submittedBy: "evil@example.com" },
+    });
+
+    expect(status).toBe(200);
+    // House + region come from the roster; the submitter is the session, not the body.
+    expect(storageMock.createMaintenanceRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ region: "West Central", buildingAddress: "1 Main St", submittedBy: ALICE.email }),
+    );
+    const created = storageMock.createMaintenanceRequest.mock.calls[0][0];
+    expect(created.region).not.toBe("East Central");
+  });
+
+  it("refuses a resident who is not on any house roster, with a helpful message", async () => {
+    actAs(ALICE, ALL_MAINTENANCE);
+    storageMock.getActiveResidentByEmail.mockResolvedValue(undefined);
+
+    const { status, body: resBody } = await request("POST", "/api/maintenance-requests", { body });
+
+    expect(status).toBe(400);
+    expect(resBody.message).toMatch(/house on file/i);
+    expect(storageMock.createMaintenanceRequest).not.toHaveBeenCalled();
+  });
+
+  it("files a staff member's request into a region they can reach, session as submitter", async () => {
+    actAs(STAFF, { ...ALL_MAINTENANCE, allowedRegions: ["West Central"] });
+    storageMock.createMaintenanceRequest.mockImplementation(async (data: Record<string, unknown>) => ({ id: "new", ...data }));
+
+    const { status } = await request("POST", "/api/maintenance-requests", {
+      body: { ...body, region: "West Central", buildingAddress: "1 Main St", submittedBy: "spoof@example.com" },
+    });
+
+    expect(status).toBe(200);
+    expect(storageMock.createMaintenanceRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ region: "West Central", submittedBy: STAFF.email }),
+    );
+  });
+
+  it("refuses a staff member filing into a region they cannot reach", async () => {
+    actAs(STAFF, { ...ALL_MAINTENANCE, allowedRegions: ["West Central"] });
+
+    const { status } = await request("POST", "/api/maintenance-requests", {
+      body: { ...body, region: "East Central", buildingAddress: "9 Elm" },
+    });
+
+    expect(status).toBe(403);
+    expect(storageMock.createMaintenanceRequest).not.toHaveBeenCalled();
+  });
+});
+
 // ---------------------------------------------------------------------------
 // 6. Uploads are refused before any bytes are read
 // ---------------------------------------------------------------------------

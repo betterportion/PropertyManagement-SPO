@@ -23,11 +23,19 @@ export default function MaintenanceRequestForm({
     priority: "",
     location: "",
   });
+  const [error, setError] = useState("");
   const update = (key: string, value: string) => setFormData((current) => ({ ...current, [key]: value }));
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    // Category and priority are required by the server; validate here so the
+    // resident sees why rather than a rejected request. The form is not cleared
+    // on error, so their description is not lost.
+    if (!formData.category || !formData.priority) {
+      setError("Please choose a category and a priority.");
+      return;
+    }
+    setError("");
     onSubmit?.(formData);
-    setFormData({ title: "", description: "", category: "", priority: "", location: "" });
   };
   return <Card className="border-border/80"><CardHeader><CardTitle className="flex items-center gap-2 text-xl"><Wrench className="h-5 w-5" />Submit maintenance request</CardTitle></CardHeader><CardContent>
     <form onSubmit={handleSubmit} className="space-y-4">
@@ -38,7 +46,8 @@ export default function MaintenanceRequestForm({
         <div className="space-y-2"><Label htmlFor="priority">Priority</Label><Select value={formData.priority} onValueChange={(v) => update("priority", v)}><SelectTrigger id="priority"><SelectValue placeholder="Select priority" /></SelectTrigger><SelectContent>{["low","medium","high","urgent"].map((v) => <SelectItem key={v} value={v}>{v[0].toUpperCase()+v.slice(1)}</SelectItem>)}</SelectContent></Select></div>
       </div>
       <div className="space-y-2"><Label htmlFor="description">Description</Label><Textarea id="description" placeholder="Detailed description of the issue" value={formData.description} onChange={(e) => update("description", e.target.value)} rows={4} required /></div>
-      <Button type="submit" variant="primary" className="w-full" disabled={isSubmitting}>{isSubmitting ? "Sending request..." : "Submit request"}</Button>
+      {error && <p className="text-sm text-destructive" data-testid="text-form-error">{error}</p>}
+      <Button type="submit" variant="primary" className="w-full" disabled={isSubmitting} data-testid="button-submit-request">{isSubmitting ? "Sending request..." : "Submit request"}</Button>
     </form>
   </CardContent></Card>;
 }

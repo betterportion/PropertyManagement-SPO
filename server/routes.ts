@@ -494,23 +494,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!ctx) return;
       if (!requirePermission(res, ctx, "canViewMaintenance", "canManageMaintenance")) return;
 
-      const validatedData = insertMaintenanceRequestSchema.parse(req.body);
+      // The submitter is always taken from the session, never from the request
+      // body, so a caller cannot file a request in someone else's name.
+      const submittedBy = ctx.user.email || "Unknown";
 
-      // Residents are scoped by ownership rather than by region -- they are
-      // never assigned regions, and they can only ever read back the requests
-      // they submitted, so a region check here would block them entirely
-      // without preventing any cross-region disclosure.
-      if (!ctx.isResident) {
-        if (!requireRegion(res, ctx, validatedData.region, "Forbidden - Cannot create in this region")) return;
+      if (ctx.isResident) {
+        // A resident never chooses a region or a house -- they cannot even see
+        // the property list. Their request is filed against the house they are
+        // on the roster for, matched by their login email. Region and building
+        // come from that record, exactly as they do for rent and deposits.
+        const residency = await storage.getActiveResidentByEmail(submittedBy);
+        if (!residency) {
+          return res.status(400).json({
+            message:
+              "We couldn't find your house on file. Ask your house director to add you to a house, then try again.",
+          });
+        }
+        const validatedData = insertMaintenanceRequestSchema
+          .omit({ region: true, buildingAddress: true, submittedBy: true })
+          .parse(req.body);
+        const request = await storage.createMaintenanceRequest({
+          ...validatedData,
+          region: residency.region,
+          buildingAddress: residency.buildingAddress,
+          submittedBy,
+        });
+        return res.json(request);
       }
 
-      // The submitter is taken from the session, never from the request body,
-      // so a caller cannot file a request in someone else's name.
-      const request = await storage.createMaintenanceRequest({
-        ...validatedData,
-        submittedBy: ctx.user.email || "Unknown",
-      });
+      // Staff file into a region they can reach. submittedBy is still the
+      // session, so it is omitted from the body here too.
+      const validatedData = insertMaintenanceRequestSchema.omit({ submittedBy: true }).parse(req.body);
+      if (!requireRegion(res, ctx, validatedData.region, "Forbidden - Cannot create in this region")) return;
 
+      const request = await storage.createMaintenanceRequest({ ...validatedData, submittedBy });
       res.json(request);
     } catch (error) {
       sendError(res, error, "Failed to create maintenance request");
