@@ -1533,4 +1533,43 @@ describe("resident finances (regional leads only)", () => {
       expect.objectContaining({ region: "West Central", propertyId: "prop-west", amountHeld: "300" }),
     );
   });
+
+  it("records who recorded a rent charge", async () => {
+    actAs(STAFF, { allowedRegions: ["West Central"] });
+    storageMock.getResident.mockResolvedValue(WEST_RESIDENT);
+    storageMock.createRentPayment.mockImplementation(async (data: Record<string, unknown>) => ({ id: "rp-1", ...data }));
+
+    const { status } = await request("POST", "/api/rent-payments", {
+      body: { residentId: WEST_RESIDENT.id, period: "2026-08", amount: 500 },
+    });
+
+    expect(status).toBe(200);
+    expect(storageMock.createAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "rent_payment.created",
+        entityType: "rent_payment",
+        entityId: "rp-1",
+        actorEmail: STAFF.email,
+      }),
+    );
+  });
+
+  it("records who changed a deposit — the withholding case leaves a trail", async () => {
+    actAs(STAFF, { allowedRegions: ["West Central"] });
+    storageMock.getSecurityDeposit.mockResolvedValue({ id: "dep-1", region: "West Central", buildingAddress: "1 Main St", status: "held" });
+    storageMock.updateSecurityDeposit.mockImplementation(async (id: string, patch: Record<string, unknown>) => ({ id, ...patch }));
+
+    const { status } = await request("PATCH", "/api/security-deposits/dep-1", {
+      body: { status: "withheld", amountReturned: 0, deductionsNotes: "damage to wall" },
+    });
+
+    expect(status).toBe(200);
+    expect(storageMock.createAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "security_deposit.updated",
+        entityId: "dep-1",
+        details: expect.objectContaining({ status: "withheld" }),
+      }),
+    );
+  });
 });

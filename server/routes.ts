@@ -1456,6 +1456,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         buildingAddress: resident.buildingAddress,
       });
       const payment = await storage.createRentPayment(validatedData);
+
+      recordAuditEvent(ctx, {
+        action: AUDIT_ACTIONS.RENT_PAYMENT_CREATED,
+        entityType: "rent_payment",
+        entityId: payment.id,
+        summary: `Recorded ${payment.period} rent of ${payment.amount ?? "an unstated amount"} for a resident at ${payment.buildingAddress} (${payment.status})`,
+        details: { residentId: payment.residentId, period: payment.period, amount: payment.amount ?? null, status: payment.status, region: payment.region },
+      });
+
       res.json(payment);
     } catch (error) {
       sendError(res, error, "Failed to record rent payment");
@@ -1493,18 +1502,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
       for (const resident of current) {
         const existing = await storage.getRentPaymentForResidentPeriod(resident.id, period);
         if (existing) continue;
-        created.push(
-          await storage.createRentPayment(
-            insertRentPaymentSchema.parse({
-              residentId: resident.id,
-              propertyId: property.id,
-              period,
-              amount,
-              region: property.region,
-              buildingAddress: property.address,
-            }),
-          ),
+        const payment = await storage.createRentPayment(
+          insertRentPaymentSchema.parse({
+            residentId: resident.id,
+            propertyId: property.id,
+            period,
+            amount,
+            region: property.region,
+            buildingAddress: property.address,
+          }),
         );
+        created.push(payment);
+        recordAuditEvent(ctx, {
+          action: AUDIT_ACTIONS.RENT_PAYMENT_CREATED,
+          entityType: "rent_payment",
+          entityId: payment.id,
+          summary: `Recorded ${payment.period} rent of ${payment.amount ?? "an unstated amount"} for a resident at ${payment.buildingAddress} (${payment.status})`,
+          details: { residentId: payment.residentId, period: payment.period, amount: payment.amount ?? null, status: payment.status, region: payment.region, viaGenerate: true },
+        });
       }
       res.json({ created: created.length, payments: created });
     } catch (error) {
@@ -1529,6 +1544,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { residentId: _r, propertyId: _p, period: _pe, region: _re, buildingAddress: _b, ...editable } = req.body ?? {};
       const validatedData = insertRentPaymentSchema.partial().parse(editable);
       const payment = await storage.updateRentPayment(req.params.id, validatedData);
+
+      recordAuditEvent(ctx, {
+        action: AUDIT_ACTIONS.RENT_PAYMENT_UPDATED,
+        entityType: "rent_payment",
+        entityId: req.params.id,
+        summary: `Updated ${existing.period} rent for a resident at ${existing.buildingAddress} (now ${payment.status})`,
+        details: {
+          changed: changedFields(existing as unknown as Record<string, unknown>, validatedData),
+          status: payment.status,
+          amount: payment.amount ?? null,
+        },
+      });
+
       res.json(payment);
     } catch (error) {
       sendError(res, error, "Failed to update rent payment");
@@ -1548,6 +1576,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!requireRegion(res, ctx, existing.region)) return;
 
       await storage.deleteRentPayment(req.params.id);
+
+      recordAuditEvent(ctx, {
+        action: AUDIT_ACTIONS.RENT_PAYMENT_DELETED,
+        entityType: "rent_payment",
+        entityId: req.params.id,
+        summary: `Deleted ${existing.period} rent of ${existing.amount ?? "an unstated amount"} for a resident at ${existing.buildingAddress}`,
+        details: { residentId: existing.residentId, period: existing.period, amount: existing.amount ?? null, status: existing.status, region: existing.region },
+      });
+
       res.json({ success: true });
     } catch (error) {
       sendError(res, error, "Failed to delete rent payment");
@@ -1592,6 +1629,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         buildingAddress: resident.buildingAddress,
       });
       const deposit = await storage.createSecurityDeposit(validatedData);
+
+      recordAuditEvent(ctx, {
+        action: AUDIT_ACTIONS.SECURITY_DEPOSIT_CREATED,
+        entityType: "security_deposit",
+        entityId: deposit.id,
+        summary: `Recorded a security deposit of ${deposit.amountHeld ?? "an unstated amount"} for a resident at ${deposit.buildingAddress} (${deposit.status})`,
+        details: { residentId: deposit.residentId, amountHeld: deposit.amountHeld ?? null, status: deposit.status, region: deposit.region },
+      });
+
       res.json(deposit);
     } catch (error) {
       sendError(res, error, "Failed to record security deposit");
@@ -1613,6 +1659,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { residentId: _r, propertyId: _p, region: _re, buildingAddress: _b, ...editable } = req.body ?? {};
       const validatedData = insertSecurityDepositSchema.partial().parse(editable);
       const deposit = await storage.updateSecurityDeposit(req.params.id, validatedData);
+
+      recordAuditEvent(ctx, {
+        action: AUDIT_ACTIONS.SECURITY_DEPOSIT_UPDATED,
+        entityType: "security_deposit",
+        entityId: req.params.id,
+        summary: `Updated a security deposit for a resident at ${existing.buildingAddress} (now ${deposit.status})`,
+        details: {
+          changed: changedFields(existing as unknown as Record<string, unknown>, validatedData),
+          status: deposit.status,
+          amountHeld: deposit.amountHeld ?? null,
+          amountReturned: deposit.amountReturned ?? null,
+        },
+      });
+
       res.json(deposit);
     } catch (error) {
       sendError(res, error, "Failed to update security deposit");
@@ -1632,6 +1692,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!requireRegion(res, ctx, existing.region)) return;
 
       await storage.deleteSecurityDeposit(req.params.id);
+
+      recordAuditEvent(ctx, {
+        action: AUDIT_ACTIONS.SECURITY_DEPOSIT_DELETED,
+        entityType: "security_deposit",
+        entityId: req.params.id,
+        summary: `Deleted a security deposit of ${existing.amountHeld ?? "an unstated amount"} for a resident at ${existing.buildingAddress}`,
+        details: { residentId: existing.residentId, amountHeld: existing.amountHeld ?? null, status: existing.status, region: existing.region },
+      });
+
       res.json({ success: true });
     } catch (error) {
       sendError(res, error, "Failed to delete security deposit");

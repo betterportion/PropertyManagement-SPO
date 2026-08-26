@@ -207,7 +207,7 @@ Any new upload route should go through `guardedUpload()` too, and its permission
 
 ## Audit log
 
-`server/audit.ts` records the actions somebody may need to account for later: **user and permission changes, maintenance status changes, invoice and billing changes, and document uploads and downloads.** `AUDIT_ACTIONS` is the full vocabulary.
+`server/audit.ts` records the actions somebody may need to account for later: **user and permission changes, maintenance status changes, invoice and billing changes, rent charge and security-deposit changes, and document uploads and downloads.** `AUDIT_ACTIONS` is the full vocabulary.
 
 Admins read it in the app: the activity trail in Settings, backed by `GET /api/audit-log` and `client/src/components/ActivityLog.tsx`. Reporting beyond that is a separate piece of work. It can also be read with SQL:
 
