@@ -11,7 +11,7 @@
  * is reported alongside but is NOT part of the health score: it is chased on its
  * own track (a KPI, a flag, and eventually an automated resident email).
  */
-import type { MaintenanceRequest, MaintenanceSchedule, Property, RentPayment } from "@shared/schema";
+import type { MaintenanceRequest, MaintenanceSchedule, Property, RentPayment, Task } from "@shared/schema";
 import { SCHEDULE_LOOKAHEAD_DAYS, LEASE_LOOKAHEAD_DAYS } from "./actionItems";
 
 const DAY_MS = 24 * 60 * 60 * 1_000;
@@ -28,6 +28,8 @@ export interface RegionSummaryInputs {
   schedules: MaintenanceSchedule[];
   properties: Property[];
   rentPayments: RentPayment[];
+  /** Open safety reminders (walkthroughs, utilities) count toward safety load. */
+  tasks: Task[];
   staff: RegionStaff[];
 }
 
@@ -77,11 +79,16 @@ export function buildRegionSummaries(
       (r) => inRegion(r.region, region) && (r.status === "pending" || r.status === "in_progress"),
     ).length;
 
-    const safetyPreventiveDue = inputs.schedules.filter((s) => {
+    const schedulesDue = inputs.schedules.filter((s) => {
       if (!s.isActive || !inRegion(s.region, region)) return false;
       const due = asDate(s.nextDueDate);
       return !!due && due <= scheduleHorizon;
     }).length;
+    // Region-level safety reminders (walkthroughs, utilities) that are still open.
+    const safetyTasksOpen = inputs.tasks.filter(
+      (t) => t.category === "safety" && t.status === "open" && inRegion(t.region, region),
+    ).length;
+    const safetyPreventiveDue = schedulesDue + safetyTasksOpen;
 
     const leaseRenewalsDue = inputs.properties.filter((p) => {
       if (p.ownership !== "rented" || p.renewalDecision === "not_renewing") return false;

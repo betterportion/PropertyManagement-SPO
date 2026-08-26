@@ -32,7 +32,7 @@ const ALL_REGIONS = "__all__";
 const taskFormSchema = z.object({
   title: z.string().min(1, "Enter a title").max(200),
   notes: z.string().max(2000).optional(),
-  category: z.enum(["general", "property", "finance"]),
+  category: z.enum(["general", "property", "safety", "finance"]),
   dueDate: z.string().optional(),
   // Where the task goes: "Just me", "All regions" (admin), or a region name.
   scope: z.string().min(1, "Choose who this is for"),
@@ -172,6 +172,7 @@ export default function Tasks() {
                             <SelectContent>
                               <SelectItem value="general">General</SelectItem>
                               <SelectItem value="property">Property</SelectItem>
+                              <SelectItem value="safety">Safety</SelectItem>
                               <SelectItem value="finance">Finance</SelectItem>
                             </SelectContent>
                           </Select>

@@ -181,8 +181,9 @@ export interface IStorage {
   deleteSecurityDeposit(id: string): Promise<void>;
 
   // Tasks
-  createTask(task: InsertTask & { createdBy: string }): Promise<Task>;
+  createTask(task: InsertTask & { createdBy: string | null; sourceKey?: string | null }): Promise<Task>;
   getTask(id: string): Promise<Task | undefined>;
+  getTaskBySourceKey(sourceKey: string): Promise<Task | undefined>;
   getAllTasks(): Promise<Task[]>;
   updateTask(id: string, data: Partial<Task>): Promise<Task>;
   deleteTask(id: string): Promise<void>;
@@ -724,13 +725,18 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Tasks Implementation
-  async createTask(taskData: InsertTask & { createdBy: string }): Promise<Task> {
+  async createTask(taskData: InsertTask & { createdBy: string | null; sourceKey?: string | null }): Promise<Task> {
     const [task] = await db.insert(tasks).values(taskData).returning();
     return task;
   }
 
   async getTask(id: string): Promise<Task | undefined> {
     const [task] = await db.select().from(tasks).where(eq(tasks.id, id));
+    return task;
+  }
+
+  async getTaskBySourceKey(sourceKey: string): Promise<Task | undefined> {
+    const [task] = await db.select().from(tasks).where(eq(tasks.sourceKey, sourceKey));
     return task;
   }
 

@@ -576,11 +576,15 @@ export const tasks = pgTable("tasks", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   title: varchar("title").notNull(),
   notes: text("notes"),
-  category: varchar("category", { enum: ["general", "property", "finance"] }).notNull().default("general"),
+  category: varchar("category", { enum: ["general", "property", "safety", "finance"] }).notNull().default("general"),
   status: varchar("status", { enum: ["open", "done"] }).notNull().default("open"),
   dueDate: timestamp("due_date"),
   region: varchar("region"),
   assignedToUserId: varchar("assigned_to_user_id").references(() => users.id, { onDelete: "set null" }),
+  // Set on auto-generated recurring tasks (walkthrough / utilities reminders) to
+  // keep the daily generator idempotent -- one row per cadence, region and cycle.
+  // Null for hand-created tasks. Unique so a re-run never duplicates a reminder.
+  sourceKey: varchar("source_key").unique(),
   // Set null rather than restrict on delete: a task (especially a broadcast)
   // can outlive its author, and deleting a user must never be blocked -- the
   // account-linking flow deletes and re-creates a user row on first sign-in.
@@ -598,6 +602,8 @@ export const insertTaskSchema = createInsertSchema(tasks)
     createdBy: true,
     completedBy: true,
     completedAt: true,
+    // Server-owned: only the recurring-task generator sets this.
+    sourceKey: true,
     createdAt: true,
     updatedAt: true,
   })

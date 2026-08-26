@@ -408,6 +408,34 @@ async function seed(): Promise<void> {
   }
   console.log(`Seeded ${regionalLeads.length} regional admins`);
 
+  // ── Seasonal safety reminders ─────────────────────────────────────────────
+  // A couple now, so the dashboard's Safety & preventive stream and region
+  // health show them immediately. The daily generator creates the real
+  // recurring set (walkthroughs Apr 15 / Jul 15, utilities) on their dates.
+  await storage.createTask({
+    title: "Household walkthroughs due — Northwest",
+    notes: "Time to plan and execute household walkthroughs. Check off once the region's houses are done.",
+    category: "safety",
+    status: "open",
+    dueDate: daysFromNow(-2), // overdue, so leadership sees the region is behind
+    region: "Northwest",
+    assignedToUserId: null,
+    createdBy: null,
+    sourceKey: "seed:walkthrough:northwest",
+  });
+  await storage.createTask({
+    title: "Turn off utilities for summer — East Central",
+    notes: "Shut off utilities at the region's houses ahead of the summer break.",
+    category: "safety",
+    status: "open",
+    dueDate: daysFromNow(20),
+    region: "East Central",
+    assignedToUserId: null,
+    createdBy: null,
+    sourceKey: "seed:utilities:east-central",
+  });
+  console.log("Seeded 2 seasonal safety reminders");
+
   // ── Optional pre-created admin ────────────────────────────────────────────
   const adminEmail = process.env.SEED_ADMIN_EMAIL?.trim();
   if (adminEmail) {

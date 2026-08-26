@@ -9,7 +9,7 @@
  */
 
 export type ActionItemSource = "schedule" | "rent" | "deposit" | "task" | "lease";
-export type ActionItemCategory = "property" | "finance" | "general";
+export type ActionItemCategory = "property" | "safety" | "finance" | "general";
 
 export interface ActionItem {
   id: string;
@@ -98,8 +98,9 @@ export function resolveRequest(item: ActionItem): ResolveRequest {
 
 /** A short human label for the item's category, for the row badge. */
 export function categoryLabel(item: ActionItem): string {
-  if (item.source === "task") return "Task";
   if (item.source === "lease") return "Lease";
+  if (item.category === "safety") return "Safety";
+  if (item.source === "task") return "Task";
   if (item.category === "finance") return "Finance";
   if (item.category === "property") return "Property";
   return "General";

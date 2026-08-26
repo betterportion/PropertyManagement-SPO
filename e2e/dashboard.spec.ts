@@ -41,4 +41,9 @@ test.describe("admin dashboard", () => {
     // Focused view offers a way back to all regions.
     await expect(page.getByTestId("button-all-regions")).toBeVisible();
   });
+
+  test("shows a seasonal safety reminder in the Safety & preventive stream", async ({ page }) => {
+    // The seed adds an (overdue) household-walkthrough reminder for Northwest.
+    await expect(page.getByText(/Household walkthroughs due/).first()).toBeVisible();
+  });
 });

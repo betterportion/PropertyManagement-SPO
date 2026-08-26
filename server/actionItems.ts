@@ -33,7 +33,7 @@ export const LEASE_LOOKAHEAD_DAYS = 60;
 const DAY_MS = 24 * 60 * 60 * 1_000;
 
 export type ActionItemSource = "schedule" | "rent" | "deposit" | "task" | "lease";
-export type ActionItemCategory = "property" | "finance" | "general";
+export type ActionItemCategory = "property" | "safety" | "finance" | "general";
 
 export interface ActionItem {
   /** The underlying record's id — what the client resolves against. */
@@ -184,7 +184,7 @@ export function buildActionItems(inputs: ActionItemInputs, now: Date = new Date(
   return items.sort(compareUrgency);
 }
 
-const CATEGORY_RANK: Record<ActionItemCategory, number> = { finance: 0, property: 1, general: 2 };
+const CATEGORY_RANK: Record<ActionItemCategory, number> = { finance: 0, safety: 1, property: 2, general: 3 };
 
 /** Orders two items so the more urgent one sorts first. */
 function compareUrgency(a: ActionItem, b: ActionItem): number {
