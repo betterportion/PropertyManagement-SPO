@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { buildActionItems, type ActionItemInputs } from "../actionItems";
-import type { MaintenanceSchedule, RentPayment, SecurityDeposit, Resident, Task } from "@shared/schema";
+import type { MaintenanceSchedule, RentPayment, SecurityDeposit, Resident, Task, Property } from "@shared/schema";
 
 // buildActionItems only reads a handful of fields off each record, so the
 // factories fill just those and cast; a full row would be noise.
@@ -22,8 +22,14 @@ function resident(over: Partial<Resident>): Resident {
 function task(over: Partial<Task>): Task {
   return { id: "t1", status: "open", dueDate: null, title: "Call plumber", notes: null, category: "general", region: "West Central", ...over } as Task;
 }
+function property(over: Partial<Property>): Property {
+  return {
+    id: "p1", name: "Cleveland House", address: "1 Main St", region: "West Central",
+    ownership: "rented", leaseRenewalDate: days(20), renewalDecision: "undecided", ...over,
+  } as Property;
+}
 
-const empty: ActionItemInputs = { schedules: [], rentPayments: [], deposits: [], residents: [], tasks: [] };
+const empty: ActionItemInputs = { schedules: [], rentPayments: [], deposits: [], residents: [], tasks: [], properties: [] };
 
 describe("buildActionItems", () => {
   it("includes a schedule due within the 30-day window and marks overdue ones", () => {
@@ -65,6 +71,29 @@ describe("buildActionItems", () => {
 
     const returned = buildActionItems({ ...empty, deposits: [deposit({ status: "returned" })], residents: [resident({ isActive: false })] }, NOW);
     expect(returned).toHaveLength(0);
+  });
+
+  it("surfaces a rented lease renewing within 60 days, and flags overdue ones", () => {
+    const items = buildActionItems({
+      ...empty,
+      properties: [property({ id: "soon", leaseRenewalDate: days(30) }), property({ id: "past", leaseRenewalDate: days(-5) })],
+    }, NOW);
+    expect(items.map((i) => i.id).sort()).toEqual(["past", "soon"]);
+    expect(items.every((i) => i.source === "lease" && i.category === "property")).toBe(true);
+    expect(items.find((i) => i.id === "past")!.overdue).toBe(true);
+  });
+
+  it("excludes owned houses, ones with no renewal date, not-renewing, and far-off renewals", () => {
+    const items = buildActionItems({
+      ...empty,
+      properties: [
+        property({ id: "owned", ownership: "owned" }),
+        property({ id: "nodate", leaseRenewalDate: null }),
+        property({ id: "leaving", renewalDecision: "not_renewing" }),
+        property({ id: "far", leaseRenewalDate: days(90) }),
+      ],
+    }, NOW);
+    expect(items).toHaveLength(0);
   });
 
   it("includes only open manual tasks", () => {

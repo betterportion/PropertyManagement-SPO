@@ -13,11 +13,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Plus, Building2, MapPin, MoreVertical } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { insertPropertySchema, type Property, type InsertProperty } from "@shared/schema";
+import { type Property } from "@shared/schema";
 import { REGIONS, chaptersForRegion, ALL_CHAPTERS } from "@shared/regions";
-import { z } from "zod";
+import PropertyLeaseFields, { propertyFormSchema, type PropertyForm } from "@/components/PropertyLeaseFields";
 import { Section, Container, PageHeader, PageStack } from "@/components/layout/page";
 import { LoadingState, EmptyState } from "@/components/states";
+import { formatDate } from "@/lib/format";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -50,9 +51,18 @@ export default function Properties() {
       (chapterFilter === "all" || p.chapter === chapterFilter),
   );
 
+  // Empty date inputs come through as "" — send null so the server's date
+  // coercion treats them as unset rather than an invalid date.
+  const normalizeLease = (data: PropertyForm) => ({
+    ...data,
+    leaseStartDate: data.leaseStartDate || null,
+    leaseEndDate: data.leaseEndDate || null,
+    leaseRenewalDate: data.leaseRenewalDate || null,
+  });
+
   const createPropertyMutation = useMutation({
-    mutationFn: async (data: InsertProperty) => {
-      return await apiRequest("POST", "/api/properties", data);
+    mutationFn: async (data: PropertyForm) => {
+      return await apiRequest("POST", "/api/properties", normalizeLease(data));
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/properties"] });
@@ -73,8 +83,8 @@ export default function Properties() {
   });
 
   const updatePropertyMutation = useMutation({
-    mutationFn: async ({ id, data }: { id: string; data: Partial<InsertProperty> }) => {
-      return await apiRequest("PATCH", `/api/properties/${id}`, data);
+    mutationFn: async ({ id, data }: { id: string; data: PropertyForm }) => {
+      return await apiRequest("PATCH", `/api/properties/${id}`, normalizeLease(data));
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/properties"] });
@@ -115,8 +125,8 @@ export default function Properties() {
     },
   });
 
-  const addForm = useForm<z.infer<typeof insertPropertySchema>>({
-    resolver: zodResolver(insertPropertySchema),
+  const addForm = useForm<PropertyForm>({
+    resolver: zodResolver(propertyFormSchema),
     defaultValues: {
       name: "",
       streetAddress: "",
@@ -129,12 +139,21 @@ export default function Properties() {
       bedrooms: undefined,
       bathrooms: undefined,
       squareFootage: undefined,
+      ownership: "owned",
+      leaseStartDate: "",
+      leaseEndDate: "",
+      leaseRenewalDate: "",
+      renewalDecision: "undecided",
     },
   });
 
-  const editForm = useForm<z.infer<typeof insertPropertySchema>>({
-    resolver: zodResolver(insertPropertySchema),
+  const editForm = useForm<PropertyForm>({
+    resolver: zodResolver(propertyFormSchema),
   });
+
+  // A stored timestamp for a date input needs to be "YYYY-MM-DD".
+  const asDateInput = (value: Date | string | null | undefined) =>
+    value ? new Date(value).toISOString().slice(0, 10) : "";
 
   const handleEdit = (property: Property) => {
     setEditingProperty(property);
@@ -150,15 +169,20 @@ export default function Properties() {
       bedrooms: property.bedrooms || undefined,
       bathrooms: property.bathrooms || undefined,
       squareFootage: property.squareFootage || undefined,
+      ownership: property.ownership,
+      leaseStartDate: asDateInput(property.leaseStartDate),
+      leaseEndDate: asDateInput(property.leaseEndDate),
+      leaseRenewalDate: asDateInput(property.leaseRenewalDate),
+      renewalDecision: property.renewalDecision,
     });
     setIsEditDialogOpen(true);
   };
 
-  const onSubmitAdd = (data: z.infer<typeof insertPropertySchema>) => {
+  const onSubmitAdd = (data: PropertyForm) => {
     createPropertyMutation.mutate(data);
   };
 
-  const onSubmitEdit = (data: z.infer<typeof insertPropertySchema>) => {
+  const onSubmitEdit = (data: PropertyForm) => {
     if (editingProperty) {
       updatePropertyMutation.mutate({ id: editingProperty.id, data });
     }
@@ -202,7 +226,7 @@ export default function Properties() {
               Add Property
             </Button>
           </DialogTrigger>
-          <DialogContent>
+          <DialogContent className="max-h-[85vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Add New Property</DialogTitle>
             </DialogHeader>
@@ -384,6 +408,8 @@ export default function Properties() {
                   )}
                 />
 
+                <PropertyLeaseFields form={addForm} />
+
                 <DialogFooter>
                   <Button type="button" variant="secondary" onClick={() => setIsAddDialogOpen(false)}>
                     Cancel
@@ -435,10 +461,20 @@ export default function Properties() {
                         {property.squareFootage && (
                           <Badge variant="secondary">{property.squareFootage.toLocaleString()} sq ft</Badge>
                         )}
+                        {property.ownership === "rented" && (
+                          <Badge variant="warning" data-testid={`badge-property-rented-${property.id}`}>Rented</Badge>
+                        )}
                       </div>
                       {property.propertyManager && (
                         <p className="text-xs text-muted-foreground mt-2">
                           Manager: {property.propertyManager}
+                        </p>
+                      )}
+                      {property.ownership === "rented" && property.leaseRenewalDate && (
+                        <p className="text-xs text-muted-foreground mt-2" data-testid={`text-property-renewal-${property.id}`}>
+                          Lease renewal: {formatDate(property.leaseRenewalDate)}
+                          {property.renewalDecision !== "undecided" &&
+                            ` · ${property.renewalDecision === "renewing" ? "Renewing" : "Not renewing"}`}
                         </p>
                       )}
                     </div>
@@ -466,7 +502,7 @@ export default function Properties() {
       )}
 
       <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-        <DialogContent>
+        <DialogContent className="max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Edit Property</DialogTitle>
           </DialogHeader>
@@ -647,6 +683,8 @@ export default function Properties() {
                   </FormItem>
                 )}
               />
+
+              <PropertyLeaseFields form={editForm} />
 
               <DialogFooter>
                 <Button type="button" variant="secondary" onClick={() => setIsEditDialogOpen(false)}>

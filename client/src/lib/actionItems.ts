@@ -8,7 +8,7 @@
  * single click.
  */
 
-export type ActionItemSource = "schedule" | "rent" | "deposit" | "task";
+export type ActionItemSource = "schedule" | "rent" | "deposit" | "task" | "lease";
 export type ActionItemCategory = "property" | "finance" | "general";
 
 export interface ActionItem {
@@ -24,15 +24,21 @@ export interface ActionItem {
 }
 
 export interface ResolveRequest {
-  method: "POST" | "PATCH";
-  path: string;
-  body?: unknown;
-  /** The label on the row's button, e.g. "Mark paid". */
+  /** The label on the row's button, e.g. "Mark paid" or "Review lease". */
   actionLabel: string;
-  /** When set, a confirm dialog with this copy runs before the request. */
+  /**
+   * A resolve is either an API call (method/path[/body], optionally confirmed)
+   * or a navigation (href) when the item needs a fuller form to act on — a
+   * lease renewal, say, where the RA records dates and a decision.
+   */
+  method?: "POST" | "PATCH";
+  path?: string;
+  body?: unknown;
+  href?: string;
+  /** When set, a confirm dialog with this copy runs before an API resolve. */
   confirm?: { title: string; body: string };
-  /** Query keys to refetch after a successful resolve. */
-  invalidate: string[];
+  /** Query keys to refetch after a successful API resolve. */
+  invalidate?: string[];
 }
 
 /** Today as "YYYY-MM-DD", the shape the date columns accept from a form. */
@@ -83,12 +89,17 @@ export function resolveRequest(item: ActionItem): ResolveRequest {
         actionLabel: "Done",
         invalidate: [ACTION_ITEMS_KEY, "/api/tasks"],
       };
+    case "lease":
+      // A renewal needs dates and a decision, so send the RA to the property to
+      // record it in the edit dialog rather than resolving in one click.
+      return { actionLabel: "Review lease", href: "/properties" };
   }
 }
 
 /** A short human label for the item's category, for the row badge. */
 export function categoryLabel(item: ActionItem): string {
   if (item.source === "task") return "Task";
+  if (item.source === "lease") return "Lease";
   if (item.category === "finance") return "Finance";
   if (item.category === "property") return "Property";
   return "General";

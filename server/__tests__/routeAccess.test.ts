@@ -1691,9 +1691,28 @@ describe("tasks & action items (regional leads only)", () => {
     storageMock.getAllSecurityDeposits.mockResolvedValue([]);
     storageMock.getAllResidents.mockResolvedValue([]);
     storageMock.getAllTasks.mockResolvedValue([]);
+    storageMock.getAllProperties.mockResolvedValue([]);
     const { status, body } = await get("/api/action-items");
     expect(status).toBe(200);
     // The East-Central rent is filtered out by region.
     expect(body.map((i: { id: string }) => i.id)).toEqual(["rp-w"]);
+  });
+
+  it("shows an RA a lease renewal in their region but not another region's", async () => {
+    actAs(STAFF, WEST);
+    storageMock.getAllMaintenanceSchedules.mockResolvedValue([]);
+    storageMock.getAllRentPayments.mockResolvedValue([]);
+    storageMock.getAllSecurityDeposits.mockResolvedValue([]);
+    storageMock.getAllResidents.mockResolvedValue([]);
+    storageMock.getAllTasks.mockResolvedValue([]);
+    const soon = new Date(Date.now() + 20 * 24 * 60 * 60 * 1000);
+    storageMock.getAllProperties.mockResolvedValue([
+      { id: "prop-w", name: "Cleveland House", address: "1 Main St", region: "West Central", ownership: "rented", leaseRenewalDate: soon, renewalDecision: "undecided" },
+      { id: "prop-e", name: "Buckeye House", address: "9 Elm", region: "East Central", ownership: "rented", leaseRenewalDate: soon, renewalDecision: "undecided" },
+    ]);
+    const { status, body } = await get("/api/action-items");
+    expect(status).toBe(200);
+    expect(body.map((i: { id: string; source: string }) => i.id)).toEqual(["prop-w"]);
+    expect(body[0].source).toBe("lease");
   });
 });

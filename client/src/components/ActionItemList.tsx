@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useLocation } from "wouter";
 import { useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -25,12 +26,13 @@ import { type ActionItem, categoryLabel, resolveRequest, type ResolveRequest } f
  */
 export default function ActionItemList({ items }: { items: ActionItem[] }) {
   const { toast } = useToast();
+  const [, setLocation] = useLocation();
   const [pending, setPending] = useState<{ item: ActionItem; request: ResolveRequest } | null>(null);
 
   const resolveMutation = useMutation({
-    mutationFn: async (request: ResolveRequest) => apiRequest(request.method, request.path, request.body),
+    mutationFn: async (request: ResolveRequest) => apiRequest(request.method!, request.path!, request.body),
     onSuccess: (_data, request) => {
-      for (const key of request.invalidate) {
+      for (const key of request.invalidate ?? []) {
         queryClient.invalidateQueries({ queryKey: [key] });
       }
       toast({ title: "Done" });
@@ -41,7 +43,9 @@ export default function ActionItemList({ items }: { items: ActionItem[] }) {
 
   const onResolve = (item: ActionItem) => {
     const request = resolveRequest(item);
-    if (request.confirm) {
+    if (request.href) {
+      setLocation(request.href);
+    } else if (request.confirm) {
       setPending({ item, request });
     } else {
       resolveMutation.mutate(request);

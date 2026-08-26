@@ -83,6 +83,25 @@ async function seed(): Promise<void> {
   const [cleveland, como, dinkytown, buckeye, aggieland, jayhawk] = properties;
   console.log(`Seeded ${properties.length} properties`);
 
+  // SPO owns most houses but rents a couple. Give those a lease with a renewal
+  // decision coming due within two months, so the dashboard shows a "Lease
+  // renewal" action item (one in Northwest, one in East Central).
+  await storage.updateProperty(cleveland.id, {
+    ownership: "rented",
+    leaseStartDate: daysAgo(320),
+    leaseEndDate: daysAhead(50),
+    leaseRenewalDate: daysAhead(40),
+    renewalDecision: "undecided",
+  });
+  await storage.updateProperty(buckeye.id, {
+    ownership: "rented",
+    leaseStartDate: daysAgo(300),
+    leaseEndDate: daysAhead(75),
+    leaseRenewalDate: daysAhead(55),
+    renewalDecision: "undecided",
+  });
+  console.log("Marked 2 properties as rented with upcoming lease renewals");
+
   // ── Vendor contacts ───────────────────────────────────────────────────────
   const contactRows = [
     { name: "Tom Blake", company: "Blake Plumbing LLC", service: "Plumbing", phone: "651-555-0142", email: "office@blakeplumbing.com", region: cleveland.region, buildingAddress: cleveland.address },
