@@ -392,6 +392,22 @@ async function seed(): Promise<void> {
   }
   console.log(`Seeded ${depositCount} security deposits`);
 
+  // ── Regional admins ───────────────────────────────────────────────────────
+  // So the leadership dashboard's region overview shows a named lead per region.
+  const regionalLeads = [
+    { id: "seed-ra-nw", email: "sarah.jenkins@spo.org", firstName: "Sarah", lastName: "Jenkins", region: "Northwest" },
+    { id: "seed-ra-ec", email: "angela.ruiz@spo.org", firstName: "Angela", lastName: "Ruiz", region: "East Central" },
+  ];
+  for (const lead of regionalLeads) {
+    const user = await storage.upsertUser({ id: lead.id, email: lead.email, firstName: lead.firstName, lastName: lead.lastName });
+    await storage.updateUserRole(user.id, "regional_administrator");
+    // updateUserRole gives a regional admin its default permissions with no
+    // regions; assign the one they lead (the on-conflict update touches only
+    // allowedRegions, leaving the rest of the row intact).
+    await storage.upsertUserPermissions({ userId: user.id, allowedRegions: [lead.region] });
+  }
+  console.log(`Seeded ${regionalLeads.length} regional admins`);
+
   // ── Optional pre-created admin ────────────────────────────────────────────
   const adminEmail = process.env.SEED_ADMIN_EMAIL?.trim();
   if (adminEmail) {

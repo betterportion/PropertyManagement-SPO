@@ -1716,3 +1716,45 @@ describe("tasks & action items (regional leads only)", () => {
     expect(body[0].source).toBe("lease");
   });
 });
+
+describe("region summary (leadership rollup)", () => {
+  function mockEmptyData() {
+    storageMock.getAllMaintenanceRequests.mockResolvedValue([]);
+    storageMock.getAllMaintenanceSchedules.mockResolvedValue([]);
+    storageMock.getAllProperties.mockResolvedValue([]);
+    storageMock.getAllRentPayments.mockResolvedValue([]);
+    storageMock.getAllUsers.mockResolvedValue([]);
+    storageMock.getAllUserPermissions.mockResolvedValue([]);
+  }
+
+  it("refuses a resident", async () => {
+    actAs(ALICE, { canViewProperties: true, canManageProperties: true });
+    expect((await get("/api/region-summary")).status).toBe(403);
+  });
+
+  it("gives a regional admin only their region, named with its lead", async () => {
+    actAs(STAFF, { allowedRegions: ["West Central"] });
+    mockEmptyData();
+    storageMock.getAllUsers.mockResolvedValue([STAFF]);
+    storageMock.getAllUserPermissions.mockResolvedValue([{ userId: STAFF.id, allowedRegions: ["West Central"] }]);
+    storageMock.getAllMaintenanceRequests.mockResolvedValue([
+      { id: "rq-w", region: "West Central", status: "pending" },
+      { id: "rq-e", region: "East Central", status: "pending" }, // filtered out by region
+    ]);
+
+    const { status, body } = await get("/api/region-summary");
+    expect(status).toBe(200);
+    expect(body.map((s: { region: string }) => s.region)).toEqual(["West Central"]);
+    expect(body[0].openRequests).toBe(1);
+    expect(body[0].admins).toEqual([{ name: STAFF.email, email: STAFF.email }]);
+  });
+
+  it("gives an admin every region", async () => {
+    actAs(ADMIN);
+    mockEmptyData();
+    const { status, body } = await get("/api/region-summary");
+    expect(status).toBe(200);
+    // One summary per canonical region (see shared/regions.ts).
+    expect(body.length).toBe(7);
+  });
+});
