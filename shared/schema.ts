@@ -339,6 +339,15 @@ export const properties = pgTable("properties", {
   bedrooms: integer("bedrooms"),
   bathrooms: numeric("bathrooms", { precision: 3, scale: 1 }),
   squareFootage: integer("square_footage"),
+  // Lease tracking. SPO owns some houses and rents others; the lease fields
+  // only apply when `ownership` is "rented". `leaseRenewalDate` is what the
+  // 2-months-out renewal reminder watches; `renewalDecision` records the RA's
+  // call so a house marked "not_renewing" drops off the reminders.
+  ownership: varchar("ownership", { enum: ["owned", "rented"] }).notNull().default("owned"),
+  leaseStartDate: timestamp("lease_start_date"),
+  leaseEndDate: timestamp("lease_end_date"),
+  leaseRenewalDate: timestamp("lease_renewal_date"),
+  renewalDecision: varchar("renewal_decision", { enum: ["undecided", "renewing", "not_renewing"] }).notNull().default("undecided"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -354,6 +363,9 @@ export const insertPropertySchema = createInsertSchema(properties)
     bedrooms: nonNegativeInt.nullish(),
     bathrooms: nonNegativeAmount.nullish(),
     squareFootage: nonNegativeInt.nullish(),
+    leaseStartDate: dateFromClient.nullish(),
+    leaseEndDate: dateFromClient.nullish(),
+    leaseRenewalDate: dateFromClient.nullish(),
   });
 
 export type Property = typeof properties.$inferSelect;

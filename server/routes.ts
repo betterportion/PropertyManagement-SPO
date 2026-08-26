@@ -1724,12 +1724,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!ctx) return;
       if (!requireStaff(res, ctx)) return;
 
-      const [schedules, rentPayments, deposits, residents, allTasks] = await Promise.all([
+      const [schedules, rentPayments, deposits, residents, allTasks, properties] = await Promise.all([
         storage.getAllMaintenanceSchedules(),
         storage.getAllRentPayments(),
         storage.getAllSecurityDeposits(),
         storage.getAllResidents(),
         storage.getAllTasks(),
+        storage.getAllProperties(),
       ]);
 
       const items = buildActionItems({
@@ -1741,6 +1742,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // moved out; they need not be filtered (the deposits already are).
         residents,
         tasks: allTasks.filter((t) => canSeeTask(ctx, t)),
+        properties: filterByRegion(ctx, properties),
       });
       res.json(items);
     } catch (error) {
