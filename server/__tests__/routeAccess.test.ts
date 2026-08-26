@@ -1723,6 +1723,7 @@ describe("region summary (leadership rollup)", () => {
     storageMock.getAllMaintenanceSchedules.mockResolvedValue([]);
     storageMock.getAllProperties.mockResolvedValue([]);
     storageMock.getAllRentPayments.mockResolvedValue([]);
+    storageMock.getAllTasks.mockResolvedValue([]);
     storageMock.getAllUsers.mockResolvedValue([]);
     storageMock.getAllUserPermissions.mockResolvedValue([]);
   }

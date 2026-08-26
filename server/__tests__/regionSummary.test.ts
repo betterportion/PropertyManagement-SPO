@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { buildRegionSummaries, type RegionSummaryInputs } from "../regionSummary";
-import type { MaintenanceRequest, MaintenanceSchedule, Property, RentPayment } from "@shared/schema";
+import type { MaintenanceRequest, MaintenanceSchedule, Property, RentPayment, Task } from "@shared/schema";
 
 const NOW = new Date("2026-08-15T00:00:00Z");
 const days = (n: number) => new Date(NOW.getTime() + n * 24 * 60 * 60 * 1000);
@@ -18,7 +18,11 @@ function rent(over: Partial<RentPayment>): RentPayment {
   return { id: "rp1", region: "Northwest", status: "unpaid", amount: "700", ...over } as RentPayment;
 }
 
-const empty: RegionSummaryInputs = { requests: [], schedules: [], properties: [], rentPayments: [], staff: [] };
+function safetyTask(over: Partial<Task>): Task {
+  return { id: "t1", region: "Northwest", category: "safety", status: "open", ...over } as Task;
+}
+
+const empty: RegionSummaryInputs = { requests: [], schedules: [], properties: [], rentPayments: [], tasks: [], staff: [] };
 
 describe("buildRegionSummaries", () => {
   it("counts each region's open requests, due schedules and renewals", () => {
@@ -36,6 +40,24 @@ describe("buildRegionSummaries", () => {
     expect(summary.safetyPreventiveDue).toBe(1); // far-future schedule excluded
     expect(summary.leaseRenewalsDue).toBe(1);
     expect(summary.attentionScore).toBe(3);
+  });
+
+  it("counts open safety reminders (walkthroughs, utilities) toward safety load", () => {
+    const [summary] = buildRegionSummaries(
+      {
+        ...empty,
+        tasks: [
+          safetyTask({ id: "open" }),
+          safetyTask({ id: "done", status: "done" }), // completed — excluded
+          safetyTask({ id: "general", category: "general" }), // not safety — excluded
+          safetyTask({ id: "other-region", region: "East Central" }), // wrong region
+        ],
+      },
+      ["Northwest"],
+      NOW,
+    );
+    expect(summary.safetyPreventiveDue).toBe(1);
+    expect(summary.attentionScore).toBe(1);
   });
 
   it("tracks unpaid rent but keeps it out of the attention score", () => {
