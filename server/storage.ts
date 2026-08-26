@@ -153,6 +153,7 @@ export interface IStorage {
   getResident(id: string): Promise<Resident | undefined>;
   getAllResidents(): Promise<Resident[]>;
   getResidentsByProperty(propertyId: string): Promise<Resident[]>;
+  getActiveResidentByEmail(email: string): Promise<Resident | undefined>;
   updateResident(id: string, data: Partial<InsertResident>): Promise<Resident>;
   deleteResident(id: string): Promise<void>;
 
@@ -606,6 +607,19 @@ export class DatabaseStorage implements IStorage {
       .from(residents)
       .where(eq(residents.propertyId, propertyId))
       .orderBy(desc(residents.isActive), asc(residents.lastName), asc(residents.firstName));
+  }
+
+  async getActiveResidentByEmail(email: string): Promise<Resident | undefined> {
+    // Matched case-insensitively: a login provider may return a different case
+    // than the roster was entered in. Most recent active residency wins if the
+    // same person appears more than once.
+    const [resident] = await db
+      .select()
+      .from(residents)
+      .where(and(ilike(residents.email, email), eq(residents.isActive, true)))
+      .orderBy(desc(residents.createdAt))
+      .limit(1);
+    return resident;
   }
 
   async updateResident(id: string, data: Partial<InsertResident>): Promise<Resident> {

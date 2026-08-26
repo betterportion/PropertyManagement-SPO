@@ -108,21 +108,33 @@ export default async function globalSetup() {
     await ensureUser(pool, { id: "e2e-admin", email: "e2e-admin@test.local", role: "admin" });
     await ensureUser(pool, { id: "e2e-resident", email: "e2e-resident@test.local", role: "resident" });
 
+    const homeProperty = (await pool.query(`SELECT id, region, address FROM properties LIMIT 1`)).rows[0];
+
+    // Put the resident on a house roster, so the in-app submit flow (which
+    // attaches region/house from the roster by email) has something to match.
+    const roster = await pool.query(`SELECT id FROM residents WHERE email = $1`, ["e2e-resident@test.local"]);
+    if (roster.rowCount === 0 && homeProperty) {
+      await pool.query(
+        `INSERT INTO residents (property_id, first_name, last_name, email, is_active, region, building_address)
+         VALUES ($1,$2,$3,$4,true,$5,$6)`,
+        [homeProperty.id, "E2E", "Resident", "e2e-resident@test.local", homeProperty.region, homeProperty.address],
+      );
+    }
+
     // Give the resident a request they own, so their dashboard has content.
     const owned = await pool.query(
       `SELECT id FROM maintenance_requests WHERE submitted_by = $1 LIMIT 1`,
       ["e2e-resident@test.local"],
     );
     if (owned.rowCount === 0) {
-      const property = (await pool.query(`SELECT region, address FROM properties LIMIT 1`)).rows[0];
       await pool.query(
         `INSERT INTO maintenance_requests
            (title, description, category, priority, status, location, region, building_address, submitted_by)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
         [
           "E2E resident request", "Dripping faucet in the kitchen", "Plumbing", "medium",
-          "pending", "Kitchen", property?.region ?? "East Central",
-          property?.address ?? "1 Main St", "e2e-resident@test.local",
+          "pending", "Kitchen", homeProperty?.region ?? "East Central",
+          homeProperty?.address ?? "1 Main St", "e2e-resident@test.local",
         ],
       );
     }
