@@ -569,7 +569,10 @@ export const tasks = pgTable("tasks", {
   dueDate: timestamp("due_date"),
   region: varchar("region"),
   assignedToUserId: varchar("assigned_to_user_id").references(() => users.id, { onDelete: "set null" }),
-  createdBy: varchar("created_by").notNull().references(() => users.id),
+  // Set null rather than restrict on delete: a task (especially a broadcast)
+  // can outlive its author, and deleting a user must never be blocked -- the
+  // account-linking flow deletes and re-creates a user row on first sign-in.
+  createdBy: varchar("created_by").references(() => users.id, { onDelete: "set null" }),
   completedBy: varchar("completed_by").references(() => users.id, { onDelete: "set null" }),
   completedAt: timestamp("completed_at"),
   createdAt: timestamp("created_at").defaultNow(),

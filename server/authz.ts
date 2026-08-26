@@ -239,7 +239,7 @@ export function filterByRelatedRegion<T>(
  */
 export function canSeeTask(
   ctx: AuthContext,
-  task: { region: string | null; assignedToUserId: string | null; createdBy: string },
+  task: { region: string | null; assignedToUserId: string | null; createdBy: string | null },
 ): boolean {
   if (ctx.isAdmin) return true;
   if (task.createdBy === ctx.userId || task.assignedToUserId === ctx.userId) return true;
