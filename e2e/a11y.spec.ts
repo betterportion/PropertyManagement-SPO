@@ -9,12 +9,11 @@ import AxeBuilder from "@axe-core/playwright";
  * insufficient contrast on real text). Minor/moderate findings are not failed
  * on here; tightening the bar later is a deliberate follow-up.
  *
- * One documented exception: three SPO **brand** colors miss AA contrast by a
- * hair (issue #35). Changing them is a design-system decision, not a code fix,
- * so those specific colors are tolerated here -- but any *other* contrast
- * failure still fails the gate, so a new regression is caught.
+ * The SPO brand colors were nudged darker (issue #35) so they clear AA on the
+ * app's light grounds; there is no longer a tolerated-exception list, so every
+ * serious contrast failure now fails the gate.
  */
-const KNOWN_BRAND_CONTRAST_COLORS = ["#74829e", "#e7133d", "#d6515d"];
+const KNOWN_BRAND_CONTRAST_COLORS: string[] = [];
 
 function isKnownBrandContrast(node: { failureSummary?: string }): boolean {
   const summary = (node.failureSummary ?? "").toLowerCase();
