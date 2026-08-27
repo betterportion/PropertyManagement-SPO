@@ -20,9 +20,15 @@ describe("normalizeRegion", () => {
     }
   });
 
-  it("leaves already-canonical Title Case values unchanged", () => {
+  it("leaves already-canonical values unchanged", () => {
     expect(normalizeRegion("West Central")).toBe("West Central");
-    expect(normalizeRegion("North East")).toBe("North East");
+    expect(normalizeRegion("Northeast")).toBe("Northeast");
+    expect(normalizeRegion("National")).toBe("National");
+  });
+
+  it("folds the old two-word Title Case names to the canonical single word", () => {
+    expect(normalizeRegion("North East")).toBe("Northeast");
+    expect(normalizeRegion("South West")).toBe("Southwest");
   });
 
   it("passes through unknown values unchanged", () => {
@@ -35,7 +41,7 @@ describe("normalizeRegions", () => {
     expect(normalizeRegions(["west-central", "East Central", "north-west"])).toEqual([
       "West Central",
       "East Central",
-      "North West",
+      "Northwest",
     ]);
   });
 

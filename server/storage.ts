@@ -56,6 +56,7 @@ import {
   type InsertAuditEvent,
 } from "@shared/schema";
 import { db } from "./db";
+import { REGIONS } from "@shared/regions";
 import { eq, and, or, desc, asc, inArray, lt, lte, gte, ilike, count, notInArray } from "drizzle-orm";
 
 // Helper function to filter out undefined values from partial updates
@@ -65,9 +66,9 @@ function filterUndefined<T extends Record<string, any>>(obj: T): Partial<T> {
   ) as Partial<T>;
 }
 
-// Helper function to compute default permissions for a given role
-const ALL_REGIONS = ["West Central", "East Central", "North West", "South West", "North East", "South East"];
-
+// Helper function to compute default permissions for a given role. An admin can
+// reach every region; the canonical list is the single source of truth in
+// shared/regions.ts, so this never drifts from the region names on records.
 function computeDefaultPermissions(userId: string, role: "admin" | "regional_administrator" | "resident"): InsertUserPermissions {
   return {
     userId,
@@ -84,7 +85,7 @@ function computeDefaultPermissions(userId: string, role: "admin" | "regional_adm
     canManageUsers: role === "admin",
     canViewProperties: role !== "resident",
     canManageProperties: role === "admin" || role === "regional_administrator",
-    allowedRegions: role === "admin" ? ALL_REGIONS : [],
+    allowedRegions: role === "admin" ? [...REGIONS] : [],
   };
 }
 
@@ -363,8 +364,8 @@ export class DatabaseStorage implements IStorage {
     
     await this.upsertUserPermissions({
       ...newDefaultPermissions,
-      allowedRegions: role === "admin" 
-        ? ALL_REGIONS 
+      allowedRegions: role === "admin"
+        ? [...REGIONS]
         : (existingPermissions?.allowedRegions || []),
     });
     

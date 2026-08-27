@@ -9,16 +9,26 @@
 import { db } from "./db";
 import { userPermissions } from "@shared/schema";
 
+// Maps every legacy region spelling to the canonical name in shared/regions.ts.
+// Two families of legacy values exist: kebab-case slugs once written by
+// Settings.tsx ("north-west"), and the old two-word Title Case once handed out
+// as an admin's default regions ("North West"). Both must resolve to the
+// single-word canonical form ("Northwest") that records actually store.
 export const KEBAB_TO_TITLE: Record<string, string> = {
   "west-central": "West Central",
   "east-central": "East Central",
-  "north-west": "North West",
-  "south-west": "South West",
-  "north-east": "North East",
-  "south-east": "South East",
+  "north-west": "Northwest",
+  "south-west": "Southwest",
+  "north-east": "Northeast",
+  "south-east": "Southeast",
+  national: "National",
+  "North West": "Northwest",
+  "South West": "Southwest",
+  "North East": "Northeast",
+  "South East": "Southeast",
 };
 
-/** Convert a single region value to the canonical Title Case format. */
+/** Convert a single region value to its canonical form (see shared/regions.ts). */
 export function normalizeRegion(value: string): string {
   return KEBAB_TO_TITLE[value] ?? value;
 }
