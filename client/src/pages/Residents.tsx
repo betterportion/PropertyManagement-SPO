@@ -40,6 +40,9 @@ export default function Residents() {
   const [selectedRegion, setSelectedRegion] = useState("all");
   const [selectedBuilding, setSelectedBuilding] = useState("all");
   const [isAddOpen, setIsAddOpen] = useState(false);
+  // How many people have been added since the dialog opened — the "enter a
+  // full house in one sitting" flow keeps the dialog open between saves.
+  const [addedCount, setAddedCount] = useState(0);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const { data: residents = [], isLoading } = useQuery<Resident[]>({
@@ -68,12 +71,29 @@ export default function Residents() {
   };
 
   const createMutation = useMutation({
-    mutationFn: async (data: ResidentForm) => apiRequest("POST", "/api/residents", data),
-    onSuccess: () => {
+    mutationFn: async ({ data }: { data: ResidentForm; addAnother: boolean }) =>
+      apiRequest("POST", "/api/residents", data),
+    onSuccess: (_result, { data, addAnother }) => {
       invalidate();
-      setIsAddOpen(false);
-      addForm.reset();
-      toast({ title: "Resident added" });
+      if (addAnother) {
+        // Keep the dialog open for the next housemate: same house, same
+        // move-in date, fresh name and email.
+        addForm.reset({
+          propertyId: data.propertyId,
+          moveInDate: data.moveInDate,
+          firstName: "",
+          lastName: "",
+          email: "",
+        });
+        addForm.setFocus("firstName");
+        setAddedCount((n) => n + 1);
+        toast({ title: `${data.firstName} ${data.lastName} added` });
+      } else {
+        setIsAddOpen(false);
+        setAddedCount(0);
+        addForm.reset();
+        toast({ title: "Resident added" });
+      }
     },
     onError: () => toast({ title: "Error", description: "Could not add the resident", variant: "destructive" }),
   });
@@ -256,7 +276,7 @@ export default function Residents() {
                 <Download className="mr-2 h-4 w-4" /> Export former
               </Button>
               {canManage && (
-              <Dialog open={isAddOpen} onOpenChange={(o) => { setIsAddOpen(o); if (!o) addForm.reset(); }}>
+              <Dialog open={isAddOpen} onOpenChange={(o) => { setIsAddOpen(o); if (!o) { addForm.reset(); setAddedCount(0); } }}>
                 <DialogTrigger asChild>
                   <Button data-testid="button-add-resident"><Plus className="mr-2 h-4 w-4" /> Add resident</Button>
                 </DialogTrigger>
@@ -266,7 +286,7 @@ export default function Residents() {
                     <DialogDescription>Record who is living in one of the houses.</DialogDescription>
                   </DialogHeader>
                   <Form {...addForm}>
-                    <form onSubmit={addForm.handleSubmit((data) => createMutation.mutate(data))} className="space-y-4">
+                    <form onSubmit={addForm.handleSubmit((data) => createMutation.mutate({ data, addAnother: false }))} className="space-y-4">
                       <FormField control={addForm.control} name="propertyId" render={({ field }) => (
                         <FormItem>
                           <FormLabel>House</FormLabel>
@@ -309,8 +329,24 @@ export default function Residents() {
                           <FormMessage />
                         </FormItem>
                       )} />
+                      {addedCount > 0 && (
+                        <p className="text-sm text-muted-foreground" data-testid="text-added-count">
+                          {addedCount} added to {propertyName(addForm.getValues("propertyId"))} so far.
+                        </p>
+                      )}
                       <DialogFooter>
-                        <Button type="button" variant="secondary" onClick={() => setIsAddOpen(false)}>Cancel</Button>
+                        <Button type="button" variant="secondary" onClick={() => setIsAddOpen(false)}>
+                          {addedCount > 0 ? "Done" : "Cancel"}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          disabled={createMutation.isPending}
+                          onClick={addForm.handleSubmit((data) => createMutation.mutate({ data, addAnother: true }))}
+                          data-testid="button-submit-resident-again"
+                        >
+                          Save & add another
+                        </Button>
                         <Button type="submit" disabled={createMutation.isPending} data-testid="button-submit-resident">
                           {createMutation.isPending ? "Saving..." : "Add resident"}
                         </Button>
