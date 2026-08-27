@@ -18,9 +18,11 @@ export default function SubmitRequest() {
       category: string;
       priority: string;
       location: string;
+      photoUrls?: string[];
     }) => apiRequest("POST", "/api/maintenance-requests", data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/maintenance-requests"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/maintenance-request-photos"] });
       toast({ title: "Request submitted", description: "You'll find it under My requests." });
       setLocation("/my-requests");
     },

@@ -228,6 +228,34 @@ export const insertAssetPhotoSchema = createInsertSchema(assetPhotos).omit({
 export type AssetPhoto = typeof assetPhotos.$inferSelect;
 export type InsertAssetPhoto = z.infer<typeof insertAssetPhotoSchema>;
 
+// Maintenance Request Photos
+//
+// Photos of the problem, attached to a maintenance request. A resident may add
+// a few when they report an issue (the request's single legacy `photoUrl` stays
+// for staff-added photos). `imageUrl` holds the "/uploads/<key>" URL; download
+// access inherits the request's visibility via findUploadReferences +
+// canReadUploadReference (a resident sees only their own request's photos).
+export const maintenanceRequestPhotos = pgTable("maintenance_request_photos", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  requestId: varchar("request_id").notNull().references(() => maintenanceRequests.id, { onDelete: "cascade" }),
+  imageUrl: varchar("image_url").notNull(),
+  uploadedBy: varchar("uploaded_by").notNull(),
+  uploadedDate: timestamp("uploaded_date").defaultNow(),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertMaintenanceRequestPhotoSchema = createInsertSchema(maintenanceRequestPhotos).omit({
+  id: true,
+  // Server-owned: taken from the authenticated actor, never a request body.
+  uploadedBy: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type MaintenanceRequestPhoto = typeof maintenanceRequestPhotos.$inferSelect;
+export type InsertMaintenanceRequestPhoto = z.infer<typeof insertMaintenanceRequestPhotoSchema>;
+
 // Maintenance Contacts
 export const maintenanceContacts = pgTable("maintenance_contacts", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),

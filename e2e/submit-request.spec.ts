@@ -38,4 +38,31 @@ test.describe("resident submits a maintenance request", () => {
     await expect(page.getByTestId("text-form-error")).toBeVisible();
     await expect(page).toHaveURL(/\/submit-request$/);
   });
+
+  test("a resident can attach a photo when reporting an issue", async ({ page }) => {
+    await page.goto("/submit-request");
+    const title = `E2E photo request ${Date.now()}`;
+    await page.getByLabel("Issue title").fill(title);
+    await page.getByLabel("Location").fill("Bathroom");
+    await page.locator("#category").click();
+    await page.getByRole("option", { name: "Plumbing" }).click();
+    await page.locator("#priority").click();
+    await page.getByRole("option", { name: "Medium" }).click();
+    await page.getByLabel("Description").fill("Leak under the sink; photo attached.");
+
+    // Attach an image via the hidden file input inside the dropzone (a 1×1 PNG).
+    const png = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+      "base64",
+    );
+    await page.getByTestId("input-file-upload").setInputFiles({ name: "leak.png", mimeType: "image/png", buffer: png });
+    await expect(page.getByTestId("request-photo-thumbs")).toBeVisible();
+
+    await page.getByTestId("button-submit-request").click();
+    await expect(page).toHaveURL(/\/my-requests$/);
+
+    // The request lands with its photo gallery under My requests.
+    await expect(page.getByText(title)).toBeVisible();
+    await expect(page.locator('[data-testid^="request-photos-"]').first()).toBeVisible();
+  });
 });
