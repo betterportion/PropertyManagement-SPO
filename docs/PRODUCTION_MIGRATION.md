@@ -262,14 +262,6 @@ OIDC_PROVIDER_NAME    = google
 OIDC_SCOPES           = openid email profile
 ```
 
-Optional, if the JotForm integration is in use:
-
-```
-JOTFORM_WEBHOOK_SECRET = <shared secret, must match the JotForm side>
-JOTFORM_FIELD_*        = <field IDs>
-JOTFORM_DEFAULT_*      = <fallback values>
-```
-
 `.env.example` documents every one of these, and the optional tuning variables (`DATABASE_SSL`, `DATABASE_POOL_MAX`, `MAX_UPLOAD_BYTES_IN_FLIGHT`).
 
 **Generate a different `SESSION_SECRET` for staging and production.** Sharing one means a staging session cookie is valid in production.
@@ -339,7 +331,6 @@ This is the bar for cutover. Work through it with at least two accounts: an admi
 - [ ] Add an asset with a photo.
 - [ ] Add a vendor contact, an invoice and a billing record.
 - [ ] Create a user, set their permissions and regions, deactivate them.
-- [ ] JotForm submission creates a maintenance request (only if the integration is in use).
 
 **Audit log** — confirms the record of who did what is actually being written:
 ```sql

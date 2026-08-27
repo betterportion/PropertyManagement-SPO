@@ -266,18 +266,71 @@ export function ownsRecord(ctx: AuthContext, submittedBy: string | null | undefi
 }
 
 /**
+ * The address of the house a resident's account is linked to, or null when
+ * there is nothing to resolve: a staff account, an account nobody has linked
+ * to a property yet, or a link whose property has since been deleted. Every
+ * null fails closed — the caller simply gets no house claim.
+ *
+ * Resolved on demand rather than in loadAuthContext because only the
+ * maintenance read paths need it, and loading it for every request on every
+ * route would cost a property lookup per API call.
+ */
+export async function residentHouseAddress(ctx: AuthContext): Promise<string | null> {
+  if (!ctx.isResident) return null;
+  const propertyId = ctx.user.propertyId;
+  if (!propertyId) return null;
+  const property = await storage.getProperty(propertyId);
+  return property?.address ?? null;
+}
+
+/**
+ * Whether a request was filed for the resident's own house.
+ *
+ * Both sides are copies of the same canonical string: `properties.address` is
+ * computed server-side and unique, the roster's buildingAddress is copied from
+ * it, and a request's buildingAddress is copied from one of those in turn. So
+ * the comparison is exact — deliberately not case-folded or trimmed, unlike
+ * ownsRecord's email match. The address column's uniqueness is only
+ * case-sensitive, so "123 Main St" and "123 MAIN ST" can be two different
+ * properties; a folded comparison would let one house read the other's
+ * history, whereas drift between two copies of the same house's address
+ * merely fails closed.
+ */
+function isOwnHouse(
+  residentHouse: string | null,
+  buildingAddress: string | null | undefined,
+): boolean {
+  if (!residentHouse || !buildingAddress) return false;
+  return buildingAddress === residentHouse;
+}
+
+/**
  * The read rule for a maintenance request, which is the one place where the
  * resident and staff rules diverge:
  *
- *   - a resident may read only requests they submitted, regardless of region
+ *   - a resident may read requests they submitted, regardless of region, and
+ *     requests filed for the house their account is linked to — the two
+ *     resident accounts on a property (steward and household leader) share
+ *     one repair history
  *   - everyone else is bound by their allowed regions
+ *
+ * `residentHouse` is the caller's house from residentHouseAddress, resolved
+ * once by the route rather than per record. It defaults to null — no house
+ * claim — so a call site that never passes it keeps the old email-only
+ * behaviour rather than silently widening.
  */
 export function canReadMaintenanceRequest(
   ctx: AuthContext,
-  request: { region?: string | null; submittedBy?: string | null },
+  request: { region?: string | null; submittedBy?: string | null; buildingAddress?: string | null },
+  residentHouse: string | null = null,
 ): boolean {
   if (ctx.isAdmin) return true;
-  if (ctx.isResident) return ownsRecord(ctx, request.submittedBy);
+  if (ctx.isResident) {
+    return (
+      ownsRecord(ctx, request.submittedBy) ||
+      isOwnHouse(residentHouse, request.buildingAddress)
+    );
+  }
   return canAccessRegion(ctx, request.region);
 }
 
@@ -296,14 +349,16 @@ export async function canReadUploadReference(
 ): Promise<boolean> {
   switch (reference.kind) {
     case "maintenanceRequest":
-      return canReadMaintenanceRequest(ctx, reference.record);
+      // The photo inherits the request's visibility, house match included:
+      // a housemate who can open the request can see the photo on it.
+      return canReadMaintenanceRequest(ctx, reference.record, await residentHouseAddress(ctx));
 
     case "maintenanceRequestPhoto": {
       // A request photo inherits the request's visibility: the resident who
-      // submitted it, or staff in the request's region. A missing request
-      // resolves to no access.
+      // submitted it or their housemate, or staff in the request's region. A
+      // missing request resolves to no access.
       const request = await storage.getMaintenanceRequest(reference.record.requestId);
-      return !!request && canReadMaintenanceRequest(ctx, request);
+      return !!request && canReadMaintenanceRequest(ctx, request, await residentHouseAddress(ctx));
     }
 
     case "walkthroughPhoto":
@@ -371,9 +426,10 @@ export async function canReadUpload(
 export function requireMaintenanceRequestAccess(
   res: Response,
   ctx: AuthContext,
-  request: { region?: string | null; submittedBy?: string | null },
+  request: { region?: string | null; submittedBy?: string | null; buildingAddress?: string | null },
+  residentHouse: string | null = null,
 ): boolean {
-  if (canReadMaintenanceRequest(ctx, request)) return true;
+  if (canReadMaintenanceRequest(ctx, request, residentHouse)) return true;
   res.status(403).json({ message: "Forbidden" });
   return false;
 }

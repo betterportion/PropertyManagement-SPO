@@ -25,7 +25,7 @@ duplicated. New issues should follow the existing label conventions
 | 2. Resident accounts ↔ properties | **Done on this branch**: `users.propertyId`, FK set-null, flows through account creation. |
 | 5. Finance permission flags | **Done on this branch**: `canViewFinancials` / `canManageFinancials`, gated onto every rent/deposit route after `requireStaff`, backfilled `true` for existing staff by the migration, staff defaults updated. Supersedes issue #43's "no finance permission" note — recorded in the route comment. The dashboard's finance-derived surfaces (action items, region summary) follow the flags too. |
 | 4a. `failed` rent status | **Done on this branch**: added to the enum; a failed (bounced) payment still counts as outstanding in action items and region summaries, and Finances can mark it. Feeds task 18. |
-| 7. Property-scoped `ownsRecord` | Current `ownsRecord` is email-only, as the backlog says. Task 2 is now done, so this is unblocked. |
+| 7. Property-scoped `ownsRecord` | **Done on this branch** (2026-08-27, task 2.2): housemates share the house's request history via `users.propertyId`, with the email match kept intact. |
 | 8. In-portal resident submission | **Built on main** (2026-08-26): "Make the resident 'Submit a request' flow actually file a request", with e2e coverage. |
 | 15. Ramp/QuickBooks | Already tracked: #32 (sync, references only) and #33 (AP/AR mapping decision, blocking). |
 | 12/18. Outbound email | Already tracked: #49 (Resend domain + API key, external) and #41 (deposit-return notices). The Resend account exists. |
@@ -66,11 +66,40 @@ Ship gate per CLAUDE.md: schema edit → `npm run db:generate` → rename migrat
 
 ## Phase 2 — Maintenance intake
 
-- **2.1 (blocking, SPO)** Collect the property-management JotForms (backlog 6). Nothing else in this phase is scopeable without them. Open a `[jr/spo]` issue.
-- **2.2** Property-scoped `ownsRecord` (backlog 7). Depends on 1.2. Add a property match **alongside** the email comparison — `submittedBy` stays an email; nothing re-keys on user ID. New cases in `ownership.test.ts`: both accounts on property A read A's requests; neither reads B's. Highest-risk change in the backlog; smallest possible diff.
-- **2.3** Wire `SubmitRequest.tsx` to `POST /api/maintenance-requests` (backlog 8): real mutation via `apiRequest`, email into `submittedBy`, invalidate the `my-requests` query keys, remove the `console.log`. The create route already accepts resident submissions through ownership.
-- **2.4** RA notification on new request (backlog 9) — behind outbound email (3.2, and external #49). Tracked in #14.
-- **2.5** Retire the JotForm webhook (backlog 10) — separate change after 2.3 ships; update README + CLAUDE.md Integrations in the same commit.
+**Decision (2026-08-26): nothing JotForm-related survives.** The original backlog
+asked for the JotForms to be collected so their field set could be reproduced
+(task 6) and for the webhook to be retired only after in-portal submission
+shipped (task 10). Both are overtaken: in-portal submission shipped on main, the
+portal form's field set is now the source of truth, and no JotForm field
+mapping will ever be needed. Task 6 is dropped outright — do not open the
+`[jr/spo]` issue, and the matching "Open items with SPO" entry is withdrawn.
+
+- **2.1** ✅ (done 2026-08-26 on this branch) Remove the JotForm integration entirely (supersedes backlog 10's
+  "retire"): delete `POST /api/webhooks/jotform` and
+  `GET /api/webhooks/jotform/config`, the field-mapping and keyword
+  auto-detection code, the `JOTFORM_*` handling in `server/config.ts`, the
+  admin setup dialog, and their tests; strip `JOTFORM_*` placeholders from
+  `.env.example`. Update the README and the CLAUDE.md Integrations section in
+  the same commit. Nothing blocks this — the webhook already fails closed
+  without its secret, so removal only deletes dead surface area.
+- **2.2** ✅ (done 2026-08-27 on this branch) Property-scoped maintenance
+  visibility (backlog 7). The house match was added **alongside** the email
+  comparison, never replacing it — `submittedBy` stays an email; nothing
+  re-keys on user ID. Mechanism: `residentHouseAddress(ctx)` resolves
+  `users.propertyId` → `properties.address` once per request, and
+  `canReadMaintenanceRequest` gains an optional house argument that defaults
+  to null (no house claim), so an un-updated call site stays email-only
+  rather than silently widening. Applied to the list, detail and contacts
+  routes and to photo access through `canReadUploadReference`; mutation
+  routes stay staff-only. Fails closed for an unlinked account, a deleted
+  property, and staff (a house match never overrides region scoping).
+  Covered in `ownership.test.ts` (both accounts on property A read A's
+  requests incl. the list route; a resident of property B and an unlinked
+  account get 403 with the refused work never fetched), `authz.test.ts`
+  (rule + resolver units), and `uploadAccess.test.ts` (housemate photo).
+- **2.3** RA notification on new request (backlog 9) — behind outbound email (3.2, and external #49). Tracked in #14. Keep the content free of anything the audit log would redact.
+
+(Backlog 8, in-portal submission, shipped on main on 2026-08-26 and needs no further work here.)
 
 ## Phase 3 — Accounts and residents
 
@@ -104,9 +133,11 @@ Ship gate per CLAUDE.md: schema edit → `npm run db:generate` → rename migrat
 2. **Reversing #43's "no finance permission" decision** (1.3). The meeting's call stands unless the maintainer objects; the plan implements the flags with a staff backfill.
 3. **`rent_payments` is the household-fee table** (no new charges table). The backlog's task 4 vocabulary (`pending`/`failed`) maps onto `unpaid`/new `failed`; `waived` stays.
 
-## Open items with SPO (unchanged from the backlog, now with issue numbers)
+## Open items with SPO
 
-1. Property-management JotForms — blocks Phase 2 scoping (open a `[jr/spo]` issue).
+1. ~~Property-management JotForms~~ — withdrawn (2026-08-26): nothing
+   JotForm-related is wanted; the portal form's field set is the source of
+   truth, so there is nothing to collect.
 2. Emails for account-less residents (backlog 18) — the roster column exists and is required; confirm the data is real.
 3. Cross-region resident moves (affects `requireRegionMove` on the resident update path).
 4. Annual maintenance budget: per property or per region (4.3).

@@ -22,10 +22,12 @@ vi.mock("../auth", () => ({ getUserId: (...args: unknown[]) => getUserId(...args
 
 const getUser = vi.fn();
 const getUserPermissions = vi.fn();
+const getProperty = vi.fn();
 vi.mock("../storage", () => ({
   storage: {
     getUser: (...args: unknown[]) => getUser(...args),
     getUserPermissions: (...args: unknown[]) => getUserPermissions(...args),
+    getProperty: (...args: unknown[]) => getProperty(...args),
   },
 }));
 
@@ -44,6 +46,7 @@ import {
   ownsRecord,
   canReadMaintenanceRequest,
   requireMaintenanceRequestAccess,
+  residentHouseAddress,
   type AuthContext,
   type PermissionName,
 } from "../authz";
@@ -78,6 +81,7 @@ function context(
     email?: string;
     allowedRegions?: string[];
     permissions?: Partial<Record<PermissionName, boolean>>;
+    propertyId?: string | null;
   } = {},
 ): AuthContext {
   const role = overrides.role ?? "regional_administrator";
@@ -88,6 +92,7 @@ function context(
       email: overrides.email ?? "staff@example.com",
       role,
       isActive: true,
+      propertyId: overrides.propertyId ?? null,
     } as AuthContext["user"],
     permissions: overrides.permissions as AuthContext["permissions"],
     isAdmin: role === "admin",
@@ -100,6 +105,7 @@ beforeEach(() => {
   getUserId.mockReset().mockReturnValue("user-1");
   getUser.mockReset();
   getUserPermissions.mockReset().mockResolvedValue(undefined);
+  getProperty.mockReset().mockResolvedValue(undefined);
 });
 
 // ---------------------------------------------------------------------------
@@ -466,6 +472,109 @@ describe("canReadMaintenanceRequest", () => {
     expect(
       canReadMaintenanceRequest(context({ role: "admin" }), { region: null, submittedBy: null }),
     ).toBe(true);
+  });
+});
+
+describe("canReadMaintenanceRequest — housemates", () => {
+  // properties.address is unique and computed server-side, and both the
+  // request's buildingAddress and the caller's resolved house come from that
+  // same column, so the match is between two copies of one canonical string.
+  const HOUSE_A = "123 Main St, Saint Paul, MN 55101";
+  const HOUSE_B = "456 Oak Ave, Saint Paul, MN 55104";
+
+  const resident = context({ role: "resident", email: "alice@example.com" });
+
+  const bobsRequestAtHouseA = {
+    region: "South East",
+    submittedBy: "bob@example.com",
+    buildingAddress: HOUSE_A,
+  };
+
+  it("lets a resident read a housemate's request for their own house", () => {
+    expect(canReadMaintenanceRequest(resident, bobsRequestAtHouseA, HOUSE_A)).toBe(true);
+  });
+
+  it("refuses a request filed for a different house", () => {
+    expect(canReadMaintenanceRequest(resident, bobsRequestAtHouseA, HOUSE_B)).toBe(false);
+  });
+
+  it("keeps the email match working even when no house is resolved", () => {
+    // The house match is added alongside ownership, never in place of it: an
+    // account with no property link still sees its own submissions.
+    expect(
+      canReadMaintenanceRequest(
+        resident,
+        { region: "South East", submittedBy: "alice@example.com", buildingAddress: HOUSE_A },
+        null,
+      ),
+    ).toBe(true);
+  });
+
+  it("refuses a housemate claim when the account has no linked house", () => {
+    expect(canReadMaintenanceRequest(resident, bobsRequestAtHouseA, null)).toBe(false);
+  });
+
+  it("refuses a request with no building address, rather than matching empty to empty", () => {
+    expect(
+      canReadMaintenanceRequest(
+        resident,
+        { region: "South East", submittedBy: "bob@example.com", buildingAddress: "" },
+        "",
+      ),
+    ).toBe(false);
+  });
+
+  it("requires an exact match: case or whitespace drift never crosses houses", () => {
+    // Unlike email, properties.address is only unique case-sensitively, so
+    // "123 Main St" and "123 MAIN ST" can be two different houses. A folded
+    // comparison would let one house read the other's history; drift between
+    // two copies of the same house's address merely fails closed instead.
+    expect(
+      canReadMaintenanceRequest(resident, bobsRequestAtHouseA, HOUSE_A.toUpperCase()),
+    ).toBe(false);
+    expect(
+      canReadMaintenanceRequest(resident, bobsRequestAtHouseA, `  ${HOUSE_A}  `),
+    ).toBe(false);
+  });
+
+  it("does not widen staff access: a house match never overrides region scoping", () => {
+    const staff = context({ allowedRegions: ["West Central"] });
+    expect(
+      canReadMaintenanceRequest(
+        staff,
+        { region: "East Central", submittedBy: "bob@example.com", buildingAddress: HOUSE_A },
+        HOUSE_A,
+      ),
+    ).toBe(false);
+  });
+});
+
+describe("residentHouseAddress", () => {
+  const HOUSE_A = "123 Main St, Saint Paul, MN 55101";
+
+  it("resolves the address of the property linked to a resident account", async () => {
+    getProperty.mockResolvedValue({ id: "prop-a", address: HOUSE_A });
+    const ctx = context({ role: "resident", propertyId: "prop-a" });
+    expect(await residentHouseAddress(ctx)).toBe(HOUSE_A);
+    expect(getProperty).toHaveBeenCalledWith("prop-a");
+  });
+
+  it("returns null for staff without touching storage", async () => {
+    const ctx = context({ role: "regional_administrator", propertyId: "prop-a" });
+    expect(await residentHouseAddress(ctx)).toBeNull();
+    expect(getProperty).not.toHaveBeenCalled();
+  });
+
+  it("returns null for a resident account with no property link", async () => {
+    const ctx = context({ role: "resident" });
+    expect(await residentHouseAddress(ctx)).toBeNull();
+    expect(getProperty).not.toHaveBeenCalled();
+  });
+
+  it("returns null when the linked property no longer exists", async () => {
+    getProperty.mockResolvedValue(undefined);
+    const ctx = context({ role: "resident", propertyId: "prop-gone" });
+    expect(await residentHouseAddress(ctx)).toBeNull();
   });
 });
 

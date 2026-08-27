@@ -13,6 +13,7 @@ import {
   requireRegionMove,
   requireMaintenanceRequestAccess,
   canReadMaintenanceRequest,
+  residentHouseAddress,
   canReadUpload,
   filterByRegion,
   filterByRelatedRegion,
@@ -25,7 +26,6 @@ import { recordAuditEvent, auditLookup, changedFields, AUDIT_ACTIONS } from "./a
 import { AUDIT_ACTION_VALUES } from "@shared/audit";
 import multer from "multer";
 import path from "path";
-import crypto from "crypto";
 import { fileTypeFromBuffer } from "file-type";
 import AdmZip from "adm-zip";
 import {
@@ -43,7 +43,7 @@ import {
   IMAGE_UPLOAD_MAX_BYTES,
   DOCUMENT_UPLOAD_MAX_BYTES,
 } from "./uploadLimits";
-import { uploadRateLimit, webhookRateLimit } from "./security";
+import { uploadRateLimit } from "./security";
 import {
   insertMaintenanceRequestSchema,
   insertWalkthroughRoomSchema,
@@ -160,15 +160,6 @@ const auditLogQuerySchema = z.object({
   from: blankAsAbsent(isoDate),
   to: blankAsAbsent(isoDate),
 });
-
-// Constant-time string comparison, so a wrong secret cannot be discovered by
-// measuring how long the comparison takes.
-function secretsMatch(provided: string, expected: string): boolean {
-  const a = Buffer.from(provided, "utf8");
-  const b = Buffer.from(expected, "utf8");
-  if (a.length !== b.length) return false;
-  return crypto.timingSafeEqual(a, b);
-}
 
 /**
  * Shared guard for linking and unlinking a vendor contact on a maintenance
@@ -462,9 +453,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const requests = await storage.getAllMaintenanceRequests();
 
       // One rule, applied to the list and to the detail route alike, so the two
-      // can never disagree about what a user is allowed to see.
+      // can never disagree about what a user is allowed to see. The caller's
+      // house is resolved once for the whole list, not once per row.
+      const residentHouse = await residentHouseAddress(ctx);
       const filteredRequests = requests.filter((request) =>
-        canReadMaintenanceRequest(ctx, request),
+        canReadMaintenanceRequest(ctx, request, residentHouse),
       );
       res.json(filteredRequests);
     } catch (error) {
@@ -483,7 +476,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Maintenance request not found" });
       }
 
-      if (!requireMaintenanceRequestAccess(res, ctx, request)) return;
+      if (!requireMaintenanceRequestAccess(res, ctx, request, await residentHouseAddress(ctx))) return;
 
       res.json(request);
     } catch (error) {
@@ -562,14 +555,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const ctx = await requireActiveUser(req, res);
       if (!ctx) return;
-      const [photos, requests] = await Promise.all([
+      const [photos, requests, residentHouse] = await Promise.all([
         storage.getAllMaintenanceRequestPhotos(),
         storage.getAllMaintenanceRequests(),
+        residentHouseAddress(ctx),
       ]);
       const byId = new Map(requests.map((r) => [r.id, r]));
       res.json(photos.filter((p) => {
         const request = byId.get(p.requestId);
-        return request && canReadMaintenanceRequest(ctx, request);
+        return request && canReadMaintenanceRequest(ctx, request, residentHouse);
       }));
     } catch (error) {
       sendError(res, error, "Failed to fetch request photos");
@@ -585,7 +579,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Photo not found" });
       }
       const request = await storage.getMaintenanceRequest(photo.requestId);
-      if (!request || !canReadMaintenanceRequest(ctx, request)) {
+      if (!request || !canReadMaintenanceRequest(ctx, request, await residentHouseAddress(ctx))) {
         return res.status(403).json({ message: "Forbidden" });
       }
       // A resident may remove only photos they added; staff may remove any on a
@@ -671,10 +665,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Vendor contact details are only reachable through a request the caller
-      // is already allowed to read: residents through ownership, staff through
-      // region. Previously any signed-in user could read the contacts on any
-      // request by guessing its ID.
-      if (!requireMaintenanceRequestAccess(res, ctx, request)) return;
+      // is already allowed to read: residents through ownership or their house,
+      // staff through region. Previously any signed-in user could read the
+      // contacts on any request by guessing its ID.
+      if (!requireMaintenanceRequestAccess(res, ctx, request, await residentHouseAddress(ctx))) return;
 
       const contacts = await storage.getRequestContacts(req.params.id);
       res.json(contacts);
@@ -2543,155 +2537,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       stream.pipe(res);
     } catch (error) {
       sendError(res, error, "Failed to load file");
-    }
-  });
-
-  // ─── JotForm Webhook ───────────────────────────────────────────────────────
-  // Called by JotForm's servers, so it cannot use session auth. It is guarded
-  // by a shared secret instead, passed as ?secret=... on the webhook URL.
-  // Configure in JotForm: Settings → Integrations → WebHooks → add this URL
-  //
-  // JotForm delivers submissions as multipart/form-data, which the JSON and
-  // urlencoded parsers upstream do not read — without this parser req.body
-  // arrives empty and every submission silently degrades to its defaults.
-  // Text fields only: JotForm sends uploaded files as links inside rawRequest,
-  // never as file parts, so a request carrying an actual file part is refused.
-  // The limits bound what an unauthenticated caller can make this parser hold
-  // in memory; the rate limit above it bounds how often they can try.
-  const jotformFormParser = multer({
-    limits: { fields: 100, fieldSize: 256 * 1024, fileSize: 1 },
-  }).none();
-
-  app.post('/api/webhooks/jotform', webhookRateLimit, jotformFormParser, async (req, res) => {
-    try {
-      // Fail closed. If no secret is configured the endpoint is disabled
-      // entirely, rather than silently accepting anonymous submissions.
-      const secret = process.env.JOTFORM_WEBHOOK_SECRET;
-      if (!secret) {
-        console.error(
-          "Rejected JotForm webhook: JOTFORM_WEBHOOK_SECRET is not configured."
-        );
-        return res.status(503).json({ message: "Webhook not configured" });
-      }
-
-      const provided = req.query.secret ?? req.body?.secret;
-      if (typeof provided !== "string" || !secretsMatch(provided, secret)) {
-        return res.status(401).json({ message: "Unauthorized" });
-      }
-
-      // Parse JotForm's rawRequest field (URL-encoded JSON string)
-      let formFields: Record<string, any> = {};
-
-      if (req.body.rawRequest) {
-        try {
-          formFields = JSON.parse(decodeURIComponent(req.body.rawRequest));
-        } catch {
-          formFields = req.body;
-        }
-      } else {
-        formFields = req.body;
-      }
-
-      // Flatten compound fields (e.g., name: {first, last} → "John Doe")
-      const flat: Record<string, string> = {};
-      for (const [key, value] of Object.entries(formFields)) {
-        if (value && typeof value === 'object' && !Array.isArray(value)) {
-          const parts = Object.values(value as Record<string, string>).filter(Boolean);
-          flat[key] = parts.join(' ').trim();
-        } else {
-          flat[key] = String(value ?? '').trim();
-        }
-      }
-
-      console.log('[JotForm] Received submission. Fields:', JSON.stringify(flat, null, 2));
-
-      // Helper: look up a field by env-var field ID first, then auto-detect by key label
-      const getField = (envKey: string, ...terms: string[]): string => {
-        const envFieldId = process.env[envKey];
-        if (envFieldId && flat[envFieldId] !== undefined) return flat[envFieldId];
-        for (const [k, v] of Object.entries(flat)) {
-          const kLower = k.toLowerCase();
-          if (terms.some(t => kLower.includes(t.toLowerCase()))) return v;
-        }
-        return '';
-      };
-
-      // Map JotForm fields to maintenance request schema
-      const title = getField('JOTFORM_FIELD_TITLE', 'title', 'subject', 'issue', 'request')
-        || `Maintenance Request – ${new Date().toLocaleDateString()}`;
-
-      const description = getField('JOTFORM_FIELD_DESCRIPTION', 'description', 'details', 'message', 'describe', 'notes', 'comment')
-        || '';
-
-      const rawCategory = getField('JOTFORM_FIELD_CATEGORY', 'category', 'type', 'problem');
-      const VALID_CATEGORIES = ['HVAC', 'Appliance', 'Electrical', 'Plumbing', 'Structural', 'Furniture', 'IT / Electronics', 'Safety Equipment', 'Vehicle', 'Other', 'Plumbing', 'General Maintenance'];
-      const category = VALID_CATEGORIES.find(c => c.toLowerCase() === rawCategory.toLowerCase()) || rawCategory || 'General Maintenance';
-
-      const rawPriority = getField('JOTFORM_FIELD_PRIORITY', 'priority', 'urgency', 'severity').toLowerCase();
-      const VALID_PRIORITIES = ['low', 'medium', 'high', 'urgent', 'wishlist'];
-      const priority = (VALID_PRIORITIES.find(p => rawPriority.includes(p)) as any) || 'medium';
-
-      const location = getField('JOTFORM_FIELD_LOCATION', 'location', 'unit', 'room', 'address', 'property')
-        || process.env.JOTFORM_DEFAULT_LOCATION || 'Unknown';
-
-      const region = getField('JOTFORM_FIELD_REGION', 'region')
-        || process.env.JOTFORM_DEFAULT_REGION || 'Unknown';
-
-      const buildingAddress = getField('JOTFORM_FIELD_BUILDING', 'building', 'buildingaddress', 'building_address')
-        || process.env.JOTFORM_DEFAULT_BUILDING || location;
-
-      const submittedBy = getField('JOTFORM_FIELD_EMAIL', 'email', 'name', 'submitter', 'contact', 'resident')
-        || req.body.formTitle || 'JotForm Submission';
-
-      const request = await storage.createMaintenanceRequest({
-        title,
-        description,
-        category,
-        priority,
-        status: 'pending',
-        location,
-        region,
-        buildingAddress,
-        submittedBy,
-      });
-
-      console.log(`[JotForm] Created maintenance request ${request.id}: "${title}" (${priority} priority)`);
-      res.status(200).json({ success: true, id: request.id });
-    } catch (error) {
-      sendError(res, error, 'Failed to process JotForm submission');
-    }
-  });
-
-  // Return current webhook config info (admin + regional_administrator)
-  app.get('/api/webhooks/jotform/config', isAuthenticated, async (req: any, res) => {
-    try {
-      // This response names which JotForm environment variables are set, so it
-      // is deliberately narrower than the rest of the API: administrators only,
-      // and only while their account is still active.
-      const ctx = await requireActiveUser(req, res);
-      if (!ctx) return;
-      if (!ctx.isAdmin && ctx.user.role !== 'regional_administrator') {
-        return res.status(403).json({ message: 'Admin or regional administrator only' });
-      }
-      res.json({
-        webhookUrl: `${req.protocol}://${req.get('host')}/api/webhooks/jotform`,
-        fields: {
-          JOTFORM_FIELD_TITLE: process.env.JOTFORM_FIELD_TITLE || null,
-          JOTFORM_FIELD_DESCRIPTION: process.env.JOTFORM_FIELD_DESCRIPTION || null,
-          JOTFORM_FIELD_CATEGORY: process.env.JOTFORM_FIELD_CATEGORY || null,
-          JOTFORM_FIELD_PRIORITY: process.env.JOTFORM_FIELD_PRIORITY || null,
-          JOTFORM_FIELD_LOCATION: process.env.JOTFORM_FIELD_LOCATION || null,
-          JOTFORM_FIELD_EMAIL: process.env.JOTFORM_FIELD_EMAIL || null,
-          JOTFORM_FIELD_REGION: process.env.JOTFORM_FIELD_REGION || null,
-          JOTFORM_FIELD_BUILDING: process.env.JOTFORM_FIELD_BUILDING || null,
-          JOTFORM_DEFAULT_REGION: process.env.JOTFORM_DEFAULT_REGION || null,
-          JOTFORM_DEFAULT_BUILDING: process.env.JOTFORM_DEFAULT_BUILDING || null,
-          JOTFORM_DEFAULT_LOCATION: process.env.JOTFORM_DEFAULT_LOCATION || null,
-          JOTFORM_WEBHOOK_SECRET: process.env.JOTFORM_WEBHOOK_SECRET ? '(set)' : null,
-        },
-      });
-    } catch (error) {
-      sendError(res, error, "Failed to load configuration");
     }
   });
 

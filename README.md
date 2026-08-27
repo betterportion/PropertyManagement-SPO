@@ -30,8 +30,6 @@ On top of the role, each user has a row of fine-grained permissions (view/manage
 
 **File storage** — either the local filesystem (development) or a private Supabase Storage bucket (production), chosen with `STORAGE_DRIVER`.
 
-**Integrations** — JotForm: a webhook turns form submissions into maintenance requests. Optional.
-
 **Hosting** — an ordinary Node service. It needs a Postgres connection string and the environment variables below, and nothing specific to any one hosting provider. The intended production home is **Render** with **Supabase** for the database and file storage; `docs/PRODUCTION_MIGRATION.md` is the step-by-step runbook for getting there.
 
 ---
@@ -64,7 +62,7 @@ Required before the app will start:
 | `OIDC_CLIENT_ID` | **Yes, off Replit** | Client ID from your identity provider. Inside a Replit workspace `REPL_ID` is used automatically |
 | `STORAGE_DRIVER` | **Yes, in production** | `local` or `supabase`. Defaults to `local` in development; the server refuses to start without it in production rather than silently lose files |
 
-Everything else is optional and documented in `.env.example`: the remaining `OIDC_*` settings, the Supabase storage credentials, database TLS and pool tuning, the JotForm webhook, `MAX_UPLOAD_BYTES_IN_FLIGHT`, `UPLOAD_DIR` and `PORT`.
+Everything else is optional and documented in `.env.example`: the remaining `OIDC_*` settings, the Supabase storage credentials, database TLS and pool tuning, `MAX_UPLOAD_BYTES_IN_FLIGHT`, `UPLOAD_DIR` and `PORT`.
 
 If anything required is missing, the server refuses to start and prints **every** missing value at once, rather than failing hours later when someone tries to log in or upload a file.
 
@@ -225,7 +223,6 @@ Worth understanding before changing anything server-side.
 - **Regions fail closed.** An empty region list grants access to nothing, not everything. Updates check both the record's current region and the incoming one, so a record cannot be moved somewhere the user cannot reach.
 - **Uploaded files are not public.** `GET /uploads/:filename` requires a session and authorizes against the record that references the file. Production hands out a short-lived signed link; the bucket itself is private.
 - **Uploads are refused before the body is read.** The permission check sits ahead of the multipart parser, so someone with no right to upload cannot push megabytes into the server's memory.
-- **The JotForm webhook fails closed.** With no `JOTFORM_WEBHOOK_SECRET` set it returns 503 rather than accepting anonymous submissions from the internet.
 - **Errors never leak internals.** Only messages the app wrote itself reach the client; everything else becomes a generic message with the detail logged server-side.
 
 ### Audit log
@@ -278,7 +275,6 @@ Two things to know about running more than one instance:
 
 - **Deleting a photo or document leaves the file in storage.** The record disappears from the app, but the file stays in the bucket and keeps costing space.
 - **Files uploaded before the current storage layout are unreachable.** Their links no longer resolve. Nothing in the app depends on them.
-- **The JotForm webhook is turned off** until `JOTFORM_WEBHOOK_SECRET` is set. It returns 503 rather than accepting unauthenticated submissions.
 
 ---
 

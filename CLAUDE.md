@@ -231,7 +231,7 @@ Routine audit events are retained for **two years**. Account and permission even
 
 ## Integrations
 
-**JotForm** (`POST /api/webhooks/jotform`) — turns form submissions into maintenance requests. It **fails closed**: with no `JOTFORM_WEBHOOK_SECRET` configured it returns 503 rather than accepting anonymous submissions, and the secret is compared in constant time via `secretsMatch()`. Field IDs map through `JOTFORM_FIELD_*` variables with keyword auto-detection as a fallback, and `JOTFORM_DEFAULT_*` supplies values for missing fields. `GET /api/webhooks/jotform/config` exposes the current mapping to the admin setup dialog.
+There are none. The JotForm webhook that used to turn form submissions into maintenance requests was **removed** (2026-08-26, SPO decision: nothing JotForm-related) — residents submit through the portal's own form instead. If a webhook ever comes back (e.g. QuickBooks/Ramp), remember what the old one did right: it failed closed without its secret, compared the secret in constant time, and rate-limited the unauthenticated endpoint. The `rawBody` capture in `server/index.ts` was removed with it; webhook signature verification will need it re-added.
 
 ---
 
@@ -253,7 +253,9 @@ Routine audit events are retained for **two years**. Account and permission even
 2. **Files uploaded before the current storage layout are unreachable.** Their URLs no longer resolve. Nothing in the app depends on them.
 3. **Out-of-region records answer 403 rather than 404**, which confirms the record exists. Knowingly accepted.
 
-**`submittedBy` holds an email address, not a user ID.** Both the create route and the JotForm webhook write an email, and `ownsRecord` in `authz.ts` compares against `ctx.user.email` to match. That is consistent today, and resident visibility works — but it is the kind of thing a well-meaning "let's key this on user ID" change breaks silently on both sides at once. `server/__tests__/ownership.test.ts` covers it.
+**`submittedBy` holds an email address, not a user ID.** The create route writes an email, and `ownsRecord` in `authz.ts` compares against `ctx.user.email` to match. That is consistent today, and resident visibility works — but it is the kind of thing a well-meaning "let's key this on user ID" change breaks silently on both sides at once. `server/__tests__/ownership.test.ts` covers it.
+
+**Resident visibility is ownership *or* house, never region.** Alongside the email match, a resident account linked to a property (`users.propertyId`) may read every request filed for that house — the two resident accounts on a property share one repair history. The house match compares the property's canonical `address` against the request's `buildingAddress` (both copies of the same computed string), is resolved via `residentHouseAddress(ctx)` once per request, and fails closed: no link, a deleted property, or a missing address means email-only visibility, and it never widens staff access or any mutation route.
 
 ---
 
