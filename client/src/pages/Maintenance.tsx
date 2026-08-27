@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Search, Plus, Link2, Copy, Check, ChevronRight } from "lucide-react";
+import { Search, Plus } from "lucide-react";
 import { PhotoUpload } from "@/components/PhotoUpload";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -60,8 +60,6 @@ export default function Maintenance() {
   const [selectedRequest, setSelectedRequest] = useState<MaintenanceRequest | null>(null);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
-  const [isJotFormDialogOpen, setIsJotFormDialogOpen] = useState(false);
-  const [copiedUrl, setCopiedUrl] = useState(false);
 
   const { user } = useAuth();
   const typedUser = user as User | null;
@@ -76,22 +74,6 @@ export default function Maintenance() {
   });
 
   const uniqueBuildings = properties.map(p => ({ id: p.address!, address: p.address! }));
-
-  const isAdmin = typedUser?.role === "admin";
-  const canManageJotForm = isAdmin || typedUser?.role === "regional_administrator";
-
-  const { data: webhookConfig } = useQuery<{ webhookUrl: string; fields: Record<string, string | null> }>({
-    queryKey: ['/api/webhooks/jotform/config'],
-    enabled: canManageJotForm && isJotFormDialogOpen,
-  });
-
-  const copyWebhookUrl = () => {
-    if (webhookConfig?.webhookUrl) {
-      navigator.clipboard.writeText(webhookConfig.webhookUrl);
-      setCopiedUrl(true);
-      setTimeout(() => setCopiedUrl(false), 2000);
-    }
-  };
 
   const handleLocationChange = (propertyAddress: string, field: { onChange: (val: string) => void }) => {
     field.onChange(propertyAddress);
@@ -175,12 +157,6 @@ export default function Maintenance() {
       <PageStack>
       <PageHeader title="Maintenance requests" description="Keep property issues moving from report to resolution."
         actions={<div className="flex flex-wrap items-center gap-2">
-          {canManageJotForm && (
-            <Button variant="secondary" onClick={() => setIsJotFormDialogOpen(true)} data-testid="button-jotform-setup">
-              <Link2 className="h-4 w-4 mr-2" />
-              JotForm Setup
-            </Button>
-          )}
           <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
           <DialogTrigger asChild>
             <Button variant="primary" data-testid="button-create-maintenance-request">
@@ -439,98 +415,6 @@ export default function Maintenance() {
           onClose={handleCloseDialog}
         />
       )}
-
-      <Dialog open={isJotFormDialogOpen} onOpenChange={setIsJotFormDialogOpen}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto" data-testid="dialog-jotform-setup">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Link2 className="h-5 w-5" />
-              JotForm Webhook Setup
-            </DialogTitle>
-          </DialogHeader>
-
-          <div className="space-y-5 py-1">
-            <p className="text-muted-foreground text-sm">
-              Connect a JotForm form so that submissions automatically create maintenance requests in this system.
-            </p>
-
-            <div className="space-y-2">
-              <h3 className="font-medium text-sm">Step 1 — Copy the Webhook URL</h3>
-              <div className="flex items-center gap-2">
-                <code className="flex-1 bg-muted text-muted-foreground text-xs px-3 py-2 rounded-md truncate" data-testid="text-webhook-url">
-                  {webhookConfig?.webhookUrl ?? "Loading…"}
-                </code>
-                <Button size="icon" variant="ghost" onClick={copyWebhookUrl} disabled={!webhookConfig?.webhookUrl} data-testid="button-copy-webhook-url">
-                  {copiedUrl ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-                </Button>
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <h3 className="font-medium text-sm">Step 2 — Add the Webhook in JotForm</h3>
-              <ol className="text-sm text-muted-foreground space-y-1.5 list-none">
-                {[
-                  "Open your JotForm form and click Settings.",
-                  'Navigate to the Integrations tab and search for "Webhook".',
-                  "Paste the URL above into the Webhook URL field.",
-                  'Click "Complete Integration" to save.',
-                ].map((step, i) => (
-                  <li key={i} className="flex items-start gap-2">
-                    <ChevronRight className="h-4 w-4 mt-0.5 shrink-0 text-muted-foreground" />
-                    <span>{step}</span>
-                  </li>
-                ))}
-              </ol>
-            </div>
-
-            <div className="space-y-2">
-              <h3 className="font-medium text-sm">Step 3 — Field Mapping (optional)</h3>
-              <p className="text-xs text-muted-foreground">
-                Set the following environment variables on the server to map your JotForm question labels to the corresponding fields. If not set, the system will attempt to auto-detect them by matching question labels.
-              </p>
-              <div className="rounded-md border overflow-hidden">
-                <table className="w-full text-xs">
-                  <thead>
-                    <tr className="bg-muted">
-                      <th className="text-left px-3 py-2 font-medium text-muted-foreground">Environment Variable</th>
-                      <th className="text-left px-3 py-2 font-medium text-muted-foreground">Maps To</th>
-                      <th className="text-left px-3 py-2 font-medium text-muted-foreground">Current Value</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {[
-                      { env: "JOTFORM_FIELD_TITLE", label: "Request Title" },
-                      { env: "JOTFORM_FIELD_DESCRIPTION", label: "Description" },
-                      { env: "JOTFORM_FIELD_CATEGORY", label: "Category" },
-                      { env: "JOTFORM_FIELD_PRIORITY", label: "Priority" },
-                      { env: "JOTFORM_FIELD_LOCATION", label: "Location" },
-                      { env: "JOTFORM_FIELD_EMAIL", label: "Submitter Email" },
-                      { env: "JOTFORM_FIELD_REGION", label: "Region" },
-                      { env: "JOTFORM_FIELD_BUILDING", label: "Building Address" },
-                      { env: "JOTFORM_DEFAULT_REGION", label: "Default Region" },
-                      { env: "JOTFORM_DEFAULT_BUILDING", label: "Default Building" },
-                      { env: "JOTFORM_DEFAULT_LOCATION", label: "Default Location" },
-                      { env: "JOTFORM_WEBHOOK_SECRET", label: "Webhook Secret (optional)" },
-                    ].map((row) => (
-                      <tr key={row.env} className="border-t">
-                        <td className="px-3 py-2 font-mono text-muted-foreground">{row.env}</td>
-                        <td className="px-3 py-2 text-muted-foreground">{row.label}</td>
-                        <td className="px-3 py-2">
-                          {webhookConfig?.fields?.[row.env] != null ? (
-                            <span className="text-foreground">{webhookConfig.fields[row.env]}</span>
-                          ) : (
-                            <span className="text-muted-foreground italic">not set</span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
       </PageStack>
       </Container>
     </Section>
