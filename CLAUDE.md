@@ -62,6 +62,7 @@ Three conventions in that suite, all of which exist because of a real miss:
 | `db.ts` | Drizzle over the standard `pg` pool, plus `pingDatabase` and `closeDatabase`. Throws at import time if `DATABASE_URL` is missing. |
 | `objectStorage/` | File storage behind a `FileStore` interface: `local.ts` for development, `supabase.ts` for production. The only code that talks to a bucket. |
 | `uploadLimits.ts` | Per-file size limits and the in-flight memory ceiling. |
+| `email.ts` | The only code that talks to the email provider (Resend). `sendEmail` never throws — unconfigured and failed sends return a result — and email is off until `RESEND_API_KEY` + `EMAIL_FROM` are both set. |
 | `logger.ts` | `log()`. Separate from `vite.ts` so the production bundle never imports Vite. |
 | `static.ts` | Serves the built client in production. |
 | `vite.ts` | Dev middleware only. Imported dynamically, and only in development — see the note in the file. |
@@ -231,7 +232,9 @@ Routine audit events are retained for **two years**. Account and permission even
 
 ## Integrations
 
-There are none. The JotForm webhook that used to turn form submissions into maintenance requests was **removed** (2026-08-26, SPO decision: nothing JotForm-related) — residents submit through the portal's own form instead. If a webhook ever comes back (e.g. QuickBooks/Ramp), remember what the old one did right: it failed closed without its secret, compared the secret in constant time, and rate-limited the unauthenticated endpoint. The `rawBody` capture in `server/index.ts` was removed with it; webhook signature verification will need it re-added.
+**Outbound email via Resend** lives behind `server/email.ts` — plain-text sends only, configured by `RESEND_API_KEY`/`EMAIL_FROM` (`EMAIL_REPLY_TO` optional). Unset means email is deliberately off and the server runs normally; a *partial* pair fails the boot check. A send failure must never fail the request that triggered it — callers get a result, not an exception. Keep message content to what the audit log could hold: names and amounts yes, credentials and banking identifiers never.
+
+The JotForm webhook that used to turn form submissions into maintenance requests was **removed** (2026-08-26, SPO decision: nothing JotForm-related) — residents submit through the portal's own form instead. If a webhook ever comes back (e.g. QuickBooks/Ramp), remember what the old one did right: it failed closed without its secret, compared the secret in constant time, and rate-limited the unauthenticated endpoint. The `rawBody` capture in `server/index.ts` was removed with it; webhook signature verification will need it re-added.
 
 ---
 
