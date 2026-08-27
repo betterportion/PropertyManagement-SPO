@@ -74,7 +74,7 @@ portal form's field set is now the source of truth, and no JotForm field
 mapping will ever be needed. Task 6 is dropped outright — do not open the
 `[jr/spo]` issue, and the matching "Open items with SPO" entry is withdrawn.
 
-- **2.1** Remove the JotForm integration entirely (supersedes backlog 10's
+- **2.1** ✅ (done 2026-08-26 on this branch) Remove the JotForm integration entirely (supersedes backlog 10's
   "retire"): delete `POST /api/webhooks/jotform` and
   `GET /api/webhooks/jotform/config`, the field-mapping and keyword
   auto-detection code, the `JOTFORM_*` handling in `server/config.ts`, the

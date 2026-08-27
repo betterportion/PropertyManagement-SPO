@@ -101,20 +101,3 @@ export const uploadRateLimit = rateLimit({
   keyGenerator: userOrIpKey,
   message: { message: "Too many uploads. Please wait a few minutes and try again." },
 });
-
-/**
- * Webhook limit.
- *
- * This endpoint is unauthenticated by necessity -- JotForm's servers call it
- * and cannot hold a session -- so it is the one door into the application that
- * anyone on the internet can knock on. The shared secret decides who gets in;
- * this decides how fast they may knock, so that guessing it, or replaying a
- * captured URL, cannot fill the maintenance queue with junk.
- */
-export const webhookRateLimit = rateLimit({
-  windowMs: 60 * 1000,
-  limit: 30,
-  standardHeaders: "draft-7",
-  legacyHeaders: false,
-  message: { message: "Too many requests." },
-});

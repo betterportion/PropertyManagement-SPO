@@ -1718,6 +1718,23 @@ describe("linking a resident account to a property", () => {
   });
 });
 
+describe("the removed JotForm webhook", () => {
+  // The integration was removed outright (2026-08-26). The route must be gone,
+  // not disabled: 404, never the old fail-closed 503, and nothing written.
+  it("answers 404 and creates nothing", async () => {
+    const { status } = await request("POST", "/api/webhooks/jotform", {
+      body: { rawRequest: JSON.stringify({ q1_title: "sneaky" }) },
+    });
+    expect(status).toBe(404);
+    expect(storageMock.createMaintenanceRequest).not.toHaveBeenCalled();
+  });
+
+  it("no longer exposes the config endpoint", async () => {
+    actAs(ADMIN);
+    expect((await get("/api/webhooks/jotform/config")).status).toBe(404);
+  });
+});
+
 describe("tasks & action items (regional leads only)", () => {
   // A West-Central RA. Their region comes from their permissions row.
   const WEST = { allowedRegions: ["West Central"] };
