@@ -2,6 +2,7 @@ import {
   users,
   userPermissions,
   maintenanceRequests,
+  maintenanceRequestPhotos,
   walkthroughRooms,
   walkthroughPhotos,
   assets,
@@ -22,6 +23,8 @@ import {
   type InsertUserPermissions,
   type MaintenanceRequest,
   type InsertMaintenanceRequest,
+  type MaintenanceRequestPhoto,
+  type InsertMaintenanceRequestPhoto,
   type WalkthroughRoom,
   type InsertWalkthroughRoom,
   type WalkthroughPhoto,
@@ -107,6 +110,13 @@ export interface IStorage {
   getAllMaintenanceRequests(): Promise<MaintenanceRequest[]>;
   updateMaintenanceRequest(id: string, data: Partial<InsertMaintenanceRequest>): Promise<MaintenanceRequest>;
   deleteMaintenanceRequest(id: string): Promise<void>;
+
+  // Maintenance Request Photos
+  createMaintenanceRequestPhoto(photo: InsertMaintenanceRequestPhoto & { uploadedBy: string }): Promise<MaintenanceRequestPhoto>;
+  getMaintenanceRequestPhoto(id: string): Promise<MaintenanceRequestPhoto | undefined>;
+  getMaintenanceRequestPhotosByRequest(requestId: string): Promise<MaintenanceRequestPhoto[]>;
+  getAllMaintenanceRequestPhotos(): Promise<MaintenanceRequestPhoto[]>;
+  deleteMaintenanceRequestPhoto(id: string): Promise<void>;
 
   // Walkthrough Rooms
   createWalkthroughRoom(room: InsertWalkthroughRoom): Promise<WalkthroughRoom>;
@@ -277,6 +287,7 @@ export interface AuditEventPage {
 
 export type UploadReference =
   | { kind: "maintenanceRequest"; record: MaintenanceRequest }
+  | { kind: "maintenanceRequestPhoto"; record: MaintenanceRequestPhoto }
   | { kind: "walkthroughPhoto"; record: WalkthroughPhoto }
   | { kind: "assetPhoto"; record: AssetPhoto }
   | { kind: "billingRecord"; record: BillingRecord };
@@ -438,6 +449,33 @@ export class DatabaseStorage implements IStorage {
 
   async deleteMaintenanceRequest(id: string): Promise<void> {
     await db.delete(maintenanceRequests).where(eq(maintenanceRequests.id, id));
+  }
+
+  // Maintenance Request Photos Implementation
+  async createMaintenanceRequestPhoto(photoData: InsertMaintenanceRequestPhoto & { uploadedBy: string }): Promise<MaintenanceRequestPhoto> {
+    const [photo] = await db.insert(maintenanceRequestPhotos).values(photoData).returning();
+    return photo;
+  }
+
+  async getMaintenanceRequestPhoto(id: string): Promise<MaintenanceRequestPhoto | undefined> {
+    const [photo] = await db.select().from(maintenanceRequestPhotos).where(eq(maintenanceRequestPhotos.id, id));
+    return photo;
+  }
+
+  async getMaintenanceRequestPhotosByRequest(requestId: string): Promise<MaintenanceRequestPhoto[]> {
+    return await db
+      .select()
+      .from(maintenanceRequestPhotos)
+      .where(eq(maintenanceRequestPhotos.requestId, requestId))
+      .orderBy(desc(maintenanceRequestPhotos.uploadedDate));
+  }
+
+  async getAllMaintenanceRequestPhotos(): Promise<MaintenanceRequestPhoto[]> {
+    return await db.select().from(maintenanceRequestPhotos).orderBy(desc(maintenanceRequestPhotos.uploadedDate));
+  }
+
+  async deleteMaintenanceRequestPhoto(id: string): Promise<void> {
+    await db.delete(maintenanceRequestPhotos).where(eq(maintenanceRequestPhotos.id, id));
   }
 
   // Walkthrough Rooms Implementation
@@ -1017,8 +1055,9 @@ export class DatabaseStorage implements IStorage {
     // Each of these is the full set of columns in which the application stores
     // an uploaded file's URL. A new column holding one has to be added here, or
     // downloads of those files will be refused to everyone but the uploader.
-    const [requests, walkthrough, asset, billing] = await Promise.all([
+    const [requests, requestPhotos, walkthrough, asset, billing] = await Promise.all([
       db.select().from(maintenanceRequests).where(eq(maintenanceRequests.photoUrl, url)),
+      db.select().from(maintenanceRequestPhotos).where(eq(maintenanceRequestPhotos.imageUrl, url)),
       db.select().from(walkthroughPhotos).where(eq(walkthroughPhotos.imageUrl, url)),
       db.select().from(assetPhotos).where(eq(assetPhotos.imageUrl, url)),
       db
@@ -1035,6 +1074,7 @@ export class DatabaseStorage implements IStorage {
 
     return [
       ...requests.map((record) => ({ kind: "maintenanceRequest" as const, record })),
+      ...requestPhotos.map((record) => ({ kind: "maintenanceRequestPhoto" as const, record })),
       ...walkthrough.map((record) => ({ kind: "walkthroughPhoto" as const, record })),
       ...asset.map((record) => ({ kind: "assetPhoto" as const, record })),
       ...billing.map((record) => ({ kind: "billingRecord" as const, record })),

@@ -488,6 +488,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Attaches already-uploaded photos to a just-created request. Only uploads the
+  // caller themselves stored are attached, so a request body cannot point a
+  // request at someone else's file to expose it (its visibility is inherited).
+  async function attachRequestPhotos(ctx: AuthContext, requestId: string, photoUrls: unknown): Promise<void> {
+    if (!Array.isArray(photoUrls)) return;
+    const uploadedBy = ctx.user.email || "Unknown";
+    for (const url of photoUrls.slice(0, 10)) {
+      if (typeof url !== "string" || !url.startsWith("/uploads/")) continue;
+      const key = url.slice("/uploads/".length);
+      if (!isSafeStorageKey(key)) continue;
+      const upload = await storage.getUploadByStorageKey(key);
+      if (!upload || upload.uploadedBy !== ctx.userId) continue;
+      await storage.createMaintenanceRequestPhoto({ requestId, imageUrl: url, uploadedBy });
+    }
+  }
+
   app.post('/api/maintenance-requests', isAuthenticated, async (req: any, res) => {
     try {
       const ctx = await requireActiveUser(req, res);
@@ -519,6 +535,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           buildingAddress: residency.buildingAddress,
           submittedBy,
         });
+        await attachRequestPhotos(ctx, request.id, req.body?.photoUrls);
         return res.json(request);
       }
 
@@ -528,9 +545,56 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!requireRegion(res, ctx, validatedData.region, "Forbidden - Cannot create in this region")) return;
 
       const request = await storage.createMaintenanceRequest({ ...validatedData, submittedBy });
+      await attachRequestPhotos(ctx, request.id, req.body?.photoUrls);
       res.json(request);
     } catch (error) {
       sendError(res, error, "Failed to create maintenance request");
+    }
+  });
+
+  // Photos attached to maintenance requests. A photo inherits the request's
+  // visibility, so a resident sees only their own request's photos and staff are
+  // bound by region -- the client groups these by requestId.
+  app.get('/api/maintenance-request-photos', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      const [photos, requests] = await Promise.all([
+        storage.getAllMaintenanceRequestPhotos(),
+        storage.getAllMaintenanceRequests(),
+      ]);
+      const byId = new Map(requests.map((r) => [r.id, r]));
+      res.json(photos.filter((p) => {
+        const request = byId.get(p.requestId);
+        return request && canReadMaintenanceRequest(ctx, request);
+      }));
+    } catch (error) {
+      sendError(res, error, "Failed to fetch request photos");
+    }
+  });
+
+  app.delete('/api/maintenance-request-photos/:id', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      const photo = await storage.getMaintenanceRequestPhoto(req.params.id);
+      if (!photo) {
+        return res.status(404).json({ message: "Photo not found" });
+      }
+      const request = await storage.getMaintenanceRequest(photo.requestId);
+      if (!request || !canReadMaintenanceRequest(ctx, request)) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+      // A resident may remove only photos they added; staff may remove any on a
+      // request in their region.
+      const isUploader = photo.uploadedBy === (ctx.user.email || "");
+      if (ctx.isResident && !isUploader) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+      await storage.deleteMaintenanceRequestPhoto(req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      sendError(res, error, "Failed to delete request photo");
     }
   });
 
@@ -1014,6 +1078,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(await storeUploadedFile(req.file, req.uploadContext));
     } catch (error) {
       sendError(res, error, "Failed to upload file");
+    }
+  });
+
+  // Loads the auth context for an upload WITHOUT blocking residents. Used only by
+  // the maintenance-request photo upload below, where a resident reporting an
+  // issue is legitimately allowed to attach a photo of it.
+  const attachUploadContext: import("express").RequestHandler = async (req: any, res, next) => {
+    try {
+      const ctx = await loadAuthContext(req);
+      if (!ctx) return res.status(403).json({ message: "Your account is not active." });
+      req.uploadContext = ctx;
+      next();
+    } catch (error) {
+      sendError(res, error, "Failed to verify upload permission.");
+    }
+  };
+
+  // Resident-safe image upload for maintenance-request photos. Same guards as
+  // /api/upload (image-only, size-capped, content-verified) but without the
+  // resident block -- a resident may attach a photo when they report an issue.
+  // The upload is only visible to its uploader until a request-photo row points
+  // at it, at which point it inherits the request's visibility.
+  app.post('/api/maintenance-request-photos/upload', isAuthenticated, uploadRateLimit, attachUploadContext, ...guardedUpload(upload.single('file'), IMAGE_UPLOAD_MAX_BYTES), async (req: any, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ message: "No file uploaded" });
+      }
+      if (!(await bufferMatchesExtension(req.file.buffer, req.file.originalname))) {
+        return res.status(400).json({
+          message: "File contents do not match the file extension. The file was not saved.",
+        });
+      }
+      res.json(await storeUploadedFile(req.file, req.uploadContext));
+    } catch (error) {
+      sendError(res, error, "Failed to upload photo");
     }
   });
 

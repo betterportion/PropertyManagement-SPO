@@ -10,9 +10,11 @@ interface PhotoUploadProps {
   existingUrl?: string;
   className?: string;
   disabled?: boolean;
+  /** Where to POST the file. Defaults to the staff image endpoint. */
+  endpoint?: string;
 }
 
-export function PhotoUpload({ onUpload, onRemove, onError, existingUrl, className, disabled }: PhotoUploadProps) {
+export function PhotoUpload({ onUpload, onRemove, onError, existingUrl, className, disabled, endpoint = "/api/upload" }: PhotoUploadProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [preview, setPreview] = useState<string | null>(existingUrl ?? null);
@@ -44,7 +46,7 @@ export function PhotoUpload({ onUpload, onRemove, onError, existingUrl, classNam
       const formData = new FormData();
       formData.append("file", file);
 
-      const response = await fetch("/api/upload", {
+      const response = await fetch(endpoint, {
         method: "POST",
         body: formData,
         credentials: "include",
@@ -71,7 +73,7 @@ export function PhotoUpload({ onUpload, onRemove, onError, existingUrl, classNam
     } finally {
       setIsUploading(false);
     }
-  }, [onUpload, onError, existingUrl]);
+  }, [onUpload, onError, existingUrl, endpoint]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();

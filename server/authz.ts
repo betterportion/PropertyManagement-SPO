@@ -296,6 +296,14 @@ export async function canReadUploadReference(
     case "maintenanceRequest":
       return canReadMaintenanceRequest(ctx, reference.record);
 
+    case "maintenanceRequestPhoto": {
+      // A request photo inherits the request's visibility: the resident who
+      // submitted it, or staff in the request's region. A missing request
+      // resolves to no access.
+      const request = await storage.getMaintenanceRequest(reference.record.requestId);
+      return !!request && canReadMaintenanceRequest(ctx, request);
+    }
+
     case "walkthroughPhoto":
       return (
         !ctx.isResident &&

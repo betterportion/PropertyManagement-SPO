@@ -151,6 +151,18 @@ async function seed(): Promise<void> {
   }
   console.log(`Seeded ${requests.length} maintenance requests`);
 
+  // A couple of photos on the first request, so the request card shows the
+  // resident-attached photo gallery.
+  for (let i = 0; i < 2; i += 1) {
+    const url = await seedImage(`reported-issue-${i}.png`);
+    await storage.createMaintenanceRequestPhoto({
+      requestId: requests[0].id,
+      imageUrl: url,
+      uploadedBy: requests[0].submittedBy,
+    });
+  }
+  console.log("Seeded 2 maintenance-request photos");
+
   // Link the plumbing and HVAC vendors to the requests they'd be called for.
   await storage.linkContactToRequest(requests[0].id, contacts[0].id);
   await storage.linkContactToRequest(requests[1].id, contacts[1].id);

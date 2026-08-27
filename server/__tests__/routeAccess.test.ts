@@ -1823,3 +1823,55 @@ describe("region summary (leadership rollup)", () => {
     expect(body.length).toBe(7);
   });
 });
+
+describe("maintenance request photos", () => {
+  const body = { title: "Leaky tap", description: "drips", category: "plumbing", priority: "medium", location: "Kitchen" };
+
+  it("attaches only the submitter's own uploads to their new request", async () => {
+    actAs(ALICE, ALL_MAINTENANCE);
+    storageMock.getActiveResidentByEmail.mockResolvedValue({ region: "West Central", buildingAddress: "1 Main St" });
+    storageMock.createMaintenanceRequest.mockImplementation(async (d: Record<string, unknown>) => ({ id: "req-new", ...d }));
+    // "mine.png" belongs to Alice; "theirs.png" belongs to someone else.
+    storageMock.getUploadByStorageKey.mockImplementation(async (key: string) =>
+      key === "mine.png" ? { storageKey: key, uploadedBy: ALICE.id } : { storageKey: key, uploadedBy: "u-someone-else" },
+    );
+
+    const { status } = await request("POST", "/api/maintenance-requests", {
+      body: { ...body, photoUrls: ["/uploads/mine.png", "/uploads/theirs.png"] },
+    });
+
+    expect(status).toBe(200);
+    expect(storageMock.createMaintenanceRequestPhoto).toHaveBeenCalledTimes(1);
+    expect(storageMock.createMaintenanceRequestPhoto).toHaveBeenCalledWith(
+      expect.objectContaining({ requestId: "req-new", imageUrl: "/uploads/mine.png", uploadedBy: ALICE.email }),
+    );
+  });
+
+  it("shows a resident only their own request's photos", async () => {
+    actAs(ALICE, ALL_MAINTENANCE);
+    storageMock.getAllMaintenanceRequests.mockResolvedValue([WEST_REQUEST, EAST_REQUEST]); // west = Alice's, east = Bob's
+    storageMock.getAllMaintenanceRequestPhotos.mockResolvedValue([
+      { id: "ph-west", requestId: "req-west", imageUrl: "/uploads/a.png" },
+      { id: "ph-east", requestId: "req-east", imageUrl: "/uploads/b.png" },
+    ]);
+
+    const { status, body: photos } = await get("/api/maintenance-request-photos");
+    expect(status).toBe(200);
+    expect(photos.map((p: { id: string }) => p.id)).toEqual(["ph-west"]);
+  });
+
+  it("lets a resident delete a photo they added but not one on another resident's request", async () => {
+    actAs(ALICE, ALL_MAINTENANCE);
+    storageMock.getMaintenanceRequestPhoto.mockResolvedValue({ id: "ph-west", requestId: "req-west", uploadedBy: ALICE.email });
+    storageMock.getMaintenanceRequest.mockResolvedValue(WEST_REQUEST);
+    expect((await request("DELETE", "/api/maintenance-request-photos/ph-west", {})).status).toBe(200);
+
+    storageMock.getMaintenanceRequestPhoto.mockResolvedValue({ id: "ph-east", requestId: "req-east", uploadedBy: BOB.email });
+    storageMock.getMaintenanceRequest.mockResolvedValue(EAST_REQUEST); // Bob's — Alice can't even read it
+    const denied = await request("DELETE", "/api/maintenance-request-photos/ph-east", {});
+    expect(denied.status).toBe(403);
+    // Only the first (own) delete went through — the denied one did not.
+    expect(storageMock.deleteMaintenanceRequestPhoto).toHaveBeenCalledTimes(1);
+    expect(storageMock.deleteMaintenanceRequestPhoto).toHaveBeenCalledWith("ph-west");
+  });
+});
