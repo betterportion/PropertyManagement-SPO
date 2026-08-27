@@ -524,10 +524,17 @@ describe("canReadMaintenanceRequest — housemates", () => {
     ).toBe(false);
   });
 
-  it("matches regardless of case and surrounding whitespace", () => {
+  it("requires an exact match: case or whitespace drift never crosses houses", () => {
+    // Unlike email, properties.address is only unique case-sensitively, so
+    // "123 Main St" and "123 MAIN ST" can be two different houses. A folded
+    // comparison would let one house read the other's history; drift between
+    // two copies of the same house's address merely fails closed instead.
     expect(
-      canReadMaintenanceRequest(resident, bobsRequestAtHouseA, `  ${HOUSE_A.toUpperCase()}  `),
-    ).toBe(true);
+      canReadMaintenanceRequest(resident, bobsRequestAtHouseA, HOUSE_A.toUpperCase()),
+    ).toBe(false);
+    expect(
+      canReadMaintenanceRequest(resident, bobsRequestAtHouseA, `  ${HOUSE_A}  `),
+    ).toBe(false);
   });
 
   it("does not widen staff access: a house match never overrides region scoping", () => {
