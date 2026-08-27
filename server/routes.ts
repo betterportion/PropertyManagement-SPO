@@ -1562,6 +1562,84 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Whether a roster resident has an active portal login, so the move-out
+  // dialog can offer to switch it off. Same guards as the move-out itself.
+  app.get('/api/residents/:id/account-status', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageProperties")) return;
+
+      const resident = await storage.getResident(req.params.id);
+      if (!resident) {
+        return res.status(404).json({ message: "Resident not found" });
+      }
+      if (!requireRegion(res, ctx, resident.region)) return;
+
+      const account = await storage.getActiveResidentAccountByEmail(resident.email);
+      res.json({ hasActiveAccount: !!account });
+    } catch (error) {
+      sendError(res, error, "Failed to check the resident's account");
+    }
+  });
+
+  // Move-out as one deliberate action: the roster row is closed on the chosen
+  // date, and optionally the person's portal login is switched off with it.
+  // Since house-wide visibility shipped, an active login keeps seeing the
+  // house's requests after its owner leaves — this is where that ends.
+  app.post('/api/residents/:id/move-out', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageProperties")) return;
+
+      const { moveOutDate, deactivateAccount } = z
+        .object({
+          moveOutDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use a YYYY-MM-DD date"),
+          deactivateAccount: z.boolean(),
+        })
+        .parse(req.body);
+
+      const resident = await storage.getResident(req.params.id);
+      if (!resident) {
+        return res.status(404).json({ message: "Resident not found" });
+      }
+      if (!requireRegion(res, ctx, resident.region)) return;
+
+      // Through the shared schema so the date string becomes a Date the same
+      // way every other resident write does.
+      const updated = await storage.updateResident(
+        req.params.id,
+        insertResidentSchema.partial().parse({ isActive: false, moveOutDate }),
+      );
+
+      // Bounded on purpose: only an *active, resident-role* login matching
+      // this roster row's email can be switched off here, and this route only
+      // ever deactivates. Reactivation stays an admin action in Settings.
+      let accountDeactivated = false;
+      if (deactivateAccount) {
+        const account = await storage.getActiveResidentAccountByEmail(resident.email);
+        if (account) {
+          await storage.updateUserActiveStatus(account.id, false);
+          accountDeactivated = true;
+          recordAuditEvent(ctx, {
+            action: AUDIT_ACTIONS.USER_STATUS_CHANGED,
+            entityType: "user",
+            entityId: account.id,
+            summary: `Deactivated ${account.email ?? account.id}'s login while moving them out of ${resident.buildingAddress}`,
+            details: { isActive: false, reason: "move_out", residentId: resident.id },
+          });
+        }
+      }
+
+      res.json({ resident: updated, accountDeactivated });
+    } catch (error) {
+      sendError(res, error, "Failed to move the resident out");
+    }
+  });
+
   app.delete('/api/residents/:id', isAuthenticated, async (req: any, res) => {
     try {
       const ctx = await requireActiveUser(req, res);

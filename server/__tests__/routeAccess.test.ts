@@ -1473,6 +1473,113 @@ describe("residents", () => {
   });
 });
 
+describe("moving a resident out", () => {
+  const ALL_PROPERTIES = { canViewProperties: true, canManageProperties: true };
+  const WEST_RESIDENT = {
+    id: "res-1",
+    firstName: "Maria",
+    lastName: "Gonzalez",
+    email: "maria@spo.org",
+    region: "West Central",
+    buildingAddress: "1 Main St",
+    isActive: true,
+  };
+  const MARIA_LOGIN = { id: "u-maria", email: "maria@spo.org", role: "resident", isActive: true };
+
+  it("marks the resident moved out on the requested date", async () => {
+    actAs(STAFF, { ...ALL_PROPERTIES, allowedRegions: ["West Central"] });
+    storageMock.getResident.mockResolvedValue(WEST_RESIDENT);
+    storageMock.updateResident.mockImplementation(async (id: string, patch: Record<string, unknown>) => ({ ...WEST_RESIDENT, ...patch }));
+
+    const { status } = await request("POST", "/api/residents/res-1/move-out", {
+      body: { moveOutDate: "2026-05-15", deactivateAccount: false },
+    });
+
+    expect(status).toBe(200);
+    expect(storageMock.updateResident).toHaveBeenCalledWith(
+      "res-1",
+      expect.objectContaining({ isActive: false, moveOutDate: new Date("2026-05-15") }),
+    );
+    expect(storageMock.updateUserActiveStatus).not.toHaveBeenCalled();
+  });
+
+  it("deactivates a matching resident login when asked to", async () => {
+    actAs(STAFF, { ...ALL_PROPERTIES, allowedRegions: ["West Central"] });
+    storageMock.getResident.mockResolvedValue(WEST_RESIDENT);
+    storageMock.updateResident.mockImplementation(async (id: string, patch: Record<string, unknown>) => ({ ...WEST_RESIDENT, ...patch }));
+    storageMock.getActiveResidentAccountByEmail.mockResolvedValue(MARIA_LOGIN);
+    storageMock.updateUserActiveStatus.mockResolvedValue({ ...MARIA_LOGIN, isActive: false });
+
+    const { status, body } = await request("POST", "/api/residents/res-1/move-out", {
+      body: { moveOutDate: "2026-05-15", deactivateAccount: true },
+    });
+
+    expect(status).toBe(200);
+    expect(storageMock.getActiveResidentAccountByEmail).toHaveBeenCalledWith("maria@spo.org");
+    expect(storageMock.updateUserActiveStatus).toHaveBeenCalledWith("u-maria", false);
+    expect((body as { accountDeactivated: boolean }).accountDeactivated).toBe(true);
+  });
+
+  it("never touches a login when none matches", async () => {
+    actAs(STAFF, { ...ALL_PROPERTIES, allowedRegions: ["West Central"] });
+    storageMock.getResident.mockResolvedValue(WEST_RESIDENT);
+    storageMock.updateResident.mockImplementation(async (id: string, patch: Record<string, unknown>) => ({ ...WEST_RESIDENT, ...patch }));
+    storageMock.getActiveResidentAccountByEmail.mockResolvedValue(undefined);
+
+    const { status, body } = await request("POST", "/api/residents/res-1/move-out", {
+      body: { moveOutDate: "2026-05-15", deactivateAccount: true },
+    });
+
+    expect(status).toBe(200);
+    expect(storageMock.updateUserActiveStatus).not.toHaveBeenCalled();
+    expect((body as { accountDeactivated: boolean }).accountDeactivated).toBe(false);
+  });
+
+  it("refuses staff outside the resident's region, changing nothing", async () => {
+    actAs(STAFF, { ...ALL_PROPERTIES, allowedRegions: ["East Central"] });
+    storageMock.getResident.mockResolvedValue(WEST_RESIDENT);
+
+    const { status } = await request("POST", "/api/residents/res-1/move-out", {
+      body: { moveOutDate: "2026-05-15", deactivateAccount: true },
+    });
+
+    expect(status).toBe(403);
+    expect(storageMock.updateResident).not.toHaveBeenCalled();
+    expect(storageMock.updateUserActiveStatus).not.toHaveBeenCalled();
+  });
+
+  it("refuses a resident, changing nothing", async () => {
+    actAs(ALICE, ALL_MAINTENANCE);
+
+    const { status } = await request("POST", "/api/residents/res-1/move-out", {
+      body: { moveOutDate: "2026-05-15", deactivateAccount: true },
+    });
+
+    expect(status).toBe(403);
+    expect(storageMock.updateResident).not.toHaveBeenCalled();
+    expect(storageMock.updateUserActiveStatus).not.toHaveBeenCalled();
+  });
+
+  it("tells staff in region whether the resident has an active login", async () => {
+    actAs(STAFF, { ...ALL_PROPERTIES, allowedRegions: ["West Central"] });
+    storageMock.getResident.mockResolvedValue(WEST_RESIDENT);
+    storageMock.getActiveResidentAccountByEmail.mockResolvedValue(MARIA_LOGIN);
+
+    const { status, body } = await get("/api/residents/res-1/account-status");
+    expect(status).toBe(200);
+    expect(body).toEqual({ hasActiveAccount: true });
+  });
+
+  it("hides account status from staff outside the region", async () => {
+    actAs(STAFF, { ...ALL_PROPERTIES, allowedRegions: ["East Central"] });
+    storageMock.getResident.mockResolvedValue(WEST_RESIDENT);
+
+    const { status } = await get("/api/residents/res-1/account-status");
+    expect(status).toBe(403);
+    expect(storageMock.getActiveResidentAccountByEmail).not.toHaveBeenCalled();
+  });
+});
+
 describe("resident finances (regional leads only)", () => {
   const WEST_PROPERTY = { id: "prop-west", name: "Cleveland House", region: "West Central", address: "1 Main St" };
   const WEST_RESIDENT = { id: "res-w", propertyId: "prop-west", region: "West Central", buildingAddress: "1 Main St", firstName: "Maria", lastName: "Diaz", isActive: true };
