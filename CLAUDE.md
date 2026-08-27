@@ -255,6 +255,8 @@ There are none. The JotForm webhook that used to turn form submissions into main
 
 **`submittedBy` holds an email address, not a user ID.** The create route writes an email, and `ownsRecord` in `authz.ts` compares against `ctx.user.email` to match. That is consistent today, and resident visibility works — but it is the kind of thing a well-meaning "let's key this on user ID" change breaks silently on both sides at once. `server/__tests__/ownership.test.ts` covers it.
 
+**Resident visibility is ownership *or* house, never region.** Alongside the email match, a resident account linked to a property (`users.propertyId`) may read every request filed for that house — the two resident accounts on a property share one repair history. The house match compares the property's canonical `address` against the request's `buildingAddress` (both copies of the same computed string), is resolved via `residentHouseAddress(ctx)` once per request, and fails closed: no link, a deleted property, or a missing address means email-only visibility, and it never widens staff access or any mutation route.
+
 ---
 
 ## Rules

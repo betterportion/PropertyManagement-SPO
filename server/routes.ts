@@ -13,6 +13,7 @@ import {
   requireRegionMove,
   requireMaintenanceRequestAccess,
   canReadMaintenanceRequest,
+  residentHouseAddress,
   canReadUpload,
   filterByRegion,
   filterByRelatedRegion,
@@ -452,9 +453,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const requests = await storage.getAllMaintenanceRequests();
 
       // One rule, applied to the list and to the detail route alike, so the two
-      // can never disagree about what a user is allowed to see.
+      // can never disagree about what a user is allowed to see. The caller's
+      // house is resolved once for the whole list, not once per row.
+      const residentHouse = await residentHouseAddress(ctx);
       const filteredRequests = requests.filter((request) =>
-        canReadMaintenanceRequest(ctx, request),
+        canReadMaintenanceRequest(ctx, request, residentHouse),
       );
       res.json(filteredRequests);
     } catch (error) {
@@ -473,7 +476,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Maintenance request not found" });
       }
 
-      if (!requireMaintenanceRequestAccess(res, ctx, request)) return;
+      if (!requireMaintenanceRequestAccess(res, ctx, request, await residentHouseAddress(ctx))) return;
 
       res.json(request);
     } catch (error) {
@@ -661,10 +664,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Vendor contact details are only reachable through a request the caller
-      // is already allowed to read: residents through ownership, staff through
-      // region. Previously any signed-in user could read the contacts on any
-      // request by guessing its ID.
-      if (!requireMaintenanceRequestAccess(res, ctx, request)) return;
+      // is already allowed to read: residents through ownership or their house,
+      // staff through region. Previously any signed-in user could read the
+      // contacts on any request by guessing its ID.
+      if (!requireMaintenanceRequestAccess(res, ctx, request, await residentHouseAddress(ctx))) return;
 
       const contacts = await storage.getRequestContacts(req.params.id);
       res.json(contacts);
