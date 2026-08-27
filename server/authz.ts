@@ -289,15 +289,19 @@ export async function residentHouseAddress(ctx: AuthContext): Promise<string | n
  * Both sides are copies of the same canonical string: `properties.address` is
  * computed server-side and unique, the roster's buildingAddress is copied from
  * it, and a request's buildingAddress is copied from one of those in turn. So
- * this is not fuzzy address matching — trim and case only absorb historic
- * rows, the way ownsRecord does for email.
+ * the comparison is exact — deliberately not case-folded or trimmed, unlike
+ * ownsRecord's email match. The address column's uniqueness is only
+ * case-sensitive, so "123 Main St" and "123 MAIN ST" can be two different
+ * properties; a folded comparison would let one house read the other's
+ * history, whereas drift between two copies of the same house's address
+ * merely fails closed.
  */
 function isOwnHouse(
   residentHouse: string | null,
   buildingAddress: string | null | undefined,
 ): boolean {
   if (!residentHouse || !buildingAddress) return false;
-  return buildingAddress.trim().toLowerCase() === residentHouse.trim().toLowerCase();
+  return buildingAddress === residentHouse;
 }
 
 /**
