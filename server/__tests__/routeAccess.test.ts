@@ -1485,7 +1485,7 @@ describe("resident finances (regional leads only)", () => {
   });
 
   it("takes region and property from the resident on a rent charge, ignoring the body", async () => {
-    actAs(STAFF, { allowedRegions: ["West Central"] });
+    actAs(STAFF, { canViewFinancials: true, canManageFinancials: true, allowedRegions: ["West Central"] });
     storageMock.getResident.mockResolvedValue(WEST_RESIDENT);
     storageMock.createRentPayment.mockImplementation(async (data: Record<string, unknown>) => ({ id: "rp-1", ...data }));
 
@@ -1500,7 +1500,7 @@ describe("resident finances (regional leads only)", () => {
   });
 
   it("refuses recording rent for a resident in another region", async () => {
-    actAs(STAFF, { allowedRegions: ["West Central"] });
+    actAs(STAFF, { canViewFinancials: true, canManageFinancials: true, allowedRegions: ["West Central"] });
     storageMock.getResident.mockResolvedValue(EAST_RESIDENT);
 
     const { status } = await request("POST", "/api/rent-payments", {
@@ -1512,7 +1512,7 @@ describe("resident finances (regional leads only)", () => {
   });
 
   it("generates charges only for current residents who lack one, using the given amount", async () => {
-    actAs(STAFF, { allowedRegions: ["West Central"] });
+    actAs(STAFF, { canViewFinancials: true, canManageFinancials: true, allowedRegions: ["West Central"] });
     storageMock.getProperty.mockResolvedValue(WEST_PROPERTY);
     storageMock.getResidentsByProperty.mockResolvedValue([
       { ...WEST_RESIDENT, id: "res-a", isActive: true },
@@ -1534,7 +1534,7 @@ describe("resident finances (regional leads only)", () => {
   });
 
   it("refuses to generate rent without an amount when the house has no prior charge", async () => {
-    actAs(STAFF, { allowedRegions: ["West Central"] });
+    actAs(STAFF, { canViewFinancials: true, canManageFinancials: true, allowedRegions: ["West Central"] });
     storageMock.getProperty.mockResolvedValue(WEST_PROPERTY);
     storageMock.getLatestRentAmountForProperty.mockResolvedValue(undefined);
 
@@ -1547,7 +1547,7 @@ describe("resident finances (regional leads only)", () => {
   });
 
   it("does not let a rent patch change the resident, house, month or region", async () => {
-    actAs(STAFF, { allowedRegions: ["West Central"] });
+    actAs(STAFF, { canViewFinancials: true, canManageFinancials: true, allowedRegions: ["West Central"] });
     storageMock.getRentPayment.mockResolvedValue({ id: "rp-1", region: "West Central" });
     storageMock.updateRentPayment.mockImplementation(async (id: string, patch: Record<string, unknown>) => ({ id, ...patch }));
 
@@ -1570,7 +1570,7 @@ describe("resident finances (regional leads only)", () => {
   });
 
   it("refuses a second deposit for a resident who already has one", async () => {
-    actAs(STAFF, { allowedRegions: ["West Central"] });
+    actAs(STAFF, { canViewFinancials: true, canManageFinancials: true, allowedRegions: ["West Central"] });
     storageMock.getResident.mockResolvedValue(WEST_RESIDENT);
     storageMock.getSecurityDepositByResident.mockResolvedValue({ id: "dep-existing" });
 
@@ -1583,7 +1583,7 @@ describe("resident finances (regional leads only)", () => {
   });
 
   it("takes region and property from the resident on a deposit, ignoring the body", async () => {
-    actAs(STAFF, { allowedRegions: ["West Central"] });
+    actAs(STAFF, { canViewFinancials: true, canManageFinancials: true, allowedRegions: ["West Central"] });
     storageMock.getResident.mockResolvedValue(WEST_RESIDENT);
     storageMock.getSecurityDepositByResident.mockResolvedValue(undefined);
     storageMock.createSecurityDeposit.mockImplementation(async (data: Record<string, unknown>) => ({ id: "dep-1", ...data }));
@@ -1599,7 +1599,7 @@ describe("resident finances (regional leads only)", () => {
   });
 
   it("records who recorded a rent charge", async () => {
-    actAs(STAFF, { allowedRegions: ["West Central"] });
+    actAs(STAFF, { canViewFinancials: true, canManageFinancials: true, allowedRegions: ["West Central"] });
     storageMock.getResident.mockResolvedValue(WEST_RESIDENT);
     storageMock.createRentPayment.mockImplementation(async (data: Record<string, unknown>) => ({ id: "rp-1", ...data }));
 
@@ -1619,7 +1619,7 @@ describe("resident finances (regional leads only)", () => {
   });
 
   it("records who changed a deposit — the withholding case leaves a trail", async () => {
-    actAs(STAFF, { allowedRegions: ["West Central"] });
+    actAs(STAFF, { canViewFinancials: true, canManageFinancials: true, allowedRegions: ["West Central"] });
     storageMock.getSecurityDeposit.mockResolvedValue({ id: "dep-1", region: "West Central", buildingAddress: "1 Main St", status: "held" });
     storageMock.updateSecurityDeposit.mockImplementation(async (id: string, patch: Record<string, unknown>) => ({ id, ...patch }));
 
@@ -1634,6 +1634,86 @@ describe("resident finances (regional leads only)", () => {
         entityId: "dep-1",
         details: expect.objectContaining({ status: "withheld" }),
       }),
+    );
+  });
+});
+
+describe("resident finances require the finance permission", () => {
+  // Finance moved from role-gated (every staff member) to flag-gated, so the
+  // later finance/admin split is a grant rather than a guard rewrite. Staff
+  // rows are backfilled with both flags by the migration; these tests pin the
+  // gate itself: no flag, no finance data, whatever the role.
+  const FIN_RESIDENT = { id: "res-w", propertyId: "prop-west", region: "West Central", buildingAddress: "1 Main St", firstName: "Maria", lastName: "Diaz", isActive: true };
+
+  it("refuses an RA whose row lacks the finance flags, and never reads the data", async () => {
+    actAs(STAFF, { canViewProperties: true, canManageProperties: true, allowedRegions: ["all"] });
+
+    expect((await get("/api/rent-payments")).status).toBe(403);
+    expect(storageMock.getAllRentPayments).not.toHaveBeenCalled();
+
+    expect((await get("/api/security-deposits")).status).toBe(403);
+    expect(storageMock.getAllSecurityDeposits).not.toHaveBeenCalled();
+  });
+
+  it("lets a view-only RA read rent but not record it", async () => {
+    actAs(STAFF, { canViewFinancials: true, allowedRegions: ["West Central"] });
+    storageMock.getAllRentPayments.mockResolvedValue([]);
+    storageMock.getResident.mockResolvedValue(FIN_RESIDENT);
+
+    expect((await get("/api/rent-payments")).status).toBe(200);
+
+    const { status } = await request("POST", "/api/rent-payments", {
+      body: { residentId: FIN_RESIDENT.id, period: "2026-08", amount: 500 },
+    });
+    expect(status).toBe(403);
+    expect(storageMock.createRentPayment).not.toHaveBeenCalled();
+  });
+
+  it("lets an RA with the manage flag record rent", async () => {
+    actAs(STAFF, { canViewFinancials: true, canManageFinancials: true, allowedRegions: ["West Central"] });
+    storageMock.getResident.mockResolvedValue(FIN_RESIDENT);
+    storageMock.createRentPayment.mockImplementation(async (data: Record<string, unknown>) => ({ id: "rp-1", ...data }));
+
+    const { status } = await request("POST", "/api/rent-payments", {
+      body: { residentId: FIN_RESIDENT.id, period: "2026-08", amount: 500 },
+    });
+    expect(status).toBe(200);
+    expect(storageMock.createRentPayment).toHaveBeenCalled();
+  });
+
+  it("lets an admin with no permissions row through — the admin bypass", async () => {
+    actAs(ADMIN);
+    storageMock.getAllRentPayments.mockResolvedValue([]);
+    storageMock.getAllSecurityDeposits.mockResolvedValue([]);
+
+    expect((await get("/api/rent-payments")).status).toBe(200);
+    expect((await get("/api/security-deposits")).status).toBe(200);
+  });
+
+  it("applies the manage gate to deposits too", async () => {
+    actAs(STAFF, { canViewFinancials: true, allowedRegions: ["West Central"] });
+    storageMock.getResident.mockResolvedValue(FIN_RESIDENT);
+    storageMock.getSecurityDepositByResident.mockResolvedValue(undefined);
+
+    const { status } = await request("POST", "/api/security-deposits", {
+      body: { residentId: FIN_RESIDENT.id, amountHeld: 300 },
+    });
+    expect(status).toBe(403);
+    expect(storageMock.createSecurityDeposit).not.toHaveBeenCalled();
+  });
+});
+
+describe("linking a resident account to a property", () => {
+  it("carries propertyId through account creation", async () => {
+    actAs(ADMIN);
+    storageMock.upsertUser.mockImplementation(async (data: Record<string, unknown>) => ({ id: "u-new", ...data }));
+
+    const { status } = await request("POST", "/api/users", {
+      body: { email: "steward@example.com", role: "resident", propertyId: "prop-west" },
+    });
+    expect(status).toBe(200);
+    expect(storageMock.upsertUser).toHaveBeenCalledWith(
+      expect.objectContaining({ email: "steward@example.com", propertyId: "prop-west" }),
     );
   });
 });
@@ -1746,7 +1826,7 @@ describe("tasks & action items (regional leads only)", () => {
   });
 
   it("builds region-scoped action items for an RA", async () => {
-    actAs(STAFF, WEST);
+    actAs(STAFF, { ...WEST, canViewFinancials: true });
     storageMock.getAllMaintenanceSchedules.mockResolvedValue([]);
     storageMock.getAllRentPayments.mockResolvedValue([
       { id: "rp-w", status: "unpaid", period: "2026-07", amount: "700", buildingAddress: "1 Main St", region: "West Central" },
@@ -1760,6 +1840,21 @@ describe("tasks & action items (regional leads only)", () => {
     expect(status).toBe(200);
     // The East-Central rent is filtered out by region.
     expect(body.map((i: { id: string }) => i.id)).toEqual(["rp-w"]);
+  });
+
+  it("hides finance-derived action items from an RA without the finance flags", async () => {
+    actAs(STAFF, WEST);
+    storageMock.getAllMaintenanceSchedules.mockResolvedValue([]);
+    storageMock.getAllRentPayments.mockResolvedValue([
+      { id: "rp-w", status: "unpaid", period: "2026-07", amount: "700", buildingAddress: "1 Main St", region: "West Central" },
+    ]);
+    storageMock.getAllSecurityDeposits.mockResolvedValue([]);
+    storageMock.getAllResidents.mockResolvedValue([]);
+    storageMock.getAllTasks.mockResolvedValue([]);
+    storageMock.getAllProperties.mockResolvedValue([]);
+    const { status, body } = await get("/api/action-items");
+    expect(status).toBe(200);
+    expect(body).toEqual([]);
   });
 
   it("shows an RA a lease renewal in their region but not another region's", async () => {
@@ -1798,7 +1893,7 @@ describe("region summary (leadership rollup)", () => {
   });
 
   it("gives a regional admin only their region, named with its lead", async () => {
-    actAs(STAFF, { allowedRegions: ["West Central"] });
+    actAs(STAFF, { canViewFinancials: true, canManageFinancials: true, allowedRegions: ["West Central"] });
     mockEmptyData();
     storageMock.getAllUsers.mockResolvedValue([STAFF]);
     storageMock.getAllUserPermissions.mockResolvedValue([{ userId: STAFF.id, allowedRegions: ["West Central"] }]);

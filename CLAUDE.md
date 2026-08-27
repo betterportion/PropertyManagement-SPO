@@ -87,8 +87,8 @@ Defined in `shared/schema.ts` using Drizzle, with Zod insert schemas generated b
 | Table | Purpose | Key relationships |
 |---|---|---|
 | `sessions` | Express session store | Managed by `connect-pg-simple`, not by app code |
-| `users` | Accounts. `role` is `admin` / `regional_administrator` / `resident`, plus `isActive` | `id` is the identity provider's subject claim; `email` is unique |
-| `user_permissions` | One row per user, thirteen boolean flags plus `allowedRegions` (text array) | `userId` unique, cascades on user delete |
+| `users` | Accounts. `role` is `admin` / `regional_administrator` / `resident`, plus `isActive`; resident accounts carry a `propertyId` linking them to their house | `id` is the identity provider's subject claim; `email` is unique |
+| `user_permissions` | One row per user, fifteen boolean flags (including the two finance flags) plus `allowedRegions` (text array) | `userId` unique, cascades on user delete |
 | `maintenance_requests` | The core workflow. Priority includes a `wishlist` level; status is pending/in_progress/completed/cancelled | `submittedBy` stores an **email**, see gotchas |
 | `walkthrough_rooms` | Inspection room templates, ordered by `displayOrder` | `propertyId` → `properties` (loose, no FK); `buildingAddress` kept for backward compatibility |
 | `walkthrough_photos` | Photos attached to a room, with condition and free-form notes | `roomId` → `walkthrough_rooms`, cascades |

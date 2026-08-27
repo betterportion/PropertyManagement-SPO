@@ -126,15 +126,17 @@ export function buildActionItems(inputs: ActionItemInputs, now: Date = new Date(
     });
   }
 
-  // Finance — rent still unpaid. "Due" is the end of the billed month.
+  // Finance — rent still owed: never paid, or a payment that bounced. A
+  // "failed" charge is still outstanding money; dropping it here would make
+  // the dashboard look better the moment a check bounces.
   for (const p of inputs.rentPayments) {
-    if (p.status !== "unpaid") continue;
+    if (p.status !== "unpaid" && p.status !== "failed") continue;
     const due = endOfPeriod(p.period);
     items.push({
       id: p.id,
       source: "rent",
       category: "finance",
-      title: `Unpaid rent — ${p.period}`,
+      title: p.status === "failed" ? `Failed rent payment — ${p.period}` : `Unpaid rent — ${p.period}`,
       subtitle: p.buildingAddress,
       amount: p.amount,
       dueDate: iso(due),

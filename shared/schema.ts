@@ -49,6 +49,11 @@ export const users = pgTable("users", {
   lastName: varchar("last_name"),
   profileImageUrl: varchar("profile_image_url"),
   role: varchar("role", { enum: ["admin", "regional_administrator", "resident"] }).notNull().default("resident"),
+  // Which house a resident account belongs to. The two resident logins per
+  // property (steward and household leader) both point at their house; staff
+  // accounts leave it null. Deleting a property unlinks the accounts rather
+  // than deleting them, so the people keep their history.
+  propertyId: varchar("property_id").references(() => properties.id, { onDelete: "set null" }),
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
@@ -70,6 +75,12 @@ export const userPermissions = pgTable("user_permissions", {
   canManageUsers: boolean("can_manage_users").notNull().default(false),
   canViewProperties: boolean("can_view_properties").notNull().default(false),
   canManageProperties: boolean("can_manage_properties").notNull().default(false),
+  // Resident finances (rent charges and security deposits). Historically this
+  // was role-gated to all staff; the flags exist so finance can later be split
+  // out of admin as a grant rather than a guard rewrite. The migration that
+  // added them backfilled both to true for existing staff.
+  canViewFinancials: boolean("can_view_financials").notNull().default(false),
+  canManageFinancials: boolean("can_manage_financials").notNull().default(false),
   allowedRegions: text("allowed_regions").array().default([]),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
@@ -465,7 +476,9 @@ export const rentPayments = pgTable(
     // The month being billed, as "YYYY-MM".
     period: varchar("period").notNull(),
     amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),
-    status: varchar("status", { enum: ["unpaid", "paid", "waived"] }).notNull().default("unpaid"),
+    // "failed" is a payment that bounced — it surfaces the resident in the
+    // outstanding-fees view rather than quietly reverting to "unpaid".
+    status: varchar("status", { enum: ["unpaid", "paid", "waived", "failed"] }).notNull().default("unpaid"),
     paidDate: timestamp("paid_date"),
     // How it was paid, e.g. "check #1234" or a QuickBooks/Ramp reference. Never
     // an account or card number.

@@ -70,6 +70,15 @@ describe("buildRegionSummaries", () => {
     expect(summary.attentionScore).toBe(0); // rent is not health
   });
 
+  it("counts a bounced (failed) payment as unpaid rent", () => {
+    const [summary] = buildRegionSummaries(
+      { ...empty, rentPayments: [rent({ status: "failed", amount: "700" })] },
+      ["Northwest"],
+      NOW,
+    );
+    expect(summary.unpaidRent).toEqual({ count: 1, amount: "700.00" });
+  });
+
   it("names the region's regional admin, falling back to email", () => {
     const [summary] = buildRegionSummaries(
       {

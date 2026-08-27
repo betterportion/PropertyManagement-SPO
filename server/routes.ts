@@ -5,6 +5,7 @@ import { setupAuth, isAuthenticated, getUserId } from "./auth";
 import {
   loadAuthContext,
   requireActiveUser,
+  hasPermission,
   requirePermission,
   requireStaff,
   requireAdmin,
@@ -112,6 +113,8 @@ const permissionsUpdateSchema = z.object({
   canManageUsers: z.boolean().optional(),
   canViewProperties: z.boolean().optional(),
   canManageProperties: z.boolean().optional(),
+  canViewFinancials: z.boolean().optional(),
+  canManageFinancials: z.boolean().optional(),
   allowedRegions: z.array(z.string()).optional(),
 });
 
@@ -1541,16 +1544,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Resident Finances: rent payments and security deposits
   //
-  // Finance data is regional-leads-only (decided with SPO, issue #43): staff
-  // pass, residents are refused outright, and everything is region-scoped. There
-  // is no separate finance permission because the only non-resident roles are
-  // exactly the leads this should reach. propertyId/region/buildingAddress are
-  // always taken from the resident (which already carries them), never the body.
+  // Finance data is staff-only and, within staff, gated by the finance
+  // permission flags. Issue #43 originally decided against a separate finance
+  // permission (staff were exactly the finance audience); the flags supersede
+  // that so finance can later be split out of admin by revoking a grant rather
+  // than rewriting guards. Existing staff were backfilled with both flags, and
+  // admins bypass as everywhere. Residents are refused outright, everything is
+  // region-scoped, and propertyId/region/buildingAddress are always taken from
+  // the resident (which already carries them), never the body.
   app.get('/api/rent-payments', isAuthenticated, async (req: any, res) => {
     try {
       const ctx = await requireActiveUser(req, res);
       if (!ctx) return;
       if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canViewFinancials", "canManageFinancials")) return;
 
       const payments = await storage.getAllRentPayments();
       res.json(filterByRegion(ctx, payments));
@@ -1564,6 +1571,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const ctx = await requireActiveUser(req, res);
       if (!ctx) return;
       if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageFinancials")) return;
 
       const resident = await storage.getResident(req.body.residentId);
       if (!resident) {
@@ -1602,6 +1610,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const ctx = await requireActiveUser(req, res);
       if (!ctx) return;
       if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageFinancials")) return;
 
       const { propertyId, period } = req.body ?? {};
       if (!/^\d{4}-\d{2}$/.test(period ?? "")) {
@@ -1654,6 +1663,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const ctx = await requireActiveUser(req, res);
       if (!ctx) return;
       if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageFinancials")) return;
 
       const existing = await storage.getRentPayment(req.params.id);
       if (!existing) {
@@ -1690,6 +1700,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const ctx = await requireActiveUser(req, res);
       if (!ctx) return;
       if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageFinancials")) return;
 
       const existing = await storage.getRentPayment(req.params.id);
       if (!existing) {
@@ -1718,6 +1729,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const ctx = await requireActiveUser(req, res);
       if (!ctx) return;
       if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canViewFinancials", "canManageFinancials")) return;
 
       const deposits = await storage.getAllSecurityDeposits();
       res.json(filterByRegion(ctx, deposits));
@@ -1731,6 +1743,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const ctx = await requireActiveUser(req, res);
       if (!ctx) return;
       if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageFinancials")) return;
 
       const resident = await storage.getResident(req.body.residentId);
       if (!resident) {
@@ -1771,6 +1784,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const ctx = await requireActiveUser(req, res);
       if (!ctx) return;
       if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageFinancials")) return;
 
       const existing = await storage.getSecurityDeposit(req.params.id);
       if (!existing) {
@@ -1806,6 +1820,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const ctx = await requireActiveUser(req, res);
       if (!ctx) return;
       if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageFinancials")) return;
 
       const existing = await storage.getSecurityDeposit(req.params.id);
       if (!existing) {
@@ -1834,14 +1849,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // "Action items" are the dashboard's derived list -- unpaid rent, deposits to
   // return, maintenance coming due -- plus the open manual tasks the caller can
   // see. Nothing here creates finance data; resolving a derived item happens on
-  // its own (already-audited) endpoint. This surface is regional-leads-only, the
-  // same audience and rationale as the finance routes above: requireStaff, no
-  // separate permission.
+  // its own (already-audited) endpoint. The surface itself is regional-leads-
+  // only (requireStaff); the finance-derived items additionally follow the
+  // finance flags, so revoking someone's finance access also empties their
+  // dashboard of rent and deposit items rather than leaking them here.
   app.get('/api/action-items', isAuthenticated, async (req: any, res) => {
     try {
       const ctx = await requireActiveUser(req, res);
       if (!ctx) return;
       if (!requireStaff(res, ctx)) return;
+      const seesFinance = hasPermission(ctx, "canViewFinancials", "canManageFinancials");
 
       const [schedules, rentPayments, deposits, residents, allTasks, properties] = await Promise.all([
         storage.getAllMaintenanceSchedules(),
@@ -1855,8 +1872,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const items = buildActionItems({
         // Derived items are region-scoped exactly like their source lists.
         schedules: filterByRegion(ctx, schedules),
-        rentPayments: filterByRegion(ctx, rentPayments),
-        deposits: filterByRegion(ctx, deposits),
+        rentPayments: seesFinance ? filterByRegion(ctx, rentPayments) : [],
+        deposits: seesFinance ? filterByRegion(ctx, deposits) : [],
         // Residents are only used to tell which deposits belong to someone who
         // moved out; they need not be filtered (the deposits already are).
         residents,
@@ -1877,6 +1894,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const ctx = await requireActiveUser(req, res);
       if (!ctx) return;
       if (!requireStaff(res, ctx)) return;
+      // Same rule as action items: the rollup is staff-wide, but its rent
+      // figures follow the finance flags.
+      const seesFinance = hasPermission(ctx, "canViewFinancials", "canManageFinancials");
 
       const [requests, schedules, properties, rentPayments, tasks, users, permissions] = await Promise.all([
         storage.getAllMaintenanceRequests(),
@@ -1907,7 +1927,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           requests: filterByRegion(ctx, requests),
           schedules: filterByRegion(ctx, schedules),
           properties: filterByRegion(ctx, properties),
-          rentPayments: filterByRegion(ctx, rentPayments),
+          rentPayments: seesFinance ? filterByRegion(ctx, rentPayments) : [],
           tasks: filterByRegion(ctx, tasks),
           staff,
         },

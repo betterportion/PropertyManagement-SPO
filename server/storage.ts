@@ -88,6 +88,11 @@ function computeDefaultPermissions(userId: string, role: "admin" | "regional_adm
     canManageUsers: role === "admin",
     canViewProperties: role !== "resident",
     canManageProperties: role === "admin" || role === "regional_administrator",
+    // Staff get both finance flags by default: today's finance audience is
+    // exactly the leads, and the flags exist so that stops being true later
+    // by revoking a grant, not by rewriting guards.
+    canViewFinancials: role !== "resident",
+    canManageFinancials: role !== "resident",
     allowedRegions: role === "admin" ? [...REGIONS] : [],
   };
 }
