@@ -24,7 +24,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { insertUserSchema, type User, type UserPermissions } from "@shared/schema";
+import { insertUserSchema, type User, type UserPermissions, type Property } from "@shared/schema";
 import { REGIONS } from "@shared/regions";
 import { z } from "zod";
 import { ActivityLog } from "@/components/ActivityLog";
@@ -76,6 +76,14 @@ export default function Settings() {
     queryKey: ["/api/users", selectedUser?.id, "permissions"],
     enabled: !!selectedUser,
   });
+
+  // For the house picker on resident accounts. Sorted so the dropdown reads
+  // like the Properties page does.
+  const { data: properties = [] } = useQuery<Property[]>({
+    queryKey: ["/api/properties"],
+    enabled: isAdmin,
+  });
+  const sortedProperties = [...properties].sort((a, b) => a.name.localeCompare(b.name));
 
   useEffect(() => {
     if (userPermissionsData) {
@@ -193,6 +201,26 @@ export default function Settings() {
     },
   });
 
+  const updatePropertyMutation = useMutation({
+    mutationFn: async ({ id, propertyId }: { id: string; propertyId: string | null }) => {
+      await apiRequest("PATCH", `/api/users/${id}/property`, { propertyId });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/users"] });
+      toast({
+        title: "Success",
+        description: "The account's house was updated",
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to update the account's house",
+        variant: "destructive",
+      });
+    },
+  });
+
   const createUserMutation = useMutation({
     mutationFn: async (data: z.infer<typeof insertUserSchema>) => {
       return await apiRequest("POST", "/api/users", data);
@@ -223,6 +251,7 @@ export default function Settings() {
       lastName: "",
       role: "resident",
       isActive: true,
+      propertyId: null,
     },
   });
 
@@ -280,7 +309,17 @@ export default function Settings() {
               <DialogTitle>Create New User</DialogTitle>
             </DialogHeader>
             <Form {...form}>
-              <form onSubmit={form.handleSubmit((data) => createUserMutation.mutate(data))} className="space-y-4">
+              <form
+                onSubmit={form.handleSubmit((data) =>
+                  // Only resident logins carry a house; the server refuses a
+                  // staff account with one, so a role change mid-form must not
+                  // leave a stale pick behind.
+                  createUserMutation.mutate(
+                    data.role === "resident" ? data : { ...data, propertyId: null },
+                  ),
+                )}
+                className="space-y-4"
+              >
                 <div className="grid grid-cols-2 gap-4">
                   <FormField
                     control={form.control}
@@ -347,6 +386,39 @@ export default function Settings() {
                   )}
                 />
 
+                {form.watch("role") === "resident" && (
+                  <FormField
+                    control={form.control}
+                    name="propertyId"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>House</FormLabel>
+                        <Select
+                          onValueChange={(value) => field.onChange(value === "__none__" ? null : value)}
+                          value={field.value ?? "__none__"}
+                        >
+                          <FormControl>
+                            <SelectTrigger data-testid="select-property">
+                              <SelectValue />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            <SelectItem value="__none__">No house yet</SelectItem>
+                            {sortedProperties.map((p) => (
+                              <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <p className="text-xs text-muted-foreground">
+                          Which house this login belongs to. It decides whose maintenance
+                          history they can see, and it survives their first sign-in.
+                        </p>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                )}
+
                 <DialogFooter>
                   <Button type="button" variant="secondary" onClick={() => setIsAddDialogOpen(false)}>
                     Cancel
@@ -407,6 +479,36 @@ export default function Settings() {
                   </SelectContent>
                 </Select>
               ),
+            },
+            {
+              key: "house",
+              header: "House",
+              cell: (user) =>
+                user.role === "resident" ? (
+                  <Select
+                    value={user.propertyId ?? "__none__"}
+                    onValueChange={(value) =>
+                      updatePropertyMutation.mutate({
+                        id: user.id,
+                        propertyId: value === "__none__" ? null : value,
+                      })
+                    }
+                    disabled={updatePropertyMutation.isPending}
+                  >
+                    <SelectTrigger className="w-40" data-testid={`select-property-${user.id}`}>
+                      <SelectValue placeholder="No house" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">No house</SelectItem>
+                      {sortedProperties.map((p) => (
+                        <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <span className="text-muted-foreground">—</span>
+                ),
+              hideOnMobile: true,
             },
             {
               key: "status",

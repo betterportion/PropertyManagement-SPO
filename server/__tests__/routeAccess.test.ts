@@ -1716,6 +1716,87 @@ describe("linking a resident account to a property", () => {
       expect.objectContaining({ email: "steward@example.com", propertyId: "prop-west" }),
     );
   });
+
+  it("lets an admin move an existing resident account to a house", async () => {
+    actAs(ADMIN);
+    storageMock.getUser.mockImplementation(async (id: string) =>
+      id === ALICE.id ? ALICE : ADMIN,
+    );
+    storageMock.getProperty.mockResolvedValue({ id: "prop-west", name: "Como House", region: "West Central" });
+    storageMock.updateUserProperty.mockResolvedValue({ ...ALICE, propertyId: "prop-west" });
+
+    const { status } = await request("PATCH", `/api/users/${ALICE.id}/property`, {
+      body: { propertyId: "prop-west" },
+    });
+    expect(status).toBe(200);
+    expect(storageMock.updateUserProperty).toHaveBeenCalledWith(ALICE.id, "prop-west");
+  });
+
+  it("lets an admin clear the link with null", async () => {
+    actAs(ADMIN);
+    storageMock.getUser.mockImplementation(async (id: string) =>
+      id === ALICE.id ? { ...ALICE, propertyId: "prop-west" } : ADMIN,
+    );
+    storageMock.updateUserProperty.mockResolvedValue({ ...ALICE, propertyId: null });
+
+    const { status } = await request("PATCH", `/api/users/${ALICE.id}/property`, {
+      body: { propertyId: null },
+    });
+    expect(status).toBe(200);
+    expect(storageMock.updateUserProperty).toHaveBeenCalledWith(ALICE.id, null);
+  });
+
+  it("refuses a regional administrator, without touching the account", async () => {
+    // Changing an account's house changes what that login can see; only
+    // admins manage accounts.
+    actAs(STAFF, { allowedRegions: ["all"] });
+
+    const { status } = await request("PATCH", `/api/users/${ALICE.id}/property`, {
+      body: { propertyId: "prop-west" },
+    });
+    expect(status).toBe(403);
+    expect(storageMock.updateUserProperty).not.toHaveBeenCalled();
+  });
+
+  it("refuses a resident, without touching the account", async () => {
+    actAs(ALICE);
+
+    const { status } = await request("PATCH", `/api/users/${BOB.id}/property`, {
+      body: { propertyId: "prop-west" },
+    });
+    expect(status).toBe(403);
+    expect(storageMock.updateUserProperty).not.toHaveBeenCalled();
+  });
+
+  it("refuses a link to a property that does not exist", async () => {
+    actAs(ADMIN);
+    storageMock.getUser.mockImplementation(async (id: string) =>
+      id === ALICE.id ? ALICE : ADMIN,
+    );
+    storageMock.getProperty.mockResolvedValue(undefined);
+
+    const { status } = await request("PATCH", `/api/users/${ALICE.id}/property`, {
+      body: { propertyId: "prop-gone" },
+    });
+    expect(status).toBe(404);
+    expect(storageMock.updateUserProperty).not.toHaveBeenCalled();
+  });
+
+  it("refuses to link a staff account to a house", async () => {
+    // Only resident logins carry a house; a staff account with one would be
+    // meaningless data waiting to confuse a future rule.
+    actAs(ADMIN);
+    storageMock.getUser.mockImplementation(async (id: string) =>
+      id === STAFF.id ? STAFF : ADMIN,
+    );
+    storageMock.getProperty.mockResolvedValue({ id: "prop-west", name: "Como House", region: "West Central" });
+
+    const { status } = await request("PATCH", `/api/users/${STAFF.id}/property`, {
+      body: { propertyId: "prop-west" },
+    });
+    expect(status).toBe(400);
+    expect(storageMock.updateUserProperty).not.toHaveBeenCalled();
+  });
 });
 
 describe("the removed JotForm webhook", () => {

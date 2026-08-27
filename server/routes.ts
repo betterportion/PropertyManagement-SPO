@@ -302,6 +302,52 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Which house a resident login belongs to — and therefore which house's
+  // maintenance history it can see. Admin-only, like every account change.
+  app.patch('/api/users/:id/property', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireAdmin(res, ctx)) return;
+
+      const { propertyId } = z.object({ propertyId: z.string().nullable() }).parse(req.body);
+
+      const target = await storage.getUser(req.params.id);
+      if (!target) {
+        return res.status(404).json({ message: "User not found" });
+      }
+      if (target.role !== "resident") {
+        return res.status(400).json({
+          message: "Only resident accounts link to a house. Change the role first.",
+        });
+      }
+
+      let property = null;
+      if (propertyId !== null) {
+        property = await storage.getProperty(propertyId);
+        if (!property) {
+          return res.status(404).json({ message: "Property not found" });
+        }
+      }
+
+      const user = await storage.updateUserProperty(req.params.id, propertyId);
+
+      recordAuditEvent(ctx, {
+        action: AUDIT_ACTIONS.USER_PROPERTY_CHANGED,
+        entityType: "user",
+        entityId: req.params.id,
+        summary: property
+          ? `Linked ${target.email ?? req.params.id} to ${property.name}`
+          : `Unlinked ${target.email ?? req.params.id} from their house`,
+        details: { from: target.propertyId ?? null, to: propertyId },
+      });
+
+      res.json(user);
+    } catch (error) {
+      sendError(res, error, "Failed to update the account's house");
+    }
+  });
+
   app.get('/api/users/:id/permissions', isAuthenticated, async (req: any, res) => {
     try {
       // A user may read only their own permissions. Admins may read anyone's.
