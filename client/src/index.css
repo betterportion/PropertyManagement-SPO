@@ -42,7 +42,9 @@
   --card-border: 220 20% 88%;
 
   --sidebar: 0 0% 100%;
-  --sidebar-foreground: 220 34% 34%;
+  /* Darkened so the sidebar's 70%-opacity nav text/labels still clear AA on the
+     white sidebar (the /70 blend of the old value landed at ~3.9:1). */
+  --sidebar-foreground: 220 34% 24%;
   --sidebar-border: 220 20% 88%;
   --sidebar-primary: 348 85% 61%;
   --sidebar-primary-foreground: 0 0% 100%;
@@ -56,7 +58,9 @@
 
   --primary: 348 85% 61%;
   --primary-foreground: 0 0% 100%;
-  --primary-strong: 348 85% 49%;
+  /* Red used as TEXT/icons on light grounds. Darkened to clear WCAG AA (4.5:1)
+     even on the app's lightest gray surfaces, not just pure white. */
+  --primary-strong: 348 85% 42%;
 
   --secondary: 220 30% 95%;
   --secondary-foreground: 220 34% 34%;
@@ -64,10 +68,12 @@
   --muted: 220 20% 96%;
   --muted-foreground: 220 20% 46%;
 
-  --accent: 355 62% 58%;
+  /* The literal brand red. Darkened to clear AA both as a fill (white text on
+     it) and as text (text-destructive on light grounds). */
+  --accent: 355 62% 45%;
   --accent-foreground: 0 0% 100%;
 
-  --destructive: 355 62% 58%;
+  --destructive: 355 62% 45%;
   --destructive-foreground: 0 0% 100%;
 
   --input: 220 20% 88%;
