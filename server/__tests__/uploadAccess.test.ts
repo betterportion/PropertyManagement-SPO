@@ -14,11 +14,13 @@ vi.mock("../auth", () => ({ getUserId: vi.fn() }));
 
 const findUploadReferences = vi.fn();
 const getAsset = vi.fn();
+const getProperty = vi.fn();
 
 vi.mock("../storage", () => ({
   storage: {
     findUploadReferences: (...args: unknown[]) => findUploadReferences(...args),
     getAsset: (...args: unknown[]) => getAsset(...args),
+    getProperty: (...args: unknown[]) => getProperty(...args),
   },
 }));
 
@@ -69,14 +71,19 @@ const billingReference = (region: string): UploadReference => ({
   record: { id: "billing-1", region } as UploadReference extends { kind: "billingRecord"; record: infer R } ? R : never,
 });
 
-const requestReference = (region: string, submittedBy: string): UploadReference => ({
+const requestReference = (
+  region: string,
+  submittedBy: string,
+  buildingAddress?: string,
+): UploadReference => ({
   kind: "maintenanceRequest",
-  record: { id: "req-1", region, submittedBy } as never,
+  record: { id: "req-1", region, submittedBy, buildingAddress } as never,
 });
 
 beforeEach(() => {
   findUploadReferences.mockReset().mockResolvedValue([]);
   getAsset.mockReset();
+  getProperty.mockReset().mockResolvedValue(undefined);
 });
 
 describe("canReadUpload", () => {
@@ -212,6 +219,34 @@ describe("canReadUpload, through a maintenance request", () => {
       requestReference("Chicago", "someone.else@example.com"),
     ]);
     const ctx = context({ role: "resident" });
+    expect(await canReadUpload(ctx, KEY, undefined)).toBe(false);
+  });
+
+  it("lets the housemate see the photo on their house's request", async () => {
+    // A photo inherits the visibility of the request, and the request is
+    // visible to both resident accounts on the house — so the photo is too.
+    const HOUSE_A = "123 Main St, Saint Paul, MN 55101";
+    findUploadReferences.mockResolvedValue([
+      requestReference("Chicago", "someone.else@example.com", HOUSE_A),
+    ]);
+    getProperty.mockResolvedValue({ id: "prop-a", address: HOUSE_A });
+
+    const ctx = context({ role: "resident" });
+    (ctx.user as { propertyId?: string }).propertyId = "prop-a";
+
+    expect(await canReadUpload(ctx, KEY, undefined)).toBe(true);
+    expect(getProperty).toHaveBeenCalledWith("prop-a");
+  });
+
+  it("does not let a resident of another house see it", async () => {
+    findUploadReferences.mockResolvedValue([
+      requestReference("Chicago", "someone.else@example.com", "123 Main St, Saint Paul, MN 55101"),
+    ]);
+    getProperty.mockResolvedValue({ id: "prop-b", address: "456 Oak Ave, Saint Paul, MN 55104" });
+
+    const ctx = context({ role: "resident" });
+    (ctx.user as { propertyId?: string }).propertyId = "prop-b";
+
     expect(await canReadUpload(ctx, KEY, undefined)).toBe(false);
   });
 });

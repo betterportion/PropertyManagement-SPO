@@ -5,15 +5,22 @@
  * mocked storage and auth, so a refactor that removes or inverts the
  * ownership check will cause these tests to fail.
  *
- * Two endpoints are covered:
- *   GET /api/maintenance-requests/:id          (routes.ts ~line 284)
- *   GET /api/maintenance-requests/:id/contacts (routes.ts ~line 437)
+ * Three endpoints are covered:
+ *   GET /api/maintenance-requests              (list, same rule as detail)
+ *   GET /api/maintenance-requests/:id
+ *   GET /api/maintenance-requests/:id/contacts
  *
  * The ownership check compares request.submittedBy against currentUser.email.
  * "submittedBy" stores the creator's email at request-creation time, NOT a
  * user ID.  A future refactor that changes the stored value to a user ID would
  * silently break the gate — these tests will catch that regression too, because
  * the mocked data uses realistic email values.
+ *
+ * Alongside the email match, a resident account linked to a property (via
+ * users.propertyId) may read every request filed for that house, so the two
+ * resident accounts on a property share one repair history. The house match
+ * is additive: it never replaces the email comparison, and an account with no
+ * property link falls back to email-only.
  */
 
 import {
@@ -38,12 +45,16 @@ const {
   mockGetPermissions,
   mockGetRequest,
   mockGetContacts,
+  mockGetProperty,
+  mockGetAllRequests,
   activeUserId,
 } = vi.hoisted(() => ({
   mockGetUser: vi.fn(),
   mockGetPermissions: vi.fn(),
   mockGetRequest: vi.fn(),
   mockGetContacts: vi.fn(),
+  mockGetProperty: vi.fn(),
+  mockGetAllRequests: vi.fn(),
   /** Mutable box — tests change .value to switch which user is "logged in". */
   activeUserId: { value: "resident-1" },
 }));
@@ -63,8 +74,9 @@ vi.mock("../storage", () => ({
     getUserPermissions: mockGetPermissions,
     getMaintenanceRequest: mockGetRequest,
     getRequestContacts: mockGetContacts,
+    getProperty: mockGetProperty,
     // Stubs for other storage methods routes.ts may reference
-    getAllMaintenanceRequests: vi.fn().mockResolvedValue([]),
+    getAllMaintenanceRequests: mockGetAllRequests,
     createMaintenanceRequest: vi.fn(),
     updateMaintenanceRequest: vi.fn(),
     deleteMaintenanceRequest: vi.fn(),
@@ -134,17 +146,53 @@ afterAll(
 // Fixtures
 // ---------------------------------------------------------------------------
 
+// Two houses. `properties.address` is unique and computed server-side, and a
+// request's buildingAddress is copied from it at creation, so the route-level
+// house match is between two copies of the same canonical string.
+const PROPERTY_A = {
+  id: "prop-a",
+  address: "123 Main St, Saint Paul, MN 55101",
+  region: "West Central",
+};
+const PROPERTY_B = {
+  id: "prop-b",
+  address: "456 Oak Ave, Saint Paul, MN 55104",
+  region: "West Central",
+};
+
+// Alice and Bob are the two resident accounts on property A — steward and
+// household leader. Carol lives at property B. Dave is a resident account
+// nobody has linked to a house yet.
 const ALICE_ID = "user-alice";
 const ALICE_EMAIL = "alice@example.com";
 
 const BOB_ID = "user-bob";
 const BOB_EMAIL = "bob@example.com";
 
+const CAROL_ID = "user-carol";
+const CAROL_EMAIL = "carol@example.com";
+
+const DAVE_ID = "user-dave";
+const DAVE_EMAIL = "dave@example.com";
+
 const STAFF_ID = "user-staff";
 const STAFF_EMAIL = "staff@example.com";
 
 const ADMIN_ID = "user-admin";
 const ADMIN_EMAIL = "admin@example.com";
+
+/** Signs in a resident account, optionally linked to a property. */
+function actAsResident(id: string, email: string, propertyId: string | null) {
+  activeUserId.value = id;
+  mockGetUser.mockResolvedValue({
+    id,
+    email,
+    role: "resident",
+    isActive: true,
+    propertyId,
+  });
+  mockGetPermissions.mockResolvedValue(canViewPerms);
+}
 
 /** Permissions that give a user read access to maintenance requests. */
 const canViewPerms = {
@@ -159,6 +207,7 @@ const alicesRequest = {
   title: "Leaky faucet",
   submittedBy: ALICE_EMAIL, // key field — must be email, not user ID
   region: "West Central",
+  buildingAddress: PROPERTY_A.address,
   status: "open",
 };
 
@@ -169,11 +218,19 @@ beforeEach(() => {
   mockGetPermissions.mockReset();
   mockGetRequest.mockReset();
   mockGetContacts.mockReset();
+  mockGetProperty.mockReset();
+  mockGetAllRequests.mockReset();
 
   // Default: the request exists
   mockGetRequest.mockResolvedValue(alicesRequest);
   // Default: contacts are empty
   mockGetContacts.mockResolvedValue([]);
+  // Default: the list holds only Alice's request
+  mockGetAllRequests.mockResolvedValue([alicesRequest]);
+  // Property lookups resolve by id, like the real storage layer
+  mockGetProperty.mockImplementation(async (id: string) =>
+    id === PROPERTY_A.id ? PROPERTY_A : id === PROPERTY_B.id ? PROPERTY_B : undefined,
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -198,16 +255,18 @@ async function getJson(
 // ---------------------------------------------------------------------------
 
 describe("GET /api/maintenance-requests/:id — ownership gate", () => {
-  it("returns 403 when a resident requests another resident's maintenance request", async () => {
-    // Bob (resident) tries to read Alice's request.
-    activeUserId.value = BOB_ID;
-    mockGetUser.mockResolvedValue({
-      id: BOB_ID,
-      email: BOB_EMAIL,
-      role: "resident",
-      isActive: true,
-    });
-    mockGetPermissions.mockResolvedValue(canViewPerms);
+  it("returns 403 when a resident of another house requests it", async () => {
+    // Carol (property B) tries to read Alice's request (property A).
+    actAsResident(CAROL_ID, CAROL_EMAIL, PROPERTY_B.id);
+
+    const { status } = await getJson("/api/maintenance-requests/req-1");
+    expect(status).toBe(403);
+  });
+
+  it("returns 403 for a resident account with no linked house", async () => {
+    // Dave has an account but nobody has linked it to a property. No link
+    // means no house claim — the gate falls back to email-only ownership.
+    actAsResident(DAVE_ID, DAVE_EMAIL, null);
 
     const { status } = await getJson("/api/maintenance-requests/req-1");
     expect(status).toBe(403);
@@ -215,18 +274,29 @@ describe("GET /api/maintenance-requests/:id — ownership gate", () => {
 
   it("returns 200 when a resident requests their own maintenance request", async () => {
     // Alice (resident) reads her own request.
-    activeUserId.value = ALICE_ID;
-    mockGetUser.mockResolvedValue({
-      id: ALICE_ID,
-      email: ALICE_EMAIL,
-      role: "resident",
-      isActive: true,
-    });
-    mockGetPermissions.mockResolvedValue(canViewPerms);
+    actAsResident(ALICE_ID, ALICE_EMAIL, PROPERTY_A.id);
 
     const { status, body } = await getJson("/api/maintenance-requests/req-1");
     expect(status).toBe(200);
     expect((body as any).id).toBe("req-1");
+  });
+
+  it("returns 200 when the other resident account on the same house requests it", async () => {
+    // Bob shares property A with Alice. The house shares one repair history,
+    // so he can read the request she filed.
+    actAsResident(BOB_ID, BOB_EMAIL, PROPERTY_A.id);
+
+    const { status, body } = await getJson("/api/maintenance-requests/req-1");
+    expect(status).toBe(200);
+    expect((body as any).id).toBe("req-1");
+  });
+
+  it("returns 403 for the housemate when their linked property no longer exists", async () => {
+    // A deleted property leaves propertyId dangling; the lookup fails closed.
+    actAsResident(BOB_ID, BOB_EMAIL, "prop-deleted");
+
+    const { status } = await getJson("/api/maintenance-requests/req-1");
+    expect(status).toBe(403);
   });
 
   it("returns 200 when an admin reads another user's maintenance request", async () => {
@@ -267,15 +337,8 @@ describe("GET /api/maintenance-requests/:id — ownership gate", () => {
 // ---------------------------------------------------------------------------
 
 describe("GET /api/maintenance-requests/:id/contacts — ownership gate", () => {
-  it("returns 403 when a resident requests contacts on another resident's request", async () => {
-    activeUserId.value = BOB_ID;
-    mockGetUser.mockResolvedValue({
-      id: BOB_ID,
-      email: BOB_EMAIL,
-      role: "resident",
-      isActive: true,
-    });
-    mockGetPermissions.mockResolvedValue(canViewPerms);
+  it("returns 403 when a resident of another house requests contacts", async () => {
+    actAsResident(CAROL_ID, CAROL_EMAIL, PROPERTY_B.id);
 
     const { status } = await getJson(
       "/api/maintenance-requests/req-1/contacts"
@@ -283,15 +346,8 @@ describe("GET /api/maintenance-requests/:id/contacts — ownership gate", () => 
     expect(status).toBe(403);
   });
 
-  it("does not fetch contacts from storage when resident is blocked", async () => {
-    activeUserId.value = BOB_ID;
-    mockGetUser.mockResolvedValue({
-      id: BOB_ID,
-      email: BOB_EMAIL,
-      role: "resident",
-      isActive: true,
-    });
-    mockGetPermissions.mockResolvedValue(canViewPerms);
+  it("does not fetch contacts from storage when the resident is blocked", async () => {
+    actAsResident(CAROL_ID, CAROL_EMAIL, PROPERTY_B.id);
 
     await getJson("/api/maintenance-requests/req-1/contacts");
 
@@ -301,14 +357,17 @@ describe("GET /api/maintenance-requests/:id/contacts — ownership gate", () => 
   });
 
   it("returns 200 when a resident requests contacts on their own request", async () => {
-    activeUserId.value = ALICE_ID;
-    mockGetUser.mockResolvedValue({
-      id: ALICE_ID,
-      email: ALICE_EMAIL,
-      role: "resident",
-      isActive: true,
-    });
-    mockGetPermissions.mockResolvedValue(canViewPerms);
+    actAsResident(ALICE_ID, ALICE_EMAIL, PROPERTY_A.id);
+
+    const { status, body } = await getJson(
+      "/api/maintenance-requests/req-1/contacts"
+    );
+    expect(status).toBe(200);
+    expect(Array.isArray(body)).toBe(true);
+  });
+
+  it("returns 200 when the housemate requests contacts on the house's request", async () => {
+    actAsResident(BOB_ID, BOB_EMAIL, PROPERTY_A.id);
 
     const { status, body } = await getJson(
       "/api/maintenance-requests/req-1/contacts"
@@ -352,4 +411,50 @@ describe("GET /api/maintenance-requests/:id/contacts — ownership gate", () => 
     expect(status).toBe(200);
   });
 
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/maintenance-requests — the list applies the same rule
+// ---------------------------------------------------------------------------
+
+describe("GET /api/maintenance-requests — ownership filter", () => {
+  it("includes the house's requests for the housemate who did not file them", async () => {
+    actAsResident(BOB_ID, BOB_EMAIL, PROPERTY_A.id);
+
+    const { status, body } = await getJson("/api/maintenance-requests");
+    expect(status).toBe(200);
+    expect((body as any[]).map((r) => r.id)).toEqual(["req-1"]);
+  });
+
+  it("returns an empty list to a resident of another house", async () => {
+    actAsResident(CAROL_ID, CAROL_EMAIL, PROPERTY_B.id);
+
+    const { status, body } = await getJson("/api/maintenance-requests");
+    expect(status).toBe(200);
+    expect(body).toEqual([]);
+  });
+
+  it("returns an empty list to a resident with no linked house and no submissions", async () => {
+    actAsResident(DAVE_ID, DAVE_EMAIL, null);
+
+    const { status, body } = await getJson("/api/maintenance-requests");
+    expect(status).toBe(200);
+    expect(body).toEqual([]);
+  });
+
+  it("does not look the property up more than once for the whole list", async () => {
+    // The house is resolved once per request, not once per row — a resident
+    // with a long history must not trigger one property query per row.
+    mockGetAllRequests.mockResolvedValue([
+      alicesRequest,
+      { ...alicesRequest, id: "req-2" },
+      { ...alicesRequest, id: "req-3" },
+    ]);
+    actAsResident(BOB_ID, BOB_EMAIL, PROPERTY_A.id);
+
+    const { status, body } = await getJson("/api/maintenance-requests");
+    expect(status).toBe(200);
+    expect((body as any[]).length).toBe(3);
+    expect(mockGetProperty).toHaveBeenCalledTimes(1);
+  });
 });
