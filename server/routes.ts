@@ -555,14 +555,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const ctx = await requireActiveUser(req, res);
       if (!ctx) return;
-      const [photos, requests] = await Promise.all([
+      const [photos, requests, residentHouse] = await Promise.all([
         storage.getAllMaintenanceRequestPhotos(),
         storage.getAllMaintenanceRequests(),
+        residentHouseAddress(ctx),
       ]);
       const byId = new Map(requests.map((r) => [r.id, r]));
       res.json(photos.filter((p) => {
         const request = byId.get(p.requestId);
-        return request && canReadMaintenanceRequest(ctx, request);
+        return request && canReadMaintenanceRequest(ctx, request, residentHouse);
       }));
     } catch (error) {
       sendError(res, error, "Failed to fetch request photos");
@@ -578,7 +579,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Photo not found" });
       }
       const request = await storage.getMaintenanceRequest(photo.requestId);
-      if (!request || !canReadMaintenanceRequest(ctx, request)) {
+      if (!request || !canReadMaintenanceRequest(ctx, request, await residentHouseAddress(ctx))) {
         return res.status(403).json({ message: "Forbidden" });
       }
       // A resident may remove only photos they added; staff may remove any on a

@@ -47,6 +47,9 @@ const {
   mockGetContacts,
   mockGetProperty,
   mockGetAllRequests,
+  mockGetAllRequestPhotos,
+  mockGetRequestPhoto,
+  mockDeleteRequestPhoto,
   activeUserId,
 } = vi.hoisted(() => ({
   mockGetUser: vi.fn(),
@@ -55,6 +58,9 @@ const {
   mockGetContacts: vi.fn(),
   mockGetProperty: vi.fn(),
   mockGetAllRequests: vi.fn(),
+  mockGetAllRequestPhotos: vi.fn(),
+  mockGetRequestPhoto: vi.fn(),
+  mockDeleteRequestPhoto: vi.fn(),
   /** Mutable box — tests change .value to switch which user is "logged in". */
   activeUserId: { value: "resident-1" },
 }));
@@ -75,6 +81,9 @@ vi.mock("../storage", () => ({
     getMaintenanceRequest: mockGetRequest,
     getRequestContacts: mockGetContacts,
     getProperty: mockGetProperty,
+    getAllMaintenanceRequestPhotos: mockGetAllRequestPhotos,
+    getMaintenanceRequestPhoto: mockGetRequestPhoto,
+    deleteMaintenanceRequestPhoto: mockDeleteRequestPhoto,
     // Stubs for other storage methods routes.ts may reference
     getAllMaintenanceRequests: mockGetAllRequests,
     createMaintenanceRequest: vi.fn(),
@@ -220,6 +229,9 @@ beforeEach(() => {
   mockGetContacts.mockReset();
   mockGetProperty.mockReset();
   mockGetAllRequests.mockReset();
+  mockGetAllRequestPhotos.mockReset().mockResolvedValue([]);
+  mockGetRequestPhoto.mockReset();
+  mockDeleteRequestPhoto.mockReset();
 
   // Default: the request exists
   mockGetRequest.mockResolvedValue(alicesRequest);
@@ -440,6 +452,41 @@ describe("GET /api/maintenance-requests — ownership filter", () => {
     const { status, body } = await getJson("/api/maintenance-requests");
     expect(status).toBe(200);
     expect(body).toEqual([]);
+  });
+
+  it("applies the same house rule to the request-photos list", async () => {
+    // The photo list inherits each request's visibility, so the housemate who
+    // did not file the request still sees the photos attached to it — and a
+    // resident of another house sees none.
+    const photo = { id: "photo-1", requestId: "req-1", imageUrl: "/uploads/abc.jpg" };
+    mockGetAllRequestPhotos.mockResolvedValue([photo]);
+
+    actAsResident(BOB_ID, BOB_EMAIL, PROPERTY_A.id);
+    const housemate = await getJson("/api/maintenance-request-photos");
+    expect(housemate.status).toBe(200);
+    expect((housemate.body as any[]).map((p) => p.id)).toEqual(["photo-1"]);
+
+    actAsResident(CAROL_ID, CAROL_EMAIL, PROPERTY_B.id);
+    const stranger = await getJson("/api/maintenance-request-photos");
+    expect(stranger.status).toBe(200);
+    expect(stranger.body).toEqual([]);
+  });
+
+  it("still refuses the housemate deleting a photo they did not upload", async () => {
+    // Visibility widened; deletion did not. A resident may remove only the
+    // photos they added themselves, housemate or not.
+    mockGetRequestPhoto.mockResolvedValue({
+      id: "photo-1",
+      requestId: "req-1",
+      uploadedBy: ALICE_EMAIL,
+    });
+    actAsResident(BOB_ID, BOB_EMAIL, PROPERTY_A.id);
+
+    const res = await fetch(`${baseUrl}/api/maintenance-request-photos/photo-1`, {
+      method: "DELETE",
+    });
+    expect(res.status).toBe(403);
+    expect(mockDeleteRequestPhoto).not.toHaveBeenCalled();
   });
 
   it("does not look the property up more than once for the whole list", async () => {
