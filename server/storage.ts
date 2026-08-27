@@ -321,13 +321,16 @@ export class DatabaseStorage implements IStorage {
         // Remove the old record (cascades to userPermissions)
         await db.delete(users).where(eq(users.id, existingByEmail.id));
 
-        // Re-insert under the OIDC sub, preserving role and active status
+        // Re-insert under the OIDC sub, preserving role, active status and the
+        // property link (a pre-created resident account already points at its
+        // house; the sign-in claims never carry propertyId).
         const [newUser] = await db
           .insert(users)
           .values({
             ...userData,
             role: existingByEmail.role,
             isActive: existingByEmail.isActive,
+            propertyId: userData.propertyId ?? existingByEmail.propertyId,
           })
           .returning();
 

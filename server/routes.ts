@@ -1862,8 +1862,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const [schedules, rentPayments, deposits, residents, allTasks, properties] = await Promise.all([
         storage.getAllMaintenanceSchedules(),
-        storage.getAllRentPayments(),
-        storage.getAllSecurityDeposits(),
+        seesFinance ? storage.getAllRentPayments() : [],
+        seesFinance ? storage.getAllSecurityDeposits() : [],
         storage.getAllResidents(),
         storage.getAllTasks(),
         storage.getAllProperties(),
@@ -1872,8 +1872,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const items = buildActionItems({
         // Derived items are region-scoped exactly like their source lists.
         schedules: filterByRegion(ctx, schedules),
-        rentPayments: seesFinance ? filterByRegion(ctx, rentPayments) : [],
-        deposits: seesFinance ? filterByRegion(ctx, deposits) : [],
+        rentPayments: filterByRegion(ctx, rentPayments),
+        deposits: filterByRegion(ctx, deposits),
         // Residents are only used to tell which deposits belong to someone who
         // moved out; they need not be filtered (the deposits already are).
         residents,
@@ -1902,7 +1902,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         storage.getAllMaintenanceRequests(),
         storage.getAllMaintenanceSchedules(),
         storage.getAllProperties(),
-        storage.getAllRentPayments(),
+        seesFinance ? storage.getAllRentPayments() : [],
         storage.getAllTasks(),
         storage.getAllUsers(),
         storage.getAllUserPermissions(),
@@ -1927,7 +1927,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           requests: filterByRegion(ctx, requests),
           schedules: filterByRegion(ctx, schedules),
           properties: filterByRegion(ctx, properties),
-          rentPayments: seesFinance ? filterByRegion(ctx, rentPayments) : [],
+          rentPayments: filterByRegion(ctx, rentPayments),
           tasks: filterByRegion(ctx, tasks),
           staff,
         },
