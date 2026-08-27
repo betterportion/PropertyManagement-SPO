@@ -14,7 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { Plus, MoreVertical, LogOut, Users } from "lucide-react";
+import { Plus, MoreVertical, LogOut, Users, Download } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { type Resident, type Property } from "@shared/schema";
@@ -125,6 +125,33 @@ export default function Residents() {
     ? null
     : properties.find((p) => p.address === selectedBuilding)?.name ?? null;
 
+  // Export the former residents currently in view (respects the region/house
+  // filters) as a CSV the user can open in a spreadsheet.
+  const formerResidents = visible.filter((r) => !r.isActive);
+  const csvCell = (value: string | null | undefined) => {
+    const s = String(value ?? "");
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const exportFormerResidents = () => {
+    const headers = ["First name", "Last name", "Email", "House", "Region", "Moved in", "Moved out"];
+    const rows = formerResidents.map((r) => [
+      r.firstName,
+      r.lastName,
+      r.email,
+      propertyName(r.propertyId),
+      r.region,
+      r.moveInDate ? formatDate(r.moveInDate) : "",
+      r.moveOutDate ? formatDate(r.moveOutDate) : "",
+    ]);
+    const csv = [headers, ...rows].map((row) => row.map(csvCell).join(",")).join("\n");
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "former-residents.csv";
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
   const renderTab = (active: boolean) => {
     const items = visible.filter((r) => r.isActive === active);
     if (items.length === 0) {
@@ -219,7 +246,16 @@ export default function Residents() {
               />
               <BuildingSelector selectedBuilding={selectedBuilding} onBuildingChange={setSelectedBuilding} buildings={buildings} />
             </div>
-            {canManage && (
+            <div className="flex items-center gap-2">
+              <Button
+                variant="secondary"
+                onClick={exportFormerResidents}
+                disabled={formerResidents.length === 0}
+                data-testid="button-export-former"
+              >
+                <Download className="mr-2 h-4 w-4" /> Export former
+              </Button>
+              {canManage && (
               <Dialog open={isAddOpen} onOpenChange={(o) => { setIsAddOpen(o); if (!o) addForm.reset(); }}>
                 <DialogTrigger asChild>
                   <Button data-testid="button-add-resident"><Plus className="mr-2 h-4 w-4" /> Add resident</Button>
@@ -283,7 +319,8 @@ export default function Residents() {
                   </Form>
                 </DialogContent>
               </Dialog>
-            )}
+              )}
+            </div>
           </div>
 
           {isLoading ? (
