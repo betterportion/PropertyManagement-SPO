@@ -61,6 +61,15 @@ describe("buildActionItems", () => {
     expect(items[0].amount).toBe("700");
   });
 
+  it("keeps a bounced (failed) payment on the list — the money is still owed", () => {
+    const items = buildActionItems({
+      ...empty,
+      rentPayments: [rent({ id: "f", status: "failed", period: "2026-07" })],
+    }, NOW);
+    expect(items.map((i) => i.id)).toEqual(["f"]);
+    expect(items[0].title).toContain("Failed rent payment");
+  });
+
   it("surfaces a held deposit only when its resident has moved out", () => {
     const moved = buildActionItems({ ...empty, deposits: [deposit({})], residents: [resident({ isActive: false })] }, NOW);
     expect(moved).toHaveLength(1);

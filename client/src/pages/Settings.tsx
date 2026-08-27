@@ -47,6 +47,8 @@ const FEATURE_PERMISSIONS = [
   { key: "canManageBilling", label: "Manage Invoices", section: "Maint Contacts & Invoices" },
   { key: "canViewContacts", label: "View Contacts", section: "Maint Contacts & Invoices" },
   { key: "canManageContacts", label: "Manage Contacts", section: "Maint Contacts & Invoices" },
+  { key: "canViewFinancials", label: "View Resident Finances", section: "Resident Finances" },
+  { key: "canManageFinancials", label: "Manage Resident Finances", section: "Resident Finances" },
   { key: "canManageUsers", label: "Manage Users", section: "Administration" },
 ] as const;
 

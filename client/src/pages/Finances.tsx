@@ -50,6 +50,7 @@ const RENT_STATUS: Record<RentPayment["status"], { label: string; variant: "outl
   paid: { label: "Paid", variant: "outline" },
   unpaid: { label: "Unpaid", variant: "destructive" },
   waived: { label: "Waived", variant: "secondary" },
+  failed: { label: "Payment failed", variant: "destructive" },
 };
 
 const DEPOSIT_STATUS: Record<SecurityDeposit["status"], { label: string; variant: "outline" | "secondary" | "destructive" }> = {
@@ -61,10 +62,11 @@ const DEPOSIT_STATUS: Record<SecurityDeposit["status"], { label: string; variant
 
 export default function Finances() {
   const { user } = useAuth();
-  const typedUser = user as { id?: string; email?: string; role?: string } | null;
+  const typedUser = user as { id?: string; email?: string; role?: string; permissions?: { canManageFinancials?: boolean } } | null;
   const { toast } = useToast();
 
-  const canManage = typedUser?.role === "admin" || typedUser?.role === "regional_administrator";
+  // Admins bypass the flag, exactly as the server does.
+  const canManage = typedUser?.role === "admin" || typedUser?.permissions?.canManageFinancials === true;
 
   const [selectedRegion, setSelectedRegion] = useState("all");
   const [selectedBuilding, setSelectedBuilding] = useState("all");
@@ -212,6 +214,11 @@ export default function Finances() {
                                 {p.status !== "waived" && (
                                   <DropdownMenuItem onClick={() => setRentStatusMutation.mutate({ id: p.id, status: "waived" })}>
                                     Mark waived
+                                  </DropdownMenuItem>
+                                )}
+                                {p.status !== "failed" && (
+                                  <DropdownMenuItem onClick={() => setRentStatusMutation.mutate({ id: p.id, status: "failed" })}>
+                                    Mark payment failed
                                   </DropdownMenuItem>
                                 )}
                                 <DropdownMenuItem onClick={() => setDeletingRent(p.id)} className="text-destructive">

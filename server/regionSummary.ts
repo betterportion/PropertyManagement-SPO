@@ -97,7 +97,10 @@ export function buildRegionSummaries(
       return !!due && due <= leaseHorizon;
     }).length;
 
-    const unpaid = inputs.rentPayments.filter((p) => inRegion(p.region, region) && p.status === "unpaid");
+    // A "failed" (bounced) payment is still owed, so it counts as unpaid here.
+    const unpaid = inputs.rentPayments.filter(
+      (p) => inRegion(p.region, region) && (p.status === "unpaid" || p.status === "failed"),
+    );
     const unpaidAmount = unpaid.reduce((sum, p) => sum + Number(p.amount ?? 0), 0);
 
     return {
