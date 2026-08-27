@@ -19,4 +19,15 @@ test.describe("residents roster", () => {
     await expect(page.locator('[data-testid^="card-resident-"]').first()).toBeVisible();
     await expect(page.locator('[data-testid^="headcount-"]').first()).toBeVisible();
   });
+
+  test("exports the former residents as a CSV", async ({ page }) => {
+    await page.goto("/residents");
+    await expect(page.getByRole("heading", { name: "Residents" })).toBeVisible();
+    // The seed leaves several former residents, so the export button is enabled.
+    const [download] = await Promise.all([
+      page.waitForEvent("download"),
+      page.getByTestId("button-export-former").click(),
+    ]);
+    expect(download.suggestedFilename()).toBe("former-residents.csv");
+  });
 });

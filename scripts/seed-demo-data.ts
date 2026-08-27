@@ -60,15 +60,30 @@ async function seed(): Promise<void> {
   }
 
   // ── Properties ────────────────────────────────────────────────────────────
-  // Region + chapter pairs come from the official SPO Regions map (see
-  // shared/regions.ts). Each chapter belongs to its property's region.
+  // One house per official SPO chapter (see shared/regions.ts). The first six
+  // are named below and keep the order the rest of the seed expects; the other
+  // twelve fill out every remaining chapter so the app has a house everywhere.
   const propertyRows = [
+    // -- the six the seed refers to by name (order matters) --
     { name: "Cleveland House", streetAddress: "1472 Cleveland Ave N", city: "St Paul", state: "MN", zipCode: "55108", region: "Northwest", chapter: "University of St. Thomas", propertyManager: "Sarah Jenkins", bedrooms: 5, bathrooms: "2.0", squareFootage: 2400 },
     { name: "Como Men's House", streetAddress: "981 Como Ave", city: "St Paul", state: "MN", zipCode: "55103", region: "Northwest", chapter: "University of Minnesota", propertyManager: "Sarah Jenkins", bedrooms: 6, bathrooms: "2.5", squareFootage: 2800 },
     { name: "Dinkytown Women's House", streetAddress: "615 8th Ave SE", city: "Minneapolis", state: "MN", zipCode: "55414", region: "Northwest", chapter: "Twin Cities Young Adults", propertyManager: "Mark Otto", bedrooms: 4, bathrooms: "2.0", squareFootage: 1900 },
     { name: "Buckeye House", streetAddress: "210 University Blvd", city: "Columbus", state: "OH", zipCode: "43210", region: "East Central", chapter: "Ohio State University", propertyManager: "Angela Ruiz", bedrooms: 7, bathrooms: "3.0", squareFootage: 3200 },
     { name: "Aggieland House", streetAddress: "504 College Main St", city: "College Station", state: "TX", zipCode: "77840", region: "Southwest", chapter: "Bryan College Station Young Adults", propertyManager: "Mark Otto", bedrooms: 5, bathrooms: "2.0", squareFootage: 2200 },
     { name: "Jayhawk House", streetAddress: "1301 Massachusetts St", city: "Lawrence", state: "KS", zipCode: "66044", region: "West Central", chapter: "University of Kansas", propertyManager: null, bedrooms: 6, bathrooms: "2.5", squareFootage: 2600 },
+    // -- one house for every remaining chapter --
+    { name: "Bearcat House", streetAddress: "2615 Clifton Ave", city: "Cincinnati", state: "OH", zipCode: "45220", region: "East Central", chapter: "University of Cincinnati", propertyManager: "Angela Ruiz", bedrooms: 5, bathrooms: "2.0", squareFootage: 2300 },
+    { name: "Short North House", streetAddress: "1088 N High St", city: "Columbus", state: "OH", zipCode: "43201", region: "East Central", chapter: "Columbus Young Adults", propertyManager: null, bedrooms: 4, bathrooms: "1.5", squareFootage: 1800 },
+    { name: "Beacon House", streetAddress: "141 Commonwealth Ave", city: "Boston", state: "MA", zipCode: "02116", region: "Northeast", chapter: "Boston Area Colleges", propertyManager: "Grace Bennett", bedrooms: 6, bathrooms: "2.5", squareFootage: 2700 },
+    { name: "Scarlet House", streetAddress: "26 Mine St", city: "New Brunswick", state: "NJ", zipCode: "08901", region: "Northeast", chapter: "Rutgers University", propertyManager: "Grace Bennett", bedrooms: 5, bathrooms: "2.0", squareFootage: 2400 },
+    { name: "Pirate House", streetAddress: "400 South Orange Ave", city: "South Orange", state: "NJ", zipCode: "07079", region: "Northeast", chapter: "Seton Hall University", propertyManager: null, bedrooms: 4, bathrooms: "2.0", squareFootage: 2000 },
+    { name: "Raven House", streetAddress: "1020 N 2nd St", city: "Atchison", state: "KS", zipCode: "66002", region: "West Central", chapter: "Benedictine College", propertyManager: null, bedrooms: 6, bathrooms: "2.5", squareFootage: 2600 },
+    { name: "Crossroads House", streetAddress: "1815 Wyandotte St", city: "Kansas City", state: "MO", zipCode: "64108", region: "West Central", chapter: "Kansas City Young Adults", propertyManager: null, bedrooms: 4, bathrooms: "2.0", squareFootage: 1900 },
+    { name: "Sun Devil House", streetAddress: "720 S Myrtle Ave", city: "Tempe", state: "AZ", zipCode: "85281", region: "Southwest", chapter: "Arizona State University", propertyManager: "Mark Otto", bedrooms: 6, bathrooms: "3.0", squareFootage: 2900 },
+    { name: "Bobcat House", streetAddress: "217 N LBJ Dr", city: "San Marcos", state: "TX", zipCode: "78666", region: "Southwest", chapter: "Texas State University", propertyManager: null, bedrooms: 5, bathrooms: "2.0", squareFootage: 2200 },
+    { name: "Celt House", streetAddress: "3800 Montrose Blvd", city: "Houston", state: "TX", zipCode: "77006", region: "Southwest", chapter: "University of St. Thomas - Houston", propertyManager: null, bedrooms: 5, bathrooms: "2.5", squareFootage: 2500 },
+    { name: "Knight House", streetAddress: "4000 Central Florida Blvd", city: "Orlando", state: "FL", zipCode: "32816", region: "Southeast", chapter: "University of Central Florida", propertyManager: "Diego Ramos", bedrooms: 6, bathrooms: "2.5", squareFootage: 2700 },
+    { name: "Bull House", streetAddress: "4202 E Fowler Ave", city: "Tampa", state: "FL", zipCode: "33620", region: "Southeast", chapter: "University of South Florida", propertyManager: "Diego Ramos", bedrooms: 5, bathrooms: "2.0", squareFootage: 2300 },
   ];
 
   const properties = [];
@@ -330,6 +345,11 @@ async function seed(): Promise<void> {
     { property: properties[2], firstName: "Grace", lastName: "Sullivan", email: "grace.sullivan@spo.org", movedInDaysAgo: 60 },
     { property: properties[0], firstName: "Thomas", lastName: "Reilly", email: "thomas.reilly@spo.org", movedInDaysAgo: 700, movedOutDaysAgo: 40 },
     { property: properties[1], firstName: "Anna", lastName: "Kowalski", email: "anna.kowalski@spo.org", movedInDaysAgo: 500, movedOutDaysAgo: 18 },
+    // A few more houses/regions so Current and Former both span regions.
+    { property: properties[3], firstName: "Marcus", lastName: "Bell", email: "marcus.bell@spo.org", movedInDaysAgo: 280 },
+    { property: properties[3], firstName: "Elena", lastName: "Ross", email: "elena.ross@spo.org", movedInDaysAgo: 600, movedOutDaysAgo: 65 },
+    { property: properties[8], firstName: "Liam", lastName: "Doyle", email: "liam.doyle@spo.org", movedInDaysAgo: 200 },
+    { property: properties[8], firstName: "Nora", lastName: "Byrne", email: "nora.byrne@spo.org", movedInDaysAgo: 520, movedOutDaysAgo: 25 },
   ];
   const residents = [];
   for (const row of residentRows) {
@@ -360,6 +380,8 @@ async function seed(): Promise<void> {
     [properties[0].id, 550],
     [properties[1].id, 600],
     [properties[2].id, 525],
+    [properties[3].id, 600],
+    [properties[8].id, 650],
   ]);
   let rentCount = 0;
   for (const [i, resident] of residents.entries()) {
@@ -406,9 +428,14 @@ async function seed(): Promise<void> {
 
   // ── Regional admins ───────────────────────────────────────────────────────
   // So the leadership dashboard's region overview shows a named lead per region.
+  // One lead per region (West Central is left unstaffed on purpose, so the
+  // leadership dashboard shows the "No regional admin assigned" state too).
   const regionalLeads = [
     { id: "seed-ra-nw", email: "sarah.jenkins@spo.org", firstName: "Sarah", lastName: "Jenkins", region: "Northwest" },
     { id: "seed-ra-ec", email: "angela.ruiz@spo.org", firstName: "Angela", lastName: "Ruiz", region: "East Central" },
+    { id: "seed-ra-ne", email: "grace.bennett@spo.org", firstName: "Grace", lastName: "Bennett", region: "Northeast" },
+    { id: "seed-ra-sw", email: "mark.otto@spo.org", firstName: "Mark", lastName: "Otto", region: "Southwest" },
+    { id: "seed-ra-se", email: "diego.ramos@spo.org", firstName: "Diego", lastName: "Ramos", region: "Southeast" },
   ];
   for (const lead of regionalLeads) {
     const user = await storage.upsertUser({ id: lead.id, email: lead.email, firstName: lead.firstName, lastName: lead.lastName });
