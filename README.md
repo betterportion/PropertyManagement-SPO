@@ -313,4 +313,3 @@ Two things to know about running more than one instance:
 | [`design_guidelines.md`](design_guidelines.md) | Typography, spacing, layout and component design rules |
 | [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) | The current backlog: what has shipped, what is blocked and on whom, and what is deliberately left for later |
 | [`docs/spo-design-system.md`](docs/spo-design-system.md) | The shared SPO design system — the authority behind `design_guidelines.md` |
-| [`docs/ONBOARDING_AUDIT.md`](docs/ONBOARDING_AUDIT.md) | **Historical.** A read-only audit of the code as it stood on 2026-08-23, kept as a record of what was found. Much of it has since been fixed or removed — read `CLAUDE.md` for how things are now |
