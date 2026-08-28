@@ -105,6 +105,7 @@ export interface IStorage {
   updateUserRole(id: string, role: "admin" | "regional_administrator" | "resident"): Promise<User>;
   updateUserActiveStatus(id: string, isActive: boolean): Promise<User>;
   updateUserProperty(id: string, propertyId: string | null): Promise<User>;
+  getActiveResidentAccountByEmail(email: string): Promise<User | undefined>;
   getUserPermissions(userId: string): Promise<UserPermissions | undefined>;
   getAllUserPermissions(): Promise<UserPermissions[]>;
   upsertUserPermissions(permissions: InsertUserPermissions): Promise<UserPermissions>;
@@ -370,6 +371,19 @@ export class DatabaseStorage implements IStorage {
 
   async getAllUsers(): Promise<User[]> {
     return await db.select().from(users);
+  }
+
+  async getActiveResidentAccountByEmail(email: string): Promise<User | undefined> {
+    // Case-insensitive like the roster lookup: the roster email is typed by
+    // staff, the login email comes from the identity provider, and the two
+    // can disagree on case. Restricted to active resident-role accounts
+    // because that is the only kind of login a roster row can speak for.
+    const [user] = await db
+      .select()
+      .from(users)
+      .where(and(ilike(users.email, email), eq(users.role, "resident"), eq(users.isActive, true)))
+      .limit(1);
+    return user;
   }
 
   async updateUserProperty(id: string, propertyId: string | null): Promise<User> {

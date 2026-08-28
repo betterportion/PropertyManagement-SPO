@@ -17,11 +17,13 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Plus, MoreVertical, LogOut, Users, Download } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { type Resident, type Property } from "@shared/schema";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
+import { type Resident, type Property, type RentPayment, type SecurityDeposit } from "@shared/schema";
 import { z } from "zod";
 import { Section, Container, PageHeader, PageStack } from "@/components/layout/page";
 import { LoadingState, EmptyState } from "@/components/states";
-import { formatDate } from "@/lib/format";
+import { formatDate, formatCurrency } from "@/lib/format";
 
 const residentFormSchema = z.object({
   propertyId: z.string().min(1, "Choose a house"),
@@ -50,7 +52,11 @@ export default function Residents() {
   });
   const { data: properties = [] } = useQuery<Property[]>({ queryKey: ["/api/properties"] });
 
-  const { data: permissionsData } = useQuery<{ canManageProperties?: boolean } | null>({
+  const { data: permissionsData } = useQuery<{
+    canManageProperties?: boolean;
+    canViewFinancials?: boolean;
+    canManageFinancials?: boolean;
+  } | null>({
     queryKey: ["/api/users", typedUser?.id, "/permissions"],
     queryFn: async () => {
       if (!typedUser?.id) return null;
@@ -98,17 +104,65 @@ export default function Residents() {
     onError: () => toast({ title: "Error", description: "Could not add the resident", variant: "destructive" }),
   });
 
+  // Move-out is a considered action, not a one-click one: the dialog states
+  // who and which house, lets the date be corrected, shows what is still
+  // outstanding, and offers to switch off a matching portal login.
+  const [movingOut, setMovingOut] = useState<Resident | null>(null);
+  const [moveOutDate, setMoveOutDate] = useState("");
+  const [deactivateAccount, setDeactivateAccount] = useState(true);
+
+  const seesFinance =
+    typedUser?.role === "admin" ||
+    permissionsData?.canViewFinancials === true ||
+    permissionsData?.canManageFinancials === true;
+
+  const { data: accountStatus } = useQuery<{ hasActiveAccount: boolean }>({
+    queryKey: ["/api/residents", movingOut?.id ?? "", "account-status"],
+    enabled: !!movingOut,
+  });
+  const { data: rentPayments = [] } = useQuery<RentPayment[]>({
+    queryKey: ["/api/rent-payments"],
+    enabled: !!movingOut && seesFinance,
+  });
+  const { data: deposits = [] } = useQuery<SecurityDeposit[]>({
+    queryKey: ["/api/security-deposits"],
+    enabled: !!movingOut && seesFinance,
+  });
+
+  const outstandingRent = movingOut
+    ? rentPayments.filter(
+        (p) => p.residentId === movingOut.id && (p.status === "unpaid" || p.status === "failed"),
+      )
+    : [];
+  const heldDeposit = movingOut
+    ? deposits.find((d) => d.residentId === movingOut.id && d.status === "held")
+    : undefined;
+
+  const openMoveOut = (resident: Resident) => {
+    setMoveOutDate(new Date().toISOString().slice(0, 10));
+    setDeactivateAccount(true);
+    setMovingOut(resident);
+  };
+
   const moveOutMutation = useMutation({
-    mutationFn: async (id: string) =>
-      apiRequest("PATCH", `/api/residents/${id}`, {
-        isActive: false,
-        moveOutDate: new Date().toISOString().slice(0, 10),
-      }),
-    onSuccess: () => {
-      invalidate();
-      toast({ title: "Marked moved out", description: "They now show under Former residents." });
+    mutationFn: async ({ id }: { id: string }) => {
+      const response = await apiRequest("POST", `/api/residents/${id}/move-out`, {
+        moveOutDate,
+        deactivateAccount: deactivateAccount && accountStatus?.hasActiveAccount === true,
+      });
+      return response.json() as Promise<{ accountDeactivated: boolean }>;
     },
-    onError: () => toast({ title: "Error", description: "Could not update the resident", variant: "destructive" }),
+    onSuccess: ({ accountDeactivated }) => {
+      invalidate();
+      setMovingOut(null);
+      toast({
+        title: "Marked moved out",
+        description: accountDeactivated
+          ? "They now show under Former residents, and their portal login was switched off."
+          : "They now show under Former residents.",
+      });
+    },
+    onError: () => toast({ title: "Error", description: "Could not move the resident out", variant: "destructive" }),
   });
 
   const deleteMutation = useMutation({
@@ -218,7 +272,7 @@ export default function Residents() {
                           <Button
                             size="sm"
                             variant="secondary"
-                            onClick={() => moveOutMutation.mutate(r.id)}
+                            onClick={() => openMoveOut(r)}
                             disabled={moveOutMutation.isPending}
                             data-testid={`button-moveout-${r.id}`}
                           >
@@ -377,6 +431,86 @@ export default function Residents() {
           )}
         </PageStack>
       </Container>
+
+      <Dialog open={!!movingOut} onOpenChange={(o) => { if (!o) setMovingOut(null); }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>
+              Move out {movingOut?.firstName} {movingOut?.lastName}?
+            </DialogTitle>
+            <DialogDescription>
+              From {movingOut ? propertyName(movingOut.propertyId) : ""}. Their maintenance
+              history stays on record, and they move to the Former residents list. Nothing is
+              deleted.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div>
+              <Label htmlFor="move-out-date">Move-out date</Label>
+              <Input
+                id="move-out-date"
+                type="date"
+                value={moveOutDate}
+                onChange={(e) => setMoveOutDate(e.target.value)}
+                className="mt-1"
+                data-testid="input-moveout-date"
+              />
+            </div>
+
+            {seesFinance && (outstandingRent.length > 0 || heldDeposit) && (
+              <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm dark:border-amber-700 dark:bg-amber-950" data-testid="text-moveout-outstanding">
+                <p className="font-medium">Still outstanding</p>
+                {outstandingRent.length > 0 && (
+                  <p>
+                    {outstandingRent.length} unpaid rent charge{outstandingRent.length === 1 ? "" : "s"} totaling{" "}
+                    {formatCurrency(outstandingRent.reduce((sum, p) => sum + Number(p.amount), 0))}. These stay
+                    on record after move-out.
+                  </p>
+                )}
+                {heldDeposit && (
+                  <p>
+                    A security deposit of {formatCurrency(heldDeposit.amountHeld)} is still held. Settle it
+                    from the Finances page.
+                  </p>
+                )}
+              </div>
+            )}
+
+            {accountStatus?.hasActiveAccount && (
+              <div className="flex items-start gap-2">
+                <Checkbox
+                  id="deactivate-account"
+                  checked={deactivateAccount}
+                  onCheckedChange={(checked) => setDeactivateAccount(checked === true)}
+                  data-testid="checkbox-deactivate-account"
+                />
+                <div className="grid gap-1">
+                  <Label htmlFor="deactivate-account">Also switch off their portal login</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Their login can see the whole house's maintenance requests. Leave this checked
+                    unless they are staying involved; an admin can reactivate it from Settings.
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button type="button" variant="secondary" onClick={() => setMovingOut(null)}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={() => movingOut && moveOutMutation.mutate({ id: movingOut.id })}
+              disabled={moveOutMutation.isPending || !moveOutDate}
+              data-testid="button-confirm-moveout"
+            >
+              {moveOutMutation.isPending ? "Saving..." : "Mark moved out"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <AlertDialog open={!!deletingId} onOpenChange={() => setDeletingId(null)}>
         <AlertDialogContent>
