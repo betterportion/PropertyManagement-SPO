@@ -144,6 +144,62 @@ function checkAuth(problems: string[]): void {
   }
 }
 
+/**
+ * Outbound email configuration, read at call time so the boot check and the
+ * email module always agree on the same values.
+ *
+ * Email is deliberately optional: the Resend domain setup (#49) is an
+ * external task, and the portal must keep running while it is pending. Both
+ * variables unset means "email is off" and every send reports not-configured.
+ * Exactly one set is a mistake worth stopping the boot for — the operator
+ * thought they were turning email on.
+ */
+export function readEmailConfigFromEnv():
+  | { configured: true; apiKey: string; from: string; replyTo?: string; problem?: undefined }
+  | { configured: false; problem?: string } {
+  const apiKey = process.env.RESEND_API_KEY;
+  const from = process.env.EMAIL_FROM;
+  const replyTo = process.env.EMAIL_REPLY_TO;
+
+  if (!apiKey && !from) {
+    return { configured: false };
+  }
+  if (!from) {
+    return {
+      configured: false,
+      problem:
+        "RESEND_API_KEY is set but EMAIL_FROM is not. Set EMAIL_FROM to the sending\n" +
+        '    identity, for example "SPO Housing <housing@spo.org>", or unset both to\n' +
+        "    leave email off.",
+    };
+  }
+  if (!apiKey) {
+    return {
+      configured: false,
+      problem:
+        "EMAIL_FROM is set but RESEND_API_KEY is not. Set the API key from the Resend\n" +
+        "    dashboard (it looks like re_...), or unset both to leave email off.",
+    };
+  }
+  // "Name <addr@domain>" and a bare address are both fine; a value with no
+  // address at all would make Resend reject every send hours from now.
+  if (!from.includes("@")) {
+    return {
+      configured: false,
+      problem: `EMAIL_FROM does not contain an email address: "${from}"`,
+    };
+  }
+
+  return replyTo
+    ? { configured: true, apiKey, from, replyTo }
+    : { configured: true, apiKey, from };
+}
+
+function checkEmail(problems: string[]): void {
+  const { problem } = readEmailConfigFromEnv();
+  if (problem) problems.push(problem);
+}
+
 function checkStorage(problems: string[]): void {
   let driver: string;
   try {
@@ -193,6 +249,7 @@ export function validateConfiguration(): void {
   checkSessionSecret(problems);
   checkAuth(problems);
   checkStorage(problems);
+  checkEmail(problems);
 
   if (problems.length === 0) return;
 

@@ -103,10 +103,49 @@ mapping will ever be needed. Task 6 is dropped outright — do not open the
 
 ## Phase 3 — Accounts and residents
 
-- **3.1** Steward provisioning + turnover (backlog 11): admin pre-creates the two resident accounts per property (email-based re-linking in `upsertUser` is the intended mechanism); deactivation via `isActive`. UI on Settings or Residents. Coordinate with #38 (turnover orchestration) rather than duplicating it.
-- **3.2** Outbound email plumbing (backlog 12): Resend vars in `server/config.ts` (boot-time validation) + `.env.example` placeholders. External dependency: #49. Unblocks 2.4, backlog 18 and 23, and #41.
-- **3.3** Fast multi-resident entry (backlog 13): the CRUD exists; the work is the "enter a full house in one sitting" flow on `Residents.tsx`.
-- **3.4** Move-out with context (backlog 14): confirmation states resident, property, and what happens to records and outstanding charges. History already survives — moving out sets `moveOutDate` + clears `isActive`; nothing is deleted.
+Reconciled against main 2026-08-27 (after Phases 1–2 merged). **No schema
+changes in this phase** — the mechanisms exist; the work is config, one email
+module, and UI. Decisions confirmed with the maintainer 2026-08-27:
+(a) move-out offers to deactivate a linked login, checkbox defaulted on;
+(b) email config is optional at boot while #49 is pending, but a *partial*
+set of email variables fails the boot check loudly; (c) 2.3 (RA
+notification) folds into this phase if #49 completes in time.
+
+Order: 3.2 first (it is the long pole — #41, #14/2.3 and backlog 18/23 all
+wait on it), then 3.1 + 3.3 together (small UI), then 3.4 on its own (it
+touches an access decision and gets the same review treatment as 2.2).
+
+- **3.2** Outbound email plumbing (backlog 12). New `server/email.ts` behind
+  a small interface, mirroring the `objectStorage/` driver pattern: the
+  official `resend` SDK when configured, and a "not configured" result —
+  never a throw — when not. `RESEND_API_KEY` + `EMAIL_FROM` (optional
+  `EMAIL_REPLY_TO`) read via `server/config.ts`; both unset means email is
+  deliberately off, exactly one set is a boot-time configuration problem.
+  `.env.example` placeholders only. Send failures log server-side and return
+  a result; a failed email must never fail the request that triggered it.
+  External dependency #49 gates the first live send, not the code.
+- **3.1** Steward provisioning (backlog 11). The mechanism shipped in Phase 1
+  (`users.propertyId`, re-link preserving it); what's missing is UI: a house
+  picker on the Settings create-user form when the role is resident, the
+  linked house shown in the user list, and set/clear on an existing resident
+  account. Deactivation already exists. Deliberately **not** building #38's
+  turnover state machine — this ships the primitives it will orchestrate.
+- **3.3** Fast multi-resident entry (backlog 13). "Save & add another" in the
+  Residents add dialog: keeps it open, preserves house and move-in date,
+  clears name/email, refocuses, shows a running added-count. No importer —
+  that stays Phase 5.
+- **3.4** Move-out with context (backlog 14). Replace today's instant,
+  confirmation-free button with a dialog naming the resident and house, an
+  editable move-out date, and consequences in plain language: history stays,
+  the roster row moves to Former residents. Callers holding a finance flag
+  also see outstanding rent charges and any held deposit (existing
+  endpoints; section hidden without the flag). **Security piece:** since 2.2
+  an active resident login sees the whole house's requests, so the dialog
+  detects a matching active resident account and offers to deactivate it,
+  checked by default. Deactivation goes through the existing status route so
+  the `user.status_changed` audit event fires.
+- **3.5** (was 2.3) RA notification on new request — first consumer of 3.2,
+  content per #14, nothing the audit log would redact. Only if #49 is done.
 
 ## Phase 4 — Finance and dashboard
 
