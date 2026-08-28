@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -34,6 +35,7 @@ export default function Properties() {
   const [deletingPropertyId, setDeletingPropertyId] = useState<string | null>(null);
   const [regionFilter, setRegionFilter] = useState("all");
   const [chapterFilter, setChapterFilter] = useState("all");
+  const [sortBy, setSortBy] = useState<"name" | "renewal">("name");
   const { toast } = useToast();
 
   const { data: properties, isLoading } = useQuery<Property[]>({
@@ -45,11 +47,23 @@ export default function Properties() {
   // for chapters no property uses yet.
   const chapters = regionFilter === "all" ? ALL_CHAPTERS : chaptersForRegion(regionFilter);
 
-  const visibleProperties = (properties || []).filter(
+  const filteredProperties = (properties || []).filter(
     (p) =>
       (regionFilter === "all" || p.region === regionFilter) &&
       (chapterFilter === "all" || p.chapter === chapterFilter),
   );
+  // "Lease renewal" puts rented houses with the nearest renewal date first —
+  // the question that sort answers is "which lease needs a decision next?".
+  // Houses with no renewal clock (owned, or no date yet) follow by name.
+  const visibleProperties =
+    sortBy === "renewal"
+      ? [...filteredProperties].sort((a, b) => {
+          const aDate = a.ownership === "rented" && a.leaseRenewalDate ? new Date(a.leaseRenewalDate).getTime() : Infinity;
+          const bDate = b.ownership === "rented" && b.leaseRenewalDate ? new Date(b.leaseRenewalDate).getTime() : Infinity;
+          if (aDate !== bDate) return aDate - bDate;
+          return a.name.localeCompare(b.name);
+        })
+      : filteredProperties;
 
   // Empty date inputs come through as "" — send null so the server's date
   // coercion treats them as unset rather than an invalid date.
@@ -216,6 +230,15 @@ export default function Properties() {
               {chapters.map((chapter) => (
                 <SelectItem key={chapter} value={chapter}>{chapter}</SelectItem>
               ))}
+            </SelectContent>
+          </Select>
+          <Select value={sortBy} onValueChange={(v) => setSortBy(v as "name" | "renewal")}>
+            <SelectTrigger className="w-44" data-testid="select-sort-properties" aria-label="Sort properties">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="name">Sort: default</SelectItem>
+              <SelectItem value="renewal">Sort: lease renewal</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -441,8 +464,17 @@ export default function Properties() {
                       <Building2 className="h-5 w-5" />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <h4 className="font-medium text-sm" data-testid={`text-property-name-${property.id}`}>
-                        {property.name}
+                      <h4 className="font-medium text-sm">
+                        {/* The name is the link, not the whole card -- the card
+                            already holds an actions menu, and nesting a button
+                            inside a link is neither valid nor keyboard-sane. */}
+                        <Link
+                          href={`/properties/${property.id}`}
+                          className="rounded-sm hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          data-testid={`text-property-name-${property.id}`}
+                        >
+                          {property.name}
+                        </Link>
                       </h4>
                       <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
                         <MapPin className="h-3 w-3" />

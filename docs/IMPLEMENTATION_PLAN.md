@@ -149,13 +149,45 @@ touches an access decision and gets the same review treatment as 2.2).
 
 ## Phase 4 — Finance and dashboard
 
-- **4.1** Ramp/QuickBooks (backlog 15): tracked in #32, **blocked by the AP/AR decision #33**. References/status/dates/amounts only.
-- **4.2** Outstanding fees + deposits panel (backlog 16): data and region scoping exist on `/api/rent-payments` and `/api/security-deposits`; `Finances.tsx` exists. Work is the "outstanding" rollup view, gated on `canViewFinancials` (from 1.3).
-- **4.3** Maintenance spend by region + annual budget (backlog 17): needs a budget column (per property or region — SPO input pending); schema change follows the migration rules. The signal to surface is *underspend*.
-- **4.4** Bounced-payment visibility (backlog 18): mark a payment `failed` (from 1.4), surface in 4.2's panel. Auto-email later, after 3.2. Confirm SPO holds emails for account-less residents — `residents.email` is `notNull`, so the column is there; whether the data is real is the question.
-- **4.5** Lease renewal column on Properties list, filter/sort (backlog 19). Depends on 1.1.
-- **4.6** Owned/rented `Badge` on PropertyDetail header + list (backlog 20). Depends on 1.1. This branch already carries the PropertyDetail page.
-- **4.7** Audit events for every new money/access action (backlog 21): via `AUDIT_ACTIONS`, plain-language summaries. Applies per-ticket above, not as a sweep at the end.
+Reconciled 2026-08-27 while starting the phase. Two findings from that pass:
+
+- **The PropertyDetail page had been lost.** `51ab295` (the /properties/:id
+  page, its e2e spec, and the Properties-list links to it) sat on the old
+  `feat/dashboard-needs-attention` base and was silently dropped when Phase 1
+  rebased onto origin/main — main even shipped links to a route that did not
+  exist. Restored on this branch by cherry-pick (original authorship kept),
+  updated for the `failed` rent status that postdates it.
+- **`527b26e` (client-side needs-attention queue) stays retired on purpose:**
+  main's dashboard is a later, richer implementation of the same idea
+  (server-side `/api/action-items` + `/api/region-summary`, which Phases 1–3
+  kept extending). `git cherry origin/main 51ab295` confirms these two were
+  the only unmerged commits from that old base.
+
+Status:
+
+- **4.1** Ramp/QuickBooks (backlog 15): tracked in #32, **blocked by the
+  AP/AR decision #33**. References/status/dates/amounts only.
+- **4.2 + 4.4** ✅ (done 2026-08-27 on this branch) Outstanding panel: a
+  third Finances tab — and the default one — showing every unpaid **or
+  failed** charge from any month grouped by house with per-house totals, a
+  summary line that singles out failed payments, held deposits of former
+  residents with a Settle shortcut, and Mark-paid inline. Client-side over
+  the existing region-scoped, finance-gated endpoints; no new routes, so no
+  new guards. 4.4's auto-email waits on #49; the account-less-resident email
+  question stays open with SPO.
+- **4.3** Maintenance spend by region + annual budget (backlog 17):
+  **blocked on SPO** — per-property vs per-region budget (open item 4). The
+  budget column follows the migration rules once answered.
+- **4.5** ✅ (done 2026-08-27) Lease-renewal on the Properties list: the
+  renewal date + decision were already displayed (shipped with lease
+  tracking); this adds the sort — "Sort: lease renewal" puts rented houses
+  with the nearest renewal first.
+- **4.6** ✅ (done 2026-08-27) Owned/rented badge: the list badge shipped
+  with lease tracking; the restored PropertyDetail header now carries an
+  Owned/Rented badge plus the renewal date and decision for rented houses.
+- **4.7** Audit events per money/access action: nothing in this phase added
+  a new money/access *action* (the panel reads existing data), so no new
+  events were due. Applies per-ticket to 4.1/4.3 when they unblock.
 
 ## Phase 5 — Later
 
