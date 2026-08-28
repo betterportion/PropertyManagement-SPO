@@ -24,13 +24,14 @@ It is a single Express server that serves both the REST API and the React fronte
 | `npm run lint` | ESLint. **Must stay at zero errors**; warnings are allowed |
 | `npm run check` | TypeScript check. **Must stay at zero errors** |
 | `npm test` | Vitest. Needs no database, no bucket, no secrets. `auditRetention.integration.test.ts` is the one test that uses a real database, and skips unless `TEST_DATABASE_URL` or `DATABASE_URL` is set |
+| `npm run test:e2e` | Playwright, in a real browser. Unlike `npm test` these need a database and a browser: `npx playwright install chromium` once, then `npm run db:migrate && npm run db:seed` against a throwaway Postgres |
 | `npm run db:generate` | Write a migration from a `shared/schema.ts` change |
 | `npm run db:migrate` | Apply pending migrations |
 | `npm run db:baseline -- <tag>` | Record existing tables as already migrated, through `<tag>` (a database that predates `migrations/`). Bare, it records only `0000` |
 | `npm run db:seed` | Demo data for an **empty** database, written through the real storage layer. Refuses to run if any properties exist. Optional `SEED_ADMIN_EMAIL` pre-creates an admin account that re-links on first sign-in |
 | `npm run db:push` | Push the schema directly, without a migration. Development only |
 
-**The gate is `npm run lint && npm run check && npm test && npm run build`.** Run all four before finishing. `.github/workflows/ci.yml` runs the same four on every push and pull request.
+**The gate is `npm run lint && npm run check && npm test && npm run build`.** Run all four before finishing. `.github/workflows/ci.yml` runs the same four on every push and pull request. `.github/workflows/e2e.yml` is a second workflow, running `npm run test:e2e` against a throwaway Postgres and a headless Chromium. It is deliberately outside the gate: it needs a database and a browser, which is exactly what the four checks above are built not to need.
 
 The linter catches mistakes, not style — formatting rules are off on purpose, so nothing here should ever produce a large reformatting diff. The 8 remaining warnings are React Compiler advice; one is in the generated `components/ui/` files, the rest in our own components and pages. Clearing them is issue #37.
 
@@ -170,7 +171,7 @@ Region names are compared in one canonical form, so a stored legacy `west-centra
 
 ### Identity
 
-**Never read `req.user.claims.sub` or any other provider claim directly.** Call `getUserId(req)` from `server/auth.ts`. That accessor exists so the identity provider can be swapped without touching 49 route handlers, and it is the only supported way to find out who is signed in. It throws if there is no authenticated user, which cannot happen behind `isAuthenticated` (that middleware requires `claims.sub`).
+**Never read `req.user.claims.sub` or any other provider claim directly.** Call `getUserId(req)` from `server/auth.ts`. That accessor exists so the identity provider can be swapped without touching a route handler: handlers reach identity through `requireActiveUser`, which leaves `getUserId` just two call sites in the whole server. It is the only supported way to find out who is signed in. It throws if there is no authenticated user, which cannot happen behind `isAuthenticated` (that middleware requires `claims.sub`).
 
 The frontend gets the user from `/api/auth/user`, which returns the database user plus their permissions. It does **not** return provider claims — read `user.email`, not `user.claims.email`.
 

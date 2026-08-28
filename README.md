@@ -110,6 +110,7 @@ The app serves the API and the frontend together on a single port (5000 by defau
 | `npm run lint` | ESLint over the server, the client and the shared code |
 | `npm run check` | TypeScript type check. Should always pass with zero errors |
 | `npm test` | Run the test suite (Vitest) |
+| `npm run test:e2e` | Run the end-to-end tests in a real browser (Playwright). Needs a database with demo data in it, which `npm test` does not |
 | `npm run db:generate` | Write a migration file from a change to `shared/schema.ts` |
 | `npm run db:migrate` | Apply pending migrations. **This is how schema changes reach production** |
 | `npm run db:baseline -- <tag>` | Record existing tables as already migrated, through `<tag>`, for a database that predates `migrations/` |
@@ -132,6 +133,12 @@ npm run build    # the production build actually builds
 `.github/workflows/ci.yml` runs exactly these four on every push and every pull
 request, so anything you skip locally will be caught there instead. CI needs no
 secrets and never touches the database, the file store or the login provider.
+
+The end-to-end tests are not among those four. `.github/workflows/e2e.yml` runs
+`npm run test:e2e` on its own, driving a real browser against a throwaway
+Postgres, because it needs a database and a browser that the four checks above
+deliberately do without. Run it locally when you have changed how a screen
+behaves and want to watch the whole flow work.
 
 ### About the linter
 
