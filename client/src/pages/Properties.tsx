@@ -35,6 +35,7 @@ export default function Properties() {
   const [deletingPropertyId, setDeletingPropertyId] = useState<string | null>(null);
   const [regionFilter, setRegionFilter] = useState("all");
   const [chapterFilter, setChapterFilter] = useState("all");
+  const [sortBy, setSortBy] = useState<"name" | "renewal">("name");
   const { toast } = useToast();
 
   const { data: properties, isLoading } = useQuery<Property[]>({
@@ -46,11 +47,23 @@ export default function Properties() {
   // for chapters no property uses yet.
   const chapters = regionFilter === "all" ? ALL_CHAPTERS : chaptersForRegion(regionFilter);
 
-  const visibleProperties = (properties || []).filter(
+  const filteredProperties = (properties || []).filter(
     (p) =>
       (regionFilter === "all" || p.region === regionFilter) &&
       (chapterFilter === "all" || p.chapter === chapterFilter),
   );
+  // "Lease renewal" puts rented houses with the nearest renewal date first —
+  // the question that sort answers is "which lease needs a decision next?".
+  // Houses with no renewal clock (owned, or no date yet) follow by name.
+  const visibleProperties =
+    sortBy === "renewal"
+      ? [...filteredProperties].sort((a, b) => {
+          const aDate = a.ownership === "rented" && a.leaseRenewalDate ? new Date(a.leaseRenewalDate).getTime() : Infinity;
+          const bDate = b.ownership === "rented" && b.leaseRenewalDate ? new Date(b.leaseRenewalDate).getTime() : Infinity;
+          if (aDate !== bDate) return aDate - bDate;
+          return a.name.localeCompare(b.name);
+        })
+      : filteredProperties;
 
   // Empty date inputs come through as "" — send null so the server's date
   // coercion treats them as unset rather than an invalid date.
@@ -217,6 +230,15 @@ export default function Properties() {
               {chapters.map((chapter) => (
                 <SelectItem key={chapter} value={chapter}>{chapter}</SelectItem>
               ))}
+            </SelectContent>
+          </Select>
+          <Select value={sortBy} onValueChange={(v) => setSortBy(v as "name" | "renewal")}>
+            <SelectTrigger className="w-44" data-testid="select-sort-properties" aria-label="Sort properties">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="name">Sort: default</SelectItem>
+              <SelectItem value="renewal">Sort: lease renewal</SelectItem>
             </SelectContent>
           </Select>
         </div>

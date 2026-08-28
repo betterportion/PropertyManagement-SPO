@@ -17,7 +17,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { Plus, MoreVertical, Check, Undo2, Wallet, PiggyBank, CalendarClock } from "lucide-react";
+import { Plus, MoreVertical, Check, Undo2, Wallet, PiggyBank, CalendarClock, AlertCircle } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { type RentPayment, type SecurityDeposit, type Resident, type Property } from "@shared/schema";
@@ -343,6 +343,117 @@ export default function Finances() {
     );
   };
 
+  // ── Outstanding ─────────────────────────────────────────────────────────
+  // The chase list, as opposed to the month-by-month bookkeeping views: every
+  // unpaid or failed charge from any month, and every deposit still held for
+  // someone who has moved out. Region and house filters apply as everywhere.
+  const outstandingPayments = inRegion(payments)
+    .filter((p) => p.status === "unpaid" || p.status === "failed")
+    .sort((a, b) => a.period.localeCompare(b.period));
+  const outstandingTotal = outstandingPayments.reduce((sum, p) => sum + Number(p.amount), 0);
+  const failedPayments = outstandingPayments.filter((p) => p.status === "failed");
+  const activeResidentIds = new Set(residents.filter((r) => r.isActive).map((r) => r.id));
+  const depositsToSettle = inRegion(deposits).filter(
+    (d) => d.status === "held" && !activeResidentIds.has(d.residentId),
+  );
+
+  const renderOutstanding = () => {
+    if (outstandingPayments.length === 0 && depositsToSettle.length === 0) {
+      return (
+        <EmptyState
+          title="Nothing outstanding"
+          description="Every recorded charge is settled and no former resident's deposit is waiting. New unpaid months appear here as soon as rent is recorded."
+        />
+      );
+    }
+    const byProperty = new Map<string, RentPayment[]>();
+    for (const p of outstandingPayments) {
+      const list = byProperty.get(p.propertyId) ?? [];
+      list.push(p);
+      byProperty.set(p.propertyId, list);
+    }
+    return (
+      <div className="space-y-6">
+        <p className="text-sm text-muted-foreground" data-testid="text-outstanding-summary">
+          {outstandingPayments.length > 0
+            ? `${formatCurrency(outstandingTotal)} outstanding across ${outstandingPayments.length} charge${outstandingPayments.length === 1 ? "" : "s"}.`
+            : "No rent outstanding."}
+          {failedPayments.length > 0 &&
+            ` ${failedPayments.length} ${failedPayments.length === 1 ? "payment has" : "payments have"} failed and may need a new payment or a follow-up.`}
+          {depositsToSettle.length > 0 &&
+            ` ${depositsToSettle.length} deposit${depositsToSettle.length === 1 ? "" : "s"} still held for former residents.`}
+        </p>
+
+        {Array.from(byProperty.entries()).map(([propertyId, list]) => (
+          <div key={propertyId} className="space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="font-semibold">{propertyName(propertyId)}</h3>
+              <span className="text-sm text-muted-foreground" data-testid={`outstanding-total-${propertyId}`}>
+                {formatCurrency(list.reduce((sum, p) => sum + Number(p.amount), 0))} owed
+              </span>
+            </div>
+            <div className="space-y-3">
+              {list.map((p) => {
+                const status = RENT_STATUS[p.status];
+                return (
+                  <Card key={p.id} data-testid={`card-outstanding-${p.id}`}>
+                    <CardContent className="flex items-start justify-between gap-4 p-4">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <p className="font-medium">{residentName(p.residentId)}</p>
+                          <Badge variant={status.variant}>{status.label}</Badge>
+                        </div>
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          {p.period} · {formatCurrency(p.amount)}
+                          {p.reference ? ` · ${p.reference}` : ""}
+                        </p>
+                      </div>
+                      {canManage && (
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => setRentStatusMutation.mutate({ id: p.id, status: "paid" })}
+                          data-testid={`button-outstanding-markpaid-${p.id}`}
+                        >
+                          <Check className="mr-1 h-4 w-4" /> Mark paid
+                        </Button>
+                      )}
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+
+        {depositsToSettle.length > 0 && (
+          <div className="space-y-3">
+            <h3 className="font-semibold">Deposits to settle</h3>
+            <div className="space-y-3">
+              {depositsToSettle.map((d) => (
+                <Card key={d.id} data-testid={`card-settle-deposit-${d.id}`}>
+                  <CardContent className="flex items-start justify-between gap-4 p-4">
+                    <div className="min-w-0">
+                      <p className="font-medium">{residentName(d.residentId)}</p>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        {formatCurrency(d.amountHeld)} held · {propertyName(d.propertyId)} · resident has moved out
+                      </p>
+                    </div>
+                    {canManage && (
+                      <Button size="sm" variant="secondary" onClick={() => setEditingDeposit(d)} data-testid={`button-settle-deposit-${d.id}`}>
+                        Settle
+                      </Button>
+                    )}
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <Section size="compact">
       <Container>
@@ -363,11 +474,18 @@ export default function Finances() {
           {rentLoading || depLoading ? (
             <LoadingState message="Loading finances..." />
           ) : (
-            <Tabs defaultValue="rent" className="w-full">
-              <TabsList className="grid w-full max-w-md grid-cols-2">
+            <Tabs defaultValue="outstanding" className="w-full">
+              <TabsList className="grid w-full max-w-md grid-cols-3">
+                {/* The chase list lands first: the question a finance person
+                    opens this page with is "who still owes us?" */}
+                <TabsTrigger value="outstanding" data-testid="tab-outstanding"><AlertCircle className="mr-2 h-4 w-4" /> Outstanding</TabsTrigger>
                 <TabsTrigger value="rent" data-testid="tab-rent"><Wallet className="mr-2 h-4 w-4" /> Rent</TabsTrigger>
                 <TabsTrigger value="deposits" data-testid="tab-deposits"><PiggyBank className="mr-2 h-4 w-4" /> Deposits</TabsTrigger>
               </TabsList>
+
+              <TabsContent value="outstanding" className="mt-6 space-y-4">
+                {renderOutstanding()}
+              </TabsContent>
 
               <TabsContent value="rent" className="mt-6 space-y-4">
                 <div className="flex flex-wrap items-center justify-between gap-4">

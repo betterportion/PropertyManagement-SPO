@@ -202,6 +202,21 @@ export default function PropertyDetail() {
           <div className="flex flex-wrap items-center gap-2" data-testid="property-facts">
             <Badge variant="secondary">{property.region}</Badge>
             {property.chapter && <Badge variant="secondary">{property.chapter}</Badge>}
+            {/* Owned vs rented changes what the house needs from staff — a
+                rented house has a landlord and a lease clock. */}
+            <Badge
+              variant={property.ownership === "rented" ? "warning" : "secondary"}
+              data-testid="badge-ownership"
+            >
+              {property.ownership === "rented" ? "Rented" : "Owned"}
+            </Badge>
+            {property.ownership === "rented" && property.leaseRenewalDate && (
+              <Badge variant="outline" data-testid="badge-lease-renewal">
+                Lease renewal {formatDate(property.leaseRenewalDate)}
+                {property.renewalDecision !== "undecided" &&
+                  ` · ${property.renewalDecision === "renewing" ? "renewing" : "not renewing"}`}
+              </Badge>
+            )}
             {property.bedrooms !== null && property.bedrooms !== undefined && (
               <Badge variant="outline">
                 {activeResidents.length} of {property.bedrooms} beds filled
