@@ -19,7 +19,7 @@ summary say what is actually left.
   4.3 maintenance budget view (per-property vs per-region, open item 4);
   deposit workflow wording (#60).
 - **Phase 5 (unscheduled):** spreadsheet import, in-app support request
-  (needs only #49 now), Sentry, docs reconciliation.
+  (needs only #49 now), Sentry. Docs reconciliation (5.4) is done.
 
 The issue tracker is GitHub issues on `betterportion/PropertyManagement-SPO`.
 Several backlog tasks already have issues — those are linked rather than
@@ -45,7 +45,7 @@ duplicated. New issues should follow the existing label conventions
 | 12/18. Outbound email | Already tracked: #49 (Resend domain + API key, external) and #41 (deposit-return notices). The Resend account exists. |
 | 11/14. Turnover / move-out | Already tracked: #38 (household turnover orchestration). |
 | 9. RA notification | Already tracked: #14 (email notifications for request activity). |
-| 25. Docs reconciliation | **Still owed** (5.4): CLAUDE.md's data-model section lists fifteen tables; twenty-one exist (missing: residents, rent_payments, security_deposits, maintenance_schedules, tasks, maintenance_request_photos). The sections touched by Phases 1–4 (authz, uploads, email, audit) were kept current as they changed. |
+| 25. Docs reconciliation | **Done** (5.4, 2026-08-28): all twenty-one tables are now in CLAUDE.md's data model, along with the five undocumented server modules (`actionItems`, `regionSummary`, `schedules`, `seasonalTasks`, `migrateRegions`) and the three daily jobs. Three stale claims were corrected: a `rawBody` capture removed with the JotForm webhook, a webhook rate limit that no longer exists, and a handler count of ~55 that is now ~84. |
 
 ---
 
@@ -212,7 +212,7 @@ Status:
 - **5.1** Spreadsheet import for residents (backlog 22): `guardedUpload()`, permission check ahead of multer, preview-and-confirm, duplicate rule = email within a property.
 - **5.2** In-app support request (backlog 23) — 3.2 is merged, so this now waits only on #49.
 - **5.3** Sentry (backlog 24): CSP allowance in `server/security.ts`, `package-lock.json` `resolved` URL check, PII scrub.
-- **5.4** Docs reconciliation (backlog 25) — but do a first pass **now**: CLAUDE.md already understates the schema by four tables, which is exactly how this backlog over-scoped Phase 1.
+- **5.4** ✅ Docs reconciliation (backlog 25), done 2026-08-28. CLAUDE.md understated the schema by six tables and the server by five modules, and carried three claims that were false — which is exactly how this backlog over-scoped Phase 1.
 
 ---
 
