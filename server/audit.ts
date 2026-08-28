@@ -23,6 +23,9 @@ export const AUDIT_ACTIONS_KEPT_INDEFINITELY = [
   "user.role_changed",
   "user.status_changed",
   "user.permissions_changed",
+  // Linking a resident login to a house decides which house's records that
+  // login can see, so it is access history like the entries above.
+  "user.property_changed",
 ] as const;
 
 /**
