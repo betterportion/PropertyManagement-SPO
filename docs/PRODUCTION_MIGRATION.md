@@ -63,7 +63,7 @@ select table_name from information_schema.tables
 where table_schema = 'public' order by table_name;
 ```
 
-You should see fifteen tables — `asset_photos`, `assets`, `audit_log`, `billing_records`, `invoices`, `maintenance_contacts`, `maintenance_requests`, `properties`, `request_contacts`, `sessions`, `uploads`, `user_permissions`, `users`, `walkthrough_photos`, `walkthrough_rooms` — plus `__drizzle_migrations`.
+You should see twenty-one tables — `asset_photos`, `assets`, `audit_log`, `billing_records`, `invoices`, `maintenance_contacts`, `maintenance_request_photos`, `maintenance_requests`, `maintenance_schedules`, `properties`, `rent_payments`, `request_contacts`, `residents`, `security_deposits`, `sessions`, `tasks`, `uploads`, `user_permissions`, `users`, `walkthrough_photos`, `walkthrough_rooms` — plus `__drizzle_migrations`.
 
 > **`sessions` must be in that list.** The app does not create it at startup — the session store is deliberately configured not to — so if the migrations did not run, logging in fails rather than silently starting a fresh store.
 
@@ -71,7 +71,14 @@ You should see fifteen tables — `asset_photos`, `assets`, `audit_log`, `billin
 
 ### Migrating an existing database instead of a fresh one
 
-Everything above assumes an empty Supabase project, where `db:migrate` applies every migration for real. A database that **already has the tables but no migration history** — the current Replit database, or a copy of it — needs one command first, or `db:migrate` will try to create tables that are already there and stop.
+> **For the SPO production launch, skip this section.** Issue #6 settled it:
+> production starts from an **empty** database and staff enter their own data, so
+> there is nothing to baseline. This is kept because the situation it describes —
+> a database with the tables but no migration history — is easy to land in by
+> accident (a `db:push` against a shared database will do it) and hard to get out
+> of without the command below.
+
+Everything above assumes an empty Supabase project, where `db:migrate` applies every migration for real. A database that **already has the tables but no migration history** needs one command first, or `db:migrate` will try to create tables that are already there and stop.
 
 ```bash
 npm run db:baseline -- <tag>     # then npm run db:migrate
@@ -85,7 +92,7 @@ npm run db:baseline -- <tag>     # then npm run db:migrate
 | The app as it runs today, before the audit log | `npm run db:baseline -- 0002_drop_monday_item_id` |
 | Only the original schema, no `uploads` table | `npm run db:baseline` |
 
-For the current Replit database the answer is the middle row: it has the `uploads` table (`0001`) and no longer has `monday_item_id` (`0002`), so baseline through `0002_drop_monday_item_id` and then migrate. That applies `0003_add_audit_log` and nothing else.
+The middle row was the old Replit database: it had the `uploads` table (`0001`) and no longer had `monday_item_id` (`0002`), so it baselined through `0002_drop_monday_item_id` and then migrated. Yours will name a different tag — there are fifteen migrations now, through `0014_resident_links_and_finance_flags`.
 
 You do not have to get this right by inspection. Before recording anything, the command compares the database against the migrations in both directions — a missing table or column, a column a later migration should already have dropped, or a table that only a later migration creates — and refuses if anything disagrees. It then works out which tag the database *does* match and tells you:
 
@@ -107,7 +114,7 @@ If it instead says the database matches no point in the migration history, stop 
 
 **Verify after baselining.** `select count(*) from drizzle.__drizzle_migrations;` should equal the number of migrations recorded, and `db:migrate` should then report applying only the ones that genuinely remain.
 
-> This sequence was rehearsed against a throwaway copy of the pre-audit schema: baseline through `0002_drop_monday_item_id`, then `db:migrate`, ends with fifteen tables, four recorded migrations, and `audit_log` created. `scripts/__tests__/baselineMigrations.test.ts` locks the check that makes it work.
+> This sequence was rehearsed against a throwaway copy of the pre-audit schema: baseline through `0002_drop_monday_item_id`, then `db:migrate`, ended with the schema as it stood at `0003` and `audit_log` created. The migration list has grown a lot since, but the mechanism is unchanged, and `scripts/__tests__/baselineMigrations.test.ts` locks the check that makes it work.
 
 ---
 
@@ -262,6 +269,12 @@ OIDC_PROVIDER_NAME    = google
 OIDC_SCOPES           = openid email profile
 ```
 
+Outbound email is deliberately **not** in that list. The app runs fine with no mailer and
+simply sends nothing. When the Resend domain is ready (issue #49), add `RESEND_API_KEY`
+and `EMAIL_FROM` together — and optionally `EMAIL_REPLY_TO`. Setting only one of the pair
+fails the boot check on purpose, so a half-configured mailer can never silently swallow
+messages.
+
 `.env.example` documents every one of these, and the optional tuning variables (`DATABASE_SSL`, `DATABASE_POOL_MAX`, `MAX_UPLOAD_BYTES_IN_FLIGHT`).
 
 **Generate a different `SESSION_SECRET` for staging and production.** Sharing one means a staging session cookie is valid in production.
@@ -350,6 +363,10 @@ from audit_log order by created_at desc limit 20;
 ## Step 9 — Bring the data across (optional)
 
 Only if the existing data has to be preserved. If the portal is going live with fresh data, skip this.
+
+> **SPO's V1 skips this step.** Issue #6 settled that there is no Replit data to bring
+> across: production starts empty and staff enter properties, residents and contacts as
+> they go. The step stays here for any later move between hosts.
 
 1. **Put the current portal into read-only use** while you copy — announce a short freeze. Anything entered after the dump is taken will be lost.
 2. Dump the current database:

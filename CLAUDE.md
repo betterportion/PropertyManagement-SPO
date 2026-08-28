@@ -32,7 +32,7 @@ It is a single Express server that serves both the REST API and the React fronte
 
 **The gate is `npm run lint && npm run check && npm test && npm run build`.** Run all four before finishing. `.github/workflows/ci.yml` runs the same four on every push and pull request.
 
-The linter catches mistakes, not style — formatting rules are off on purpose, so nothing here should ever produce a large reformatting diff. The 7 remaining warnings are React Compiler advice, partly in the generated `components/ui/` files.
+The linter catches mistakes, not style — formatting rules are off on purpose, so nothing here should ever produce a large reformatting diff. The 8 remaining warnings are React Compiler advice; one is in the generated `components/ui/` files, the rest in our own components and pages. Clearing them is issue #37.
 
 The tests are weighted towards authorization. If you change anything in `server/authz.ts`, in a route's guards, or in who may read an upload, add a test for it in `server/__tests__/authz.test.ts` (the rule on its own) or `server/__tests__/routeAccess.test.ts` (the rule over real HTTP, through the real login guard).
 
@@ -49,13 +49,18 @@ Three conventions in that suite, all of which exist because of a real miss:
 
 | File | Responsibility |
 |---|---|
-| `index.ts` | Entry point. Validates configuration before anything else loads, sets `trust proxy`, security headers, JSON body parsing (captures `rawBody` for webhooks), API request logging, graceful shutdown, listens on `PORT`. |
+| `index.ts` | Entry point. Validates configuration before anything else loads, sets `trust proxy`, security headers, JSON body parsing, API request logging, graceful shutdown, listens on `PORT`. |
 | `config.ts` | Every environment variable the server cannot run without, checked once at boot and reported together. Also owns the OIDC provider settings. |
-| `routes.ts` | Every API endpoint. One large file, ~55 handlers. |
+| `routes.ts` | Every API endpoint. One large file, ~84 handlers. |
 | `auth.ts` | OpenID Connect login and the session store. Reads its provider settings from `config.ts`. |
 | `authz.ts` | Who may do what: `requireActiveUser`, `requirePermission`, the region helpers, upload and maintenance ownership. |
 | `audit.ts` | Records the actions somebody may have to account for later. See "Audit log" below. |
-| `security.ts` | Helmet headers including the production CSP, plus the upload and webhook rate limits. |
+| `security.ts` | Helmet headers including the production CSP, plus the upload rate limit. |
+| `actionItems.ts` | What the dashboard says needs attention, from schedules coming due, unpaid rent and deposits still held, plus the manual `tasks`. `buildActionItems` is pure — records plus `now` — so it tests without a database or a clock. |
+| `regionSummary.ts` | The per-region rollup a national admin reads. Also pure. "Health" is operational load only; unpaid rent is reported beside it, never inside it. |
+| `schedules.ts` | Preventive and safety schedules, and the daily job that turns a due one into an ordinary maintenance request. Idempotent via `lastGeneratedForDue`, so an overdue task does not spawn a request a day. |
+| `seasonalTasks.ts` | Calendar-driven reminders (walkthrough season, summer utilities, lease-end utilities) generated as ordinary `tasks`. Idempotent via each task's unique `sourceKey`. |
+| `migrateRegions.ts` | Two idempotent startup fix-ups: legacy region spellings in `allowedRegions` to their canonical form, and a billing-region backfill. Runs on every boot; already-correct rows are untouched. |
 | `errors.ts` | Error classification, `sendError`, and the final error middleware. |
 | `health.ts` | `GET /api/health` for the hosting platform. Unauthenticated, so it reveals nothing. |
 | `storage.ts` | Every database query, behind a single `IStorage` interface exported as `storage`. |
@@ -66,6 +71,8 @@ Three conventions in that suite, all of which exist because of a real miss:
 | `logger.ts` | `log()`. Separate from `vite.ts` so the production bundle never imports Vite. |
 | `static.ts` | Serves the built client in production. |
 | `vite.ts` | Dev middleware only. Imported dynamically, and only in development — see the note in the file. |
+
+**Three daily jobs run inside the web process**, each started at boot and run once immediately: audit-log retention (`audit.ts`), maintenance-schedule generation (`schedules.ts`), and seasonal reminder tasks (`seasonalTasks.ts`). There is no separate worker and no cron. All three are idempotent, because a restart re-runs them — if you add a fourth, it must be too, and it must not be able to fail the boot.
 
 **Route handlers never touch the database directly.** They go through `storage`. Keep it that way — it is the only reason the data layer is testable and swappable.
 
@@ -83,14 +90,16 @@ Three conventions in that suite, all of which exist because of a real miss:
 
 ## Data model
 
-Defined in `shared/schema.ts` using Drizzle, with Zod insert schemas generated by `drizzle-zod`. This file is the single source of truth for both server and client types. Fifteen tables:
+Defined in `shared/schema.ts` using Drizzle, with Zod insert schemas generated by `drizzle-zod`. This file is the single source of truth for both server and client types. Twenty-one tables:
 
 | Table | Purpose | Key relationships |
 |---|---|---|
 | `sessions` | Express session store | Managed by `connect-pg-simple`, not by app code |
 | `users` | Accounts. `role` is `admin` / `regional_administrator` / `resident`, plus `isActive`; resident accounts carry a `propertyId` linking them to their house | `id` is the identity provider's subject claim; `email` is unique |
 | `user_permissions` | One row per user, fifteen boolean flags (including the two finance flags) plus `allowedRegions` (text array) | `userId` unique, cascades on user delete |
-| `maintenance_requests` | The core workflow. Priority includes a `wishlist` level; status is pending/in_progress/completed/cancelled | `submittedBy` stores an **email**, see gotchas |
+| `maintenance_requests` | The core workflow. Priority includes a `wishlist` level; status is pending/in_progress/completed/cancelled. `photoUrl` is the single photo filed *with* the request; anything added later lives in `maintenance_request_photos` | `submittedBy` stores an **email**, see gotchas |
+| `maintenance_request_photos` | Photos added to a request after it was filed, each with its uploader and date | `requestId` → `maintenance_requests`, cascades |
+| `maintenance_schedules` | Recurring upkeep on a house — `category` is `safety` or `preventive`, `intervalMonths` sets the cadence. A daily job turns a due schedule into an ordinary maintenance request, so there is no second queue to watch | `propertyId` → `properties` cascades; optional `assetId` → `assets` set-null; `region`/`buildingAddress` denormalised for region scoping |
 | `walkthrough_rooms` | Inspection room templates, ordered by `displayOrder` | `propertyId` → `properties` (loose, no FK); `buildingAddress` kept for backward compatibility |
 | `walkthrough_photos` | Photos attached to a room, with condition and free-form notes | `roomId` → `walkthrough_rooms`, cascades |
 | `assets` | Fixed and movable assets, with age, serial, purchase price, asset tag | `propertyId` → `properties` (loose, no FK) |
@@ -98,7 +107,11 @@ Defined in `shared/schema.ts` using Drizzle, with Zod insert schemas generated b
 | `maintenance_contacts` | Vendors | Referenced by invoices and request links |
 | `invoices` | Invoice records with amount, status, due/paid dates | `contactId` and `maintenanceRequestId`, both set-null on delete |
 | `billing_records` | Vendor billing with three document URLs (contract/invoice, COI, W-9) | `contactId` is a plain column, **not** a foreign key |
-| `properties` | Property records. `address` is computed from the four address parts and is unique; `chapter` (free text) records which SPO chapter uses the property | Referenced loosely by rooms and assets |
+| `properties` | Property records. `address` is computed from the four address parts and is unique; `chapter` (free text) records which SPO chapter uses the property; `ownership` (`owned`/`rented`) carries the three lease dates and a `renewalDecision` | Referenced loosely by rooms and assets; referenced with a real FK by residents and schedules |
+| `residents` | People living in a house: name, email, move-in/move-out dates, `isActive`. Deliberately **not** `users` — a resident on the roster need not have a login | `propertyId` → `properties`, cascades; `region`/`buildingAddress` denormalised |
+| `rent_payments` | One row per resident per `YYYY-MM` period: amount, status (`unpaid`/`paid`/`waived`/`failed`), paid date, free-text `reference`. `failed` is a bounced payment and still counts as outstanding. The `reference` is a note like "check #1234" or a processor ID — **never** an account or card number | `residentId` → `residents` cascades; unique on (resident, period) |
+| `security_deposits` | One deposit per resident: amount held, status (`held`/`returned`/`partially_returned`/`withheld`), amount returned, and deductions as a note rather than an itemised ledger | `residentId` → `residents`, cascades, unique |
+| `tasks` | Staff to-dos: title, category, open/done, due date, optional region and assignee. Reminders generated on a calendar carry a unique `sourceKey` so the daily job never duplicates one; hand-created tasks leave it null | `assignedToUserId`, `createdBy` and `completedBy` → `users`, all set-null so a task outlives its author |
 | `request_contacts` | Join table linking contacts to maintenance requests | Both sides cascade |
 | `uploads` | One row per stored file: random storage key, original name, content type, size, uploader | `uploadedBy` is a user ID; no FK, so the row outlives the account |
 | `audit_log` | Append-only record of access, money and document events | Actor stored as plain columns, deliberately no FK |
@@ -208,7 +221,7 @@ Any new upload route should go through `guardedUpload()` too, and its permission
 
 ## Audit log
 
-`server/audit.ts` records the actions somebody may need to account for later: **user and permission changes, maintenance status changes, invoice and billing changes, rent charge and security-deposit changes, and document uploads and downloads.** `AUDIT_ACTIONS` is the full vocabulary.
+`server/audit.ts` records the actions somebody may need to account for later: **user, permission and house-link changes, maintenance status changes, invoice and billing changes, rent charge and security-deposit changes, and document uploads and downloads.** `AUDIT_ACTIONS` is the full vocabulary.
 
 Admins read it in the app: the activity trail in Settings, backed by `GET /api/audit-log` and `client/src/components/ActivityLog.tsx`. Reporting beyond that is a separate piece of work. It can also be read with SQL:
 
@@ -226,7 +239,7 @@ Photo downloads are deliberately not recorded — every list view pulls dozens, 
 
 When you add an event, add it to `AUDIT_ACTIONS` rather than passing a bare string, and write a `summary` a non-technical reader can understand.
 
-Routine audit events are retained for **two years**. Account and permission events (`user.created`, `user.deleted`, `user.role_changed`, `user.status_changed`, and `user.permissions_changed`) are kept indefinitely because they are rare and most likely to be needed later. The server runs retention cleanup automatically once a day; each delete is capped at 1,000 rows to avoid one large table-locking statement. There is no user-facing clear-log action.
+Routine audit events are retained for **two years**. Account and access events (`user.created`, `user.deleted`, `user.role_changed`, `user.status_changed`, `user.permissions_changed`, and `user.property_changed`) are kept indefinitely because they are rare and most likely to be needed later. `user.property_changed` is on that list because the house a resident login is linked to decides which house's records it can read — that is access history, not housekeeping. The list lives in `AUDIT_ACTIONS_KEPT_INDEFINITELY`; add to it there, not here alone. The server runs retention cleanup automatically once a day; each delete is capped at 1,000 rows to avoid one large table-locking statement. There is no user-facing clear-log action.
 
 ---
 
