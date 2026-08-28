@@ -48,8 +48,10 @@ against that page before calling it done.
   primitives use the muted surface with normal text instead. `--accent` keeps its spec
   value and is still available for brand highlights.
 - **Theme choice** lives in `localStorage` under `spo-portal-theme` and supports light,
-  dark and system. A bootstrap script in `client/index.html` applies it before the first
-  paint; keep the storage key in that script in sync with `ThemeProvider`.
+  dark and system. `client/public/theme-init.js` applies it before the first paint, loaded
+  as a blocking script from `client/index.html` — it is a separate file, not an inline
+  script, so the production Content Security Policy can forbid inline scripts outright.
+  Keep the storage key in it in sync with `ThemeProvider`.
 
 ## Where the pieces are
 
@@ -63,6 +65,7 @@ against that page before calling it done.
 | Money, date and percentage formatters | `client/src/lib/format.ts` |
 | Chart series colors | `client/src/lib/chart-palette.ts` |
 | Theme provider and toggle | `client/src/providers/ThemeProvider.tsx`, `client/src/components/ThemeToggle.tsx` |
+| Pre-paint theme bootstrap | `client/public/theme-init.js` |
 | Live reference page | `client/src/pages/Styleguide.tsx` (`/styleguide`) |
 
 ## Signs a screen has drifted

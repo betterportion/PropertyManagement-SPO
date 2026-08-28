@@ -32,7 +32,7 @@ It is a single Express server that serves both the REST API and the React fronte
 
 **The gate is `npm run lint && npm run check && npm test && npm run build`.** Run all four before finishing. `.github/workflows/ci.yml` runs the same four on every push and pull request.
 
-The linter catches mistakes, not style — formatting rules are off on purpose, so nothing here should ever produce a large reformatting diff. The 7 remaining warnings are React Compiler advice, partly in the generated `components/ui/` files.
+The linter catches mistakes, not style — formatting rules are off on purpose, so nothing here should ever produce a large reformatting diff. The 8 remaining warnings are React Compiler advice; one is in the generated `components/ui/` files, the rest in our own components and pages. Clearing them is issue #37.
 
 The tests are weighted towards authorization. If you change anything in `server/authz.ts`, in a route's guards, or in who may read an upload, add a test for it in `server/__tests__/authz.test.ts` (the rule on its own) or `server/__tests__/routeAccess.test.ts` (the rule over real HTTP, through the real login guard).
 
@@ -221,7 +221,7 @@ Any new upload route should go through `guardedUpload()` too, and its permission
 
 ## Audit log
 
-`server/audit.ts` records the actions somebody may need to account for later: **user and permission changes, maintenance status changes, invoice and billing changes, rent charge and security-deposit changes, and document uploads and downloads.** `AUDIT_ACTIONS` is the full vocabulary.
+`server/audit.ts` records the actions somebody may need to account for later: **user, permission and house-link changes, maintenance status changes, invoice and billing changes, rent charge and security-deposit changes, and document uploads and downloads.** `AUDIT_ACTIONS` is the full vocabulary.
 
 Admins read it in the app: the activity trail in Settings, backed by `GET /api/audit-log` and `client/src/components/ActivityLog.tsx`. Reporting beyond that is a separate piece of work. It can also be read with SQL:
 
@@ -239,7 +239,7 @@ Photo downloads are deliberately not recorded — every list view pulls dozens, 
 
 When you add an event, add it to `AUDIT_ACTIONS` rather than passing a bare string, and write a `summary` a non-technical reader can understand.
 
-Routine audit events are retained for **two years**. Account and permission events (`user.created`, `user.deleted`, `user.role_changed`, `user.status_changed`, and `user.permissions_changed`) are kept indefinitely because they are rare and most likely to be needed later. The server runs retention cleanup automatically once a day; each delete is capped at 1,000 rows to avoid one large table-locking statement. There is no user-facing clear-log action.
+Routine audit events are retained for **two years**. Account and access events (`user.created`, `user.deleted`, `user.role_changed`, `user.status_changed`, `user.permissions_changed`, and `user.property_changed`) are kept indefinitely because they are rare and most likely to be needed later. `user.property_changed` is on that list because the house a resident login is linked to decides which house's records it can read — that is access history, not housekeeping. The list lives in `AUDIT_ACTIONS_KEPT_INDEFINITELY`; add to it there, not here alone. The server runs retention cleanup automatically once a day; each delete is capped at 1,000 rows to avoid one large table-locking statement. There is no user-facing clear-log action.
 
 ---
 

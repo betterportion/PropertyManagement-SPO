@@ -2,7 +2,10 @@
 
 A property management portal for **Saint Paul's Outreach, Inc. (SPO)**.
 
-Staff use it to manage properties, maintenance requests, walkthrough inspections, physical assets, vendor contacts, and invoices. Residents use it to submit maintenance requests and follow their progress.
+Staff use it to manage properties, resident rosters, maintenance requests, walkthrough
+inspections, physical assets, preventive and safety schedules, vendor contacts, invoices
+and household finances. Residents use it to submit maintenance requests and follow their
+progress.
 
 ---
 
@@ -14,9 +17,9 @@ The portal serves three kinds of user, and each sees a completely different set 
 |---|---|
 | **Admin** | Full access to everything, including user management and permissions. Bypasses per-feature permission checks. |
 | **Regional administrator** | Manages properties, maintenance, walkthroughs, assets, contacts and invoices — but only for the regions they have been granted. |
-| **Resident** | Submits maintenance requests and tracks their own. Cannot see anyone else's data. |
+| **Resident** | Submits maintenance requests and follows them. Sees the requests they filed *and* every request filed for the house their account is linked to — housemates share one repair history. Never sees another house, and never sees anything by region. |
 
-On top of the role, each user has a row of fine-grained permissions (view/manage per feature) and a list of allowed regions. Admins ignore both.
+On top of the role, each user has a row of fine-grained permissions — fifteen view/manage flags, including two that gate the finance screens on their own — and a list of allowed regions. Admins ignore both.
 
 ---
 
@@ -62,7 +65,14 @@ Required before the app will start:
 | `OIDC_CLIENT_ID` | **Yes, off Replit** | Client ID from your identity provider. Inside a Replit workspace `REPL_ID` is used automatically |
 | `STORAGE_DRIVER` | **Yes, in production** | `local` or `supabase`. Defaults to `local` in development; the server refuses to start without it in production rather than silently lose files |
 
-Everything else is optional and documented in `.env.example`: the remaining `OIDC_*` settings, the Supabase storage credentials, database TLS and pool tuning, `MAX_UPLOAD_BYTES_IN_FLIGHT`, `UPLOAD_DIR` and `PORT`.
+Everything else is optional and documented in `.env.example`: the remaining `OIDC_*`
+settings, the Supabase storage credentials, database TLS and pool tuning,
+`MAX_UPLOAD_BYTES_IN_FLIGHT`, `UPLOAD_DIR` and `PORT`.
+
+Outbound email is one of those optional groups and is worth calling out: with
+`RESEND_API_KEY` and `EMAIL_FROM` unset the app runs normally and simply sends nothing.
+Set **both** to turn it on — setting only one fails the boot check on purpose, because a
+half-configured mailer that silently drops messages is worse than one that is off.
 
 If anything required is missing, the server refuses to start and prints **every** missing value at once, rather than failing hours later when someone tries to log in or upload a file.
 
@@ -130,9 +140,10 @@ are deliberately left off: switching them on would reformat the whole codebase
 in one commit and bury every real change afterwards.
 
 `npm run lint` must report **zero errors**. Warnings are allowed, and there are
-currently seven. They come from the React Compiler rules, partly pointing at
-the generated `components/ui/` files, which are upstream shadcn/ui code we
-do not hand-edit. They are worth reading, but they do not block a merge.
+currently eight, all from the React Compiler rules. Seven are in our own
+components and pages; one is in the generated `components/ui/` files, which are
+upstream shadcn/ui code we do not hand-edit. They are worth reading, they do not
+block a merge, and clearing them is tracked as issue #37.
 
 ### About the tests
 
@@ -160,6 +171,13 @@ where a mistake is expensive and silent:
 | `server/__tests__/auditRetention.integration.test.ts` | The retention query against a real PostgreSQL database: expired routine entries go in batches, account and permission history stays |
 | `server/__tests__/errors.test.ts` | Failures becoming clean responses instead of stack traces |
 | `server/__tests__/region.test.ts` | Turning region names into one canonical form |
+| `server/__tests__/upsertUserRelink.test.ts` | An account re-linking to a new provider ID by email, keeping its role and permissions |
+| `server/__tests__/actionItems.test.ts` | What the dashboard raises, and in what order |
+| `server/__tests__/regionSummary.test.ts` | The per-region rollup, including what is deliberately left out of "health" |
+| `server/__tests__/schedules.test.ts` | Due schedules generating a request once, not once a day |
+| `server/__tests__/seasonalTasks.test.ts` | The reminder calendar, and the `sourceKey` that stops duplicates |
+| `server/__tests__/email.test.ts` | Sends failing softly, and never throwing into the request that triggered them |
+| `scripts/__tests__/baselineMigrations.test.ts` | The baseline command refusing a tag the database does not actually match |
 
 Three habits worth keeping when you add to them:
 
@@ -193,6 +211,13 @@ server/                 Express backend
   auth.ts               OpenID Connect login — the only provider-aware file
   authz.ts              Who may do what: permissions, regions, ownership
   audit.ts              Records access, money and document events
+  actionItems.ts        What the dashboard says needs attention (pure, testable)
+  regionSummary.ts      The per-region rollup for a national admin (pure)
+  schedules.ts          Preventive/safety schedules and their daily generator
+  seasonalTasks.ts      Calendar reminders (walkthroughs, utilities) as tasks
+  migrateRegions.ts     Idempotent startup fix-ups for legacy region spellings
+  email.ts              The only code that talks to Resend; off until configured
+  errors.ts             Error classification and the final error middleware
   storage.ts            All database access, behind one interface
   db.ts                 Drizzle over the standard pg pool
   config.ts             Boot-time configuration checks and OIDC settings
@@ -227,7 +252,7 @@ Worth understanding before changing anything server-side.
 
 ### Audit log
 
-The `audit_log` table records the actions somebody may have to account for later: user and permission changes, maintenance status changes, invoice and billing changes, and document uploads and downloads. Photo views are deliberately not recorded — there are far too many of them and they would bury everything else.
+The `audit_log` table records the actions somebody may have to account for later: user, permission and house-link changes, maintenance status changes, invoice and billing changes, rent charge and security-deposit changes, and document uploads and downloads. Photo views are deliberately not recorded — there are far too many of them and they would bury everything else.
 
 Admins can read it in the app: Settings shows the activity trail, backed by
 `GET /api/audit-log`. It can also be read directly with SQL:
@@ -241,7 +266,7 @@ limit 50;
 
 Two guarantees, both covered by tests: it never stores a credential, and a failure to write it never fails the user's request. Entries do contain names, filenames and email addresses — that is what makes the log worth reading — but each one is length-capped before it is stored.
 
-Routine entries (document downloads, uploads, invoice and billing changes, and maintenance status changes) are retained for **two years**. Account and permission history (user creation/deletion, role and status changes, and permission changes) is kept indefinitely because it is rare and most likely to be needed later. The server runs this cleanup automatically once a day, deleting routine rows in batches of at most 1,000 so it does not issue one large table-locking delete. There is no in-app clear-log action.
+Routine entries (document downloads, uploads, invoice and billing changes, and maintenance status changes) are retained for **two years**. Account and access history (user creation and deletion, role, status and permission changes, and the house a resident login is linked to) is kept indefinitely because it is rare and most likely to be needed later — the house link is on that list because it decides which house's records that login can read. The server runs this cleanup automatically once a day, deleting routine rows in batches of at most 1,000 so it does not issue one large table-locking delete. There is no in-app clear-log action.
 
 ### Financial data
 
@@ -275,6 +300,7 @@ Two things to know about running more than one instance:
 
 - **Deleting a photo or document leaves the file in storage.** The record disappears from the app, but the file stays in the bucket and keeps costing space.
 - **Files uploaded before the current storage layout are unreachable.** Their links no longer resolve. Nothing in the app depends on them.
+- **A record outside your regions answers 403, not 404**, which confirms it exists. Knowingly accepted: the people using this portal all work for the same organisation.
 
 ---
 
@@ -285,4 +311,6 @@ Two things to know about running more than one instance:
 | [`CLAUDE.md`](CLAUDE.md) | Detailed architecture, data model, conventions, standing rules and gotchas — written for AI coding assistants, but the most useful document here for any engineer |
 | [`docs/PRODUCTION_MIGRATION.md`](docs/PRODUCTION_MIGRATION.md) | The staging-first runbook for standing up Supabase, Google Workspace login and Render |
 | [`design_guidelines.md`](design_guidelines.md) | Typography, spacing, layout and component design rules |
-| [`docs/ONBOARDING_AUDIT.md`](docs/ONBOARDING_AUDIT.md) | The post-GitHub onboarding audit: what runs, what Replit provisioned, and the remaining migration work |
+| [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) | The current backlog: what has shipped, what is blocked and on whom, and what is deliberately left for later |
+| [`docs/spo-design-system.md`](docs/spo-design-system.md) | The shared SPO design system — the authority behind `design_guidelines.md` |
+| [`docs/ONBOARDING_AUDIT.md`](docs/ONBOARDING_AUDIT.md) | **Historical.** A read-only audit of the code as it stood on 2026-08-23, kept as a record of what was found. Much of it has since been fixed or removed — read `CLAUDE.md` for how things are now |

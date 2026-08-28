@@ -5,6 +5,17 @@ https://github.com/betterportion/PropertyManagement-SPO. Every claim below was
 checked against code; documentation was treated as unverified. Where a doc and
 the code disagree, the discrepancy is called out with file:line.
 
+> **⚠️ Historical document — do not read this as a description of the code today.**
+> It records what a read-only audit found on **2026-08-23**, and it is kept for that
+> reason: it says what was wrong and why, which is worth having. The code has moved a
+> long way since. In particular, everything JotForm — the webhook, its shared secret,
+> its field-mapping variables — was **removed** (2026-08-26, SPO decision); residents
+> submit through the portal's own form. The schema has grown from 15 tables to 21,
+> and the endpoint and permission-flag counts below are all from that commit.
+>
+> For how the system works now, read [`CLAUDE.md`](../CLAUDE.md); for what is left to
+> build, [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md).
+
 > **Status update (2026-08-23, branch `onboarding-fixes`):** the findings below
 > describe commit `d585158` as audited — every count and command output in this
 > document (lint warnings, file counts, test totals) reflects that commit,
