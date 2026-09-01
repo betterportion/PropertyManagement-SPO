@@ -15,6 +15,12 @@ import type { RequestHandler } from "express";
 
 export const IMAGE_UPLOAD_MAX_BYTES = 10 * 1024 * 1024;
 export const DOCUMENT_UPLOAD_MAX_BYTES = 20 * 1024 * 1024;
+/**
+ * A roster CSV. Much smaller than the other two on purpose: the largest
+ * realistic file is a few hundred rows of names, and the parsed result is
+ * held in memory as objects on top of the raw bytes.
+ */
+export const CSV_IMPORT_MAX_BYTES = 2 * 1024 * 1024;
 
 /**
  * Room for the multipart envelope around the file itself: the boundary lines and

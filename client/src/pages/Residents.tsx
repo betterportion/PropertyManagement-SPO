@@ -10,6 +10,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -23,6 +24,7 @@ import { type Resident, type Property, type RentPayment, type SecurityDeposit } 
 import { z } from "zod";
 import { Section, Container, PageHeader, PageStack } from "@/components/layout/page";
 import { LoadingState, EmptyState } from "@/components/states";
+import { RosterImportDialog } from "@/components/RosterImportDialog";
 import { formatDate, formatCurrency } from "@/lib/format";
 
 const residentFormSchema = z.object({
@@ -30,6 +32,8 @@ const residentFormSchema = z.object({
   firstName: z.string().min(1, "First name is required"),
   lastName: z.string().min(1, "Last name is required"),
   email: z.string().email("Enter a valid email address"),
+  phone: z.string().optional(),
+  notes: z.string().optional(),
   moveInDate: z.string().optional(),
 });
 type ResidentForm = z.infer<typeof residentFormSchema>;
@@ -90,6 +94,8 @@ export default function Residents() {
           firstName: "",
           lastName: "",
           email: "",
+          phone: "",
+          notes: "",
         });
         addForm.setFocus("firstName");
         setAddedCount((n) => n + 1);
@@ -177,7 +183,7 @@ export default function Residents() {
 
   const addForm = useForm<ResidentForm>({
     resolver: zodResolver(residentFormSchema),
-    defaultValues: { propertyId: "", firstName: "", lastName: "", email: "", moveInDate: "" },
+    defaultValues: { propertyId: "", firstName: "", lastName: "", email: "", phone: "", notes: "", moveInDate: "" },
   });
 
   const propertyName = (id: string) => properties.find((p) => p.id === id)?.name ?? "Unknown house";
@@ -330,6 +336,9 @@ export default function Residents() {
                 <Download className="mr-2 h-4 w-4" /> Export former
               </Button>
               {canManage && (
+                <RosterImportDialog properties={properties} onImported={invalidate} />
+              )}
+              {canManage && (
               <Dialog open={isAddOpen} onOpenChange={(o) => { setIsAddOpen(o); if (!o) { addForm.reset(); setAddedCount(0); } }}>
                 <DialogTrigger asChild>
                   <Button data-testid="button-add-resident"><Plus className="mr-2 h-4 w-4" /> Add resident</Button>
@@ -376,10 +385,24 @@ export default function Residents() {
                           <FormMessage />
                         </FormItem>
                       )} />
+                      <FormField control={addForm.control} name="phone" render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Phone <span className="text-muted-foreground text-xs">(optional)</span></FormLabel>
+                          <FormControl><Input type="tel" {...field} placeholder="(555) 123-4567" data-testid="input-resident-phone" /></FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )} />
                       <FormField control={addForm.control} name="moveInDate" render={({ field }) => (
                         <FormItem>
                           <FormLabel>Move-in date <span className="text-muted-foreground text-xs">(optional)</span></FormLabel>
                           <FormControl><Input type="date" {...field} data-testid="input-resident-movein" /></FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )} />
+                      <FormField control={addForm.control} name="notes" render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Notes <span className="text-muted-foreground text-xs">(optional)</span></FormLabel>
+                          <FormControl><Textarea rows={2} {...field} placeholder="Anything an RA should know" data-testid="input-resident-notes" /></FormControl>
                           <FormMessage />
                         </FormItem>
                       )} />

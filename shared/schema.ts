@@ -81,6 +81,17 @@ export const userPermissions = pgTable("user_permissions", {
   // added them backfilled both to true for existing staff.
   canViewFinancials: boolean("can_view_financials").notNull().default(false),
   canManageFinancials: boolean("can_manage_financials").notNull().default(false),
+  // Walkthrough completion by a resident-tier account -- the household leader
+  // and the steward, the only two residents per property who ever have a login.
+  // Deliberately separate from canManageWalkthroughs: that flag is the staff
+  // grant and carries region scope, this one carries none and is only ever
+  // house-scoped. Granted by hand per account; no role gets it by default.
+  canCompleteWalkthroughs: boolean("can_complete_walkthroughs").notNull().default(false),
+  // The per-property setup checklist (utilities, insurance, startup budget).
+  // Granted by hand rather than by role so that the first feature to use it
+  // starts from nobody, not from everybody; admins bypass it as they bypass
+  // every flag.
+  canManagePropertySetup: boolean("can_manage_property_setup").notNull().default(false),
   allowedRegions: text("allowed_regions").array().default([]),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
@@ -430,6 +441,13 @@ export const residents = pgTable("residents", {
   firstName: varchar("first_name").notNull(),
   lastName: varchar("last_name").notNull(),
   email: varchar("email").notNull(),
+  // Nullable on purpose. A roster imported from a spreadsheet often has no
+  // phone number, and requiring one would mean either inventing a value or
+  // dropping the row. Nothing in the portal sends an SMS -- group texting is
+  // deliberately not built (see CLAUDE.md) -- so this is a contact detail an
+  // RA reads, not a channel the app uses.
+  phone: varchar("phone"),
+  notes: text("notes"),
   moveInDate: timestamp("move_in_date"),
   moveOutDate: timestamp("move_out_date"),
   isActive: boolean("is_active").notNull().default(true),

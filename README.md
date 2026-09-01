@@ -19,7 +19,7 @@ The portal serves three kinds of user, and each sees a completely different set 
 | **Regional administrator** | Manages properties, maintenance, walkthroughs, assets, contacts and invoices — but only for the regions they have been granted. |
 | **Resident** | Submits maintenance requests and follows them. Sees the requests they filed *and* every request filed for the house their account is linked to — housemates share one repair history. Never sees another house, and never sees anything by region. |
 
-On top of the role, each user has a row of fine-grained permissions — fifteen view/manage flags, including two that gate the finance screens on their own — and a list of allowed regions. Admins ignore both.
+On top of the role, each user has a row of fine-grained permissions — seventeen view/manage flags, including two that gate the finance screens on their own and two held in reserve for surfaces not built yet — and a list of allowed regions. Admins ignore both.
 
 ---
 
@@ -27,7 +27,7 @@ On top of the role, each user has a row of fine-grained permissions — fifteen 
 
 **Frontend** — React 18 + TypeScript, Vite, Wouter for routing, TanStack Query for server state, React Hook Form + Zod for forms, Tailwind CSS with shadcn/ui (New York style) on Radix primitives.
 
-**Backend** — Express on Node 20, TypeScript with ESM, Passport with `openid-client` for OpenID Connect login, `express-session` backed by PostgreSQL.
+**Backend** — Express on Node 20, TypeScript with ESM, Passport with `openid-client` for OpenID Connect login, `express-session` backed by PostgreSQL, `papaparse` for the roster CSV import.
 
 **Database** — PostgreSQL over the standard `pg` driver, with Drizzle ORM and Drizzle Kit. Any Postgres works: Supabase, Neon, RDS, or one you run yourself. The schema is the single source of truth and lives in `shared/schema.ts`.
 
@@ -219,6 +219,8 @@ server/                 Express backend
   authz.ts              Who may do what: permissions, regions, ownership
   audit.ts              Records access, money and document events
   actionItems.ts        What the dashboard says needs attention (pure, testable)
+  maintenanceStatus.ts  When a request closed, from its status transition (pure)
+  residentImport.ts     Roster CSV parsing, validation and duplicates (pure)
   regionSummary.ts      The per-region rollup for a national admin (pure)
   schedules.ts          Preventive/safety schedules and their daily generator
   seasonalTasks.ts      Calendar reminders (walkthroughs, utilities) as tasks
@@ -277,7 +279,7 @@ Routine entries (document downloads, uploads, invoice and billing changes, and m
 
 ### Financial data
 
-The portal **never** stores raw bank account numbers, routing numbers, card numbers, CVVs or ACH credentials. Any future payments work goes through QuickBooks, Stripe or an equivalent processor, and this database keeps only references, statuses, dates and amounts. The reasoning is in `CLAUDE.md` under "Financial data" — treat it as a standing rule, not a preference.
+The portal **never** stores raw bank account numbers, routing numbers, card numbers, CVVs or ACH credentials. Any future payments work goes through QuickBooks or Ramp, the two SPO uses, and this database keeps only references, statuses, dates and amounts. The reasoning is in `CLAUDE.md` under "Financial data" — treat it as a standing rule, not a preference.
 
 ---
 
@@ -308,6 +310,7 @@ Two things to know about running more than one instance:
 - **Deleting a photo or document leaves the file in storage.** The record disappears from the app, but the file stays in the bucket and keeps costing space.
 - **Files uploaded before the current storage layout are unreachable.** Their links no longer resolve. Nothing in the app depends on them.
 - **A record outside your regions answers 403, not 404**, which confirms it exists. Knowingly accepted: the people using this portal all work for the same organisation.
+- **Maintenance requests closed before the close date was recorded have none.** The portal only started writing a close date recently, and there is no way to work out when an older request was closed. They are deliberately not backfilled, because a guessed date is worse than none once a resident's view depends on it.
 
 ---
 

@@ -34,6 +34,8 @@ about *this* repo. When a change lands on a path with no row here, add the row i
 | `server/email.ts`, `server/schedules.ts`, `server/seasonalTasks.ts` | CLAUDE.md "Integrations" and the three-daily-jobs paragraph | a fourth job moves that paragraph's count and its idempotency rule |
 | `server/storage.ts` | the `IStorage` rule in CLAUDE.md — route handlers never touch the database directly | `grep -n 'db\.' server/routes.ts` should stay empty |
 | `client/src/components/ui/` | CLAUDE.md "22 generated primitives" | `ls client/src/components/ui/ \| wc -l` |
+| `client/src/components/` (outside `ui/`) | nothing, unless the component is a feature a doc describes in prose — a new dialog behind an existing button is not a claim | read the hunk; check CLAUDE.md and README for prose naming the feature |
+| `migrations/` | CLAUDE.md "Rules for schema changes"; the migration count and latest tag quoted in `docs/PRODUCTION_MIGRATION.md` | `ls migrations/*.sql \| wc -l` and the newest tag against what the runbook names |
 | `client/src/pages/` added or deleted | README "Project layout"; the role-based routing note in CLAUDE.md if `App.tsx`'s switch changed | read the hunk |
 | `.github/workflows/` | CLAUDE.md "the gate" paragraph; README "Checks before you push" | every workflow file is named somewhere |
 | a known issue fixed, or a new one accepted | CLAUDE.md "Known open issues"; README "Known issues" | the two lists say the same things |

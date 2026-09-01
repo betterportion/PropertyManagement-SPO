@@ -1,4 +1,4 @@
-import type { Express } from "express";
+import type { Express, RequestHandler } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { setupAuth, isAuthenticated, getUserId } from "./auth";
@@ -42,6 +42,7 @@ import {
   guardedUpload,
   IMAGE_UPLOAD_MAX_BYTES,
   DOCUMENT_UPLOAD_MAX_BYTES,
+  CSV_IMPORT_MAX_BYTES,
 } from "./uploadLimits";
 import { uploadRateLimit } from "./security";
 import {
@@ -64,6 +65,8 @@ import {
 } from "@shared/schema";
 import { STANDARD_SCHEDULE_TEMPLATES, addMonths } from "./schedules";
 import { buildActionItems } from "./actionItems";
+import { closedDateChange } from "./maintenanceStatus";
+import { parseResidentCsv, buildImportPreview } from "./residentImport";
 import { buildRegionSummaries, type RegionStaff } from "./regionSummary";
 import { normalizeRegions } from "./migrateRegions";
 import { REGIONS } from "@shared/regions";
@@ -89,6 +92,24 @@ const upload = multer({
     }
     cb(new Error("Only image files are allowed"));
   },
+});
+
+/**
+ * The body of a confirmed roster import.
+ *
+ * Deliberately not the preview object the client was handed: only the fields
+ * that become a resident are accepted, so a client cannot smuggle a region, a
+ * property or an `isActive` past the route by echoing the preview back.
+ */
+const rosterImportSchema = z.object({
+  rows: z.array(z.object({
+    firstName: z.string().min(1),
+    lastName: z.string().min(1),
+    email: z.string().email(),
+    phone: z.string().nullish().transform((v) => v ?? null),
+    notes: z.string().nullish().transform((v) => v ?? null),
+    moveInDate: z.string().nullish().transform((v) => v ?? null),
+  })).min(1, "There is nothing to import"),
 });
 
 const roleUpdateSchema = z.object({
@@ -576,6 +597,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           region: residency.region,
           buildingAddress: residency.buildingAddress,
           submittedBy,
+          ...closedDateChange(undefined, validatedData.status, new Date()),
         });
         await attachRequestPhotos(ctx, request.id, req.body?.photoUrls);
         return res.json(request);
@@ -586,7 +608,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const validatedData = insertMaintenanceRequestSchema.omit({ submittedBy: true }).parse(req.body);
       if (!requireRegion(res, ctx, validatedData.region, "Forbidden - Cannot create in this region")) return;
 
-      const request = await storage.createMaintenanceRequest({ ...validatedData, submittedBy });
+      const request = await storage.createMaintenanceRequest({
+        ...validatedData,
+        submittedBy,
+        // Staff can file a request that is already resolved. Treat that as
+        // closing it now, so it carries a close date like any other.
+        ...closedDateChange(undefined, validatedData.status, new Date()),
+      });
       await attachRequestPhotos(ctx, request.id, req.body?.photoUrls);
       res.json(request);
     } catch (error) {
@@ -657,7 +685,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       if (!requireRegionMove(res, ctx, existingRequest.region, validatedData.region)) return;
 
-      const request = await storage.updateMaintenanceRequest(req.params.id, validatedData);
+      // Stamp or clear the close date from the transition. This is the only
+      // thing that writes completedDate on an update -- it is never taken from
+      // the request body, so a client cannot backdate a closure.
+      const request = await storage.updateMaintenanceRequest(req.params.id, {
+        ...validatedData,
+        ...closedDateChange(existingRequest.status, validatedData.status, new Date()),
+      });
 
       // Only a status change is recorded. Every other edit is ordinary work,
       // and logging all of them would bury the ones that matter.
@@ -1537,6 +1571,158 @@ export async function registerRoutes(app: Express): Promise<Server> {
       sendError(res, error, "Failed to add resident");
     }
   });
+
+  // ---------------------------------------------------------------------------
+  // Roster CSV import
+  //
+  // Two endpoints, and the split between them is the whole point: the upload
+  // only ever produces a preview, and a separate confirm does the writing. An
+  // import that applied itself on upload would give an RA no chance to notice
+  // that a column was misread or that half the sheet is already on the roster.
+  //
+  // The property is in the URL rather than a form field so the multipart request
+  // still carries exactly one part and no text fields -- the same property the
+  // other upload routes rely on to bound what a request can cost.
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Authorizes a roster import and resolves its property.
+   *
+   * This runs BEFORE multer on both routes. Doing the permission and region
+   * checks after the body was read would mean a caller with no right to import
+   * still gets their file buffered into memory first.
+   */
+  const requireRosterImportAccess: RequestHandler = async (req: any, res, next) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageProperties")) return;
+
+      const property = await storage.getProperty(req.params.propertyId);
+      if (!property) {
+        return res.status(404).json({ message: "Property not found" });
+      }
+      if (!requireRegion(res, ctx, property.region, "Forbidden - Cannot import into this region")) return;
+
+      req.importContext = { ctx, property };
+      next();
+    } catch (error) {
+      sendError(res, error, "Failed to start the roster import");
+    }
+  };
+
+  const csvUpload = multer({
+    storage: fileStorage,
+    // One file, no text fields -- see the image uploader above.
+    limits: { fileSize: CSV_IMPORT_MAX_BYTES, files: 1, fields: 0 },
+    fileFilter: (req, file, cb) => {
+      const ext = path.extname(file.originalname).toLowerCase();
+      // Spreadsheet tools disagree about a CSV's MIME type -- Excel sends
+      // application/vnd.ms-excel, some browsers send octet-stream -- so the
+      // extension is the real check and the type list is deliberately broad.
+      const allowedMime = new Set([
+        "text/csv",
+        "text/plain",
+        "application/csv",
+        "application/vnd.ms-excel",
+        "application/octet-stream",
+      ]);
+      if (ext === ".csv" && allowedMime.has(file.mimetype)) {
+        return cb(null, true);
+      }
+      cb(new Error("Only a .csv file can be imported"));
+    },
+  });
+
+  /**
+   * Reads the uploaded CSV as text.
+   *
+   * There is no magic-byte check here, unlike the document uploads, because a
+   * CSV has no signature to check and -- more to the point -- nothing is
+   * stored. The bytes are decoded, parsed, and dropped when the request ends,
+   * so a file pretending to be a CSV gets parsed into rows that fail validation
+   * rather than written anywhere.
+   */
+  function decodeCsv(buffer: Buffer): string | null {
+    const text = buffer.toString("utf8");
+    // A lone replacement character means the bytes were not UTF-8 text.
+    return text.includes("\uFFFD") ? null : text;
+  }
+
+  app.post(
+    '/api/properties/:propertyId/residents/import/preview',
+    isAuthenticated,
+    uploadRateLimit,
+    requireRosterImportAccess,
+    ...guardedUpload(csvUpload.single('file'), CSV_IMPORT_MAX_BYTES),
+    async (req: any, res) => {
+      try {
+        if (!req.file) {
+          return res.status(400).json({ message: "No file uploaded" });
+        }
+        const text = decodeCsv(req.file.buffer);
+        if (text === null) {
+          return res.status(400).json({ message: "That file is not readable as text. Export it as CSV and try again." });
+        }
+
+        const existing = await storage.getResidentsByProperty(req.params.propertyId);
+        const preview = buildImportPreview(
+          parseResidentCsv(text),
+          existing.map((resident) => resident.email),
+        );
+        res.json(preview);
+      } catch (error) {
+        sendError(res, error, "Failed to read the roster file");
+      }
+    },
+  );
+
+  app.post(
+    '/api/properties/:propertyId/residents/import',
+    isAuthenticated,
+    requireRosterImportAccess,
+    async (req: any, res) => {
+      try {
+        const { property } = req.importContext;
+        const { rows } = rosterImportSchema.parse(req.body);
+
+        // The confirm step re-derives everything rather than trusting what the
+        // preview said. The roster can have moved on between the two requests,
+        // and the rows arrive from a client that could have edited them.
+        const existing = await storage.getResidentsByProperty(property.id);
+        const preview = buildImportPreview(
+          { rows: rows.map((row, index) => ({ ...row, rowNumber: index + 1, errors: [] })), fileErrors: [] },
+          existing.map((resident) => resident.email),
+        );
+
+        const created = [];
+        for (const outcome of preview.outcomes) {
+          if (outcome.kind !== "create") continue;
+          const validated = insertResidentSchema.parse({
+            propertyId: property.id,
+            firstName: outcome.row.firstName,
+            lastName: outcome.row.lastName,
+            email: outcome.row.email,
+            phone: outcome.row.phone,
+            notes: outcome.row.notes,
+            moveInDate: outcome.row.moveInDate,
+            region: property.region,
+            buildingAddress: property.address,
+          });
+          created.push(await storage.createResident(validated));
+        }
+
+        res.json({
+          created: created.length,
+          skipped: preview.counts.duplicate + preview.counts.error,
+          residents: created,
+        });
+      } catch (error) {
+        sendError(res, error, "Failed to import the roster");
+      }
+    },
+  );
 
   app.patch('/api/residents/:id', isAuthenticated, async (req: any, res) => {
     try {

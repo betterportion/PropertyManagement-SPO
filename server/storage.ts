@@ -93,6 +93,12 @@ function computeDefaultPermissions(userId: string, role: "admin" | "regional_adm
     // by revoking a grant, not by rewriting guards.
     canViewFinancials: role !== "resident",
     canManageFinancials: role !== "resident",
+    // Both new-surface flags start false for every role, including staff. They
+    // gate features that do not exist yet, and the plan they come from asks for
+    // them to land ahead of the features rather than alongside them -- so the
+    // safe starting state is nobody, and turning one on is a data change.
+    canCompleteWalkthroughs: false,
+    canManagePropertySetup: false,
     allowedRegions: role === "admin" ? [...REGIONS] : [],
   };
 }
@@ -112,10 +118,18 @@ export interface IStorage {
   deleteUser(id: string): Promise<void>;
 
   // Maintenance Requests
-  createMaintenanceRequest(request: InsertMaintenanceRequest): Promise<MaintenanceRequest>;
+  createMaintenanceRequest(
+    request: InsertMaintenanceRequest & { completedDate?: Date | null },
+  ): Promise<MaintenanceRequest>;
   getMaintenanceRequest(id: string): Promise<MaintenanceRequest | undefined>;
   getAllMaintenanceRequests(): Promise<MaintenanceRequest[]>;
-  updateMaintenanceRequest(id: string, data: Partial<InsertMaintenanceRequest>): Promise<MaintenanceRequest>;
+  // completedDate is not part of the insert schema -- it is set by the server
+  // from a status transition, never accepted from a request body. See
+  // server/maintenanceStatus.ts. null clears it when a request reopens.
+  updateMaintenanceRequest(
+    id: string,
+    data: Partial<InsertMaintenanceRequest> & { completedDate?: Date | null },
+  ): Promise<MaintenanceRequest>;
   deleteMaintenanceRequest(id: string): Promise<void>;
 
   // Maintenance Request Photos
@@ -456,7 +470,9 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Maintenance Requests Implementation
-  async createMaintenanceRequest(requestData: InsertMaintenanceRequest): Promise<MaintenanceRequest> {
+  async createMaintenanceRequest(
+    requestData: InsertMaintenanceRequest & { completedDate?: Date | null },
+  ): Promise<MaintenanceRequest> {
     const [request] = await db.insert(maintenanceRequests).values(requestData).returning();
     return request;
   }
@@ -470,7 +486,10 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(maintenanceRequests).orderBy(desc(maintenanceRequests.submittedDate));
   }
 
-  async updateMaintenanceRequest(id: string, data: Partial<InsertMaintenanceRequest>): Promise<MaintenanceRequest> {
+  async updateMaintenanceRequest(
+    id: string,
+    data: Partial<InsertMaintenanceRequest> & { completedDate?: Date | null },
+  ): Promise<MaintenanceRequest> {
     const [request] = await db
       .update(maintenanceRequests)
       .set({ ...filterUndefined(data), updatedAt: new Date() })
