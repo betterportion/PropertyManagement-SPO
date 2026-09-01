@@ -120,6 +120,13 @@
       "when": 1788235975176,
       "tag": "0016_add_resident_phone_and_notes",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1788298881059,
+      "tag": "0017_walkthrough_events_and_items",
+      "breakpoints": true
     }
   ]
 }

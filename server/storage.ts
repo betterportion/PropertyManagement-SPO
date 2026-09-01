@@ -4,6 +4,8 @@ import {
   maintenanceRequests,
   maintenanceRequestPhotos,
   walkthroughRooms,
+  walkthroughs,
+  walkthroughItems,
   walkthroughPhotos,
   assets,
   assetPhotos,
@@ -26,6 +28,10 @@ import {
   type MaintenanceRequestPhoto,
   type InsertMaintenanceRequestPhoto,
   type WalkthroughRoom,
+  type Walkthrough,
+  type InsertWalkthrough,
+  type WalkthroughItem,
+  type InsertWalkthroughItem,
   type InsertWalkthroughRoom,
   type WalkthroughPhoto,
   type InsertWalkthroughPhoto,
@@ -139,7 +145,24 @@ export interface IStorage {
   getAllMaintenanceRequestPhotos(): Promise<MaintenanceRequestPhoto[]>;
   deleteMaintenanceRequestPhoto(id: string): Promise<void>;
 
+  // Walkthroughs
+  createWalkthrough(walkthrough: InsertWalkthrough): Promise<Walkthrough>;
+  getWalkthrough(id: string): Promise<Walkthrough | undefined>;
+  getAllWalkthroughs(): Promise<Walkthrough[]>;
+  getWalkthroughsByProperty(propertyId: string): Promise<Walkthrough[]>;
+  updateWalkthrough(id: string, data: Partial<InsertWalkthrough>): Promise<Walkthrough>;
+  deleteWalkthrough(id: string): Promise<void>;
+
+  // Walkthrough Items
+  createWalkthroughItem(item: InsertWalkthroughItem): Promise<WalkthroughItem>;
+  getWalkthroughItem(id: string): Promise<WalkthroughItem | undefined>;
+  getAllWalkthroughItems(): Promise<WalkthroughItem[]>;
+  getWalkthroughItemsByRoom(roomId: string): Promise<WalkthroughItem[]>;
+  updateWalkthroughItem(id: string, data: Partial<InsertWalkthroughItem>): Promise<WalkthroughItem>;
+  deleteWalkthroughItem(id: string): Promise<void>;
+
   // Walkthrough Rooms
+  getWalkthroughRoomsByWalkthrough(walkthroughId: string): Promise<WalkthroughRoom[]>;
   createWalkthroughRoom(room: InsertWalkthroughRoom): Promise<WalkthroughRoom>;
   getWalkthroughRoom(id: string): Promise<WalkthroughRoom | undefined>;
   getAllWalkthroughRooms(): Promise<WalkthroughRoom[]>;
@@ -529,7 +552,87 @@ export class DatabaseStorage implements IStorage {
     await db.delete(maintenanceRequestPhotos).where(eq(maintenanceRequestPhotos.id, id));
   }
 
+  // Walkthroughs Implementation
+  async createWalkthrough(data: InsertWalkthrough): Promise<Walkthrough> {
+    const [row] = await db.insert(walkthroughs).values(data).returning();
+    return row;
+  }
+
+  async getWalkthrough(id: string): Promise<Walkthrough | undefined> {
+    const [row] = await db.select().from(walkthroughs).where(eq(walkthroughs.id, id));
+    return row;
+  }
+
+  async getAllWalkthroughs(): Promise<Walkthrough[]> {
+    return await db.select().from(walkthroughs).orderBy(desc(walkthroughs.walkthroughDate));
+  }
+
+  async getWalkthroughsByProperty(propertyId: string): Promise<Walkthrough[]> {
+    return await db
+      .select()
+      .from(walkthroughs)
+      .where(eq(walkthroughs.propertyId, propertyId))
+      .orderBy(desc(walkthroughs.walkthroughDate));
+  }
+
+  async updateWalkthrough(id: string, data: Partial<InsertWalkthrough>): Promise<Walkthrough> {
+    const [row] = await db
+      .update(walkthroughs)
+      .set({ ...filterUndefined(data), updatedAt: new Date() })
+      .where(eq(walkthroughs.id, id))
+      .returning();
+    return row;
+  }
+
+  async deleteWalkthrough(id: string): Promise<void> {
+    await db.delete(walkthroughs).where(eq(walkthroughs.id, id));
+  }
+
+  // Walkthrough Items Implementation
+  async createWalkthroughItem(data: InsertWalkthroughItem): Promise<WalkthroughItem> {
+    const [row] = await db.insert(walkthroughItems).values(data).returning();
+    return row;
+  }
+
+  async getWalkthroughItem(id: string): Promise<WalkthroughItem | undefined> {
+    const [row] = await db.select().from(walkthroughItems).where(eq(walkthroughItems.id, id));
+    return row;
+  }
+
+  async getAllWalkthroughItems(): Promise<WalkthroughItem[]> {
+    return await db.select().from(walkthroughItems).orderBy(walkthroughItems.displayOrder);
+  }
+
+  async getWalkthroughItemsByRoom(roomId: string): Promise<WalkthroughItem[]> {
+    return await db
+      .select()
+      .from(walkthroughItems)
+      .where(eq(walkthroughItems.roomId, roomId))
+      .orderBy(walkthroughItems.displayOrder);
+  }
+
+  async updateWalkthroughItem(id: string, data: Partial<InsertWalkthroughItem>): Promise<WalkthroughItem> {
+    const [row] = await db
+      .update(walkthroughItems)
+      .set({ ...filterUndefined(data), updatedAt: new Date() })
+      .where(eq(walkthroughItems.id, id))
+      .returning();
+    return row;
+  }
+
+  async deleteWalkthroughItem(id: string): Promise<void> {
+    await db.delete(walkthroughItems).where(eq(walkthroughItems.id, id));
+  }
+
   // Walkthrough Rooms Implementation
+  async getWalkthroughRoomsByWalkthrough(walkthroughId: string): Promise<WalkthroughRoom[]> {
+    return await db
+      .select()
+      .from(walkthroughRooms)
+      .where(eq(walkthroughRooms.walkthroughId, walkthroughId))
+      .orderBy(walkthroughRooms.displayOrder);
+  }
+
   async createWalkthroughRoom(roomData: InsertWalkthroughRoom): Promise<WalkthroughRoom> {
     const [room] = await db.insert(walkthroughRooms).values(roomData).returning();
     return room;

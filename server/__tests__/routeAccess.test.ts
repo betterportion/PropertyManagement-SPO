@@ -1384,6 +1384,252 @@ describe("importing a roster from a spreadsheet", () => {
   });
 });
 
+/**
+ * Walkthroughs and their items.
+ *
+ * These are new routes, and nothing existing fails if one of them is missing a
+ * guard -- which is exactly why every one of them is asserted here.
+ *
+ * The novel risk is the region chain. An item has no region of its own: it
+ * inherits its room's, which inherits its walkthrough's. Any break in that
+ * chain must grant nothing rather than fall through to "no region required".
+ */
+describe("walkthroughs and walkthrough items", () => {
+  const WEST_PROPERTY = { id: "prop-west", name: "Cleveland House", region: "West Central", address: "1 Main St" };
+  const EAST_PROPERTY = { id: "prop-east", name: "Como House", region: "East Central", address: "2 River Rd" };
+  const VIEW = { canViewWalkthroughs: true };
+  const MANAGE = { canViewWalkthroughs: true, canManageWalkthroughs: true };
+
+  const WEST_WT = { id: "wt-west", propertyId: "prop-west", region: "West Central", buildingAddress: "1 Main St", status: "draft" };
+  const EAST_WT = { id: "wt-east", propertyId: "prop-east", region: "East Central", buildingAddress: "2 River Rd", status: "draft" };
+  const WEST_ROOM = { id: "room-west", name: "Kitchen", walkthroughId: "wt-west" };
+  const EAST_ROOM = { id: "room-east", name: "Kitchen", walkthroughId: "wt-east" };
+  const ORPHAN_ROOM = { id: "room-orphan", name: "Kitchen", walkthroughId: null };
+  const WEST_ITEM = { id: "item-west", roomId: "room-west", label: "Sink", condition: "good" };
+  const ORPHAN_ITEM = { id: "item-orphan", roomId: "room-orphan", label: "Sink", condition: "good" };
+
+  const westLead = () => actAs(STAFF, { ...MANAGE, allowedRegions: ["West Central"] });
+
+  // ── The three layers, on every new route ─────────────────────────────────
+
+  const READS: [string, string][] = [
+    ["GET", "/api/walkthroughs"],
+    ["GET", "/api/walkthroughs/wt-west"],
+    ["GET", "/api/walkthroughs/wt-west/rooms"],
+    ["GET", "/api/walkthrough-rooms/room-west/items"],
+  ];
+  const WRITES: [string, string][] = [
+    ["POST", "/api/walkthroughs"],
+    ["PATCH", "/api/walkthroughs/wt-west"],
+    ["DELETE", "/api/walkthroughs/wt-west"],
+    ["POST", "/api/walkthrough-items"],
+    ["PATCH", "/api/walkthrough-items/item-west"],
+    ["DELETE", "/api/walkthrough-items/item-west"],
+  ];
+
+  /** GET cannot carry a body, so only the writes get one. */
+  const call = (method: string, path: string) =>
+    method === "GET" ? request(method, path) : request(method, path, { body: {} });
+
+  it.each([...READS, ...WRITES])("refuses an anonymous caller: %s %s", async (method, path) => {
+    const { status } = await call(method, path);
+    expect(status).toBe(401);
+  });
+
+  it.each([...READS, ...WRITES])("refuses a resident: %s %s", async (method, path) => {
+    actAs(ALICE, ALL_MAINTENANCE);
+    storageMock.getWalkthrough.mockResolvedValue(WEST_WT);
+    storageMock.getWalkthroughRoom.mockResolvedValue(WEST_ROOM);
+    storageMock.getWalkthroughItem.mockResolvedValue(WEST_ITEM);
+    const { status } = await call(method, path);
+    expect(status).toBe(403);
+  });
+
+  it.each(WRITES)("refuses staff holding only the view permission: %s %s", async (method, path) => {
+    actAs(STAFF, { ...VIEW, allowedRegions: ["West Central"] });
+    storageMock.getProperty.mockResolvedValue(WEST_PROPERTY);
+    storageMock.getWalkthrough.mockResolvedValue(WEST_WT);
+    storageMock.getWalkthroughRoom.mockResolvedValue(WEST_ROOM);
+    storageMock.getWalkthroughItem.mockResolvedValue(WEST_ITEM);
+    const { status } = await call(method, path);
+    expect(status).toBe(403);
+    expect(storageMock.createWalkthrough).not.toHaveBeenCalled();
+    expect(storageMock.updateWalkthrough).not.toHaveBeenCalled();
+    expect(storageMock.deleteWalkthrough).not.toHaveBeenCalled();
+    expect(storageMock.createWalkthroughItem).not.toHaveBeenCalled();
+  });
+
+  // ── Region scoping ───────────────────────────────────────────────────────
+
+  it("filters the list to the caller's regions", async () => {
+    westLead();
+    storageMock.getAllWalkthroughs.mockResolvedValue([WEST_WT, EAST_WT]);
+    const { status, body } = await request("GET", "/api/walkthroughs");
+    expect(status).toBe(200);
+    expect(body.map((w: { id: string }) => w.id)).toEqual(["wt-west"]);
+  });
+
+  it("gives an unassigned staff account an empty list, never everything", async () => {
+    actAs(STAFF, { ...MANAGE, allowedRegions: [] });
+    storageMock.getAllWalkthroughs.mockResolvedValue([WEST_WT, EAST_WT]);
+    const { body } = await request("GET", "/api/walkthroughs");
+    expect(body).toEqual([]);
+  });
+
+  it("refuses a walkthrough in another region", async () => {
+    westLead();
+    storageMock.getWalkthrough.mockResolvedValue(EAST_WT);
+    expect((await request("GET", "/api/walkthroughs/wt-east")).status).toBe(403);
+  });
+
+  it("refuses another region's rooms, without reading them", async () => {
+    westLead();
+    storageMock.getWalkthrough.mockResolvedValue(EAST_WT);
+    const { status } = await request("GET", "/api/walkthroughs/wt-east/rooms");
+    expect(status).toBe(403);
+    expect(storageMock.getWalkthroughRoomsByWalkthrough).not.toHaveBeenCalled();
+  });
+
+  it("takes region and house from the property, not from the caller", async () => {
+    westLead();
+    storageMock.getProperty.mockResolvedValue(WEST_PROPERTY);
+    storageMock.createWalkthrough.mockImplementation(async (w: Record<string, unknown>) => ({ id: "wt-new", ...w }));
+
+    const { status } = await request("POST", "/api/walkthroughs", {
+      body: { propertyId: "prop-west", region: "East Central", buildingAddress: "2 River Rd" },
+    });
+
+    expect(status).toBe(200);
+    expect(storageMock.createWalkthrough).toHaveBeenCalledWith(
+      expect.objectContaining({ region: "West Central", buildingAddress: "1 Main St" }),
+    );
+  });
+
+  it("records who performed it from the session, not the body", async () => {
+    westLead();
+    storageMock.getProperty.mockResolvedValue(WEST_PROPERTY);
+    storageMock.createWalkthrough.mockImplementation(async (w: Record<string, unknown>) => ({ id: "wt-new", ...w }));
+
+    await request("POST", "/api/walkthroughs", {
+      body: { propertyId: "prop-west", performedBy: "someone.else@spo.org" },
+    });
+
+    expect(storageMock.createWalkthrough).toHaveBeenCalledWith(
+      expect.objectContaining({ performedBy: STAFF.email }),
+    );
+  });
+
+  it("refuses to create in a region the caller cannot reach", async () => {
+    westLead();
+    storageMock.getProperty.mockResolvedValue(EAST_PROPERTY);
+    const { status } = await request("POST", "/api/walkthroughs", { body: { propertyId: "prop-east" } });
+    expect(status).toBe(403);
+    expect(storageMock.createWalkthrough).not.toHaveBeenCalled();
+  });
+
+  it("will not move a walkthrough to another house or region", async () => {
+    westLead();
+    storageMock.getWalkthrough.mockResolvedValue(WEST_WT);
+    storageMock.updateWalkthrough.mockResolvedValue(WEST_WT);
+
+    await request("PATCH", "/api/walkthroughs/wt-west", {
+      body: { status: "reviewed", propertyId: "prop-east", region: "East Central", buildingAddress: "2 River Rd" },
+    });
+
+    const patch = storageMock.updateWalkthrough.mock.calls[0][1];
+    expect(patch).toEqual({ status: "reviewed" });
+  });
+
+  // ── The region chain, and what happens when it breaks ────────────────────
+
+  it("resolves an item's region through its room and walkthrough", async () => {
+    // The positive control for the three refusals below: the chain really does
+    // resolve, so their failures are about the guard and not about the mocks.
+    westLead();
+    storageMock.getWalkthroughRoom.mockResolvedValue(WEST_ROOM);
+    storageMock.getWalkthrough.mockResolvedValue(WEST_WT);
+    storageMock.getWalkthroughItemsByRoom.mockResolvedValue([WEST_ITEM]);
+
+    const { status, body } = await request("GET", "/api/walkthrough-rooms/room-west/items");
+    expect(status).toBe(200);
+    expect(body).toHaveLength(1);
+  });
+
+  it("refuses an item whose walkthrough is in another region", async () => {
+    westLead();
+    storageMock.getWalkthroughRoom.mockResolvedValue(EAST_ROOM);
+    storageMock.getWalkthrough.mockResolvedValue(EAST_WT);
+
+    const { status } = await request("GET", "/api/walkthrough-rooms/room-east/items");
+    expect(status).toBe(403);
+    expect(storageMock.getWalkthroughItemsByRoom).not.toHaveBeenCalled();
+  });
+
+  it("fails closed for a room that belongs to no walkthrough", async () => {
+    // A room left unlinked by the backfill has no region to inherit. It must
+    // grant nothing, rather than skipping the region check for want of a value.
+    westLead();
+    storageMock.getWalkthroughRoom.mockResolvedValue(ORPHAN_ROOM);
+
+    const { status } = await request("GET", "/api/walkthrough-rooms/room-orphan/items");
+    expect(status).toBe(403);
+    expect(storageMock.getWalkthroughItemsByRoom).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the room itself is missing", async () => {
+    westLead();
+    storageMock.getWalkthroughRoom.mockResolvedValue(undefined);
+    expect((await request("GET", "/api/walkthrough-rooms/nope/items")).status).toBe(403);
+  });
+
+  it("fails closed when the walkthrough behind the room has been deleted", async () => {
+    westLead();
+    storageMock.getWalkthroughRoom.mockResolvedValue(WEST_ROOM);
+    storageMock.getWalkthrough.mockResolvedValue(undefined);
+    expect((await request("GET", "/api/walkthrough-rooms/room-west/items")).status).toBe(403);
+  });
+
+  it("refuses to create an item on an orphaned room, and creates nothing", async () => {
+    westLead();
+    storageMock.getWalkthroughRoom.mockResolvedValue(ORPHAN_ROOM);
+
+    const { status } = await request("POST", "/api/walkthrough-items", {
+      body: { roomId: "room-orphan", label: "Sink", displayOrder: 0 },
+    });
+
+    expect(status).toBe(403);
+    expect(storageMock.createWalkthroughItem).not.toHaveBeenCalled();
+  });
+
+  it("refuses to edit an item whose chain does not resolve, and writes nothing", async () => {
+    westLead();
+    storageMock.getWalkthroughItem.mockResolvedValue(ORPHAN_ITEM);
+    storageMock.getWalkthroughRoom.mockResolvedValue(ORPHAN_ROOM);
+
+    const { status } = await request("PATCH", "/api/walkthrough-items/item-orphan", {
+      body: { condition: "good" },
+    });
+
+    expect(status).toBe(403);
+    expect(storageMock.updateWalkthroughItem).not.toHaveBeenCalled();
+  });
+
+  it("will not move an item into another room", async () => {
+    westLead();
+    storageMock.getWalkthroughItem.mockResolvedValue(WEST_ITEM);
+    storageMock.getWalkthroughRoom.mockResolvedValue(WEST_ROOM);
+    storageMock.getWalkthrough.mockResolvedValue(WEST_WT);
+    storageMock.updateWalkthroughItem.mockResolvedValue(WEST_ITEM);
+
+    await request("PATCH", "/api/walkthrough-items/item-west", {
+      body: { condition: "poor", roomId: "room-east" },
+    });
+
+    const patch = storageMock.updateWalkthroughItem.mock.calls[0][1];
+    expect(patch).toEqual({ condition: "poor" });
+  });
+});
+
 describe("who may read the activity log", () => {
   const EVENT = {
     id: "evt-1",

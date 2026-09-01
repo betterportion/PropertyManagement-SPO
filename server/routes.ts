@@ -48,6 +48,8 @@ import { uploadRateLimit } from "./security";
 import {
   insertMaintenanceRequestSchema,
   insertWalkthroughRoomSchema,
+  insertWalkthroughSchema,
+  insertWalkthroughItemSchema,
   insertWalkthroughPhotoSchema,
   insertAssetSchema,
   insertAssetPhotoSchema,
@@ -792,6 +794,242 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Walkthrough Rooms Routes
+  // ---------------------------------------------------------------------------
+  // Walkthroughs
+  //
+  // A dated inspection event for one house. Rooms hang off one of these rather
+  // than off the property directly, which is what makes a year-over-year
+  // comparison possible at all.
+  //
+  // Region comes off the walkthrough itself -- it is denormalised from the
+  // property exactly as it is on residents and schedules -- so these routes
+  // scope with filterByRegion rather than the related-region join the room
+  // routes need.
+  // ---------------------------------------------------------------------------
+
+  app.get('/api/walkthroughs', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canViewWalkthroughs", "canManageWalkthroughs")) return;
+
+      res.json(filterByRegion(ctx, await storage.getAllWalkthroughs()));
+    } catch (error) {
+      sendError(res, error, "Failed to fetch walkthroughs");
+    }
+  });
+
+  app.get('/api/walkthroughs/:id', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canViewWalkthroughs", "canManageWalkthroughs")) return;
+
+      const walkthrough = await storage.getWalkthrough(req.params.id);
+      if (!walkthrough) {
+        return res.status(404).json({ message: "Walkthrough not found" });
+      }
+      if (!requireRegion(res, ctx, walkthrough.region)) return;
+
+      res.json(walkthrough);
+    } catch (error) {
+      sendError(res, error, "Failed to fetch walkthrough");
+    }
+  });
+
+  app.get('/api/walkthroughs/:id/rooms', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canViewWalkthroughs", "canManageWalkthroughs")) return;
+
+      // Authorize against the parent before reading its children, so a guessed
+      // walkthrough id in another region cannot enumerate that house's rooms.
+      const walkthrough = await storage.getWalkthrough(req.params.id);
+      if (!walkthrough) {
+        return res.status(404).json({ message: "Walkthrough not found" });
+      }
+      if (!requireRegion(res, ctx, walkthrough.region)) return;
+
+      res.json(await storage.getWalkthroughRoomsByWalkthrough(req.params.id));
+    } catch (error) {
+      sendError(res, error, "Failed to fetch walkthrough rooms");
+    }
+  });
+
+  app.post('/api/walkthroughs', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageWalkthroughs")) return;
+
+      const property = await storage.getProperty(req.body?.propertyId);
+      if (!property) {
+        return res.status(404).json({ message: "Property not found" });
+      }
+      if (!requireRegion(res, ctx, property.region, "Forbidden - Cannot create in this region")) return;
+
+      // region and buildingAddress come from the property, never the caller,
+      // so a walkthrough cannot be filed into a region its author cannot see.
+      const validatedData = insertWalkthroughSchema.parse({
+        ...req.body,
+        region: property.region,
+        buildingAddress: property.address,
+        performedBy: ctx.user.email ?? null,
+      });
+
+      res.json(await storage.createWalkthrough(validatedData));
+    } catch (error) {
+      sendError(res, error, "Failed to create walkthrough");
+    }
+  });
+
+  app.patch('/api/walkthroughs/:id', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageWalkthroughs")) return;
+
+      const existing = await storage.getWalkthrough(req.params.id);
+      if (!existing) {
+        return res.status(404).json({ message: "Walkthrough not found" });
+      }
+      if (!requireRegion(res, ctx, existing.region)) return;
+
+      // The house a walkthrough belongs to is fixed, so its property and the
+      // region and address derived from it are not editable.
+      const { propertyId: _p, region: _r, buildingAddress: _b, ...editable } = req.body ?? {};
+      const validatedData = insertWalkthroughSchema.partial().parse(editable);
+
+      res.json(await storage.updateWalkthrough(req.params.id, validatedData));
+    } catch (error) {
+      sendError(res, error, "Failed to update walkthrough");
+    }
+  });
+
+  app.delete('/api/walkthroughs/:id', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageWalkthroughs")) return;
+
+      const existing = await storage.getWalkthrough(req.params.id);
+      if (!existing) {
+        return res.status(404).json({ message: "Walkthrough not found" });
+      }
+      if (!requireRegion(res, ctx, existing.region)) return;
+
+      await storage.deleteWalkthrough(req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      sendError(res, error, "Failed to delete walkthrough");
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // Walkthrough items
+  //
+  // An item has no region of its own. It inherits the room's, which inherits
+  // the walkthrough's -- so every one of these resolves the chain and checks
+  // the region at the top of it before touching anything.
+  // ---------------------------------------------------------------------------
+
+  /**
+   * The region an item belongs to, or null when the chain is broken.
+   *
+   * Returns null rather than throwing so callers fail closed: a room with no
+   * walkthrough, or a walkthrough that has been deleted, grants nothing.
+   */
+  async function regionForWalkthroughRoom(roomId: string): Promise<string | null> {
+    const room = await storage.getWalkthroughRoom(roomId);
+    if (!room?.walkthroughId) return null;
+    const walkthrough = await storage.getWalkthrough(room.walkthroughId);
+    return walkthrough?.region ?? null;
+  }
+
+  app.get('/api/walkthrough-rooms/:roomId/items', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canViewWalkthroughs", "canManageWalkthroughs")) return;
+
+      const region = await regionForWalkthroughRoom(req.params.roomId);
+      if (!requireRegion(res, ctx, region)) return;
+
+      res.json(await storage.getWalkthroughItemsByRoom(req.params.roomId));
+    } catch (error) {
+      sendError(res, error, "Failed to fetch walkthrough items");
+    }
+  });
+
+  app.post('/api/walkthrough-items', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageWalkthroughs")) return;
+
+      const validatedData = insertWalkthroughItemSchema.parse(req.body);
+      const region = await regionForWalkthroughRoom(validatedData.roomId);
+      if (!requireRegion(res, ctx, region, "Forbidden - Cannot create in this region")) return;
+
+      res.json(await storage.createWalkthroughItem(validatedData));
+    } catch (error) {
+      sendError(res, error, "Failed to create walkthrough item");
+    }
+  });
+
+  app.patch('/api/walkthrough-items/:id', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageWalkthroughs")) return;
+
+      const existing = await storage.getWalkthroughItem(req.params.id);
+      if (!existing) {
+        return res.status(404).json({ message: "Walkthrough item not found" });
+      }
+      if (!requireRegion(res, ctx, await regionForWalkthroughRoom(existing.roomId))) return;
+
+      // An item cannot be moved to another room: that would carry it into a
+      // different walkthrough, and possibly a different region.
+      const { roomId: _r, ...editable } = req.body ?? {};
+      const validatedData = insertWalkthroughItemSchema.partial().parse(editable);
+
+      res.json(await storage.updateWalkthroughItem(req.params.id, validatedData));
+    } catch (error) {
+      sendError(res, error, "Failed to update walkthrough item");
+    }
+  });
+
+  app.delete('/api/walkthrough-items/:id', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageWalkthroughs")) return;
+
+      const existing = await storage.getWalkthroughItem(req.params.id);
+      if (!existing) {
+        return res.status(404).json({ message: "Walkthrough item not found" });
+      }
+      if (!requireRegion(res, ctx, await regionForWalkthroughRoom(existing.roomId))) return;
+
+      await storage.deleteWalkthroughItem(req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      sendError(res, error, "Failed to delete walkthrough item");
+    }
+  });
+
   app.get('/api/walkthrough-rooms', isAuthenticated, async (req: any, res) => {
     try {
       const ctx = await requireActiveUser(req, res);

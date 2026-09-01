@@ -149,8 +149,16 @@ export type InsertMaintenanceRequest = z.infer<typeof insertMaintenanceRequestSc
 export const walkthroughRooms = pgTable("walkthrough_rooms", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   name: varchar("name").notNull(),
+  // A room now belongs to a dated walkthrough rather than straight to a house,
+  // so the same kitchen appears once per inspection and can be compared year
+  // over year. Nullable only because the column has to exist before the
+  // backfill can populate it; every row is set by the end of that migration.
+  walkthroughId: varchar("walkthrough_id").references(() => walkthroughs.id, { onDelete: "cascade" }),
   propertyId: varchar("property_id"), // References properties table
   buildingAddress: varchar("building_address").notNull(), // Kept for backward compatibility
+  // Legacy. This text array was the only per-item detail the old shape held;
+  // the backfill turned each entry into a walkthrough_items row. Kept rather
+  // than dropped so the migration stays reversible by inspection.
   requiredQuestions: text("required_questions").array(),
   displayOrder: integer("display_order").notNull(),
   createdAt: timestamp("created_at").defaultNow(),
@@ -170,12 +178,102 @@ export const insertWalkthroughRoomSchema = createInsertSchema(walkthroughRooms)
 export type WalkthroughRoom = typeof walkthroughRooms.$inferSelect;
 export type InsertWalkthroughRoom = z.infer<typeof insertWalkthroughRoomSchema>;
 
+/**
+ * The condition vocabulary for a walkthrough item.
+ *
+ * Two kinds of "no grade" here, and they are not the same thing:
+ *   - `not_applicable` -- the item does not exist in this house. No smoke
+ *     detector in a room that has none.
+ *   - `not_recorded` -- the item exists and nobody assessed it. Every item the
+ *     backfill created from legacy data is this, because the old vocabulary
+ *     recorded *change* ("same as last walkthrough") rather than *state*, and
+ *     "nothing changed" says nothing about whether a room is good or poor.
+ *
+ * Collapsing the two would either hide a real gap in the record or invent a
+ * clean bill of health for a room nobody looked at.
+ */
+export const WALKTHROUGH_CONDITIONS = [
+  "good",
+  "fair",
+  "poor",
+  "damaged",
+  "not_applicable",
+  "not_recorded",
+] as const;
+
+export type WalkthroughCondition = (typeof WALKTHROUGH_CONDITIONS)[number];
+
+/** The conditions the flagged-items view treats as needing attention. */
+export const WALKTHROUGH_FLAGGED_CONDITIONS = ["poor", "damaged"] as const;
+
+// Walkthroughs
+//
+// A dated inspection event for one house. This is the record that did not
+// exist before: rooms hung straight off a property, so there was nothing to
+// compare year over year and no record of who filled an inspection in.
+//
+// region and buildingAddress are denormalised from the property, exactly as on
+// residents and maintenance schedules, so region-scoped authorization applies
+// without a join.
+export const walkthroughs = pgTable("walkthroughs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  propertyId: varchar("property_id").notNull().references(() => properties.id, { onDelete: "cascade" }),
+  walkthroughDate: timestamp("walkthrough_date").notNull().defaultNow(),
+  type: varchar("type", { enum: ["move_in", "move_out", "annual", "legacy"] }).notNull().default("annual"),
+  // draft survives leaving the page half-finished, which is the normal case
+  // for somebody filling this in on a phone while walking around a house.
+  status: varchar("status", { enum: ["draft", "submitted", "reviewed"] }).notNull().default("draft"),
+  performedBy: varchar("performed_by"),
+  notes: text("notes"),
+  region: varchar("region").notNull(),
+  buildingAddress: varchar("building_address").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertWalkthroughSchema = createInsertSchema(walkthroughs)
+  .omit({ id: true, createdAt: true, updatedAt: true })
+  // Optional rather than nullable: the column is NOT NULL with a default, so
+  // an omitted date means "now", and an explicit null is a caller error.
+  .extend({ walkthroughDate: dateFromClient.optional() });
+
+export type Walkthrough = typeof walkthroughs.$inferSelect;
+export type InsertWalkthrough = z.infer<typeof insertWalkthroughSchema>;
+
+// Walkthrough Items
+//
+// One line of a room's checklist: the sink, the smoke detector, the walls.
+// This is where condition and notes now live. They used to live on a photo,
+// which meant an item nobody photographed could not be assessed at all.
+export const walkthroughItems = pgTable("walkthrough_items", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  roomId: varchar("room_id").notNull().references(() => walkthroughRooms.id, { onDelete: "cascade" }),
+  label: varchar("label").notNull(),
+  condition: varchar("condition", { enum: WALKTHROUGH_CONDITIONS }).notNull().default("not_recorded"),
+  notes: text("notes"),
+  displayOrder: integer("display_order").notNull().default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertWalkthroughItemSchema = createInsertSchema(walkthroughItems)
+  .omit({ id: true, createdAt: true, updatedAt: true })
+  .extend({ displayOrder: nonNegativeInt });
+
+export type WalkthroughItem = typeof walkthroughItems.$inferSelect;
+export type InsertWalkthroughItem = z.infer<typeof insertWalkthroughItemSchema>;
+
 // Walkthrough Photos
 export const walkthroughPhotos = pgTable("walkthrough_photos", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   roomId: varchar("room_id").notNull().references(() => walkthroughRooms.id, { onDelete: "cascade" }),
   imageUrl: varchar("image_url").notNull(),
-  condition: varchar("condition", { enum: ["same_as_last_walkthrough", "additional_damage"] }).notNull(),
+  // Legacy, and deliberately not dropped. This vocabulary records *change*
+  // since the last visit, not *state*, so it cannot be reinterpreted as a
+  // condition -- see WALKTHROUGH_CONDITIONS. Condition now lives on
+  // walkthrough_items; this column is nullable so new photos need not set it,
+  // and the existing values stay exactly as they were recorded.
+  condition: varchar("condition", { enum: ["same_as_last_walkthrough", "additional_damage"] }),
   notes: text("notes"),
   region: varchar("region").notNull(),
   buildingAddress: varchar("building_address").notNull(),
