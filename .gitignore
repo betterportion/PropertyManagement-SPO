@@ -38,3 +38,6 @@ vite.config.ts.*
 /test-results/
 /playwright-report/
 /e2e/.auth/
+
+# Local working notes, not part of the app
+IMPLEMENTATION_PLAN_Michael.md

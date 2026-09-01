@@ -227,6 +227,65 @@ describe("requirePermission", () => {
   });
 });
 
+describe("the two flags added ahead of their features", () => {
+  // canCompleteWalkthroughs and canManagePropertySetup gate surfaces that do
+  // not exist yet. Nothing reads them, so nothing would fail if they were
+  // wired up wrongly -- which is exactly why the wiring is asserted here and
+  // not left until the feature arrives.
+
+  it("grants neither flag to a staff account that was given no grant", () => {
+    // The point of landing them early is that the features arrive gated. A
+    // default of true anywhere would silently undo that.
+    const ctx = context({ role: "regional_administrator", permissions: {} });
+    expect(hasPermission(ctx, "canCompleteWalkthroughs")).toBe(false);
+    expect(hasPermission(ctx, "canManagePropertySetup")).toBe(false);
+  });
+
+  it("grants neither flag to a resident account that was given no grant", () => {
+    const ctx = context({ role: "resident", permissions: {} });
+    expect(hasPermission(ctx, "canCompleteWalkthroughs")).toBe(false);
+    expect(hasPermission(ctx, "canManagePropertySetup")).toBe(false);
+  });
+
+  it("honours an explicit grant, and only the one granted", () => {
+    const ctx = context({ role: "resident", permissions: { canCompleteWalkthroughs: true } });
+    expect(hasPermission(ctx, "canCompleteWalkthroughs")).toBe(true);
+    expect(hasPermission(ctx, "canManagePropertySetup")).toBe(false);
+  });
+
+  it("applies the admin bypass, as every other flag does", () => {
+    const ctx = context({ role: "admin", permissions: undefined });
+    expect(hasPermission(ctx, "canCompleteWalkthroughs")).toBe(true);
+    expect(hasPermission(ctx, "canManagePropertySetup")).toBe(true);
+  });
+
+  it("refuses through requirePermission with a 403, not a crash", () => {
+    // The failure mode these replace: a check that reads the permissions row
+    // directly returns a 500 for an admin who has no row.
+    const res = response();
+    expect(requirePermission(res, context({ role: "resident" }), "canCompleteWalkthroughs")).toBe(false);
+    expect(res.sent.status).toBe(403);
+
+    const adminRes = response();
+    const admin = context({ role: "admin", permissions: undefined });
+    expect(requirePermission(adminRes, admin, "canCompleteWalkthroughs")).toBe(true);
+    expect(adminRes.sent.status).toBeUndefined();
+  });
+
+  it("grants no region reach by itself", () => {
+    // canCompleteWalkthroughs is house-scoped by design. Holding it must not
+    // widen what regions an account can reach, or the resident walkthrough
+    // routes would inherit a region path they are not supposed to have.
+    const ctx = context({
+      role: "resident",
+      permissions: { canCompleteWalkthroughs: true },
+      allowedRegions: [],
+    });
+    expect(canAccessRegion(ctx, "West Central")).toBe(false);
+    expect(filterByRegion(ctx, [{ region: "West Central" }])).toEqual([]);
+  });
+});
+
 describe("requireStaff and requireAdmin", () => {
   it("requireStaff refuses a resident", () => {
     const res = response();

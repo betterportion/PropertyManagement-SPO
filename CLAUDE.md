@@ -52,11 +52,13 @@ Three conventions in that suite, all of which exist because of a real miss:
 |---|---|
 | `index.ts` | Entry point. Validates configuration before anything else loads, sets `trust proxy`, security headers, JSON body parsing, API request logging, graceful shutdown, listens on `PORT`. |
 | `config.ts` | Every environment variable the server cannot run without, checked once at boot and reported together. Also owns the OIDC provider settings. |
-| `routes.ts` | Every API endpoint. One large file, ~84 handlers. |
+| `routes.ts` | Every API endpoint. One large file, ~86 handlers. |
 | `auth.ts` | OpenID Connect login and the session store. Reads its provider settings from `config.ts`. |
 | `authz.ts` | Who may do what: `requireActiveUser`, `requirePermission`, the region helpers, upload and maintenance ownership. |
 | `audit.ts` | Records the actions somebody may have to account for later. See "Audit log" below. |
 | `security.ts` | Helmet headers including the production CSP, plus the upload rate limit. |
+| `residentImport.ts` | The roster CSV rules: parsing (header aliases, quoted fields, the two date spellings a spreadsheet exports), per-row validation, and duplicate classification keyed on email **within a property**. Pure — text and existing emails in, findings out — so the file is never stored and the routes only read and write. |
+| `maintenanceStatus.ts` | When a maintenance request closed. `closedDateChange` is a pure function over the previous status, the next status and `now`, returning the patch to `completedDate`. Closing stamps it, reopening clears it, and an edit that does not change the status writes nothing. |
 | `actionItems.ts` | What the dashboard says needs attention, from schedules coming due, unpaid rent and deposits still held, plus the manual `tasks`. `buildActionItems` is pure — records plus `now` — so it tests without a database or a clock. |
 | `regionSummary.ts` | The per-region rollup a national admin reads. Also pure. "Health" is operational load only; unpaid rent is reported beside it, never inside it. |
 | `schedules.ts` | Preventive and safety schedules, and the daily job that turns a due one into an ordinary maintenance request. Idempotent via `lastGeneratedForDue`, so an overdue task does not spawn a request a day. |
@@ -97,8 +99,8 @@ Defined in `shared/schema.ts` using Drizzle, with Zod insert schemas generated b
 |---|---|---|
 | `sessions` | Express session store | Managed by `connect-pg-simple`, not by app code |
 | `users` | Accounts. `role` is `admin` / `regional_administrator` / `resident`, plus `isActive`; resident accounts carry a `propertyId` linking them to their house | `id` is the identity provider's subject claim; `email` is unique |
-| `user_permissions` | One row per user, fifteen boolean flags (including the two finance flags) plus `allowedRegions` (text array) | `userId` unique, cascades on user delete |
-| `maintenance_requests` | The core workflow. Priority includes a `wishlist` level; status is pending/in_progress/completed/cancelled. `photoUrl` is the single photo filed *with* the request; anything added later lives in `maintenance_request_photos` | `submittedBy` stores an **email**, see gotchas |
+| `user_permissions` | One row per user, seventeen boolean flags (including the two finance flags, and two that gate surfaces not built yet) plus `allowedRegions` (text array) | `userId` unique, cascades on user delete |
+| `maintenance_requests` | The core workflow. Priority includes a `wishlist` level; status is pending/in_progress/completed/cancelled. `completedDate` is the **close** date, set for `cancelled` as well as `completed`. `photoUrl` is the single photo filed *with* the request; anything added later lives in `maintenance_request_photos` | `submittedBy` stores an **email**, see gotchas |
 | `maintenance_request_photos` | Photos added to a request after it was filed, each with its uploader and date | `requestId` → `maintenance_requests`, cascades |
 | `maintenance_schedules` | Recurring upkeep on a house — `category` is `safety` or `preventive`, `intervalMonths` sets the cadence. A daily job turns a due schedule into an ordinary maintenance request, so there is no second queue to watch | `propertyId` → `properties` cascades; optional `assetId` → `assets` set-null; `region`/`buildingAddress` denormalised for region scoping |
 | `walkthrough_rooms` | Inspection room templates, ordered by `displayOrder` | `propertyId` → `properties` (loose, no FK); `buildingAddress` kept for backward compatibility |
@@ -109,7 +111,7 @@ Defined in `shared/schema.ts` using Drizzle, with Zod insert schemas generated b
 | `invoices` | Invoice records with amount, status, due/paid dates | `contactId` and `maintenanceRequestId`, both set-null on delete |
 | `billing_records` | Vendor billing with three document URLs (contract/invoice, COI, W-9) | `contactId` is a plain column, **not** a foreign key |
 | `properties` | Property records. `address` is computed from the four address parts and is unique; `chapter` (free text) records which SPO chapter uses the property; `ownership` (`owned`/`rented`) carries the three lease dates and a `renewalDecision` | Referenced loosely by rooms and assets; referenced with a real FK by residents and schedules |
-| `residents` | People living in a house: name, email, move-in/move-out dates, `isActive`. Deliberately **not** `users` — a resident on the roster need not have a login | `propertyId` → `properties`, cascades; `region`/`buildingAddress` denormalised |
+| `residents` | People living in a house: name, email, optional phone and notes, move-in/move-out dates, `isActive`. Deliberately **not** `users` — a resident on the roster need not have a login | `propertyId` → `properties`, cascades; `region`/`buildingAddress` denormalised |
 | `rent_payments` | One row per resident per `YYYY-MM` period: amount, status (`unpaid`/`paid`/`waived`/`failed`), paid date, free-text `reference`. `failed` is a bounced payment and still counts as outstanding. The `reference` is a note like "check #1234" or a processor ID — **never** an account or card number | `residentId` → `residents` cascades; unique on (resident, period) |
 | `security_deposits` | One deposit per resident: amount held, status (`held`/`returned`/`partially_returned`/`withheld`), amount returned, and deductions as a note rather than an itemised ledger | `residentId` → `residents`, cascades, unique |
 | `tasks` | Staff to-dos: title, category, open/done, due date, optional region and assignee. Reminders generated on a calendar carry a unique `sourceKey` so the daily job never duplicates one; hand-created tasks leave it null | `assignedToUserId`, `createdBy` and `completedBy` → `users`, all set-null so a task outlives its author |
@@ -152,7 +154,7 @@ app.get('/api/things', isAuthenticated, async (req: any, res) => {
     if (!requirePermission(res, ctx, "canViewThings")) return;
 
     const things = await storage.getAllThings();
-    res.json(ctx.isAdmin ? things : filterByRegion(things, ctx.allowedRegions));
+    res.json(filterByRegion(ctx, things));
   } catch (error) {
     sendError(res, error, "Failed to fetch things");
   }
@@ -163,7 +165,8 @@ app.get('/api/things', isAuthenticated, async (req: any, res) => {
 
 Non-admins only see records in their `allowedRegions`.
 
-- `filterByRegion(items, allowedRegions)` — filters a list. **Returns an empty array when `allowedRegions` is empty or null**, which is deliberate: no regions means no access, not all access. The literal string `"all"` in the list means every region.
+- `filterByRegion(ctx, items)` — filters a list. It takes the whole context, not a region list, and applies the admin bypass itself, so callers pass `ctx` straight through rather than testing `ctx.isAdmin` first. **Returns an empty array when the user's `allowedRegions` is empty or null**, which is deliberate: no regions means no access, not all access. The literal string `"all"` in the list means every region.
+- `filterByRelatedRegion(ctx, items, regionOf)` — the same rule for records whose region lives on a related record, such as an asset photo inheriting its asset's region.
 - `requireRegion(res, ctx, region)` — single-record check before create or delete.
 - `requireRegionMove(res, ctx, existingRegion, incomingRegion)` — on update, checks *both*, so a record cannot be moved into a region the user cannot reach.
 
@@ -196,16 +199,18 @@ The full provider-change sequence is in `docs/PRODUCTION_MIGRATION.md`.
 
 Uploads go through one interface, `server/objectStorage/`, with two drivers chosen by `STORAGE_DRIVER`: a local folder for development and a **private** Supabase bucket for production. Nothing else in the app talks to a bucket, and no route writes to the container filesystem.
 
-Two endpoints, both behind `isAuthenticated` and a permission check, both buffering the file in memory with multer and then writing it to the store:
+Two endpoints store a file, both behind `isAuthenticated` and a permission check, both buffering it in memory with multer and then writing it to the store:
 
 - `POST /api/upload` — images only (jpeg/jpg/png/gif/webp), 10 MB limit.
 - `POST /api/upload-doc` — documents and images (pdf/doc/docx + image types), 20 MB limit.
 
 Both validate the extension, the MIME type **and the file's actual magic bytes**, so a renamed executable is rejected before anything is stored. Both generate the storage key server-side — the client's filename survives only in the `uploads` table — and both return `{ url: "/uploads/<key>" }`.
 
+A third route takes a file without storing one: the roster CSV import, below. It goes through `guardedUpload()` like the other two, but it parses the bytes and discards them, so none of the storage-key or magic-byte rules apply to it.
+
 ### Upload limits
 
-Because uploads are buffered in memory, `server/uploadLimits.ts` bounds them. It is the single source of truth for the per-file limits (10MB images, 20MB documents) — the multer configs import them rather than repeating the numbers.
+Because uploads are buffered in memory, `server/uploadLimits.ts` bounds them. It is the single source of truth for the per-file limits (10MB images, 20MB documents, 2MB roster CSVs) — the multer configs import them rather than repeating the numbers.
 
 `guardedUpload()` wraps each upload route with two things:
 
@@ -213,6 +218,14 @@ Because uploads are buffered in memory, `server/uploadLimits.ts` bounds them. It
 - **Local handling of multer's own errors.** An oversized file returns `413` with the limit stated, rather than the generic message the final error handler in `server/errors.ts` would produce.
 
 Any new upload route should go through `guardedUpload()` too, and its permission check must sit **before** the multer middleware — otherwise a caller with no right to upload still gets their whole body read into memory.
+
+### The roster CSV import
+
+`POST /api/properties/:propertyId/residents/import/preview` and `POST /api/properties/:propertyId/residents/import` are a deliberate pair: **the upload only ever produces a preview, and nothing is written until the second call confirms it.** Three things to preserve if you touch them:
+
+- **The property is in the URL, not a form field**, so the multipart request still carries one part and no text fields — the property the other upload routes rely on to bound what a request can cost.
+- **The CSV is never stored.** It is decoded, parsed and dropped. That is also why there is no magic-byte check here: a CSV has no signature, and nothing reaches a bucket for a disguised file to sit in.
+- **The confirm step re-derives everything** — it re-reads the roster, re-runs the duplicate check, and takes `propertyId`, `region` and `buildingAddress` from the property rather than from the body. The rows arrive from a client that could have edited them, and the roster can have moved on between the two calls.
 
 ### Reading files back
 
@@ -269,6 +282,7 @@ The JotForm webhook that used to turn form submissions into maintenance requests
 1. **Deleting a photo or document leaves the file in storage.** The database row goes; the object stays and keeps costing space.
 2. **Files uploaded before the current storage layout are unreachable.** Their URLs no longer resolve. Nothing in the app depends on them.
 3. **Out-of-region records answer 403 rather than 404**, which confirms the record exists. Knowingly accepted.
+4. **Requests closed before `completedDate` started being written have no close date.** The column existed from the baseline but nothing set it until `maintenanceStatus.ts` landed, so historic rows are closed with a null date and nothing can reconstruct when they closed — `updatedAt` moves on any edit. They are deliberately *not* backfilled: a guessed date is worse than no date once a visibility window depends on it. Anything reading the close date must decide what a null means and say so; the resident visibility window treats it as outside the window, which fails closed.
 
 **`submittedBy` holds an email address, not a user ID.** The create route writes an email, and `ownsRecord` in `authz.ts` compares against `ctx.user.email` to match. That is consistent today, and resident visibility works — but it is the kind of thing a well-meaning "let's key this on user ID" change breaks silently on both sides at once. `server/__tests__/ownership.test.ts` covers it.
 
@@ -282,7 +296,7 @@ The JotForm webhook that used to turn form submissions into maintenance requests
 
 **The portal must never store raw banking or card credentials.** Specifically, no bank account number, no routing number, no full card number (PAN), no CVV/CVC, no ACH authorization credentials, and no online banking login of any kind — not in the database, not in an uploaded document field, not in a log line, not in the audit log.
 
-That data belongs with a qualified processor: **QuickBooks, Stripe, or an equivalent**. Any future payments or bookkeeping feature integrates with one of those and stores only:
+That data belongs with a qualified processor. SPO uses **QuickBooks and Ramp**; anything equivalent is a decision, not a default. Any future payments or bookkeeping feature integrates with one of those and stores only:
 
 - a **reference** issued by the processor (customer ID, payment intent ID, invoice ID),
 - a **status** (paid, pending, failed),

@@ -1078,6 +1078,312 @@ describe("what reaches the audit log", () => {
 // Reading the audit log back
 // ---------------------------------------------------------------------------
 
+/**
+ * The close-date clock over real HTTP.
+ *
+ * The transition rules are covered exhaustively and without HTTP in
+ * maintenanceStatus.test.ts. What can only be checked here is that the route
+ * actually calls them, and that the value reaching storage came from the
+ * server rather than from the request body.
+ */
+describe("when a maintenance request records that it closed", () => {
+  const patch = (path: string, body: unknown) => request("PATCH", path, { body });
+
+  /** The patch the route handed to storage on a maintenance update. */
+  function maintenancePatch() {
+    const calls = storageMock.updateMaintenanceRequest.mock.calls;
+    return calls.length === 1 ? calls[0][1] : undefined;
+  }
+
+  it("stamps a close date when a request is completed", async () => {
+    actAs(STAFF, { ...ALL_MAINTENANCE, allowedRegions: ["West Central"] });
+    storageMock.getMaintenanceRequest.mockResolvedValue(WEST_REQUEST);
+
+    await patch("/api/maintenance-requests/req-west", { status: "completed" });
+
+    expect(maintenancePatch()?.completedDate).toBeInstanceOf(Date);
+  });
+
+  it("clears the close date when a closed request is reopened", async () => {
+    actAs(STAFF, { ...ALL_MAINTENANCE, allowedRegions: ["West Central"] });
+    storageMock.getMaintenanceRequest.mockResolvedValue({ ...WEST_REQUEST, status: "completed" });
+
+    await patch("/api/maintenance-requests/req-west", { status: "in_progress" });
+
+    expect(maintenancePatch()).toHaveProperty("completedDate", null);
+  });
+
+  it("leaves the close date alone on an edit that does not change the status", async () => {
+    // The one that matters for the rows closed before this column was written:
+    // an unrelated edit must not backfill a date and make an old request look
+    // freshly closed. The positive control above proves the spy fires, so this
+    // absence is a real absence rather than a test that never ran.
+    actAs(STAFF, { ...ALL_MAINTENANCE, allowedRegions: ["West Central"] });
+    storageMock.getMaintenanceRequest.mockResolvedValue({ ...WEST_REQUEST, status: "completed" });
+
+    await patch("/api/maintenance-requests/req-west", { description: "Still dripping" });
+
+    expect(maintenancePatch()).not.toHaveProperty("completedDate");
+  });
+
+  it("ignores a close date supplied by the caller", async () => {
+    // completedDate is not in the insert schema, so a body carrying one is
+    // stripped before it reaches storage. Without that, a client could backdate
+    // a closure and push a request out of the resident visibility window early.
+    actAs(STAFF, { ...ALL_MAINTENANCE, allowedRegions: ["West Central"] });
+    storageMock.getMaintenanceRequest.mockResolvedValue(WEST_REQUEST);
+
+    await patch("/api/maintenance-requests/req-west", {
+      description: "Still dripping",
+      completedDate: "2020-01-01T00:00:00.000Z",
+    });
+
+    expect(maintenancePatch()).not.toHaveProperty("completedDate");
+  });
+});
+
+/**
+ * The roster CSV import.
+ *
+ * The parsing and duplicate rules are covered without HTTP in
+ * residentImport.test.ts. What is asserted here is the part only a real request
+ * can show: that the permission and region checks run BEFORE the multipart
+ * parser, that a preview writes nothing, and that a confirm does not trust what
+ * the client sends back.
+ */
+describe("importing a roster from a spreadsheet", () => {
+  const WEST_PROPERTY = { id: "prop-west", name: "Cleveland House", region: "West Central", address: "1 Main St" };
+  const EAST_PROPERTY = { id: "prop-east", name: "Como House", region: "East Central", address: "2 River Rd" };
+  const ALL_PROPERTIES = { canViewProperties: true, canManageProperties: true };
+
+  const ROSTER = "First Name,Last Name,Email\nAda,Lovelace,ada@spo.org\nGrace,Hopper,grace@spo.org";
+
+  async function postRoster(propertyId: string, text = ROSTER) {
+    const form = new FormData();
+    form.append("file", new Blob([text], { type: "text/csv" }), "roster.csv");
+    const res = await fetch(`${baseUrl}/api/properties/${propertyId}/residents/import/preview`, {
+      method: "POST",
+      body: form,
+    });
+    let body: any = null;
+    try {
+      body = await res.json();
+    } catch {
+      body = null;
+    }
+    return { status: res.status, body };
+  }
+
+  const confirm = (propertyId: string, rows: unknown[]) =>
+    request("POST", `/api/properties/${propertyId}/residents/import`, { body: { rows } });
+
+  // ── Who may import ────────────────────────────────────────────────────────
+
+  it("refuses an anonymous caller", async () => {
+    const { status } = await postRoster("prop-west");
+    expect(status).toBe(401);
+    expect(storageMock.createResident).not.toHaveBeenCalled();
+  });
+
+  it("refuses a resident", async () => {
+    actAs(ALICE, ALL_MAINTENANCE);
+    storageMock.getProperty.mockResolvedValue(WEST_PROPERTY);
+    const { status } = await postRoster("prop-west");
+    expect(status).toBe(403);
+    expect(storageMock.createResident).not.toHaveBeenCalled();
+  });
+
+  it("refuses staff who lack the property permission", async () => {
+    actAs(STAFF, { ...ALL_MAINTENANCE, allowedRegions: ["West Central"] });
+    storageMock.getProperty.mockResolvedValue(WEST_PROPERTY);
+    const { status } = await postRoster("prop-west");
+    expect(status).toBe(403);
+    expect(storageMock.createResident).not.toHaveBeenCalled();
+  });
+
+  it("refuses a house in a region the importer cannot reach", async () => {
+    actAs(STAFF, { ...ALL_PROPERTIES, allowedRegions: ["West Central"] });
+    storageMock.getProperty.mockResolvedValue(EAST_PROPERTY);
+    const { status } = await postRoster("prop-east");
+    expect(status).toBe(403);
+    expect(storageMock.createResident).not.toHaveBeenCalled();
+  });
+
+  // ── The body must not be read for a caller who will be refused ────────────
+
+  it("proves the instrumentation works: an allowed import does reach the parser", async () => {
+    // The positive control. Without it, every "not called" below could pass
+    // because the spy was never wired to this route at all.
+    actAs(STAFF, { ...ALL_PROPERTIES, allowedRegions: ["West Central"] });
+    storageMock.getProperty.mockResolvedValue(WEST_PROPERTY);
+    storageMock.getResidentsByProperty.mockResolvedValue([]);
+
+    const { status } = await postRoster("prop-west");
+
+    expect(status).toBe(200);
+    expect(multerEntered).toHaveBeenCalledWith("/api/properties/prop-west/residents/import/preview");
+  });
+
+  it("turns a resident away before reading the file", async () => {
+    actAs(ALICE, ALL_MAINTENANCE);
+    storageMock.getProperty.mockResolvedValue(WEST_PROPERTY);
+    await postRoster("prop-west");
+    expect(multerEntered).not.toHaveBeenCalled();
+  });
+
+  it("turns an out-of-region importer away before reading the file", async () => {
+    actAs(STAFF, { ...ALL_PROPERTIES, allowedRegions: ["West Central"] });
+    storageMock.getProperty.mockResolvedValue(EAST_PROPERTY);
+    await postRoster("prop-east");
+    expect(multerEntered).not.toHaveBeenCalled();
+  });
+
+  // ── Preview writes nothing ────────────────────────────────────────────────
+
+  it("previews without creating anybody", async () => {
+    // The rule the whole feature is shaped around: an upload is never an
+    // import. Nothing is written until a separate confirm arrives.
+    actAs(STAFF, { ...ALL_PROPERTIES, allowedRegions: ["West Central"] });
+    storageMock.getProperty.mockResolvedValue(WEST_PROPERTY);
+    storageMock.getResidentsByProperty.mockResolvedValue([]);
+
+    const { status, body } = await postRoster("prop-west");
+
+    expect(status).toBe(200);
+    expect(body.counts).toEqual({ create: 2, duplicate: 0, error: 0 });
+    expect(storageMock.createResident).not.toHaveBeenCalled();
+  });
+
+  it("reports a duplicate against the roster as it stands now", async () => {
+    actAs(STAFF, { ...ALL_PROPERTIES, allowedRegions: ["West Central"] });
+    storageMock.getProperty.mockResolvedValue(WEST_PROPERTY);
+    storageMock.getResidentsByProperty.mockResolvedValue([{ email: "ada@spo.org" }]);
+
+    const { body } = await postRoster("prop-west");
+
+    expect(body.counts).toEqual({ create: 1, duplicate: 1, error: 0 });
+    expect(storageMock.createResident).not.toHaveBeenCalled();
+  });
+
+  it("refuses a file that is not a CSV", async () => {
+    actAs(STAFF, { ...ALL_PROPERTIES, allowedRegions: ["West Central"] });
+    storageMock.getProperty.mockResolvedValue(WEST_PROPERTY);
+
+    const form = new FormData();
+    form.append("file", new Blob(["not a roster"], { type: "application/pdf" }), "roster.pdf");
+    const res = await fetch(`${baseUrl}/api/properties/prop-west/residents/import/preview`, {
+      method: "POST",
+      body: form,
+    });
+
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect(storageMock.createResident).not.toHaveBeenCalled();
+  });
+
+  // ── Confirm re-derives rather than trusting the client ────────────────────
+
+  it("creates the confirmed rows against the property from the URL", async () => {
+    actAs(STAFF, { ...ALL_PROPERTIES, allowedRegions: ["West Central"] });
+    storageMock.getProperty.mockResolvedValue(WEST_PROPERTY);
+    storageMock.getResidentsByProperty.mockResolvedValue([]);
+    storageMock.createResident.mockImplementation(async (r: Record<string, unknown>) => ({ id: "res-new", ...r }));
+
+    const { status, body } = await confirm("prop-west", [
+      { firstName: "Ada", lastName: "Lovelace", email: "ada@spo.org" },
+    ]);
+
+    expect(status).toBe(200);
+    expect(body.created).toBe(1);
+    expect(storageMock.createResident).toHaveBeenCalledWith(
+      expect.objectContaining({
+        propertyId: "prop-west",
+        email: "ada@spo.org",
+        region: "West Central",
+        buildingAddress: "1 Main St",
+      }),
+    );
+  });
+
+  it("takes region and house from the property, not from the caller", async () => {
+    // A client that echoes an edited preview back must not be able to file
+    // somebody into a region the importer cannot reach.
+    actAs(STAFF, { ...ALL_PROPERTIES, allowedRegions: ["West Central"] });
+    storageMock.getProperty.mockResolvedValue(WEST_PROPERTY);
+    storageMock.getResidentsByProperty.mockResolvedValue([]);
+    storageMock.createResident.mockImplementation(async (r: Record<string, unknown>) => ({ id: "res-new", ...r }));
+
+    await confirm("prop-west", [
+      {
+        firstName: "Ada",
+        lastName: "Lovelace",
+        email: "ada@spo.org",
+        region: "East Central",
+        propertyId: "prop-east",
+        buildingAddress: "2 River Rd",
+        isActive: false,
+      },
+    ]);
+
+    expect(storageMock.createResident).toHaveBeenCalledWith(
+      expect.objectContaining({ propertyId: "prop-west", region: "West Central", buildingAddress: "1 Main St" }),
+    );
+  });
+
+  it("re-checks duplicates at confirm, not just at preview", async () => {
+    // The roster can move on between the two requests -- another RA importing
+    // the same sheet, or the same person adding one by hand.
+    actAs(STAFF, { ...ALL_PROPERTIES, allowedRegions: ["West Central"] });
+    storageMock.getProperty.mockResolvedValue(WEST_PROPERTY);
+    storageMock.getResidentsByProperty.mockResolvedValue([{ email: "ada@spo.org" }]);
+
+    const { status, body } = await confirm("prop-west", [
+      { firstName: "Ada", lastName: "Lovelace", email: "ada@spo.org" },
+    ]);
+
+    expect(status).toBe(200);
+    expect(body.created).toBe(0);
+    expect(body.skipped).toBe(1);
+    expect(storageMock.createResident).not.toHaveBeenCalled();
+  });
+
+  it("refuses a confirm for a house in another region", async () => {
+    actAs(STAFF, { ...ALL_PROPERTIES, allowedRegions: ["West Central"] });
+    storageMock.getProperty.mockResolvedValue(EAST_PROPERTY);
+
+    const { status } = await confirm("prop-east", [
+      { firstName: "Ada", lastName: "Lovelace", email: "ada@spo.org" },
+    ]);
+
+    expect(status).toBe(403);
+    expect(storageMock.createResident).not.toHaveBeenCalled();
+  });
+
+  it("refuses a confirm carrying a row that is not usable", async () => {
+    actAs(STAFF, { ...ALL_PROPERTIES, allowedRegions: ["West Central"] });
+    storageMock.getProperty.mockResolvedValue(WEST_PROPERTY);
+    storageMock.getResidentsByProperty.mockResolvedValue([]);
+
+    const { status } = await confirm("prop-west", [
+      { firstName: "Ada", lastName: "Lovelace", email: "not-an-email" },
+    ]);
+
+    expect(status).toBe(400);
+    expect(storageMock.createResident).not.toHaveBeenCalled();
+  });
+
+  it("refuses a property that does not exist", async () => {
+    actAs(STAFF, { ...ALL_PROPERTIES, allowedRegions: ["West Central"] });
+    storageMock.getProperty.mockResolvedValue(undefined);
+
+    const { status } = await confirm("prop-nope", [
+      { firstName: "Ada", lastName: "Lovelace", email: "ada@spo.org" },
+    ]);
+
+    expect(status).toBe(404);
+    expect(storageMock.createResident).not.toHaveBeenCalled();
+  });
+});
+
 describe("who may read the activity log", () => {
   const EVENT = {
     id: "evt-1",
