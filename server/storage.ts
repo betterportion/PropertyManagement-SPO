@@ -176,6 +176,7 @@ export interface IStorage {
   getWalkthroughItem(id: string): Promise<WalkthroughItem | undefined>;
   getAllWalkthroughItems(): Promise<WalkthroughItem[]>;
   getWalkthroughItemsByRoom(roomId: string): Promise<WalkthroughItem[]>;
+  getWalkthroughItemsByWalkthrough(walkthroughId: string): Promise<WalkthroughItem[]>;
   updateWalkthroughItem(id: string, data: Partial<InsertWalkthroughItem>): Promise<WalkthroughItem>;
   deleteWalkthroughItem(id: string): Promise<void>;
 
@@ -682,6 +683,23 @@ export class DatabaseStorage implements IStorage {
       .from(walkthroughItems)
       .where(eq(walkthroughItems.roomId, roomId))
       .orderBy(walkthroughItems.displayOrder);
+  }
+
+  /**
+   * Every item in a walkthrough, across all of its rooms.
+   *
+   * One query rather than one per room: the mobile screen needs the whole
+   * checklist to show progress before the RA has opened a single room, and a
+   * phone in a house should not make eight round trips to find that out.
+   */
+  async getWalkthroughItemsByWalkthrough(walkthroughId: string): Promise<WalkthroughItem[]> {
+    const rows = await db
+      .select({ item: walkthroughItems })
+      .from(walkthroughItems)
+      .innerJoin(walkthroughRooms, eq(walkthroughItems.roomId, walkthroughRooms.id))
+      .where(eq(walkthroughRooms.walkthroughId, walkthroughId))
+      .orderBy(walkthroughRooms.displayOrder, walkthroughItems.displayOrder);
+    return rows.map((row) => row.item);
   }
 
   async updateWalkthroughItem(id: string, data: Partial<InsertWalkthroughItem>): Promise<WalkthroughItem> {

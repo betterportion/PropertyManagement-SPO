@@ -1003,6 +1003,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  /**
+   * Every item in a walkthrough, across all of its rooms.
+   *
+   * The mobile screen shows one room at a time but needs the whole checklist
+   * up front: progress across the house, and which rooms are still untouched,
+   * are the two things that let an RA skip around instead of working through
+   * the list in order.
+   *
+   * Authorized against the parent walkthrough for the same reason the rooms
+   * route is: a guessed id in another region must not enumerate that house's
+   * checklist.
+   */
+  app.get('/api/walkthroughs/:id/items', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canViewWalkthroughs", "canManageWalkthroughs")) return;
+
+      const walkthrough = await storage.getWalkthrough(req.params.id);
+      if (!walkthrough) {
+        return res.status(404).json({ message: "Walkthrough not found" });
+      }
+      if (!requireRegion(res, ctx, walkthrough.region)) return;
+
+      res.json(await storage.getWalkthroughItemsByWalkthrough(req.params.id));
+    } catch (error) {
+      sendError(res, error, "Failed to fetch walkthrough items");
+    }
+  });
+
   app.post('/api/walkthroughs', isAuthenticated, async (req: any, res) => {
     try {
       const ctx = await requireActiveUser(req, res);

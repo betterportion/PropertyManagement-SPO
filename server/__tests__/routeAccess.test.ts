@@ -1427,6 +1427,7 @@ describe("walkthroughs and walkthrough items", () => {
     ["GET", "/api/walkthroughs"],
     ["GET", "/api/walkthroughs/wt-west"],
     ["GET", "/api/walkthroughs/wt-west/rooms"],
+    ["GET", "/api/walkthroughs/wt-west/items"],
     ["GET", "/api/walkthrough-rooms/room-west/items"],
   ];
   const WRITES: [string, string][] = [
@@ -1499,6 +1500,34 @@ describe("walkthroughs and walkthrough items", () => {
     const { status } = await request("GET", "/api/walkthroughs/wt-east/rooms");
     expect(status).toBe(403);
     expect(storageMock.getWalkthroughRoomsByWalkthrough).not.toHaveBeenCalled();
+  });
+
+  it("returns the whole checklist of a walkthrough in the caller's region", async () => {
+    // The positive control for the refusal below: the route really does read
+    // the checklist when it is allowed to, so "not called" means the guard.
+    westLead();
+    storageMock.getWalkthrough.mockResolvedValue(WEST_WT);
+    storageMock.getWalkthroughItemsByWalkthrough.mockResolvedValue([WEST_ITEM]);
+
+    const { status, body } = await request("GET", "/api/walkthroughs/wt-west/items");
+    expect(status).toBe(200);
+    expect(body.map((i: { id: string }) => i.id)).toEqual(["item-west"]);
+  });
+
+  it("refuses another region's checklist, without reading it", async () => {
+    westLead();
+    storageMock.getWalkthrough.mockResolvedValue(EAST_WT);
+    const { status } = await request("GET", "/api/walkthroughs/wt-east/items");
+    expect(status).toBe(403);
+    expect(storageMock.getWalkthroughItemsByWalkthrough).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the walkthrough behind a checklist is gone", async () => {
+    westLead();
+    storageMock.getWalkthrough.mockResolvedValue(undefined);
+    const { status } = await request("GET", "/api/walkthroughs/nope/items");
+    expect(status).toBe(404);
+    expect(storageMock.getWalkthroughItemsByWalkthrough).not.toHaveBeenCalled();
   });
 
   it("takes region and house from the property, not from the caller", async () => {

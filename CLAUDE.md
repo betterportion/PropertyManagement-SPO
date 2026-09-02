@@ -52,7 +52,7 @@ Three conventions in that suite, all of which exist because of a real miss:
 |---|---|
 | `index.ts` | Entry point. Validates configuration before anything else loads, sets `trust proxy`, security headers, JSON body parsing, API request logging, graceful shutdown, listens on `PORT`. |
 | `config.ts` | Every environment variable the server cannot run without, checked once at boot and reported together. Also owns the OIDC provider settings. |
-| `routes.ts` | Every API endpoint. One large file, ~105 handlers. |
+| `routes.ts` | Every API endpoint. One large file, ~106 handlers. |
 | `auth.ts` | OpenID Connect login and the session store. Reads its provider settings from `config.ts`. |
 | `authz.ts` | Who may do what: `requireActiveUser`, `requirePermission`, the region helpers, upload and maintenance ownership. |
 | `audit.ts` | Records the actions somebody may have to account for later. See "Audit log" below. |
@@ -177,6 +177,21 @@ Three properties to preserve:
 - **Changing the template is `requireAdmin`, not `canManageWalkthroughs`.** That flag is a grant over your own houses; the template is national, so an edit reaches every region. They are different things and need different grants.
 
 Labels carry forward; **condition and notes never do**. A new walkthrough starts unassessed, for the same reason the `0017` backfill refused to turn "unchanged" into a condition. The seeded template content is **provisional** — SPO's own forms are still outstanding — which is why it is ordinary editable rows rather than constants.
+
+### The walkthrough screen
+
+`client/src/pages/WalkthroughRun.tsx` at `/walkthroughs/:id` is where a walkthrough is actually filled in. The people using it are students standing in a house holding a phone with one hand free, and everything about it follows from that:
+
+- **One room fills the screen**, and rooms are reachable in any order through the room switcher. A house is not walked in list order, and a screen that insists on finishing one room before the next is a screen that gets abandoned halfway.
+- **There is no save button and no client-side draft.** Every condition tap is its own `PATCH /api/walkthrough-items/:id`. The chips update optimistically so tapping feels like ticking a paper form; the cache is invalidated in `onSettled` behind that.
+- **Nothing here moves a walkthrough out of `draft`.** The status vocabulary exists on the record and the badge reports it, but no control changes it — the plan has not asked for that step yet, and inventing a submit action would decide on SPO's behalf what "finished" means and who may say so.
+- **A note is the half that is easy to lose,** because it is typed over seconds and the moments it can be lost are the moments nothing fires an event you would normally listen for. `ItemRow` writes one four ways — a moment after typing stops, on blur, on `visibilitychange`/`pagehide`, and on unmount. Removing any of the last three loses a note that a real RA would have typed; the reload assertion in `e2e/mobile.spec.ts` is what proves it, and it does fail when they are removed.
+- **`GET /api/walkthroughs/:id/items` returns the whole checklist in one request.** Progress across the house has to be readable before any room is opened, and a phone should not make one round trip per room to work that out.
+- **Every condition carries its word** — "Good", "Damaged", "Not here". Colour is a second signal and never the only one. `client/src/lib/walkthrough.ts` owns the labels, the progress arithmetic and the manage rule so the header bar and the room switcher cannot disagree; it is pure and tested in `client/src/lib/walkthrough.test.ts`.
+- **Adding a room requires a room type.** The type is what brings the standard items with it, and a room added by name alone would arrive empty with nothing to fill it in. Removing an item a house does not have is the editing this screen offers; adding one back, deleting a room and deleting a photo are deliberately absent until a ticket asks for them.
+- **Empty is not finished.** A room with no items reports 0%, never 100% — the one lie this screen cannot afford.
+
+`Walkthroughs.tsx` is now only the index: pick a house, see its dated inspections, start a new one. The old room-per-property shape it used to render — along with `RoomCard.tsx` and `RoomDetailDrawer.tsx` — is gone, because two live shapes is how drift starts. The phone-width acceptance criteria live in `e2e/mobile.spec.ts`.
 
 ### Walkthrough conditions
 
