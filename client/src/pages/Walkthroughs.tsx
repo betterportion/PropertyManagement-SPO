@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { ArrowLeft, Building2, CalendarDays, ChevronRight, ClipboardList, MapPin, Plus } from "lucide-react";
 
@@ -20,13 +20,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Container, PageHeader, PageStack, Section } from "@/components/layout/page";
 import { EmptyState, LoadingState } from "@/components/states";
 import { useAuth } from "@/hooks/useAuth";
-import { useToast } from "@/hooks/use-toast";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { today, useStartWalkthrough } from "@/hooks/useStartWalkthrough";
 import { formatDate } from "@/lib/format";
 import {
   WALKTHROUGH_STATUS_BADGE,
   WALKTHROUGH_TYPE_LABEL,
-  canManageWalkthroughs,
+  canFillInWalkthroughs,
   type WalkthroughUser,
 } from "@/lib/walkthrough";
 import type { Property, Walkthrough } from "@shared/schema";
@@ -43,16 +42,9 @@ import type { Property, Walkthrough } from "@shared/schema";
 /** Legacy walkthroughs came from the backfill; nobody starts one. */
 const STARTABLE_TYPES: Walkthrough["type"][] = ["annual", "move_in", "move_out"];
 
-/** Today as "YYYY-MM-DD", for the date input's default. */
-function today(): string {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-}
-
 export default function Walkthroughs() {
   const [, navigate] = useLocation();
   const { user } = useAuth();
-  const { toast } = useToast();
 
   const [selectedProperty, setSelectedProperty] = useState<Property | null>(null);
   const [isStartOpen, setIsStartOpen] = useState(false);
@@ -61,7 +53,7 @@ export default function Walkthroughs() {
 
   // Computed, not returned on. An early return above the queries below would
   // change the hook count once the auth query resolves, and React throws.
-  const canManage = canManageWalkthroughs(user as WalkthroughUser | null);
+  const canManage = canFillInWalkthroughs(user as WalkthroughUser | null);
 
   const { data: properties = [], isLoading: propertiesLoading } = useQuery<Property[]>({
     queryKey: ["/api/properties"],
@@ -87,30 +79,7 @@ export default function Walkthroughs() {
     return grouped;
   }, [walkthroughs]);
 
-  const startWalkthrough = useMutation({
-    mutationFn: async (propertyId: string) => {
-      const response = await apiRequest("POST", "/api/walkthroughs", {
-        propertyId,
-        type: newType,
-        walkthroughDate: newDate,
-      });
-      return (await response.json()) as Walkthrough & { roomsCreated: number };
-    },
-    onSuccess: (walkthrough) => {
-      queryClient.invalidateQueries({ queryKey: ["/api/walkthroughs"] });
-      setIsStartOpen(false);
-      if (walkthrough.roomsCreated === 0) {
-        toast({
-          title: "Walkthrough started, but the checklist is empty",
-          description: "The standard rooms did not load. Add the rooms you need from inside the walkthrough.",
-        });
-      }
-      navigate(`/walkthroughs/${walkthrough.id}`);
-    },
-    onError: () => {
-      toast({ variant: "destructive", title: "Not started", description: "The walkthrough could not be started." });
-    },
-  });
+  const startWalkthrough = useStartWalkthrough(() => setIsStartOpen(false));
 
   const isLoading = propertiesLoading || walkthroughsLoading;
   const propertyWalkthroughs = selectedProperty ? (byProperty.get(selectedProperty.id) ?? []) : [];
@@ -313,7 +282,14 @@ export default function Walkthroughs() {
                 <Button
                   variant="primary"
                   disabled={!selectedProperty || !newDate || startWalkthrough.isPending}
-                  onClick={() => selectedProperty && startWalkthrough.mutate(selectedProperty.id)}
+                  onClick={() =>
+                    selectedProperty &&
+                    startWalkthrough.mutate({
+                      propertyId: selectedProperty.id,
+                      type: newType,
+                      walkthroughDate: newDate,
+                    })
+                  }
                   data-testid="button-confirm-start-walkthrough"
                 >
                   {startWalkthrough.isPending ? "Starting…" : "Start"}

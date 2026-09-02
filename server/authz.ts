@@ -435,3 +435,187 @@ export function requireMaintenanceRequestAccess(
   res.status(403).json({ message: "Forbidden" });
   return false;
 }
+
+/**
+ * ---------------------------------------------------------------------------
+ * Walkthroughs
+ * ---------------------------------------------------------------------------
+ * Walkthroughs are the one part of the portal two different tiers reach by two
+ * different rules, so the rule lives here rather than being spelled out on
+ * each of the ten routes that need it:
+ *
+ *   - staff are bound by region, as everywhere else;
+ *   - a resident-tier account holding `canCompleteWalkthroughs` is bound to
+ *     the single house their login is linked to, and to nothing else. There is
+ *     no region path for a resident, at any point, on any of these routes.
+ *     `users.propertyId` therefore now decides which house's walkthroughs a
+ *     login may write, not only which house's maintenance requests it may
+ *     read.
+ *
+ * The permission layer and the scope layer stay separate functions on purpose,
+ * matching every other route in the app: the route asks "may this account
+ * touch walkthroughs at all?" before it loads a record, so a caller with no
+ * grant cannot use a 404 to find out which walkthrough ids exist.
+ */
+
+/** Reading a walkthrough, or changing one. */
+export type WalkthroughNeed = "view" | "manage";
+
+/**
+ * Whether the account holds a grant over walkthroughs at all — before any
+ * question of which house or region.
+ *
+ * A resident needs `canCompleteWalkthroughs` and nothing else will do: the
+ * staff flags are region-scoped in intent, and honouring one on a resident
+ * account would hand it the region path this whole section exists to deny.
+ * Admins pass through `hasPermission`'s bypass, as everywhere else.
+ */
+export function hasWalkthroughPermission(ctx: AuthContext, need: WalkthroughNeed): boolean {
+  if (ctx.isResident) return hasPermission(ctx, "canCompleteWalkthroughs");
+  return need === "manage"
+    ? hasPermission(ctx, "canManageWalkthroughs")
+    : hasPermission(ctx, "canViewWalkthroughs", "canManageWalkthroughs");
+}
+
+/** `hasWalkthroughPermission`, but sends 403 and returns false. */
+export function requireWalkthroughPermission(
+  res: Response,
+  ctx: AuthContext,
+  need: WalkthroughNeed,
+): boolean {
+  if (hasWalkthroughPermission(ctx, need)) return true;
+  res.status(403).json({ message: "Forbidden" });
+  return false;
+}
+
+/**
+ * Whether the caller may reach one walkthrough.
+ *
+ * Scope only — the permission layer above is a separate check, and both have
+ * to pass. Fails closed in every ambiguous case: a walkthrough that could not
+ * be resolved (a deleted one, or a room whose chain is broken) grants nothing
+ * to anyone but an admin, and a resident with no house claim grants nothing at
+ * all.
+ *
+ * `residentHouse` comes from `residentHouseAddress` and is resolved once by
+ * the route rather than per record. It defaults to null — no house claim — so
+ * a call site that forgets to pass it denies rather than widens.
+ */
+export function canAccessWalkthrough(
+  ctx: AuthContext,
+  walkthrough: { region?: string | null; buildingAddress?: string | null } | null | undefined,
+  residentHouse: string | null = null,
+): boolean {
+  if (ctx.isAdmin) return true;
+  if (!walkthrough) return false;
+  if (ctx.isResident) return isOwnHouse(residentHouse, walkthrough.buildingAddress);
+  return canAccessRegion(ctx, walkthrough.region);
+}
+
+/**
+ * `canAccessWalkthrough`, resolving the caller's house itself and sending 403.
+ *
+ * The house lookup costs one query and only for a resident — for everyone else
+ * `residentHouseAddress` returns null without touching the database.
+ */
+export async function requireWalkthroughAccess(
+  res: Response,
+  ctx: AuthContext,
+  walkthrough: { region?: string | null; buildingAddress?: string | null } | null | undefined,
+  message = "Forbidden",
+): Promise<boolean> {
+  if (canAccessWalkthrough(ctx, walkthrough, await residentHouseAddress(ctx))) return true;
+  res.status(403).json({ message });
+  return false;
+}
+
+/**
+ * The point in time a walkthrough records, or null when it has none.
+ *
+ * The column is a timestamp, but a record read back through a JSON boundary
+ * can arrive as a string, and a malformed one must not silently compare as
+ * epoch zero. Null is the honest answer and every caller treats it as such.
+ */
+function walkthroughTime(value: Date | string | null | undefined): number | null {
+  if (!value) return null;
+  const time = value instanceof Date ? value.getTime() : new Date(value).getTime();
+  return Number.isNaN(time) ? null : time;
+}
+
+/**
+ * Whether this is the walkthrough of its house that is still being performed,
+ * as opposed to a prior year's.
+ *
+ * This is what "read prior years read-only" means for a household leader: they
+ * fill in the current inspection of their house and read every earlier one
+ * without being able to change it.
+ *
+ * The test is the walkthrough's own date against the newest date on that
+ * house, and deliberately **not** its `status`. Nothing in the portal moves a
+ * walkthrough out of `draft`, so a status gate would lock either everything or
+ * nothing, and inventing a submit step would decide on SPO's behalf what
+ * "finished" means and who may say so — the same reason `WalkthroughRun` has
+ * no submit button. A date needs no such decision.
+ *
+ * Two rules keep it from locking somebody out of work they are doing:
+ *   - ties are writable, because a move-in and a move-out can share a day and
+ *     locking both would leave a leader unable to fill in either;
+ *   - an undated walkthrough is read-only, which fails closed.
+ *
+ * Staff are not subject to this at all — they can correct any year — which is
+ * what makes it safe to apply to residents in the first place.
+ */
+export function isCurrentWalkthrough(
+  walkthrough: { walkthroughDate?: Date | string | null },
+  houseWalkthroughs: readonly { walkthroughDate?: Date | string | null }[],
+): boolean {
+  const at = walkthroughTime(walkthrough.walkthroughDate);
+  if (at === null) return false;
+  for (const other of houseWalkthroughs) {
+    const time = walkthroughTime(other.walkthroughDate);
+    if (time !== null && time > at) return false;
+  }
+  return true;
+}
+
+/**
+ * `isCurrentWalkthrough` as a route guard, and a no-op for staff.
+ *
+ * Loads the house's own history rather than trusting anything on the request,
+ * and costs that query only for a resident actually attempting a write.
+ */
+export async function requireCurrentWalkthrough(
+  res: Response,
+  ctx: AuthContext,
+  walkthrough: { propertyId?: string | null; walkthroughDate?: Date | string | null } | null | undefined,
+): Promise<boolean> {
+  if (!ctx.isResident) return true;
+
+  const deny = () => {
+    res.status(403).json({ message: "Forbidden - Earlier walkthroughs are read-only" });
+    return false;
+  };
+
+  if (!walkthrough?.propertyId) return deny();
+
+  const history = (await storage.getWalkthroughsByProperty(walkthrough.propertyId)) ?? [];
+  return isCurrentWalkthrough(walkthrough, history) ? true : deny();
+}
+
+/**
+ * Filters a list of walkthroughs to the ones the caller may see.
+ *
+ * Not `filterByRegion`, because a resident has no regions and must never
+ * acquire any here: theirs is filtered by house, and an account with no house
+ * claim gets an empty list rather than the region rule as a fallback.
+ */
+export function visibleWalkthroughs<
+  T extends { region?: string | null; buildingAddress?: string | null },
+>(ctx: AuthContext, items: T[], residentHouse: string | null = null): T[] {
+  if (ctx.isAdmin) return items;
+  if (ctx.isResident) {
+    if (!residentHouse) return [];
+    return items.filter((item) => isOwnHouse(residentHouse, item.buildingAddress));
+  }
+  return filterByRegion(ctx, items);
+}

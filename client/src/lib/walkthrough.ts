@@ -46,25 +46,107 @@ export const WALKTHROUGH_STATUS_BADGE: Record<
 /** The shape of `/api/auth/user` that the walkthrough screens actually read. */
 export interface WalkthroughUser {
   role?: string | null;
-  permissions?: { canManageWalkthroughs?: boolean | null } | null;
+  /** The house a resident login is linked to; null for staff. */
+  propertyId?: string | null;
+  permissions?: {
+    canManageWalkthroughs?: boolean | null;
+    canCompleteWalkthroughs?: boolean | null;
+  } | null;
+}
+
+/** Whether this is a resident-tier account rather than a staff one. */
+export function isResidentAccount(user: WalkthroughUser | null | undefined): boolean {
+  return user?.role === "resident";
 }
 
 /**
- * Whether this account may change a walkthrough.
+ * Whether this account may fill in walkthroughs at all.
  *
- * Mirrors the server rule in all three parts, so the UI never offers a control
- * the request behind it would refuse: residents are out regardless of what
- * their permissions row says (`requireStaff`), admins are in regardless of
- * whether they have one at all (the admin bypass -- most do not, and a check
- * reading only the flag would hide every control from the people who
- * administer the app), and everyone else needs the flag.
+ * Mirrors the *manage* half of `hasWalkthroughPermission` in server/authz.ts —
+ * the client has no read-only walkthrough surface, so the view half has no
+ * caller here. Named for what it decides rather than after any one permission
+ * column, because two different columns answer it depending on the tier:
+ *
+ *   - an admin is in regardless of whether they have a permissions row at all
+ *     (the admin bypass -- most do not, and a check reading only the flag
+ *     would hide every control from the people who administer the app);
+ *   - a resident is in only on `canCompleteWalkthroughs`, and a staff flag on
+ *     a resident account buys nothing;
+ *   - everyone else needs `canManageWalkthroughs`.
+ *
+ * What it does NOT say is *which* walkthrough. For a resident the server binds
+ * that to the one house their login is linked to, and no client check stands
+ * in for that.
  *
  * Pure, so both screens can compute it below their hooks rather than returning
  * early above them.
  */
-export function canManageWalkthroughs(user: WalkthroughUser | null | undefined): boolean {
-  if (!user || user.role === "resident") return false;
-  return user.role === "admin" || user.permissions?.canManageWalkthroughs === true;
+export function canFillInWalkthroughs(user: WalkthroughUser | null | undefined): boolean {
+  if (!user) return false;
+  if (user.role === "admin") return true;
+  if (isResidentAccount(user)) return user.permissions?.canCompleteWalkthroughs === true;
+  return user.permissions?.canManageWalkthroughs === true;
+}
+
+/**
+ * Whether the room photos belong on screen for this account.
+ *
+ * Staff only, and deliberately narrower than `canManageWalkthroughs`: a
+ * resident cannot upload a file anywhere in the portal except a maintenance
+ * request, and `canReadUploadReference` does not give them a walkthrough
+ * photo either. Showing the section to a household leader would offer a
+ * control every request behind it would refuse.
+ */
+export function canSeeWalkthroughPhotos(user: WalkthroughUser | null | undefined): boolean {
+  return !!user && !isResidentAccount(user);
+}
+
+/**
+ * Whether this account may write to *this particular* walkthrough.
+ *
+ * `canFillInWalkthroughs` says whether the account holds the grant at all;
+ * this says whether the walkthrough in front of them is one the grant reaches.
+ * The two differ only for a resident, whose prior years are read-only — see
+ * `isCurrentWalkthrough` in server/authz.ts, which this mirrors so the screen
+ * never offers a control the PATCH behind it would refuse.
+ *
+ * `houseWalkthroughs` is every walkthrough of that house the caller can see.
+ * For a staff account it is not consulted at all.
+ */
+export function canWriteWalkthrough(
+  user: WalkthroughUser | null | undefined,
+  walkthrough: { walkthroughDate?: Date | string | null } | null | undefined,
+  houseWalkthroughs: readonly { walkthroughDate?: Date | string | null }[],
+): boolean {
+  if (!canFillInWalkthroughs(user)) return false;
+  if (!isResidentAccount(user)) return true;
+  return !!walkthrough && isCurrentWalkthrough(walkthrough, houseWalkthroughs);
+}
+
+/** The timestamp a walkthrough records, or null when it has none. */
+function walkthroughTime(value: Date | string | null | undefined): number | null {
+  if (!value) return null;
+  const time = value instanceof Date ? value.getTime() : new Date(value).getTime();
+  return Number.isNaN(time) ? null : time;
+}
+
+/**
+ * Whether this is the walkthrough of its house still being performed.
+ *
+ * The same rule as `isCurrentWalkthrough` in server/authz.ts, and for the same
+ * reasons: dates rather than status, ties writable, undated read-only.
+ */
+export function isCurrentWalkthrough(
+  walkthrough: { walkthroughDate?: Date | string | null },
+  houseWalkthroughs: readonly { walkthroughDate?: Date | string | null }[],
+): boolean {
+  const at = walkthroughTime(walkthrough.walkthroughDate);
+  if (at === null) return false;
+  for (const other of houseWalkthroughs) {
+    const time = walkthroughTime(other.walkthroughDate);
+    if (time !== null && time > at) return false;
+  }
+  return true;
 }
 
 /** What an RA reads on the chip. Short, because these sit in a row on a phone. */

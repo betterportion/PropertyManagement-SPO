@@ -18,6 +18,10 @@ import {
   filterByRegion,
   filterByRelatedRegion,
   canSeeTask,
+  requireWalkthroughPermission,
+  requireWalkthroughAccess,
+  requireCurrentWalkthrough,
+  visibleWalkthroughs,
   type AuthContext,
 } from "./authz";
 import { z } from "zod";
@@ -818,8 +822,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const ctx = await requireActiveUser(req, res);
       if (!ctx) return;
-      if (!requireStaff(res, ctx)) return;
-      if (!requirePermission(res, ctx, "canViewWalkthroughs", "canManageWalkthroughs")) return;
+      // Reachable by a household leader too: this is the room-type list the
+      // add-a-room picker reads, and without it they can add nothing. It
+      // carries no house, so it discloses nothing about anybody's property.
+      if (!requireWalkthroughPermission(res, ctx, "view")) return;
 
       // National, so no region filter: the room types are the same everywhere.
       res.json(await storage.getAllWalkthroughTemplateRooms());
@@ -944,20 +950,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // than off the property directly, which is what makes a year-over-year
   // comparison possible at all.
   //
-  // Region comes off the walkthrough itself -- it is denormalised from the
-  // property exactly as it is on residents and schedules -- so these routes
-  // scope with filterByRegion rather than the related-region join the room
-  // routes need.
+  // Two tiers reach these routes by two different rules. Staff are scoped by
+  // the region denormalised onto the walkthrough itself, exactly as on
+  // residents and schedules. A household leader or steward holding
+  // canCompleteWalkthroughs is scoped to the single house their login is
+  // linked to, and has no region path at any point. requireWalkthroughPermission
+  // and requireWalkthroughAccess in server/authz.ts hold both halves of that,
+  // so no handler here decides it for itself.
   // ---------------------------------------------------------------------------
 
   app.get('/api/walkthroughs', isAuthenticated, async (req: any, res) => {
     try {
       const ctx = await requireActiveUser(req, res);
       if (!ctx) return;
-      if (!requireStaff(res, ctx)) return;
-      if (!requirePermission(res, ctx, "canViewWalkthroughs", "canManageWalkthroughs")) return;
+      if (!requireWalkthroughPermission(res, ctx, "view")) return;
 
-      res.json(filterByRegion(ctx, await storage.getAllWalkthroughs()));
+      // Staff are filtered by region, a household leader by their own house.
+      // visibleWalkthroughs keeps the two apart -- a resident never falls
+      // through to the region rule, however their permissions row is set.
+      res.json(
+        visibleWalkthroughs(
+          ctx,
+          await storage.getAllWalkthroughs(),
+          await residentHouseAddress(ctx),
+        ),
+      );
     } catch (error) {
       sendError(res, error, "Failed to fetch walkthroughs");
     }
@@ -967,14 +984,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const ctx = await requireActiveUser(req, res);
       if (!ctx) return;
-      if (!requireStaff(res, ctx)) return;
-      if (!requirePermission(res, ctx, "canViewWalkthroughs", "canManageWalkthroughs")) return;
+      if (!requireWalkthroughPermission(res, ctx, "view")) return;
 
       const walkthrough = await storage.getWalkthrough(req.params.id);
       if (!walkthrough) {
         return res.status(404).json({ message: "Walkthrough not found" });
       }
-      if (!requireRegion(res, ctx, walkthrough.region)) return;
+      if (!(await requireWalkthroughAccess(res, ctx, walkthrough))) return;
 
       res.json(walkthrough);
     } catch (error) {
@@ -986,16 +1002,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const ctx = await requireActiveUser(req, res);
       if (!ctx) return;
-      if (!requireStaff(res, ctx)) return;
-      if (!requirePermission(res, ctx, "canViewWalkthroughs", "canManageWalkthroughs")) return;
+      if (!requireWalkthroughPermission(res, ctx, "view")) return;
 
       // Authorize against the parent before reading its children, so a guessed
-      // walkthrough id in another region cannot enumerate that house's rooms.
+      // walkthrough id belonging to another house cannot enumerate its rooms.
       const walkthrough = await storage.getWalkthrough(req.params.id);
       if (!walkthrough) {
         return res.status(404).json({ message: "Walkthrough not found" });
       }
-      if (!requireRegion(res, ctx, walkthrough.region)) return;
+      if (!(await requireWalkthroughAccess(res, ctx, walkthrough))) return;
 
       res.json(await storage.getWalkthroughRoomsByWalkthrough(req.params.id));
     } catch (error) {
@@ -1019,14 +1034,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const ctx = await requireActiveUser(req, res);
       if (!ctx) return;
-      if (!requireStaff(res, ctx)) return;
-      if (!requirePermission(res, ctx, "canViewWalkthroughs", "canManageWalkthroughs")) return;
+      if (!requireWalkthroughPermission(res, ctx, "view")) return;
 
       const walkthrough = await storage.getWalkthrough(req.params.id);
       if (!walkthrough) {
         return res.status(404).json({ message: "Walkthrough not found" });
       }
-      if (!requireRegion(res, ctx, walkthrough.region)) return;
+      if (!(await requireWalkthroughAccess(res, ctx, walkthrough))) return;
 
       res.json(await storage.getWalkthroughItemsByWalkthrough(req.params.id));
     } catch (error) {
@@ -1038,14 +1052,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const ctx = await requireActiveUser(req, res);
       if (!ctx) return;
-      if (!requireStaff(res, ctx)) return;
-      if (!requirePermission(res, ctx, "canManageWalkthroughs")) return;
+      if (!requireWalkthroughPermission(res, ctx, "manage")) return;
 
       const property = await storage.getProperty(req.body?.propertyId);
       if (!property) {
         return res.status(404).json({ message: "Property not found" });
       }
-      if (!requireRegion(res, ctx, property.region, "Forbidden - Cannot create in this region")) return;
+      // The house being started is checked the same way a walkthrough is: by
+      // region for staff, by the caller's own address for a household leader.
+      if (
+        !(await requireWalkthroughAccess(
+          res,
+          ctx,
+          { region: property.region, buildingAddress: property.address },
+          "Forbidden - Cannot create for this property",
+        ))
+      ) {
+        return;
+      }
 
       // region and buildingAddress come from the property, never the caller,
       // so a walkthrough cannot be filed into a region its author cannot see.
@@ -1139,14 +1163,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const ctx = await requireActiveUser(req, res);
       if (!ctx) return;
-      if (!requireStaff(res, ctx)) return;
-      if (!requirePermission(res, ctx, "canManageWalkthroughs")) return;
+      if (!requireWalkthroughPermission(res, ctx, "manage")) return;
 
       const walkthrough = await storage.getWalkthrough(req.params.id);
       if (!walkthrough) {
         return res.status(404).json({ message: "Walkthrough not found" });
       }
-      if (!requireRegion(res, ctx, walkthrough.region)) return;
+      if (!(await requireWalkthroughAccess(res, ctx, walkthrough))) return;
+      // A household leader adds rooms to the inspection they are performing,
+      // never to a prior year's. No-op for staff, who correct any year.
+      if (!(await requireCurrentWalkthrough(res, ctx, walkthrough))) return;
 
       const body = z
         .object({
@@ -1248,27 +1274,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ---------------------------------------------------------------------------
 
   /**
-   * The region an item belongs to, or null when the chain is broken.
+   * The walkthrough an item belongs to, or undefined when the chain is broken.
    *
-   * Returns null rather than throwing so callers fail closed: a room with no
-   * walkthrough, or a walkthrough that has been deleted, grants nothing.
+   * Returns undefined rather than throwing so callers fail closed: a room with
+   * no walkthrough, or a walkthrough that has been deleted, grants nothing.
+   * The whole record comes back rather than just its region, because the house
+   * on it is what a household leader is checked against.
    */
-  async function regionForWalkthroughRoom(roomId: string): Promise<string | null> {
+  async function walkthroughForRoom(roomId: string) {
     const room = await storage.getWalkthroughRoom(roomId);
-    if (!room?.walkthroughId) return null;
-    const walkthrough = await storage.getWalkthrough(room.walkthroughId);
-    return walkthrough?.region ?? null;
+    if (!room?.walkthroughId) return undefined;
+    return await storage.getWalkthrough(room.walkthroughId);
   }
 
   app.get('/api/walkthrough-rooms/:roomId/items', isAuthenticated, async (req: any, res) => {
     try {
       const ctx = await requireActiveUser(req, res);
       if (!ctx) return;
-      if (!requireStaff(res, ctx)) return;
-      if (!requirePermission(res, ctx, "canViewWalkthroughs", "canManageWalkthroughs")) return;
+      if (!requireWalkthroughPermission(res, ctx, "view")) return;
 
-      const region = await regionForWalkthroughRoom(req.params.roomId);
-      if (!requireRegion(res, ctx, region)) return;
+      const walkthrough = await walkthroughForRoom(req.params.roomId);
+      if (!(await requireWalkthroughAccess(res, ctx, walkthrough))) return;
 
       res.json(await storage.getWalkthroughItemsByRoom(req.params.roomId));
     } catch (error) {
@@ -1284,8 +1310,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!requirePermission(res, ctx, "canManageWalkthroughs")) return;
 
       const validatedData = insertWalkthroughItemSchema.parse(req.body);
-      const region = await regionForWalkthroughRoom(validatedData.roomId);
-      if (!requireRegion(res, ctx, region, "Forbidden - Cannot create in this region")) return;
+      // Staff-only on purpose, so still the plain region check rather than the
+      // two-tier guard above: adding a checklist line back is not one of the
+      // edits the walkthrough screen offers a household leader, and the
+      // template is where the standard items are decided.
+      const walkthrough = await walkthroughForRoom(validatedData.roomId);
+      if (!requireRegion(res, ctx, walkthrough?.region, "Forbidden - Cannot create in this region")) return;
 
       res.json(await storage.createWalkthroughItem(validatedData));
     } catch (error) {
@@ -1297,14 +1327,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const ctx = await requireActiveUser(req, res);
       if (!ctx) return;
-      if (!requireStaff(res, ctx)) return;
-      if (!requirePermission(res, ctx, "canManageWalkthroughs")) return;
+      if (!requireWalkthroughPermission(res, ctx, "manage")) return;
 
       const existing = await storage.getWalkthroughItem(req.params.id);
       if (!existing) {
         return res.status(404).json({ message: "Walkthrough item not found" });
       }
-      if (!requireRegion(res, ctx, await regionForWalkthroughRoom(existing.roomId))) return;
+      const walkthrough = await walkthroughForRoom(existing.roomId);
+      if (!(await requireWalkthroughAccess(res, ctx, walkthrough))) return;
+      // "Read prior years read-only": a leader records conditions on the
+      // current inspection of their house only. No-op for staff.
+      if (!(await requireCurrentWalkthrough(res, ctx, walkthrough))) return;
 
       // An item cannot be moved to another room: that would carry it into a
       // different walkthrough, and possibly a different region.
@@ -1321,14 +1354,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const ctx = await requireActiveUser(req, res);
       if (!ctx) return;
-      if (!requireStaff(res, ctx)) return;
-      if (!requirePermission(res, ctx, "canManageWalkthroughs")) return;
+      if (!requireWalkthroughPermission(res, ctx, "manage")) return;
 
       const existing = await storage.getWalkthroughItem(req.params.id);
       if (!existing) {
         return res.status(404).json({ message: "Walkthrough item not found" });
       }
-      if (!requireRegion(res, ctx, await regionForWalkthroughRoom(existing.roomId))) return;
+      const walkthrough = await walkthroughForRoom(existing.roomId);
+      if (!(await requireWalkthroughAccess(res, ctx, walkthrough))) return;
+      if (!(await requireCurrentWalkthrough(res, ctx, walkthrough))) return;
 
       await storage.deleteWalkthroughItem(req.params.id);
       res.json({ success: true });

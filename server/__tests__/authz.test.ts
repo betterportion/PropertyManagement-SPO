@@ -23,11 +23,13 @@ vi.mock("../auth", () => ({ getUserId: (...args: unknown[]) => getUserId(...args
 const getUser = vi.fn();
 const getUserPermissions = vi.fn();
 const getProperty = vi.fn();
+const getWalkthroughsByProperty = vi.fn();
 vi.mock("../storage", () => ({
   storage: {
     getUser: (...args: unknown[]) => getUser(...args),
     getUserPermissions: (...args: unknown[]) => getUserPermissions(...args),
     getProperty: (...args: unknown[]) => getProperty(...args),
+    getWalkthroughsByProperty: (...args: unknown[]) => getWalkthroughsByProperty(...args),
   },
 }));
 
@@ -47,6 +49,13 @@ import {
   canReadMaintenanceRequest,
   requireMaintenanceRequestAccess,
   residentHouseAddress,
+  hasWalkthroughPermission,
+  requireWalkthroughPermission,
+  canAccessWalkthrough,
+  requireWalkthroughAccess,
+  isCurrentWalkthrough,
+  requireCurrentWalkthrough,
+  visibleWalkthroughs,
   type AuthContext,
   type PermissionName,
 } from "../authz";
@@ -227,11 +236,12 @@ describe("requirePermission", () => {
   });
 });
 
-describe("the two flags added ahead of their features", () => {
-  // canCompleteWalkthroughs and canManagePropertySetup gate surfaces that do
-  // not exist yet. Nothing reads them, so nothing would fail if they were
-  // wired up wrongly -- which is exactly why the wiring is asserted here and
-  // not left until the feature arrives.
+describe("the flags landed ahead of their features", () => {
+  // canCompleteWalkthroughs now gates the resident walkthrough routes (see the
+  // walkthrough blocks at the end of this file); canManagePropertySetup still
+  // gates a surface that does not exist. These assertions are about the wiring
+  // of the flags themselves -- default false, explicit grant honoured, admin
+  // bypass applied, and no region reach acquired from either.
 
   it("grants neither flag to a staff account that was given no grant", () => {
     // The point of landing them early is that the features arrive gated. A
@@ -643,5 +653,358 @@ describe("requireMaintenanceRequestAccess", () => {
     const resident = context({ role: "resident", email: "alice@example.com" });
     expect(requireMaintenanceRequestAccess(res, resident, { submittedBy: "bob@example.com" })).toBe(false);
     expect(res.sent.status).toBe(403);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Walkthroughs: the second way in
+// ---------------------------------------------------------------------------
+
+/**
+ * These are the rules behind the resident walkthrough routes, and they are the
+ * shape of both historic authorization gaps in this codebase: a second tier
+ * reaching routes that previously had exactly one.
+ *
+ * The property under test throughout is that a resident-tier account never
+ * acquires a region path. Everything it can reach it reaches through the one
+ * house its login is linked to, and every way of failing to resolve that house
+ * denies rather than widens.
+ */
+describe("hasWalkthroughPermission", () => {
+  it("lets a household leader in on canCompleteWalkthroughs, for reading and for writing", () => {
+    const leader = context({ role: "resident", permissions: { canCompleteWalkthroughs: true } });
+    expect(hasWalkthroughPermission(leader, "view")).toBe(true);
+    expect(hasWalkthroughPermission(leader, "manage")).toBe(true);
+  });
+
+  it("refuses a resident account that has not been granted the flag", () => {
+    const resident = context({ role: "resident", permissions: {} });
+    expect(hasWalkthroughPermission(resident, "view")).toBe(false);
+    expect(hasWalkthroughPermission(resident, "manage")).toBe(false);
+  });
+
+  it("refuses a resident account with no permissions row at all", () => {
+    const resident = context({ role: "resident" });
+    expect(hasWalkthroughPermission(resident, "view")).toBe(false);
+    expect(hasWalkthroughPermission(resident, "manage")).toBe(false);
+  });
+
+  it("will not accept a staff walkthrough flag on a resident account", () => {
+    // The staff flags are region-scoped in intent. Honouring one here would
+    // hand a resident-tier login the region path this whole section denies.
+    const resident = context({
+      role: "resident",
+      permissions: { canViewWalkthroughs: true, canManageWalkthroughs: true },
+      allowedRegions: ["West Central"],
+    });
+    expect(hasWalkthroughPermission(resident, "view")).toBe(false);
+    expect(hasWalkthroughPermission(resident, "manage")).toBe(false);
+  });
+
+  it("will not accept canCompleteWalkthroughs on a staff account", () => {
+    // The mirror of the rule above: the resident flag is a house grant, and it
+    // must not stand in for the staff grants on the same routes.
+    const staff = context({
+      role: "regional_administrator",
+      permissions: { canCompleteWalkthroughs: true },
+      allowedRegions: ["West Central"],
+    });
+    expect(hasWalkthroughPermission(staff, "view")).toBe(false);
+    expect(hasWalkthroughPermission(staff, "manage")).toBe(false);
+  });
+
+  it("keeps the staff view/manage split", () => {
+    const viewer = context({ permissions: { canViewWalkthroughs: true } });
+    expect(hasWalkthroughPermission(viewer, "view")).toBe(true);
+    expect(hasWalkthroughPermission(viewer, "manage")).toBe(false);
+
+    const manager = context({ permissions: { canManageWalkthroughs: true } });
+    expect(hasWalkthroughPermission(manager, "view")).toBe(true);
+    expect(hasWalkthroughPermission(manager, "manage")).toBe(true);
+  });
+
+  it("applies the admin bypass, row or no row", () => {
+    const admin = context({ role: "admin", permissions: undefined });
+    expect(hasWalkthroughPermission(admin, "view")).toBe(true);
+    expect(hasWalkthroughPermission(admin, "manage")).toBe(true);
+  });
+
+  it("refuses through requireWalkthroughPermission with a 403", () => {
+    const res = response();
+    expect(requireWalkthroughPermission(res, context({ role: "resident" }), "view")).toBe(false);
+    expect(res.sent.status).toBe(403);
+
+    const ok = response();
+    const leader = context({ role: "resident", permissions: { canCompleteWalkthroughs: true } });
+    expect(requireWalkthroughPermission(ok, leader, "view")).toBe(true);
+    expect(ok.sent.status).toBeUndefined();
+  });
+});
+
+describe("canAccessWalkthrough", () => {
+  const HOUSE_A = "123 Main St, Saint Paul, MN 55101";
+  const HOUSE_B = "77 Cretin Ave, Saint Paul, MN 55105";
+
+  const atHouseA = { region: "West Central", buildingAddress: HOUSE_A };
+  const atHouseB = { region: "West Central", buildingAddress: HOUSE_B };
+
+  const leader = () =>
+    context({
+      role: "resident",
+      permissions: { canCompleteWalkthroughs: true },
+      propertyId: "prop-a",
+    });
+
+  it("lets a household leader reach their own house", () => {
+    expect(canAccessWalkthrough(leader(), atHouseA, HOUSE_A)).toBe(true);
+  });
+
+  it("refuses another house in the same region", () => {
+    // The one that matters: same region, same permissions, different house.
+    expect(canAccessWalkthrough(leader(), atHouseB, HOUSE_A)).toBe(false);
+  });
+
+  it("refuses a resident with no house claim, whatever regions they were given", () => {
+    // No propertyId, a deleted property and a property with no address all
+    // arrive here as a null house, and all three must deny.
+    const stray = context({
+      role: "resident",
+      permissions: { canCompleteWalkthroughs: true },
+      allowedRegions: ["West Central", "all"],
+    });
+    expect(canAccessWalkthrough(stray, atHouseA, null)).toBe(false);
+    expect(canAccessWalkthrough(stray, atHouseA)).toBe(false);
+  });
+
+  it("refuses a walkthrough with no house recorded on it", () => {
+    expect(canAccessWalkthrough(leader(), { region: "West Central" }, HOUSE_A)).toBe(false);
+    expect(canAccessWalkthrough(leader(), { region: "West Central", buildingAddress: null }, HOUSE_A)).toBe(false);
+  });
+
+  it("never lets a resident through on region, even holding every region", () => {
+    const stray = context({
+      role: "resident",
+      permissions: { canCompleteWalkthroughs: true },
+      allowedRegions: ["all"],
+      propertyId: "prop-a",
+    });
+    expect(canAccessWalkthrough(stray, atHouseB, HOUSE_A)).toBe(false);
+  });
+
+  it("compares houses exactly, as the maintenance house rule does", () => {
+    // properties.address is unique case-sensitively, so two houses can differ
+    // by case alone. Folding the comparison would let one read the other.
+    expect(canAccessWalkthrough(leader(), atHouseA, HOUSE_A.toUpperCase())).toBe(false);
+    expect(canAccessWalkthrough(leader(), atHouseA, ` ${HOUSE_A} `)).toBe(false);
+  });
+
+  it("keeps staff on the region rule, and ignores the house", () => {
+    const west = context({ allowedRegions: ["West Central"] });
+    expect(canAccessWalkthrough(west, atHouseA)).toBe(true);
+    expect(canAccessWalkthrough(west, { region: "East Central", buildingAddress: HOUSE_A }, HOUSE_A)).toBe(false);
+  });
+
+  it("denies everyone but an admin when the walkthrough could not be resolved", () => {
+    // A room with no walkthrough, or one whose walkthrough has been deleted.
+    expect(canAccessWalkthrough(leader(), undefined, HOUSE_A)).toBe(false);
+    expect(canAccessWalkthrough(context({ allowedRegions: ["all"] }), null)).toBe(false);
+    expect(canAccessWalkthrough(context({ role: "admin" }), undefined)).toBe(true);
+  });
+});
+
+describe("requireWalkthroughAccess", () => {
+  const HOUSE_A = "123 Main St, Saint Paul, MN 55101";
+
+  it("resolves the caller's house itself and allows their own", async () => {
+    getProperty.mockResolvedValue({ id: "prop-a", address: HOUSE_A });
+    const res = response();
+    const leader = context({
+      role: "resident",
+      permissions: { canCompleteWalkthroughs: true },
+      propertyId: "prop-a",
+    });
+
+    expect(
+      await requireWalkthroughAccess(res, leader, { region: "West Central", buildingAddress: HOUSE_A }),
+    ).toBe(true);
+    expect(res.sent.status).toBeUndefined();
+  });
+
+  it("sends 403 for a house that is not theirs", async () => {
+    getProperty.mockResolvedValue({ id: "prop-a", address: HOUSE_A });
+    const res = response();
+    const leader = context({
+      role: "resident",
+      permissions: { canCompleteWalkthroughs: true },
+      propertyId: "prop-a",
+    });
+
+    expect(
+      await requireWalkthroughAccess(res, leader, { region: "West Central", buildingAddress: "77 Cretin Ave" }),
+    ).toBe(false);
+    expect(res.sent.status).toBe(403);
+  });
+
+  it("sends 403 when the linked property has been deleted", async () => {
+    getProperty.mockResolvedValue(undefined);
+    const res = response();
+    const leader = context({
+      role: "resident",
+      permissions: { canCompleteWalkthroughs: true },
+      propertyId: "prop-gone",
+    });
+
+    expect(
+      await requireWalkthroughAccess(res, leader, { region: "West Central", buildingAddress: HOUSE_A }),
+    ).toBe(false);
+    expect(res.sent.status).toBe(403);
+  });
+
+  it("costs staff no property lookup", async () => {
+    const res = response();
+    const west = context({ allowedRegions: ["West Central"] });
+    expect(await requireWalkthroughAccess(res, west, { region: "West Central" })).toBe(true);
+    expect(getProperty).not.toHaveBeenCalled();
+  });
+});
+
+describe("visibleWalkthroughs", () => {
+  const HOUSE_A = "123 Main St, Saint Paul, MN 55101";
+  const HOUSE_B = "77 Cretin Ave, Saint Paul, MN 55105";
+
+  const WEST_A = { id: "wt-a", region: "West Central", buildingAddress: HOUSE_A };
+  const WEST_B = { id: "wt-b", region: "West Central", buildingAddress: HOUSE_B };
+  const EAST_B = { id: "wt-c", region: "East Central", buildingAddress: HOUSE_B };
+  const ALL = [WEST_A, WEST_B, EAST_B];
+
+  it("gives a household leader their own house and nothing else", () => {
+    const leader = context({ role: "resident", permissions: { canCompleteWalkthroughs: true } });
+    expect(visibleWalkthroughs(leader, ALL, HOUSE_A).map((w) => w.id)).toEqual(["wt-a"]);
+  });
+
+  it("gives a resident with no house claim an empty list, never the region list", () => {
+    const stray = context({
+      role: "resident",
+      permissions: { canCompleteWalkthroughs: true },
+      allowedRegions: ["West Central"],
+    });
+    expect(visibleWalkthroughs(stray, ALL, null)).toEqual([]);
+    expect(visibleWalkthroughs(stray, ALL)).toEqual([]);
+  });
+
+  it("keeps staff on the region rule", () => {
+    const west = context({ allowedRegions: ["West Central"] });
+    expect(visibleWalkthroughs(west, ALL).map((w) => w.id)).toEqual(["wt-a", "wt-b"]);
+  });
+
+  it("gives an unassigned staff account nothing", () => {
+    expect(visibleWalkthroughs(context({ allowedRegions: [] }), ALL)).toEqual([]);
+  });
+
+  it("gives an admin everything", () => {
+    expect(visibleWalkthroughs(context({ role: "admin" }), ALL)).toHaveLength(3);
+  });
+});
+
+describe("isCurrentWalkthrough", () => {
+  const dated = (walkthroughDate: string | Date | null) => ({ walkthroughDate });
+
+  const LAST_YEAR = dated("2025-09-01T00:00:00.000Z");
+  const THIS_YEAR = dated("2026-09-01T00:00:00.000Z");
+
+  it("says yes to the newest inspection of the house", () => {
+    expect(isCurrentWalkthrough(THIS_YEAR, [THIS_YEAR, LAST_YEAR])).toBe(true);
+  });
+
+  it("says no to a prior year", () => {
+    // The whole point: last year's walkthrough is readable and not writable.
+    expect(isCurrentWalkthrough(LAST_YEAR, [THIS_YEAR, LAST_YEAR])).toBe(false);
+  });
+
+  it("says yes to the only one there is", () => {
+    expect(isCurrentWalkthrough(THIS_YEAR, [THIS_YEAR])).toBe(true);
+    expect(isCurrentWalkthrough(THIS_YEAR, [])).toBe(true);
+  });
+
+  it("lets a tie through, so a move-in and a move-out on one day both work", () => {
+    const moveOut = dated("2026-09-01T00:00:00.000Z");
+    expect(isCurrentWalkthrough(THIS_YEAR, [THIS_YEAR, moveOut])).toBe(true);
+    expect(isCurrentWalkthrough(moveOut, [THIS_YEAR, moveOut])).toBe(true);
+  });
+
+  it("accepts a Date as readily as a string", () => {
+    const asDate = dated(new Date("2026-09-01T00:00:00.000Z"));
+    expect(isCurrentWalkthrough(asDate, [LAST_YEAR])).toBe(true);
+    expect(isCurrentWalkthrough(LAST_YEAR, [asDate])).toBe(false);
+  });
+
+  it("treats an undated or unparseable walkthrough as read-only", () => {
+    // Fails closed rather than comparing as epoch zero, which would make an
+    // undated record the oldest one there is and read as writable by accident
+    // only when it stood alone.
+    expect(isCurrentWalkthrough(dated(null), [])).toBe(false);
+    expect(isCurrentWalkthrough(dated("not a date"), [])).toBe(false);
+  });
+
+  it("ignores an undated sibling rather than letting it win the comparison", () => {
+    expect(isCurrentWalkthrough(THIS_YEAR, [THIS_YEAR, dated(null), dated("nonsense")])).toBe(true);
+  });
+});
+
+describe("requireCurrentWalkthrough", () => {
+  const HOUSE_WALKTHROUGHS = [
+    { id: "wt-new", walkthroughDate: "2026-09-01T00:00:00.000Z" },
+    { id: "wt-old", walkthroughDate: "2025-09-01T00:00:00.000Z" },
+  ];
+
+  const leader = () =>
+    context({ role: "resident", permissions: { canCompleteWalkthroughs: true }, propertyId: "prop-a" });
+
+  beforeEach(() => {
+    getWalkthroughsByProperty.mockReset().mockResolvedValue(HOUSE_WALKTHROUGHS);
+  });
+
+  it("lets a leader write to the current inspection", async () => {
+    const res = response();
+    const current = { propertyId: "prop-a", walkthroughDate: "2026-09-01T00:00:00.000Z" };
+    expect(await requireCurrentWalkthrough(res, leader(), current)).toBe(true);
+    expect(res.sent.status).toBeUndefined();
+  });
+
+  it("refuses a leader on a prior year, and says why", async () => {
+    const res = response();
+    const prior = { propertyId: "prop-a", walkthroughDate: "2025-09-01T00:00:00.000Z" };
+    expect(await requireCurrentWalkthrough(res, leader(), prior)).toBe(false);
+    expect(res.sent.status).toBe(403);
+    expect(res.sent.message).toContain("read-only");
+  });
+
+  it("does not restrict staff, who correct any year", async () => {
+    const prior = { propertyId: "prop-a", walkthroughDate: "2025-09-01T00:00:00.000Z" };
+    expect(await requireCurrentWalkthrough(response(), context({ allowedRegions: ["all"] }), prior)).toBe(true);
+    expect(await requireCurrentWalkthrough(response(), context({ role: "admin" }), prior)).toBe(true);
+    // And costs them no history lookup at all.
+    expect(getWalkthroughsByProperty).not.toHaveBeenCalled();
+  });
+
+  it("refuses a leader when the walkthrough could not be resolved", async () => {
+    const res = response();
+    expect(await requireCurrentWalkthrough(res, leader(), undefined)).toBe(false);
+    expect(res.sent.status).toBe(403);
+    expect(getWalkthroughsByProperty).not.toHaveBeenCalled();
+  });
+
+  it("refuses a leader when the walkthrough belongs to no property", async () => {
+    const res = response();
+    expect(await requireCurrentWalkthrough(res, leader(), { walkthroughDate: "2026-09-01T00:00:00.000Z" })).toBe(false);
+    expect(res.sent.status).toBe(403);
+  });
+
+  it("reads the history of the walkthrough's own house", async () => {
+    await requireCurrentWalkthrough(response(), leader(), {
+      propertyId: "prop-a",
+      walkthroughDate: "2026-09-01T00:00:00.000Z",
+    });
+    expect(getWalkthroughsByProperty).toHaveBeenCalledWith("prop-a");
   });
 });

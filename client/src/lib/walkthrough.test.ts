@@ -4,8 +4,11 @@ import {
   CONDITION_LABEL,
   WALKTHROUGH_STATUS_BADGE,
   WALKTHROUGH_TYPE_LABEL,
-  canManageWalkthroughs,
+  canFillInWalkthroughs,
+  canSeeWalkthroughPhotos,
+  canWriteWalkthrough,
   conditionTone,
+  isCurrentWalkthrough,
   isAssessed,
   itemsByRoom,
   progressOf,
@@ -157,31 +160,113 @@ describe("walkthrough vocabulary", () => {
   });
 });
 
-describe("canManageWalkthroughs", () => {
+describe("canFillInWalkthroughs", () => {
   it("lets an admin through even with no permissions row", () => {
     // The admin bypass. Admins frequently have no user_permissions row, and a
     // check reading only the flag would hide every control from them.
-    expect(canManageWalkthroughs({ role: "admin" })).toBe(true);
-    expect(canManageWalkthroughs({ role: "admin", permissions: null })).toBe(true);
+    expect(canFillInWalkthroughs({ role: "admin" })).toBe(true);
+    expect(canFillInWalkthroughs({ role: "admin", permissions: null })).toBe(true);
   });
 
   it("lets staff through only on the flag, not on the role", () => {
     // A regional administrator without the grant can look but not touch --
     // which is what the server enforces, so the UI must not offer more.
-    expect(canManageWalkthroughs({ role: "regional_administrator" })).toBe(false);
+    expect(canFillInWalkthroughs({ role: "regional_administrator" })).toBe(false);
     expect(
-      canManageWalkthroughs({ role: "regional_administrator", permissions: { canManageWalkthroughs: true } }),
+      canFillInWalkthroughs({ role: "regional_administrator", permissions: { canManageWalkthroughs: true } }),
     ).toBe(true);
   });
 
-  it("refuses a resident whatever their permissions row says", () => {
-    // The server rejects residents before it reads a single flag, so a stray
-    // grant on a resident account must not put an edit control on screen.
-    expect(canManageWalkthroughs({ role: "resident", permissions: { canManageWalkthroughs: true } })).toBe(false);
+  it("lets a household leader through on canCompleteWalkthroughs", () => {
+    // Their own house only -- which the server binds them to and no client
+    // check stands in for. What this decides is whether the controls appear.
+    expect(
+      canFillInWalkthroughs({ role: "resident", permissions: { canCompleteWalkthroughs: true } }),
+    ).toBe(true);
+  });
+
+  it("refuses a resident holding only the staff flag", () => {
+    // hasWalkthroughPermission will not read a staff grant off a resident
+    // account, so an edit control offered on one would be refused by every
+    // request behind it.
+    expect(canFillInWalkthroughs({ role: "resident", permissions: { canManageWalkthroughs: true } })).toBe(false);
+    expect(canFillInWalkthroughs({ role: "resident" })).toBe(false);
+    expect(canFillInWalkthroughs({ role: "resident", permissions: {} })).toBe(false);
+  });
+
+  it("refuses staff holding only the resident flag", () => {
+    expect(
+      canFillInWalkthroughs({
+        role: "regional_administrator",
+        permissions: { canCompleteWalkthroughs: true },
+      }),
+    ).toBe(false);
   });
 
   it("refuses nobody at all", () => {
-    expect(canManageWalkthroughs(null)).toBe(false);
-    expect(canManageWalkthroughs(undefined)).toBe(false);
+    expect(canFillInWalkthroughs(null)).toBe(false);
+    expect(canFillInWalkthroughs(undefined)).toBe(false);
+  });
+});
+
+describe("canSeeWalkthroughPhotos", () => {
+  it("keeps the room photos to staff, even for a leader who may fill the checklist in", () => {
+    // A resident cannot upload a file outside a maintenance request, and
+    // canReadUploadReference does not hand them a walkthrough photo either.
+    // The section is hidden rather than shown and refused.
+    expect(
+      canSeeWalkthroughPhotos({ role: "resident", permissions: { canCompleteWalkthroughs: true } }),
+    ).toBe(false);
+    expect(canSeeWalkthroughPhotos({ role: "regional_administrator" })).toBe(true);
+    expect(canSeeWalkthroughPhotos({ role: "admin" })).toBe(true);
+    expect(canSeeWalkthroughPhotos(null)).toBe(false);
+  });
+});
+
+describe("isCurrentWalkthrough and canWriteWalkthrough", () => {
+  const dated = (walkthroughDate: string) => ({ walkthroughDate });
+  const THIS_YEAR = dated("2026-09-01T00:00:00.000Z");
+  const LAST_YEAR = dated("2025-09-01T00:00:00.000Z");
+  const HISTORY = [THIS_YEAR, LAST_YEAR];
+
+  const leader = { role: "resident", permissions: { canCompleteWalkthroughs: true } };
+  const staff = { role: "regional_administrator", permissions: { canManageWalkthroughs: true } };
+
+  it("picks out the inspection still being performed", () => {
+    expect(isCurrentWalkthrough(THIS_YEAR, HISTORY)).toBe(true);
+    expect(isCurrentWalkthrough(LAST_YEAR, HISTORY)).toBe(false);
+  });
+
+  it("keeps a leader's prior years read-only, matching the server", () => {
+    // The screen must not offer a chip the PATCH behind it would refuse.
+    expect(canWriteWalkthrough(leader, THIS_YEAR, HISTORY)).toBe(true);
+    expect(canWriteWalkthrough(leader, LAST_YEAR, HISTORY)).toBe(false);
+  });
+
+  it("lets staff write any year, without consulting the history", () => {
+    expect(canWriteWalkthrough(staff, LAST_YEAR, [])).toBe(true);
+    expect(canWriteWalkthrough({ role: "admin" }, LAST_YEAR, [])).toBe(true);
+  });
+
+  it("refuses anyone without the grant, current year or not", () => {
+    expect(canWriteWalkthrough({ role: "resident" }, THIS_YEAR, HISTORY)).toBe(false);
+    expect(canWriteWalkthrough({ role: "regional_administrator" }, THIS_YEAR, HISTORY)).toBe(false);
+    expect(canWriteWalkthrough(null, THIS_YEAR, HISTORY)).toBe(false);
+  });
+
+  it("refuses a leader before the walkthrough has loaded", () => {
+    // Undefined must not read as writable during the first render.
+    expect(canWriteWalkthrough(leader, undefined, HISTORY)).toBe(false);
+    expect(canWriteWalkthrough(leader, null, HISTORY)).toBe(false);
+  });
+
+  it("treats an undated walkthrough as read-only", () => {
+    expect(isCurrentWalkthrough({ walkthroughDate: null }, [])).toBe(false);
+    expect(canWriteWalkthrough(leader, { walkthroughDate: null }, [])).toBe(false);
+  });
+
+  it("lets a tie through, so a same-day move-in and move-out both work", () => {
+    const sameDay = dated("2026-09-01T00:00:00.000Z");
+    expect(canWriteWalkthrough(leader, sameDay, [THIS_YEAR, sameDay])).toBe(true);
   });
 });

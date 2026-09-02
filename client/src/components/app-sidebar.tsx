@@ -19,6 +19,12 @@ import spoLogo from "@assets/SPO Logo under 600x600px_SPO Vertical - Ocean_17631
 interface AppSidebarProps {
   role: "admin" | "regional_administrator" | "resident";
   currentPath: string;
+  /**
+   * Whether this account may fill in a walkthrough. Only changes the resident
+   * menu -- staff reach walkthroughs whether or not they hold the grant, and
+   * the page tells them what they may do once they are there.
+   */
+  canCompleteWalkthroughs?: boolean;
 }
 
 type NavItem = { title: string; url: string; icon: typeof Home };
@@ -42,11 +48,17 @@ const residentMenuItems: NavItem[] = [
   { title: "My Requests", url: "/my-requests", icon: Wrench },
 ];
 
-export function AppSidebar({ role, currentPath }: AppSidebarProps) {
+export function AppSidebar({ role, currentPath, canCompleteWalkthroughs = false }: AppSidebarProps) {
   const { isMobile, setOpenMobile } = useSidebar();
   const isStaff = role === "admin" || role === "regional_administrator";
 
-  const menuItems = isStaff ? adminMenuItems : residentMenuItems;
+  // A household leader granted canCompleteWalkthroughs gets the one extra
+  // entry, and nothing else on the staff menu comes with it.
+  const menuItems = isStaff
+    ? adminMenuItems
+    : canCompleteWalkthroughs
+      ? [...residentMenuItems, { title: "Walkthroughs", url: "/walkthroughs", icon: Camera }]
+      : residentMenuItems;
 
   // Bottom-pinned utility group. Regional administrators cannot access Settings.
   const utilityItems: NavItem[] = [];
