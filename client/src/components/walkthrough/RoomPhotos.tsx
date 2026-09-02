@@ -1,8 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { X } from "lucide-react";
 import { PhotoUpload } from "@/components/PhotoUpload";
-import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { formatDate } from "@/lib/format";
@@ -14,9 +12,6 @@ import type { Walkthrough, WalkthroughPhoto, WalkthroughRoom } from "@shared/sch
  * Photos are per room rather than per item on purpose: an RA taking a picture
  * of a damaged wall is documenting the room, and asking them to pick which
  * checklist line it belongs to first is how photos stop being taken.
- *
- * The delete control is always visible. The existing gallery reveals it on
- * hover, which on a phone means never.
  */
 
 interface RoomPhotosProps {
@@ -58,18 +53,6 @@ export default function RoomPhotos({ walkthrough, room, canManage, uploaderEmail
     },
   });
 
-  const deletePhoto = useMutation({
-    mutationFn: async (id: string) => {
-      await apiRequest("DELETE", `/api/walkthrough-photos/${id}`);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: photosKey });
-    },
-    onError: () => {
-      toast({ variant: "destructive", title: "Not removed", description: "That photo could not be removed." });
-    },
-  });
-
   return (
     <div className="space-y-3">
       <h3 className="text-sm font-semibold text-muted-foreground">
@@ -80,26 +63,13 @@ export default function RoomPhotos({ walkthrough, room, canManage, uploaderEmail
       {photos.length > 0 && (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
           {photos.map((photo) => (
-            <figure key={photo.id} className="relative overflow-hidden rounded-md border border-border" data-testid={`photo-${photo.id}`}>
+            <figure key={photo.id} className="overflow-hidden rounded-md border border-border" data-testid={`photo-${photo.id}`}>
               <img
                 src={photo.imageUrl}
                 alt={photo.notes || `${room.name} photo`}
                 className="aspect-square w-full object-cover"
                 loading="lazy"
               />
-              {canManage && (
-                <Button
-                  type="button"
-                  variant="destructive"
-                  size="icon"
-                  className="absolute right-1 top-1 h-8 w-8"
-                  aria-label="Remove this photo"
-                  onClick={() => deletePhoto.mutate(photo.id)}
-                  data-testid={`button-delete-photo-${photo.id}`}
-                >
-                  <X className="h-4 w-4" />
-                </Button>
-              )}
               <figcaption className="border-t border-border bg-background px-2 py-1 text-xs text-muted-foreground">
                 {formatDate(photo.uploadedDate)}
               </figcaption>

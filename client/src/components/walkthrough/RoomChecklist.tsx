@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { Plus, Trash2 } from "lucide-react";
+import { Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/states";
@@ -34,14 +33,12 @@ const NOTE_SAVE_DELAY_MS = 700;
 
 interface RoomChecklistProps {
   walkthroughId: string;
-  roomId: string;
   items: WalkthroughItem[];
   canManage: boolean;
 }
 
-export default function RoomChecklist({ walkthroughId, roomId, items, canManage }: RoomChecklistProps) {
+export default function RoomChecklist({ walkthroughId, items, canManage }: RoomChecklistProps) {
   const { toast } = useToast();
-  const [newItemLabel, setNewItemLabel] = useState("");
 
   const itemsKey = ["/api/walkthroughs", walkthroughId, "items"] as const;
 
@@ -73,23 +70,6 @@ export default function RoomChecklist({ walkthroughId, roomId, items, canManage 
     },
   });
 
-  const createItem = useMutation({
-    mutationFn: async (label: string) => {
-      await apiRequest("POST", "/api/walkthrough-items", {
-        roomId,
-        label,
-        displayOrder: items.length,
-      });
-    },
-    onSuccess: () => {
-      setNewItemLabel("");
-      queryClient.invalidateQueries({ queryKey: itemsKey });
-    },
-    onError: () => {
-      toast({ variant: "destructive", title: "Not added", description: "That item could not be added." });
-    },
-  });
-
   const deleteItem = useMutation({
     mutationFn: async (id: string) => {
       await apiRequest("DELETE", `/api/walkthrough-items/${id}`);
@@ -106,8 +86,8 @@ export default function RoomChecklist({ walkthroughId, roomId, items, canManage 
     <div className="space-y-3">
       {items.length === 0 ? (
         <EmptyState
-          title="This room has no items yet"
-          description="Add what should be checked in here — the sink, the smoke detector, the windows."
+          title="Nothing to check in this room"
+          description="Every item here has been removed, so this room records nothing. Photos of it can still be added below."
         />
       ) : (
         items.map((item) => (
@@ -124,32 +104,6 @@ export default function RoomChecklist({ walkthroughId, roomId, items, canManage 
         ))
       )}
 
-      {canManage && (
-        <div className="flex gap-2 pt-1">
-          <Input
-            value={newItemLabel}
-            onChange={(event) => setNewItemLabel(event.target.value)}
-            placeholder="Add something else to check…"
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && newItemLabel.trim()) {
-                event.preventDefault();
-                createItem.mutate(newItemLabel.trim());
-              }
-            }}
-            data-testid="input-new-item"
-          />
-          <Button
-            type="button"
-            variant="secondary"
-            disabled={!newItemLabel.trim() || createItem.isPending}
-            onClick={() => createItem.mutate(newItemLabel.trim())}
-            data-testid="button-add-item"
-          >
-            <Plus className="h-4 w-4" />
-            Add
-          </Button>
-        </div>
-      )}
     </div>
   );
 }

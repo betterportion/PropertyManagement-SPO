@@ -1,18 +1,8 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Check, CircleDashed, CircleDot, DoorOpen, Plus, Trash2 } from "lucide-react";
+import { Check, CircleDashed, CircleDot, DoorOpen, Plus } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -78,7 +68,6 @@ export default function RoomSwitcher({
 }: RoomSwitcherProps) {
   const { toast } = useToast();
   const [isAddOpen, setIsAddOpen] = useState(false);
-  const [roomToDelete, setRoomToDelete] = useState<WalkthroughRoom | null>(null);
   const [templateRoomId, setTemplateRoomId] = useState("");
   const [customName, setCustomName] = useState("");
 
@@ -96,7 +85,7 @@ export default function RoomSwitcher({
   const addRoom = useMutation({
     mutationFn: async () => {
       const response = await apiRequest("POST", `/api/walkthroughs/${walkthroughId}/rooms`, {
-        templateRoomId: templateRoomId || undefined,
+        templateRoomId,
         name: customName.trim() || undefined,
       });
       return (await response.json()) as WalkthroughRoom & { itemsCreated: number };
@@ -113,7 +102,7 @@ export default function RoomSwitcher({
         title: `${room.name} added`,
         description: room.itemsCreated > 0
           ? `Started with ${room.itemsCreated} standard item${room.itemsCreated === 1 ? "" : "s"}. Remove anything this house does not have.`
-          : "Add what should be checked in this room.",
+          : "That room type has no standard items, so there is nothing to check in it yet.",
       });
     },
     onError: () => {
@@ -121,25 +110,10 @@ export default function RoomSwitcher({
     },
   });
 
-  const deleteRoom = useMutation({
-    mutationFn: async (id: string) => {
-      await apiRequest("DELETE", `/api/walkthrough-rooms/${id}`);
-    },
-    onSuccess: (_result, id) => {
-      queryClient.invalidateQueries({ queryKey: roomsKey });
-      queryClient.invalidateQueries({ queryKey: itemsKey });
-      setRoomToDelete(null);
-      if (id === currentRoomId) {
-        const next = rooms.find((room) => room.id !== id);
-        if (next) onSelectRoom(next.id);
-      }
-    },
-    onError: () => {
-      toast({ variant: "destructive", title: "Not removed", description: "That room could not be removed." });
-    },
-  });
-
-  const canSubmitRoom = Boolean(templateRoomId || customName.trim());
+  // A room type is required rather than optional. It is what brings the
+  // standard items with it, and a room added by name alone would arrive empty
+  // with no way to fill it in.
+  const canSubmitRoom = Boolean(templateRoomId);
 
   return (
     <>
@@ -157,7 +131,7 @@ export default function RoomSwitcher({
               const status = STATUS_STYLE[roomStatus(items)];
               const StatusIcon = status.icon;
               return (
-                <li key={room.id} className="flex items-center gap-1">
+                <li key={room.id}>
                   <button
                     type="button"
                     onClick={() => {
@@ -166,7 +140,7 @@ export default function RoomSwitcher({
                     }}
                     aria-current={room.id === currentRoomId ? "true" : undefined}
                     className={cn(
-                      "flex min-h-14 flex-1 items-center gap-3 rounded-md border px-3 py-2 text-left",
+                      "flex min-h-14 w-full items-center gap-3 rounded-md border px-3 py-2 text-left",
                       room.id === currentRoomId
                         ? "border-primary bg-primary/10"
                         : "border-border hover:bg-muted",
@@ -182,18 +156,6 @@ export default function RoomSwitcher({
                       </span>
                     </span>
                   </button>
-                  {canManage && (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      aria-label={`Remove ${room.name}`}
-                      onClick={() => setRoomToDelete(room)}
-                      data-testid={`button-delete-room-${room.id}`}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  )}
                 </li>
               );
             })}
@@ -272,26 +234,6 @@ export default function RoomSwitcher({
         </DialogContent>
       </Dialog>
 
-      <AlertDialog open={!!roomToDelete} onOpenChange={(next) => !next && setRoomToDelete(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Remove {roomToDelete?.name}?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Everything recorded for this room in this walkthrough goes with it — the items,
-              their conditions and notes, and any photos. Earlier walkthroughs are not affected.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel data-testid="button-cancel-delete-room">Keep it</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => roomToDelete && deleteRoom.mutate(roomToDelete.id)}
-              data-testid="button-confirm-delete-room"
-            >
-              Remove the room
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </>
   );
 }

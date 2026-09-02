@@ -1,25 +1,15 @@
 import { useMemo, useState } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "wouter";
 import { ArrowLeft, ArrowRight, ChevronLeft, DoorOpen, ListChecks } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { EmptyState, ErrorState, LoadingState } from "@/components/states";
 import RoomChecklist from "@/components/walkthrough/RoomChecklist";
 import RoomPhotos from "@/components/walkthrough/RoomPhotos";
 import RoomSwitcher from "@/components/walkthrough/RoomSwitcher";
 import { useAuth } from "@/hooks/useAuth";
-import { useToast } from "@/hooks/use-toast";
-import { apiRequest, queryClient } from "@/lib/queryClient";
 import { formatDate } from "@/lib/format";
 import {
   WALKTHROUGH_STATUS_BADGE,
@@ -41,22 +31,21 @@ import type { Walkthrough, WalkthroughItem, WalkthroughRoom } from "@shared/sche
  *     pinching.
  *   - Rooms are reachable in any order. Houses are not walked in list order.
  *   - Every tap is written to the server as it happens and the walkthrough
- *     stays a `draft` until somebody says otherwise, so a locked phone, a dead
- *     battery or a closed tab costs nothing.
+ *     stays a `draft`, so a locked phone, a dead battery or a closed tab costs
+ *     nothing.
  *
- * There is no separate save step and no client-side draft. "Submit" only
- * changes the status.
+ * There is no separate save step and no client-side draft. Nothing here moves
+ * a walkthrough out of `draft` -- the plan has not asked for that yet, and the
+ * status badge below only reports what the record already says.
  */
 
 export default function WalkthroughRun() {
   const params = useParams<{ id: string }>();
   const walkthroughId = params.id;
   const { user } = useAuth();
-  const { toast } = useToast();
 
   const [activeRoomId, setActiveRoomId] = useState<string | null>(null);
   const [isSwitcherOpen, setIsSwitcherOpen] = useState(false);
-  const [isFinishOpen, setIsFinishOpen] = useState(false);
 
   const typedUser = user as (WalkthroughUser & { email?: string }) | null;
 
@@ -98,21 +87,6 @@ export default function WalkthroughRun() {
     rooms.find((room) => room.id === activeRoomId) ?? rooms[0] ?? null;
   const currentIndex = currentRoom ? rooms.findIndex((room) => room.id === currentRoom.id) : -1;
 
-  const submitWalkthrough = useMutation({
-    mutationFn: async (status: Walkthrough["status"]) => {
-      await apiRequest("PATCH", `/api/walkthroughs/${walkthroughId}`, { status });
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/walkthroughs", walkthroughId] });
-      queryClient.invalidateQueries({ queryKey: ["/api/walkthroughs"] });
-      setIsFinishOpen(false);
-      toast({ title: "Walkthrough submitted", description: "It is now on record for this house." });
-    },
-    onError: () => {
-      toast({ variant: "destructive", title: "Not submitted", description: "The walkthrough could not be submitted." });
-    },
-  });
-
   const isLoading = walkthroughLoading || roomsLoading || itemsLoading;
   const status = walkthrough ? WALKTHROUGH_STATUS_BADGE[walkthrough.status] : null;
 
@@ -152,12 +126,7 @@ export default function WalkthroughRun() {
           </p>
         </div>
 
-        <RoomChecklist
-          walkthroughId={walkthroughId}
-          roomId={currentRoom.id}
-          items={roomItems}
-          canManage={canManage}
-        />
+        <RoomChecklist walkthroughId={walkthroughId} items={roomItems} canManage={canManage} />
 
         <RoomPhotos
           walkthrough={walkthrough}
@@ -235,16 +204,6 @@ export default function WalkthroughRun() {
               <ListChecks className="h-4 w-4" />
               {currentRoom ? `Room ${currentIndex + 1} of ${rooms.length}` : "Rooms"}
             </Button>
-            {canManage && walkthrough?.status === "draft" && (
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={() => setIsFinishOpen(true)}
-                data-testid="button-open-finish"
-              >
-                Finish
-              </Button>
-            )}
           </div>
         </div>
       </header>
@@ -286,37 +245,6 @@ export default function WalkthroughRun() {
         onSelectRoom={setActiveRoomId}
         canManage={canManage}
       />
-
-      <Dialog open={isFinishOpen} onOpenChange={setIsFinishOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Submit this walkthrough?</DialogTitle>
-            <DialogDescription>
-              {overall.assessed === overall.total
-                ? "Everything on the checklist has been recorded."
-                : `${overall.total - overall.assessed} item${overall.total - overall.assessed === 1 ? " has" : "s have"} not been checked. You can still submit, and anything left will show as "Not checked".`}
-            </DialogDescription>
-          </DialogHeader>
-          {overall.flagged > 0 && (
-            <p className="text-sm text-amber-700 dark:text-amber-400" data-testid="text-finish-flagged">
-              {overall.flagged} item{overall.flagged === 1 ? " is" : "s are"} marked poor or damaged.
-            </p>
-          )}
-          <DialogFooter>
-            <Button variant="secondary" onClick={() => setIsFinishOpen(false)} data-testid="button-cancel-finish">
-              Keep working
-            </Button>
-            <Button
-              variant="primary"
-              disabled={submitWalkthrough.isPending}
-              onClick={() => submitWalkthrough.mutate("submitted")}
-              data-testid="button-submit-walkthrough"
-            >
-              {submitWalkthrough.isPending ? "Submitting…" : "Submit"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
