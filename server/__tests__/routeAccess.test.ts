@@ -1410,6 +1410,17 @@ describe("walkthroughs and walkthrough items", () => {
 
   const westLead = () => actAs(STAFF, { ...MANAGE, allowedRegions: ["West Central"] });
 
+  /**
+   * Creating a walkthrough also seeds its structure from the template. These
+   * tests are about the guards rather than the seeding, so this gives it an
+   * empty template to read and nothing to copy.
+   */
+  const seedsNothing = () => {
+    storageMock.getWalkthroughsByProperty.mockResolvedValue([]);
+    storageMock.getAllWalkthroughTemplateRooms.mockResolvedValue([]);
+    storageMock.getAllWalkthroughTemplateItems.mockResolvedValue([]);
+  };
+
   // ── The three layers, on every new route ─────────────────────────────────
 
   const READS: [string, string][] = [
@@ -1494,6 +1505,7 @@ describe("walkthroughs and walkthrough items", () => {
     westLead();
     storageMock.getProperty.mockResolvedValue(WEST_PROPERTY);
     storageMock.createWalkthrough.mockImplementation(async (w: Record<string, unknown>) => ({ id: "wt-new", ...w }));
+    seedsNothing();
 
     const { status } = await request("POST", "/api/walkthroughs", {
       body: { propertyId: "prop-west", region: "East Central", buildingAddress: "2 River Rd" },
@@ -1509,6 +1521,7 @@ describe("walkthroughs and walkthrough items", () => {
     westLead();
     storageMock.getProperty.mockResolvedValue(WEST_PROPERTY);
     storageMock.createWalkthrough.mockImplementation(async (w: Record<string, unknown>) => ({ id: "wt-new", ...w }));
+    seedsNothing();
 
     await request("POST", "/api/walkthroughs", {
       body: { propertyId: "prop-west", performedBy: "someone.else@spo.org" },
@@ -1627,6 +1640,371 @@ describe("walkthroughs and walkthrough items", () => {
 
     const patch = storageMock.updateWalkthroughItem.mock.calls[0][1];
     expect(patch).toEqual({ condition: "poor" });
+  });
+});
+
+/**
+ * The national walkthrough template.
+ *
+ * The interesting boundary here is not resident-versus-staff, it is
+ * regional-versus-national. A regional administrator holding
+ * canManageWalkthroughs manages their own houses; this template reaches every
+ * region, so changing it takes admin. Those are the tests that matter.
+ */
+describe("the national walkthrough template", () => {
+  const MANAGE = { canViewWalkthroughs: true, canManageWalkthroughs: true };
+  const T_ROOM = { id: "t-bath", name: "Bathroom", includeByDefault: true, displayOrder: 1 };
+  const T_ITEM = { id: "ti-1", templateRoomId: "t-bath", label: "Toilet", displayOrder: 0 };
+
+  const MUTATIONS: [string, string, Record<string, unknown>][] = [
+    ["POST", "/api/walkthrough-template/rooms", { name: "Attic", displayOrder: 0 }],
+    ["PATCH", "/api/walkthrough-template/rooms/t-bath", { name: "Bath" }],
+    ["DELETE", "/api/walkthrough-template/rooms/t-bath", {}],
+    ["POST", "/api/walkthrough-template/items", { templateRoomId: "t-bath", label: "Fan", displayOrder: 0 }],
+    ["PATCH", "/api/walkthrough-template/items/ti-1", { label: "Extractor fan" }],
+    ["DELETE", "/api/walkthrough-template/items/ti-1", {}],
+  ];
+
+  const primeTemplate = () => {
+    storageMock.getWalkthroughTemplateRoom.mockResolvedValue(T_ROOM);
+    storageMock.getWalkthroughTemplateItem.mockResolvedValue(T_ITEM);
+  };
+
+  const expectNoTemplateWrite = () => {
+    expect(storageMock.createWalkthroughTemplateRoom).not.toHaveBeenCalled();
+    expect(storageMock.updateWalkthroughTemplateRoom).not.toHaveBeenCalled();
+    expect(storageMock.deleteWalkthroughTemplateRoom).not.toHaveBeenCalled();
+    expect(storageMock.createWalkthroughTemplateItem).not.toHaveBeenCalled();
+    expect(storageMock.updateWalkthroughTemplateItem).not.toHaveBeenCalled();
+    expect(storageMock.deleteWalkthroughTemplateItem).not.toHaveBeenCalled();
+  };
+
+  it.each(MUTATIONS)("refuses an anonymous caller: %s %s", async (method, path, body) => {
+    const { status } = await request(method, path, { body });
+    expect(status).toBe(401);
+    expectNoTemplateWrite();
+  });
+
+  it.each(MUTATIONS)("refuses a resident: %s %s", async (method, path, body) => {
+    actAs(ALICE, ALL_MAINTENANCE);
+    primeTemplate();
+    const { status } = await request(method, path, { body });
+    expect(status).toBe(403);
+    expectNoTemplateWrite();
+  });
+
+  it.each(MUTATIONS)(
+    "refuses a regional administrator who manages walkthroughs: %s %s",
+    async (method, path, body) => {
+      // The boundary this whole block exists for. canManageWalkthroughs is a
+      // grant over your own houses; the template is national, so it is not
+      // enough here. A regional lead editing it would change every region.
+      actAs(STAFF, { ...MANAGE, allowedRegions: ["West Central"] });
+      primeTemplate();
+      const { status } = await request(method, path, { body });
+      expect(status).toBe(403);
+      expectNoTemplateWrite();
+    },
+  );
+
+  it.each(MUTATIONS)("lets an admin through: %s %s", async (method, path, body) => {
+    // The positive control. Without it every refusal above could be passing
+    // because the request was malformed rather than because a guard ran.
+    actAs(ADMIN);
+    primeTemplate();
+    storageMock.createWalkthroughTemplateRoom.mockResolvedValue(T_ROOM);
+    storageMock.updateWalkthroughTemplateRoom.mockResolvedValue(T_ROOM);
+    storageMock.createWalkthroughTemplateItem.mockResolvedValue(T_ITEM);
+    storageMock.updateWalkthroughTemplateItem.mockResolvedValue(T_ITEM);
+
+    const { status } = await request(method, path, { body });
+    expect(status).toBe(200);
+  });
+
+  it("lets a regional administrator READ the template", async () => {
+    // Refusing this would stop an RA picking a room type at all.
+    actAs(STAFF, { ...MANAGE, allowedRegions: ["West Central"] });
+    storageMock.getAllWalkthroughTemplateRooms.mockResolvedValue([T_ROOM]);
+    const { status, body } = await request("GET", "/api/walkthrough-template/rooms");
+    expect(status).toBe(200);
+    expect(body).toHaveLength(1);
+  });
+
+  it("refuses a resident the template list", async () => {
+    actAs(ALICE, ALL_MAINTENANCE);
+    expect((await request("GET", "/api/walkthrough-template/rooms")).status).toBe(403);
+    expect((await request("GET", "/api/walkthrough-template/items")).status).toBe(403);
+  });
+
+  it("will not move a template item between room types", async () => {
+    actAs(ADMIN);
+    primeTemplate();
+    storageMock.updateWalkthroughTemplateItem.mockResolvedValue(T_ITEM);
+
+    await request("PATCH", "/api/walkthrough-template/items/ti-1", {
+      body: { label: "Extractor fan", templateRoomId: "t-kitchen" },
+    });
+
+    expect(storageMock.updateWalkthroughTemplateItem.mock.calls[0][1]).toEqual({ label: "Extractor fan" });
+  });
+
+  it("404s an item added to a room type that does not exist", async () => {
+    actAs(ADMIN);
+    storageMock.getWalkthroughTemplateRoom.mockResolvedValue(undefined);
+    const { status } = await request("POST", "/api/walkthrough-template/items", {
+      body: { templateRoomId: "nope", label: "Fan", displayOrder: 0 },
+    });
+    expect(status).toBe(404);
+    expect(storageMock.createWalkthroughTemplateItem).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * What a new walkthrough starts out containing.
+ *
+ * The planning rules are covered without HTTP in walkthroughTemplate.test.ts.
+ * What only a real request shows is which SOURCE the route picks -- template on
+ * a property's first walkthrough, that property's own last one afterwards --
+ * and that a seeding failure does not cost the RA the walkthrough itself.
+ */
+describe("seeding a new walkthrough", () => {
+  const MANAGE = { canViewWalkthroughs: true, canManageWalkthroughs: true };
+  const WEST_PROPERTY = { id: "prop-west", name: "Cleveland House", region: "West Central", address: "1 Main St" };
+  const T_ROOMS = [
+    { id: "t-kitchen", name: "Kitchen", includeByDefault: true, displayOrder: 0 },
+    { id: "t-garage", name: "Garage", includeByDefault: false, displayOrder: 9 },
+  ];
+  const T_ITEMS = [
+    { id: "i1", templateRoomId: "t-kitchen", label: "Sink", displayOrder: 0 },
+    { id: "i2", templateRoomId: "t-garage", label: "Door opener", displayOrder: 0 },
+  ];
+
+  const readyToCreate = () => {
+    actAs(STAFF, { ...MANAGE, allowedRegions: ["West Central"] });
+    storageMock.getProperty.mockResolvedValue(WEST_PROPERTY);
+    storageMock.createWalkthrough.mockImplementation(async (w: Record<string, unknown>) => ({ id: "wt-new", ...w }));
+    storageMock.createWalkthroughRoom.mockImplementation(async (r: Record<string, unknown>) => ({ id: `room-${(r as { name: string }).name}`, ...r }));
+    storageMock.createWalkthroughItem.mockResolvedValue({ id: "item-new" });
+  };
+
+  const createdRoomNames = () =>
+    storageMock.createWalkthroughRoom.mock.calls.map((c: unknown[]) => (c[0] as { name: string }).name);
+  const createdItemLabels = () =>
+    storageMock.createWalkthroughItem.mock.calls.map((c: unknown[]) => (c[0] as { label: string }).label);
+
+  it("copies the national template on a property's first walkthrough", async () => {
+    readyToCreate();
+    storageMock.getWalkthroughsByProperty.mockResolvedValue([]);
+    storageMock.getAllWalkthroughTemplateRooms.mockResolvedValue(T_ROOMS);
+    storageMock.getAllWalkthroughTemplateItems.mockResolvedValue(T_ITEMS);
+
+    const { status, body } = await request("POST", "/api/walkthroughs", { body: { propertyId: "prop-west" } });
+
+    expect(status).toBe(200);
+    expect(body.roomsCreated).toBe(1);
+    expect(createdRoomNames()).toEqual(["Kitchen"]);
+    expect(createdItemLabels()).toEqual(["Sink"]);
+  });
+
+  it("leaves a non-standard room type out of a first walkthrough", async () => {
+    readyToCreate();
+    storageMock.getWalkthroughsByProperty.mockResolvedValue([]);
+    storageMock.getAllWalkthroughTemplateRooms.mockResolvedValue(T_ROOMS);
+    storageMock.getAllWalkthroughTemplateItems.mockResolvedValue(T_ITEMS);
+
+    await request("POST", "/api/walkthroughs", { body: { propertyId: "prop-west" } });
+
+    expect(createdRoomNames()).not.toContain("Garage");
+    expect(createdItemLabels()).not.toContain("Door opener");
+  });
+
+  it("copies the property's own last walkthrough, not the template, on a repeat", async () => {
+    // The rule that makes editing worth doing: once an RA has deleted the
+    // smoke detector this house lacks and added the porch it has, that shape
+    // comes back next year rather than the national default.
+    readyToCreate();
+    storageMock.getWalkthroughsByProperty.mockResolvedValue([
+      { id: "wt-last", propertyId: "prop-west", region: "West Central" },
+    ]);
+    storageMock.getWalkthroughRoomsByWalkthrough.mockResolvedValue([
+      { id: "r-porch", name: "Porch", displayOrder: 0 },
+    ]);
+    storageMock.getWalkthroughItemsByRoom.mockResolvedValue([
+      { roomId: "r-porch", label: "Railing", displayOrder: 0, condition: "damaged", notes: "Loose" },
+    ]);
+
+    const { body } = await request("POST", "/api/walkthroughs", { body: { propertyId: "prop-west" } });
+
+    expect(body.roomsCreated).toBe(1);
+    expect(createdRoomNames()).toEqual(["Porch"]);
+    expect(storageMock.getAllWalkthroughTemplateRooms).not.toHaveBeenCalled();
+  });
+
+  it("does not carry last year's condition or notes into the new walkthrough", async () => {
+    // A new walkthrough starts unassessed. Inheriting "damaged" would present
+    // a stale judgement as this year's finding.
+    readyToCreate();
+    storageMock.getWalkthroughsByProperty.mockResolvedValue([{ id: "wt-last", propertyId: "prop-west" }]);
+    storageMock.getWalkthroughRoomsByWalkthrough.mockResolvedValue([{ id: "r-porch", name: "Porch", displayOrder: 0 }]);
+    storageMock.getWalkthroughItemsByRoom.mockResolvedValue([
+      { roomId: "r-porch", label: "Railing", displayOrder: 0, condition: "damaged", notes: "Loose" },
+    ]);
+
+    await request("POST", "/api/walkthroughs", { body: { propertyId: "prop-west" } });
+
+    const item = storageMock.createWalkthroughItem.mock.calls[0][0];
+    expect(item).not.toHaveProperty("condition");
+    expect(item).not.toHaveProperty("notes");
+  });
+
+  it("never copies photos", async () => {
+    readyToCreate();
+    storageMock.getWalkthroughsByProperty.mockResolvedValue([{ id: "wt-last", propertyId: "prop-west" }]);
+    storageMock.getWalkthroughRoomsByWalkthrough.mockResolvedValue([{ id: "r-porch", name: "Porch", displayOrder: 0 }]);
+    storageMock.getWalkthroughItemsByRoom.mockResolvedValue([]);
+
+    await request("POST", "/api/walkthroughs", { body: { propertyId: "prop-west" } });
+
+    expect(storageMock.createWalkthroughPhoto).not.toHaveBeenCalled();
+  });
+
+  it("still creates the walkthrough when seeding fails", async () => {
+    // The walkthrough row already exists by the time seeding runs. A 500 here
+    // would tell an RA the whole thing failed when it did not, and they would
+    // start a second one.
+    readyToCreate();
+    storageMock.getWalkthroughsByProperty.mockRejectedValue(new Error("template unreachable"));
+
+    const { status, body } = await request("POST", "/api/walkthroughs", { body: { propertyId: "prop-west" } });
+
+    expect(status).toBe(200);
+    expect(body.id).toBe("wt-new");
+    expect(body.roomsCreated).toBe(0);
+  });
+
+  it("creates an empty walkthrough when the template is empty", async () => {
+    readyToCreate();
+    storageMock.getWalkthroughsByProperty.mockResolvedValue([]);
+    storageMock.getAllWalkthroughTemplateRooms.mockResolvedValue([]);
+    storageMock.getAllWalkthroughTemplateItems.mockResolvedValue([]);
+
+    const { status, body } = await request("POST", "/api/walkthroughs", { body: { propertyId: "prop-west" } });
+
+    expect(status).toBe(200);
+    expect(body.roomsCreated).toBe(0);
+    expect(storageMock.createWalkthroughRoom).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Adding a room to an existing walkthrough, prefilled from a room type.
+ */
+describe("adding a room to a walkthrough", () => {
+  const MANAGE = { canViewWalkthroughs: true, canManageWalkthroughs: true };
+  const WEST_WT = { id: "wt-west", propertyId: "prop-west", region: "West Central", buildingAddress: "1 Main St" };
+  const EAST_WT = { id: "wt-east", propertyId: "prop-east", region: "East Central", buildingAddress: "2 River Rd" };
+  const T_BATH = { id: "t-bath", name: "Bathroom", includeByDefault: true, displayOrder: 1 };
+  const T_ITEMS = [
+    { id: "i1", templateRoomId: "t-bath", label: "Sink", displayOrder: 0 },
+    { id: "i2", templateRoomId: "t-bath", label: "Toilet", displayOrder: 1 },
+    { id: "i3", templateRoomId: "t-kitchen", label: "Range", displayOrder: 0 },
+  ];
+
+  const westLead = () => actAs(STAFF, { ...MANAGE, allowedRegions: ["West Central"] });
+
+  it("prefills the room type's standard items", async () => {
+    westLead();
+    storageMock.getWalkthrough.mockResolvedValue(WEST_WT);
+    storageMock.getWalkthroughTemplateRoom.mockResolvedValue(T_BATH);
+    storageMock.getAllWalkthroughTemplateItems.mockResolvedValue(T_ITEMS);
+    storageMock.getWalkthroughRoomsByWalkthrough.mockResolvedValue([]);
+    storageMock.createWalkthroughRoom.mockResolvedValue({ id: "room-new", name: "Bathroom" });
+    storageMock.createWalkthroughItem.mockResolvedValue({ id: "item-new" });
+
+    const { status, body } = await request("POST", "/api/walkthroughs/wt-west/rooms", {
+      body: { templateRoomId: "t-bath" },
+    });
+
+    expect(status).toBe(200);
+    expect(body.itemsCreated).toBe(2);
+    expect(storageMock.createWalkthroughItem.mock.calls.map((c: unknown[]) => (c[0] as { label: string }).label))
+      .toEqual(["Sink", "Toilet"]);
+  });
+
+  it("does not leak another room type's items", async () => {
+    westLead();
+    storageMock.getWalkthrough.mockResolvedValue(WEST_WT);
+    storageMock.getWalkthroughTemplateRoom.mockResolvedValue(T_BATH);
+    storageMock.getAllWalkthroughTemplateItems.mockResolvedValue(T_ITEMS);
+    storageMock.getWalkthroughRoomsByWalkthrough.mockResolvedValue([]);
+    storageMock.createWalkthroughRoom.mockResolvedValue({ id: "room-new", name: "Bathroom" });
+    storageMock.createWalkthroughItem.mockResolvedValue({ id: "item-new" });
+
+    await request("POST", "/api/walkthroughs/wt-west/rooms", { body: { templateRoomId: "t-bath" } });
+
+    expect(storageMock.createWalkthroughItem.mock.calls.map((c: unknown[]) => (c[0] as { label: string }).label))
+      .not.toContain("Range");
+  });
+
+  it("adds a plain named room with no items", async () => {
+    westLead();
+    storageMock.getWalkthrough.mockResolvedValue(WEST_WT);
+    storageMock.getWalkthroughRoomsByWalkthrough.mockResolvedValue([]);
+    storageMock.createWalkthroughRoom.mockResolvedValue({ id: "room-new", name: "Boot room" });
+
+    const { status, body } = await request("POST", "/api/walkthroughs/wt-west/rooms", {
+      body: { name: "Boot room" },
+    });
+
+    expect(status).toBe(200);
+    expect(body.itemsCreated).toBe(0);
+    expect(storageMock.createWalkthroughItem).not.toHaveBeenCalled();
+  });
+
+  it("refuses a request with neither a name nor a room type", async () => {
+    westLead();
+    storageMock.getWalkthrough.mockResolvedValue(WEST_WT);
+    storageMock.getWalkthroughRoomsByWalkthrough.mockResolvedValue([]);
+
+    const { status } = await request("POST", "/api/walkthroughs/wt-west/rooms", { body: {} });
+    expect(status).toBe(400);
+    expect(storageMock.createWalkthroughRoom).not.toHaveBeenCalled();
+  });
+
+  it("refuses a walkthrough in another region, and creates nothing", async () => {
+    westLead();
+    storageMock.getWalkthrough.mockResolvedValue(EAST_WT);
+
+    const { status } = await request("POST", "/api/walkthroughs/wt-east/rooms", {
+      body: { templateRoomId: "t-bath" },
+    });
+
+    expect(status).toBe(403);
+    expect(storageMock.createWalkthroughRoom).not.toHaveBeenCalled();
+    expect(storageMock.createWalkthroughItem).not.toHaveBeenCalled();
+  });
+
+  it("refuses a resident", async () => {
+    actAs(ALICE, ALL_MAINTENANCE);
+    storageMock.getWalkthrough.mockResolvedValue(WEST_WT);
+    const { status } = await request("POST", "/api/walkthroughs/wt-west/rooms", { body: { name: "Boot room" } });
+    expect(status).toBe(403);
+    expect(storageMock.createWalkthroughRoom).not.toHaveBeenCalled();
+  });
+
+  it("takes the house from the walkthrough, not the caller", async () => {
+    westLead();
+    storageMock.getWalkthrough.mockResolvedValue(WEST_WT);
+    storageMock.getWalkthroughRoomsByWalkthrough.mockResolvedValue([]);
+    storageMock.createWalkthroughRoom.mockResolvedValue({ id: "room-new", name: "Boot room" });
+
+    await request("POST", "/api/walkthroughs/wt-west/rooms", {
+      body: { name: "Boot room", propertyId: "prop-east", buildingAddress: "2 River Rd" },
+    });
+
+    expect(storageMock.createWalkthroughRoom).toHaveBeenCalledWith(
+      expect.objectContaining({ propertyId: "prop-west", buildingAddress: "1 Main St" }),
+    );
   });
 });
 
