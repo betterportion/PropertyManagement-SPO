@@ -1,396 +1,327 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
+import { useLocation } from "wouter";
+import { ArrowLeft, Building2, CalendarDays, ChevronRight, ClipboardList, MapPin, Plus } from "lucide-react";
+
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Plus, ArrowLeft, Building2, MapPin, DoorOpen } from "lucide-react";
-import RoomCard from "@/components/RoomCard";
-import RoomDetailDrawer from "@/components/RoomDetailDrawer";
-import { PhotoUpload } from "@/components/PhotoUpload";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Container, PageHeader, PageStack, Section } from "@/components/layout/page";
+import { EmptyState, LoadingState } from "@/components/states";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { insertWalkthroughRoomSchema, insertWalkthroughPhotoSchema, type WalkthroughRoom, type WalkthroughPhoto, type UserPermissions, type Property } from "@shared/schema";
-import { z } from "zod";
-import { Section, Container, PageHeader, PageStack } from "@/components/layout/page";
-import { LoadingState, EmptyState } from "@/components/states";
+import { formatDate } from "@/lib/format";
+import {
+  WALKTHROUGH_STATUS_BADGE,
+  WALKTHROUGH_TYPE_LABEL,
+  canManageWalkthroughs,
+  type WalkthroughUser,
+} from "@/lib/walkthrough";
+import type { Property, Walkthrough } from "@shared/schema";
 
-interface User {
-  id: string;
-  email: string;
-  firstName?: string;
-  lastName?: string;
-  role: string;
+/**
+ * Which houses have been walked, and when.
+ *
+ * This page is the index; the filling-in happens on `/walkthroughs/:id`.
+ * Rooms used to hang straight off a property and this page listed them, which
+ * meant a house had exactly one set of rooms and no history. A walkthrough is
+ * now a dated event, so the list a house shows is a list of visits.
+ */
+
+/** Legacy walkthroughs came from the backfill; nobody starts one. */
+const STARTABLE_TYPES: Walkthrough["type"][] = ["annual", "move_in", "move_out"];
+
+/** Today as "YYYY-MM-DD", for the date input's default. */
+function today(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
 }
 
 export default function Walkthroughs() {
-  const [selectedProperty, setSelectedProperty] = useState<Property | null>(null);
-  const [selectedRoom, setSelectedRoom] = useState<WalkthroughRoom | null>(null);
-  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
-  const [isAddRoomDialogOpen, setIsAddRoomDialogOpen] = useState(false);
-  const [createdRoom, setCreatedRoom] = useState<WalkthroughRoom | null>(null);
-  const [isPhotoUploadDialogOpen, setIsPhotoUploadDialogOpen] = useState(false);
-
+  const [, navigate] = useLocation();
   const { user } = useAuth();
   const { toast } = useToast();
 
-  const typedUser = user as User | null;
+  const [selectedProperty, setSelectedProperty] = useState<Property | null>(null);
+  const [isStartOpen, setIsStartOpen] = useState(false);
+  const [newType, setNewType] = useState<Walkthrough["type"]>("annual");
+  const [newDate, setNewDate] = useState(today());
 
-  const { data: permissions } = useQuery<UserPermissions>({
-    queryKey: [`/api/users/${typedUser?.id}/permissions`],
-    enabled: !!typedUser?.id,
-  });
-
-  const canManage = permissions?.canManageWalkthroughs || typedUser?.role === "admin" || typedUser?.role === "regional_administrator";
-
-  const { data: allRooms = [], isLoading: roomsLoading } = useQuery<WalkthroughRoom[]>({
-    queryKey: ['/api/walkthrough-rooms'],
-  });
-
-  const { data: allPhotos = [] } = useQuery<WalkthroughPhoto[]>({
-    queryKey: ['/api/walkthrough-photos'],
-  });
+  // Computed, not returned on. An early return above the queries below would
+  // change the hook count once the auth query resolves, and React throws.
+  const canManage = canManageWalkthroughs(user as WalkthroughUser | null);
 
   const { data: properties = [], isLoading: propertiesLoading } = useQuery<Property[]>({
-    queryKey: ['/api/properties'],
+    queryKey: ["/api/properties"],
   });
 
-  const getFirstPhotoForRoom = (roomId: string) => {
-    return allPhotos.find(photo => photo.roomId === roomId) || null;
-  };
-
-  const getPropertyForRoom = (room: WalkthroughRoom) => {
-    if (room.propertyId) return properties.find(p => p.id === room.propertyId) || null;
-    return properties.find(p => p.address === room.buildingAddress) || null;
-  };
-
-  const getRoomCountForProperty = (property: Property) => {
-    return allRooms.filter(r => r.propertyId === property.id || r.buildingAddress === property.address).length;
-  };
-
-  const roomsForSelectedProperty = selectedProperty
-    ? allRooms.filter(r => r.propertyId === selectedProperty.id || r.buildingAddress === selectedProperty.address)
-    : [];
-
-  const handleOpenRoom = (room: WalkthroughRoom) => {
-    setSelectedRoom(room);
-    setIsDrawerOpen(true);
-  };
-
-  const addRoomForm = useForm<z.infer<typeof insertWalkthroughRoomSchema>>({
-    resolver: zodResolver(insertWalkthroughRoomSchema),
-    defaultValues: {
-      name: "",
-      propertyId: "",
-      buildingAddress: "",
-      displayOrder: 0,
-    },
+  const { data: walkthroughs = [], isLoading: walkthroughsLoading } = useQuery<Walkthrough[]>({
+    queryKey: ["/api/walkthroughs"],
   });
 
-  const photoForm = useForm<z.infer<typeof insertWalkthroughPhotoSchema>>({
-    resolver: zodResolver(insertWalkthroughPhotoSchema),
-    defaultValues: {
-      roomId: "",
-      imageUrl: "",
-      condition: "same_as_last_walkthrough",
-      notes: "",
-      region: "",
-      buildingAddress: "",
-      location: "",
-      uploadedBy: typedUser?.email || "",
-    },
-  });
+  const byProperty = useMemo(() => {
+    const grouped = new Map<string, Walkthrough[]>();
+    for (const walkthrough of walkthroughs) {
+      const existing = grouped.get(walkthrough.propertyId);
+      if (existing) existing.push(walkthrough);
+      else grouped.set(walkthrough.propertyId, [walkthrough]);
+    }
+    for (const group of Array.from(grouped.values())) {
+      group.sort(
+        (a: Walkthrough, b: Walkthrough) =>
+          new Date(b.walkthroughDate).getTime() - new Date(a.walkthroughDate).getTime(),
+      );
+    }
+    return grouped;
+  }, [walkthroughs]);
 
-  const createRoomMutation = useMutation<WalkthroughRoom, Error, z.infer<typeof insertWalkthroughRoomSchema>>({
-    mutationFn: async (data) => {
-      const response = await apiRequest("POST", "/api/walkthrough-rooms", data);
-      return response.json() as Promise<WalkthroughRoom>;
+  const startWalkthrough = useMutation({
+    mutationFn: async (propertyId: string) => {
+      const response = await apiRequest("POST", "/api/walkthroughs", {
+        propertyId,
+        type: newType,
+        walkthroughDate: newDate,
+      });
+      return (await response.json()) as Walkthrough & { roomsCreated: number };
     },
-    onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ["/api/walkthrough-rooms"] });
-      setIsAddRoomDialogOpen(false);
-      addRoomForm.reset();
-      setCreatedRoom(data);
-      photoForm.setValue("roomId", data.id);
-      photoForm.setValue("region", selectedProperty?.region || "");
-      photoForm.setValue("buildingAddress", selectedProperty?.address || "");
-      photoForm.setValue("location", data.name);
-      photoForm.setValue("uploadedBy", typedUser?.email || "");
-      setIsPhotoUploadDialogOpen(true);
-      toast({ title: "Room created", description: "Add a photo to document this room." });
+    onSuccess: (walkthrough) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/walkthroughs"] });
+      setIsStartOpen(false);
+      if (walkthrough.roomsCreated === 0) {
+        toast({
+          title: "Walkthrough started, but the checklist is empty",
+          description: "The standard rooms did not load. Add the rooms you need from inside the walkthrough.",
+        });
+      }
+      navigate(`/walkthroughs/${walkthrough.id}`);
     },
     onError: () => {
-      toast({ title: "Error", description: "Failed to create room", variant: "destructive" });
+      toast({ variant: "destructive", title: "Not started", description: "The walkthrough could not be started." });
     },
   });
 
-  const createPhotoMutation = useMutation({
-    mutationFn: async (data: z.infer<typeof insertWalkthroughPhotoSchema>) => {
-      return await apiRequest("POST", "/api/walkthrough-photos", data);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/walkthrough-photos"] });
-      setIsPhotoUploadDialogOpen(false);
-      setCreatedRoom(null);
-      photoForm.reset();
-      toast({ title: "Photo uploaded", description: "Room documentation saved." });
-    },
-    onError: () => {
-      toast({ title: "Error", description: "Failed to upload photo", variant: "destructive" });
-    },
-  });
-
-  const handleOpenAddRoom = () => {
-    if (!selectedProperty) return;
-    addRoomForm.setValue("propertyId", selectedProperty.id);
-    addRoomForm.setValue("buildingAddress", selectedProperty.address);
-    addRoomForm.setValue("displayOrder", 0);
-    setIsAddRoomDialogOpen(true);
-  };
-
-  const onSubmitRoom = (data: z.infer<typeof insertWalkthroughRoomSchema>) => {
-    createRoomMutation.mutate(data);
-  };
-
-  const onSubmitPhoto = (data: z.infer<typeof insertWalkthroughPhotoSchema>) => {
-    if (!createdRoom) return;
-    createPhotoMutation.mutate({ ...data, roomId: createdRoom.id });
-  };
-
-  const isLoading = propertiesLoading || roomsLoading;
+  const isLoading = propertiesLoading || walkthroughsLoading;
+  const propertyWalkthroughs = selectedProperty ? (byProperty.get(selectedProperty.id) ?? []) : [];
 
   return (
     <Section size="compact">
       <Container>
-      <PageStack>
-      <PageHeader
-        title={selectedProperty ? selectedProperty.name : "Walkthroughs"}
-        description={selectedProperty ? selectedProperty.address : "Select a property to view and document its rooms."}
-        actions={
-          <>
-            {selectedProperty && (
-              <Button variant="ghost" size="icon" onClick={() => setSelectedProperty(null)} data-testid="button-back-to-properties" aria-label="Back to properties">
-                <ArrowLeft className="h-4 w-4" />
-              </Button>
-            )}
-            {selectedProperty && canManage && (
-              <Button variant="primary" onClick={handleOpenAddRoom} data-testid="button-add-room">
-                <Plus className="h-4 w-4" />
-                Add room
-              </Button>
-            )}
-          </>
-        }
-      />
-
-      {isLoading ? (
-        <LoadingState message="Loading walkthroughs..." />
-      ) : !selectedProperty ? (
-        /* Property selection grid */
-        properties.length === 0 ? (
-          <div className="text-center py-16">
-            <Building2 className="h-12 w-12 text-muted-foreground/40 mx-auto mb-3" />
-            <EmptyState title="No properties are ready for walkthroughs" description="Add a property first, then document each room from this workspace." />
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {properties.map((property) => {
-              const roomCount = getRoomCountForProperty(property);
-              return (
-                <Card
-                  key={property.id}
-                  className="hover-elevate active-elevate-2 cursor-pointer"
-                  onClick={() => setSelectedProperty(property)}
-                  data-testid={`card-property-${property.id}`}
-                >
-                  <CardContent className="p-5">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="rounded-md bg-muted p-2 flex-shrink-0">
-                        <Building2 className="h-5 w-5 text-muted-foreground" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <h3 className="font-semibold text-base truncate" data-testid={`text-property-name-${property.id}`}>
-                          {property.name}
-                        </h3>
-                        <div className="flex items-center gap-1 mt-1 text-sm text-muted-foreground">
-                          <MapPin className="h-3 w-3 flex-shrink-0" />
-                          <span className="truncate">{property.address}</span>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2 mt-4">
-                      {property.region && (
-                        <Badge variant="secondary" className="text-xs">
-                          {property.region}
-                        </Badge>
-                      )}
-                      <div className="flex items-center gap-1 text-xs text-muted-foreground ml-auto">
-                        <DoorOpen className="h-3.5 w-3.5" />
-                        <span>{roomCount} {roomCount === 1 ? "room" : "rooms"}</span>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              );
-            })}
-          </div>
-        )
-      ) : (
-        /* Rooms for selected property */
-        roomsForSelectedProperty.length === 0 ? (
-          <EmptyState
-            icon={DoorOpen}
-            title="This property has no rooms yet"
-            description="Add the first room to begin documenting its condition."
-            action={canManage ? <Button variant="primary" onClick={handleOpenAddRoom} data-testid="button-add-room-empty"><Plus className="h-4 w-4" />Add first room</Button> : undefined}
-          />
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {roomsForSelectedProperty.map((room) => (
-              <RoomCard
-                key={room.id}
-                room={room}
-                photo={getFirstPhotoForRoom(room.id)}
-                property={getPropertyForRoom(room)}
-                onClick={() => handleOpenRoom(room)}
-              />
-            ))}
-          </div>
-        )
-      )}
-
-      <RoomDetailDrawer
-        room={selectedRoom}
-        open={isDrawerOpen}
-        onOpenChange={setIsDrawerOpen}
-        canManage={canManage}
-      />
-
-      {/* Add Room Dialog */}
-      <Dialog open={isAddRoomDialogOpen} onOpenChange={setIsAddRoomDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Add New Room</DialogTitle>
-            <DialogDescription>
-              {selectedProperty?.name} — {selectedProperty?.address}
-            </DialogDescription>
-          </DialogHeader>
-          <Form {...addRoomForm}>
-            <form onSubmit={addRoomForm.handleSubmit(onSubmitRoom)} className="space-y-4">
-              <FormField
-                control={addRoomForm.control}
-                name="name"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Room Name</FormLabel>
-                    <FormControl>
-                      <Input {...field} placeholder="Living Room, Bedroom, Kitchen, etc." data-testid="input-room-name" />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
+        <PageStack>
+          <PageHeader
+            title={selectedProperty ? selectedProperty.name : "Walkthroughs"}
+            description={
+              selectedProperty
+                ? selectedProperty.address
+                : "Pick a house to see its inspections, or start a new one."
+            }
+            actions={
+              <>
+                {selectedProperty && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => setSelectedProperty(null)}
+                    aria-label="Back to properties"
+                    data-testid="button-back-to-properties"
+                  >
+                    <ArrowLeft className="h-4 w-4" />
+                  </Button>
                 )}
+                {selectedProperty && canManage && (
+                  <Button
+                    variant="primary"
+                    onClick={() => {
+                      setNewType("annual");
+                      setNewDate(today());
+                      setIsStartOpen(true);
+                    }}
+                    data-testid="button-start-walkthrough"
+                  >
+                    <Plus className="h-4 w-4" />
+                    Start a walkthrough
+                  </Button>
+                )}
+              </>
+            }
+          />
+
+          {isLoading ? (
+            <LoadingState message="Loading walkthroughs..." />
+          ) : !selectedProperty ? (
+            properties.length === 0 ? (
+              <EmptyState
+                icon={Building2}
+                title="No properties are ready for walkthroughs"
+                description="Add a property first, then every inspection of that house is recorded here."
               />
+            ) : (
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+                {properties.map((property) => {
+                  const history = byProperty.get(property.id) ?? [];
+                  const latest = history[0];
+                  return (
+                    <Card
+                      key={property.id}
+                      className="cursor-pointer hover-elevate active-elevate-2"
+                      onClick={() => setSelectedProperty(property)}
+                      data-testid={`card-property-${property.id}`}
+                    >
+                      <CardContent className="p-5">
+                        <div className="flex items-start gap-3">
+                          <div className="flex-shrink-0 rounded-md bg-muted p-2">
+                            <Building2 className="h-5 w-5 text-muted-foreground" />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <h3 className="truncate text-base font-semibold" data-testid={`text-property-name-${property.id}`}>
+                              {property.name}
+                            </h3>
+                            <div className="mt-1 flex items-center gap-1 text-sm text-muted-foreground">
+                              <MapPin className="h-3 w-3 flex-shrink-0" />
+                              <span className="truncate">{property.address}</span>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="mt-4 flex items-center gap-2">
+                          {property.region && (
+                            <Badge variant="secondary" className="text-xs">
+                              {property.region}
+                            </Badge>
+                          )}
+                          <span className="ml-auto text-xs text-muted-foreground" data-testid={`text-last-walkthrough-${property.id}`}>
+                            {latest
+                              ? `Last walked ${formatDate(latest.walkthroughDate)}`
+                              : "Never walked"}
+                          </span>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+              </div>
+            )
+          ) : propertyWalkthroughs.length === 0 ? (
+            <EmptyState
+              icon={ClipboardList}
+              title="This house has not been walked yet"
+              description="The first walkthrough starts from the standard checklist, and every one after copies this house's own last visit."
+              action={
+                canManage ? (
+                  <Button
+                    variant="primary"
+                    onClick={() => {
+                      setNewType("annual");
+                      setNewDate(today());
+                      setIsStartOpen(true);
+                    }}
+                    data-testid="button-start-first-walkthrough"
+                  >
+                    <Plus className="h-4 w-4" />
+                    Start the first walkthrough
+                  </Button>
+                ) : undefined
+              }
+            />
+          ) : (
+            <div className="space-y-3">
+              {propertyWalkthroughs.map((walkthrough) => {
+                const status = WALKTHROUGH_STATUS_BADGE[walkthrough.status];
+                return (
+                  <Card
+                    key={walkthrough.id}
+                    className="cursor-pointer hover-elevate active-elevate-2"
+                    onClick={() => navigate(`/walkthroughs/${walkthrough.id}`)}
+                    data-testid={`card-walkthrough-${walkthrough.id}`}
+                  >
+                    <CardContent className="flex items-center gap-3 p-4">
+                      <div className="flex-shrink-0 rounded-md bg-muted p-2">
+                        <CalendarDays className="h-5 w-5 text-muted-foreground" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="font-semibold" data-testid={`text-walkthrough-date-${walkthrough.id}`}>
+                          {formatDate(walkthrough.walkthroughDate)}
+                        </p>
+                        <p className="truncate text-sm text-muted-foreground">
+                          {WALKTHROUGH_TYPE_LABEL[walkthrough.type]}
+                          {walkthrough.performedBy ? ` · ${walkthrough.performedBy}` : ""}
+                        </p>
+                      </div>
+                      <Badge variant={status.variant} data-testid={`badge-status-${walkthrough.id}`}>
+                        {status.label}
+                      </Badge>
+                      <ChevronRight className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          )}
+
+          <Dialog open={isStartOpen} onOpenChange={setIsStartOpen}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Start a walkthrough</DialogTitle>
+                <DialogDescription>
+                  {selectedProperty?.name} — {selectedProperty?.address}
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="walkthrough-type">Kind of walkthrough</Label>
+                  <Select value={newType} onValueChange={(value) => setNewType(value as Walkthrough["type"])}>
+                    <SelectTrigger id="walkthrough-type" data-testid="select-walkthrough-type">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {STARTABLE_TYPES.map((type) => (
+                        <SelectItem key={type} value={type}>
+                          {WALKTHROUGH_TYPE_LABEL[type]}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="walkthrough-date">Date</Label>
+                  <Input
+                    id="walkthrough-date"
+                    type="date"
+                    value={newDate}
+                    onChange={(event) => setNewDate(event.target.value)}
+                    data-testid="input-walkthrough-date"
+                  />
+                </div>
+              </div>
+
               <DialogFooter>
-                <Button type="button" variant="secondary" onClick={() => setIsAddRoomDialogOpen(false)}>
+                <Button variant="secondary" onClick={() => setIsStartOpen(false)}>
                   Cancel
                 </Button>
-                <Button type="submit" disabled={createRoomMutation.isPending} data-testid="button-submit-room">
-                  {createRoomMutation.isPending ? "Creating..." : "Create Room"}
+                <Button
+                  variant="primary"
+                  disabled={!selectedProperty || !newDate || startWalkthrough.isPending}
+                  onClick={() => selectedProperty && startWalkthrough.mutate(selectedProperty.id)}
+                  data-testid="button-confirm-start-walkthrough"
+                >
+                  {startWalkthrough.isPending ? "Starting…" : "Start"}
                 </Button>
               </DialogFooter>
-            </form>
-          </Form>
-        </DialogContent>
-      </Dialog>
-
-      {/* Photo Upload Dialog */}
-      <Dialog open={isPhotoUploadDialogOpen} onOpenChange={setIsPhotoUploadDialogOpen}>
-        <DialogContent className="max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Add Photo — {createdRoom?.name}</DialogTitle>
-            <DialogDescription>Upload a photo and add notes for this room</DialogDescription>
-          </DialogHeader>
-          <Form {...photoForm}>
-            <form onSubmit={photoForm.handleSubmit(onSubmitPhoto)} className="space-y-4">
-              <FormField
-                control={photoForm.control}
-                name="imageUrl"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Photo</FormLabel>
-                    <FormControl>
-                      <PhotoUpload
-                        onUpload={(url) => field.onChange(url)}
-                        onError={(error) => toast({ title: "Upload failed", description: error, variant: "destructive" })}
-                        disabled={createPhotoMutation.isPending}
-                      />
-                    </FormControl>
-                    {field.value && (
-                      <p className="text-xs text-muted-foreground">Photo uploaded successfully</p>
-                    )}
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={photoForm.control}
-                name="condition"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Condition</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value ?? undefined}>
-                      <FormControl>
-                        <SelectTrigger data-testid="select-condition">
-                          <SelectValue />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        <SelectItem value="same_as_last_walkthrough">Same as Last Walkthrough</SelectItem>
-                        <SelectItem value="additional_damage">Additional Damage</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={photoForm.control}
-                name="notes"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Notes (Optional)</FormLabel>
-                    <FormControl>
-                      <Textarea
-                        {...field}
-                        value={field.value || ""}
-                        placeholder="Describe the room condition, any issues, or observations..."
-                        data-testid="input-photo-notes"
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <DialogFooter>
-                <Button type="submit" disabled={createPhotoMutation.isPending} data-testid="button-submit-photo">
-                  {createPhotoMutation.isPending ? "Uploading..." : "Add Room"}
-                </Button>
-              </DialogFooter>
-            </form>
-          </Form>
-        </DialogContent>
-      </Dialog>
-      </PageStack>
+            </DialogContent>
+          </Dialog>
+        </PageStack>
       </Container>
     </Section>
   );

@@ -15,6 +15,7 @@ import Landing from "@/pages/Landing";
 import AdminDashboard from "@/pages/AdminDashboard";
 import Maintenance from "@/pages/Maintenance";
 import Walkthroughs from "@/pages/Walkthroughs";
+import WalkthroughRun from "@/pages/WalkthroughRun";
 import Assets from "@/pages/Assets";
 import Safety from "@/pages/Safety";
 import Residents from "@/pages/Residents";
@@ -54,6 +55,7 @@ function Router() {
         <Route path="/finances" component={Finances} />
         <Route path="/maintenance" component={Maintenance} />
         <Route path="/walkthroughs" component={Walkthroughs} />
+        <Route path="/walkthroughs/:id" component={WalkthroughRun} />
         <Route path="/assets" component={Assets} />
         <Route path="/safety" component={Safety} />
         <Route path="/contacts" component={Contacts} />
