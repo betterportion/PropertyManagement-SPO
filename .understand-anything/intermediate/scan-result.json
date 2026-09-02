@@ -1,0 +1,1308 @@
+{
+  "name": "spo-property-portal",
+  "description": "A property management portal for Saint Paul's Outreach, Inc. (SPO), where staff manage properties, maintenance requests, walkthrough inspections, physical assets, vendor contacts and invoices, and residents submit and track their own maintenance requests. It is a single Express server on Node 20 that serves both the REST API and the React SPA on one port, backed by PostgreSQL through Drizzle ORM. Note: this project has over 100 source files; consider scoping analysis to a subdirectory for faster results.",
+  "languages": [
+    "css",
+    "html",
+    "javascript",
+    "json",
+    "markdown",
+    "sql",
+    "typescript",
+    "yaml"
+  ],
+  "frameworks": [
+    "React",
+    "Vite",
+    "Vitest",
+    "Express",
+    "Tailwind CSS",
+    "Drizzle ORM",
+    "TanStack Query",
+    "Wouter",
+    "Zod",
+    "React Hook Form",
+    "Passport",
+    "Playwright",
+    "GitHub Actions"
+  ],
+  "files": [
+    {
+      "path": ".env.example",
+      "language": "config",
+      "sizeLines": 177,
+      "fileCategory": "config"
+    },
+    {
+      "path": ".github/workflows/ci.yml",
+      "language": "yaml",
+      "sizeLines": 56,
+      "fileCategory": "infra"
+    },
+    {
+      "path": ".github/workflows/e2e.yml",
+      "language": "yaml",
+      "sizeLines": 75,
+      "fileCategory": "infra"
+    },
+    {
+      "path": "CLAUDE.md",
+      "language": "markdown",
+      "sizeLines": 292,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "client/index.html",
+      "language": "html",
+      "sizeLines": 22,
+      "fileCategory": "markup"
+    },
+    {
+      "path": "client/public/theme-init.js",
+      "language": "javascript",
+      "sizeLines": 25,
+      "fileCategory": "code"
+    },
+    {
+      "path": "client/src/App.tsx",
+      "language": "typescript",
+      "sizeLines": 136,
+      "fileCategory": "code"
+    },
+    {
+      "path": "client/src/components/ActivityLog.tsx",
+      "language": "typescript",
+      "sizeLines": 284,
+      "fileCategory": "code"
+    },
+    {
+      "path": "client/src/components/app-sidebar.tsx",
+      "language": "typescript",
+      "sizeLines": 115,
+      "fileCategory": "code"
+    },
+    {
+      "path": "client/src/components/AssetTracker.tsx",
+      "language": "typescript",
+      "sizeLines": 243,
+      "fileCategory": "code"
+    },
+    {
+      "path": "client/src/components/BuildingSelector.tsx",
+      "language": "typescript",
+      "sizeLines": 31,
+      "fileCategory": "code"
+    },
+    {
+      "path": "client/src/components/ContactsInvoices.tsx",
+      "language": "typescript",
+      "sizeLines": 167,
+      "fileCategory": "code"
+    },
+    {
+      "path": "client/src/components/data-table.tsx",
+      "language": "typescript",
+      "sizeLines": 224,
+      "fileCategory": "code"
+    },
+    {
+      "path": "client/src/components/ErrorBoundary.tsx",
+      "language": "typescript",
+      "sizeLines": 93,
+      "fileCategory": "code"
+    },
+    {
+      "path": "client/src/components/layout/page.tsx",
+      "language": "typescript",
+      "sizeLines": 72,
+      "fileCategory": "code"
+    },
+    {
+      "path": "client/src/components/MaintenanceEditDialog.tsx",
+      "language": "typescript",
+      "sizeLines": 423,
+      "fileCategory": "code"
+    },
+    {
+      "path": "client/src/components/MaintenanceRequestCard.tsx",
+      "language": "typescript",
+      "sizeLines": 11,
+      "fileCategory": "code"
+    },
+    {
+      "path": "client/src/components/MaintenanceRequestForm.tsx",
+      "language": "typescript",
+      "sizeLines": 43,
+      "fileCategory": "code"
+    },
+    {
+      "path": "client/src/components/PhotoGallery.tsx",
+      "language": "typescript",
+      "sizeLines": 218,
+      "fileCategory": "code"
+    },
+    {
+      "path": "client/src/components/PhotoUpload.tsx",
+      "language": "typescript",
+      "sizeLines": 205,
+      "fileCategory": "code"
+    },
+    {
+      "path": "client/src/components/RegionSelector.tsx",
+      "language": "typescript",
+      "sizeLines": 37,
+      "fileCategory": "code"
+    },
+    {
+      "path": "client/src/components/RoomCard.tsx",
+      "language": "typescript",
+      "sizeLines": 76,
+      "fileCategory": "code"
+    },
+    {
+      "path": "client/src/components/RoomDetailDrawer.tsx",
+      "language": "typescript",
+      "sizeLines": 382,
+      "fileCategory": "code"
+    },
+    {
+      "path": "client/src/components/stat-tile.tsx",
+      "language": "typescript",
+      "sizeLines": 74,
+      "fileCategory": "code"
+    },
+    {
+      "path": "client/src/components/states.tsx",
+      "language": "typescript",
+      "sizeLines": 87,
+      "fileCategory": "code"
+    },
+    {
+      "path": "client/src/components/ThemeToggle.tsx",
+      "language": "typescript",
+      "sizeLines": 42,
+      "fileCategory": "code"
+    },
+    {
+      "path": "client/src/components/UserMenu.tsx",
+      "language": "typescript",
+      "sizeLines": 55,
+      "fileCategory": "code"
+    },
+    {
+      "path": "client/src/hooks/use-mobile.tsx",
+      "language": "typescript",
+      "sizeLines": 19,
+      "fileCategory": "code"
+    },
+    {
+      "path": "client/src/hooks/use-toast.ts",
+      "language": "typescript",
+      "sizeLines": 194,
+      "fileCategory": "code"
+    },
+    {
+      "path": "client/src/hooks/use-url-state.ts",
+      "language": "typescript",
+      "sizeLines": 69,
+      "fileCategory": "code"
+    },
+    {
+      "path": "client/src/hooks/useAuth.ts",
+      "language": "typescript",
+      "sizeLines": 25,
+      "fileCategory": "code"
+    },
+    {
+      "path": "client/src/index.css",
+      "language": "css",
+      "sizeLines": 343,
+      "fileCategory": "markup"
+    },
+    {
+      "path": "client/src/lib/authUtils.ts",
+      "language": "typescript",
+      "sizeLines": 3,
+      "fileCategory": "code"
+    },
+    {
+      "path": "client/src/lib/chart-palette.ts",
+      "language": "typescript",
+      "sizeLines": 23,
+      "fileCategory": "code"
+    },
+    {
+      "path": "client/src/lib/format.ts",
+      "language": "typescript",
+      "sizeLines": 101,
+      "fileCategory": "code"
+    },
+    {
+      "path": "client/src/lib/queryClient.ts",
+      "language": "typescript",
+      "sizeLines": 57,
+      "fileCategory": "code"
+    },
+    {
+      "path": "client/src/lib/utils.ts",
+      "language": "typescript",
+      "sizeLines": 6,
+      "fileCategory": "code"
+    },
+    {
+      "path": "client/src/main.tsx",
+      "language": "typescript",
+      "sizeLines": 13,
+      "fileCategory": "code"
+    },
+    {
+      "path": "client/src/pages/AdminDashboard.tsx",
+      "language": "typescript",
+      "sizeLines": 208,
+      "fileCategory": "code"
+    },
+    {
+      "path": "client/src/pages/Assets.tsx",
+      "language": "typescript",
+      "sizeLines": 914,
+      "fileCategory": "code"
+    },
+    {
+      "path": "client/src/pages/Contacts.tsx",
+      "language": "typescript",
+      "sizeLines": 883,
+      "fileCategory": "code"
+    },
+    {
+      "path": "client/src/pages/Finances.tsx",
+      "language": "typescript",
+      "sizeLines": 612,
+      "fileCategory": "code"
+    },
+    {
+      "path": "client/src/pages/Landing.tsx",
+      "language": "typescript",
+      "sizeLines": 85,
+      "fileCategory": "code"
+    },
+    {
+      "path": "client/src/pages/Maintenance.tsx",
+      "language": "typescript",
+      "sizeLines": 546,
+      "fileCategory": "code"
+    },
+    {
+      "path": "client/src/pages/MyRequests.tsx",
+      "language": "typescript",
+      "sizeLines": 60,
+      "fileCategory": "code"
+    },
+    {
+      "path": "client/src/pages/not-found.tsx",
+      "language": "typescript",
+      "sizeLines": 15,
+      "fileCategory": "code"
+    },
+    {
+      "path": "client/src/pages/Properties.tsx",
+      "language": "typescript",
+      "sizeLines": 672,
+      "fileCategory": "code"
+    },
+    {
+      "path": "client/src/pages/ResidentDashboard.tsx",
+      "language": "typescript",
+      "sizeLines": 119,
+      "fileCategory": "code"
+    },
+    {
+      "path": "client/src/pages/Residents.tsx",
+      "language": "typescript",
+      "sizeLines": 315,
+      "fileCategory": "code"
+    },
+    {
+      "path": "client/src/pages/Safety.tsx",
+      "language": "typescript",
+      "sizeLines": 383,
+      "fileCategory": "code"
+    },
+    {
+      "path": "client/src/pages/Settings.tsx",
+      "language": "typescript",
+      "sizeLines": 579,
+      "fileCategory": "code"
+    },
+    {
+      "path": "client/src/pages/Styleguide.tsx",
+      "language": "typescript",
+      "sizeLines": 400,
+      "fileCategory": "code"
+    },
+    {
+      "path": "client/src/pages/SubmitRequest.tsx",
+      "language": "typescript",
+      "sizeLines": 20,
+      "fileCategory": "code"
+    },
+    {
+      "path": "client/src/pages/Walkthroughs.tsx",
+      "language": "typescript",
+      "sizeLines": 397,
+      "fileCategory": "code"
+    },
+    {
+      "path": "client/src/providers/ThemeProvider.tsx",
+      "language": "typescript",
+      "sizeLines": 84,
+      "fileCategory": "code"
+    },
+    {
+      "path": "components.json",
+      "language": "json",
+      "sizeLines": 19,
+      "fileCategory": "config"
+    },
+    {
+      "path": "design_guidelines.md",
+      "language": "markdown",
+      "sizeLines": 77,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/ONBOARDING_AUDIT.md",
+      "language": "markdown",
+      "sizeLines": 246,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/PRODUCTION_MIGRATION.md",
+      "language": "markdown",
+      "sizeLines": 435,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/spo-design-system.md",
+      "language": "markdown",
+      "sizeLines": 749,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "drizzle.config.ts",
+      "language": "typescript",
+      "sizeLines": 14,
+      "fileCategory": "code"
+    },
+    {
+      "path": "e2e/a11y.spec.ts",
+      "language": "typescript",
+      "sizeLines": 78,
+      "fileCategory": "code"
+    },
+    {
+      "path": "e2e/assets.spec.ts",
+      "language": "typescript",
+      "sizeLines": 42,
+      "fileCategory": "code"
+    },
+    {
+      "path": "e2e/auth.spec.ts",
+      "language": "typescript",
+      "sizeLines": 20,
+      "fileCategory": "code"
+    },
+    {
+      "path": "e2e/dashboard.spec.ts",
+      "language": "typescript",
+      "sizeLines": 36,
+      "fileCategory": "code"
+    },
+    {
+      "path": "e2e/finances.spec.ts",
+      "language": "typescript",
+      "sizeLines": 19,
+      "fileCategory": "code"
+    },
+    {
+      "path": "e2e/global-setup.ts",
+      "language": "typescript",
+      "sizeLines": 157,
+      "fileCategory": "code"
+    },
+    {
+      "path": "e2e/mobile.spec.ts",
+      "language": "typescript",
+      "sizeLines": 43,
+      "fileCategory": "code"
+    },
+    {
+      "path": "e2e/properties.spec.ts",
+      "language": "typescript",
+      "sizeLines": 32,
+      "fileCategory": "code"
+    },
+    {
+      "path": "e2e/resident.spec.ts",
+      "language": "typescript",
+      "sizeLines": 35,
+      "fileCategory": "code"
+    },
+    {
+      "path": "e2e/residents.spec.ts",
+      "language": "typescript",
+      "sizeLines": 22,
+      "fileCategory": "code"
+    },
+    {
+      "path": "e2e/safety.spec.ts",
+      "language": "typescript",
+      "sizeLines": 31,
+      "fileCategory": "code"
+    },
+    {
+      "path": "eslint.config.js",
+      "language": "javascript",
+      "sizeLines": 127,
+      "fileCategory": "code"
+    },
+    {
+      "path": "migrations/0000_baseline_current_schema.sql",
+      "language": "sql",
+      "sizeLines": 192,
+      "fileCategory": "data"
+    },
+    {
+      "path": "migrations/0001_add_uploads_table.sql",
+      "language": "sql",
+      "sizeLines": 10,
+      "fileCategory": "data"
+    },
+    {
+      "path": "migrations/0002_drop_monday_item_id.sql",
+      "language": "sql",
+      "sizeLines": 0,
+      "fileCategory": "data"
+    },
+    {
+      "path": "migrations/0003_add_audit_log.sql",
+      "language": "sql",
+      "sizeLines": 14,
+      "fileCategory": "data"
+    },
+    {
+      "path": "migrations/0004_add_audit_log_filter_indexes.sql",
+      "language": "sql",
+      "sizeLines": 1,
+      "fileCategory": "data"
+    },
+    {
+      "path": "migrations/0005_add_property_chapter.sql",
+      "language": "sql",
+      "sizeLines": 0,
+      "fileCategory": "data"
+    },
+    {
+      "path": "migrations/0006_drop_question_answers.sql",
+      "language": "sql",
+      "sizeLines": 0,
+      "fileCategory": "data"
+    },
+    {
+      "path": "migrations/0007_add_maintenance_schedules.sql",
+      "language": "sql",
+      "sizeLines": 19,
+      "fileCategory": "data"
+    },
+    {
+      "path": "migrations/0008_add_residents.sql",
+      "language": "sql",
+      "sizeLines": 15,
+      "fileCategory": "data"
+    },
+    {
+      "path": "migrations/0009_add_resident_finances.sql",
+      "language": "sql",
+      "sizeLines": 34,
+      "fileCategory": "data"
+    },
+    {
+      "path": "migrations/meta/_journal.json",
+      "language": "json",
+      "sizeLines": 75,
+      "fileCategory": "config"
+    },
+    {
+      "path": "migrations/meta/0000_snapshot.json",
+      "language": "json",
+      "sizeLines": 1238,
+      "fileCategory": "config"
+    },
+    {
+      "path": "migrations/meta/0001_snapshot.json",
+      "language": "json",
+      "sizeLines": 1303,
+      "fileCategory": "config"
+    },
+    {
+      "path": "migrations/meta/0002_snapshot.json",
+      "language": "json",
+      "sizeLines": 1297,
+      "fileCategory": "config"
+    },
+    {
+      "path": "migrations/meta/0003_snapshot.json",
+      "language": "json",
+      "sizeLines": 1418,
+      "fileCategory": "config"
+    },
+    {
+      "path": "migrations/meta/0004_snapshot.json",
+      "language": "json",
+      "sizeLines": 1454,
+      "fileCategory": "config"
+    },
+    {
+      "path": "migrations/meta/0005_snapshot.json",
+      "language": "json",
+      "sizeLines": 1460,
+      "fileCategory": "config"
+    },
+    {
+      "path": "migrations/meta/0006_snapshot.json",
+      "language": "json",
+      "sizeLines": 1454,
+      "fileCategory": "config"
+    },
+    {
+      "path": "migrations/meta/0007_snapshot.json",
+      "language": "json",
+      "sizeLines": 1588,
+      "fileCategory": "config"
+    },
+    {
+      "path": "migrations/meta/0008_snapshot.json",
+      "language": "json",
+      "sizeLines": 1691,
+      "fileCategory": "config"
+    },
+    {
+      "path": "migrations/meta/0009_snapshot.json",
+      "language": "json",
+      "sizeLines": 1941,
+      "fileCategory": "config"
+    },
+    {
+      "path": "package.json",
+      "language": "json",
+      "sizeLines": 103,
+      "fileCategory": "config"
+    },
+    {
+      "path": "playwright.config.ts",
+      "language": "typescript",
+      "sizeLines": 77,
+      "fileCategory": "code"
+    },
+    {
+      "path": "postcss.config.js",
+      "language": "javascript",
+      "sizeLines": 6,
+      "fileCategory": "code"
+    },
+    {
+      "path": "README.md",
+      "language": "markdown",
+      "sizeLines": 292,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "scripts/__tests__/baselineMigrations.test.ts",
+      "language": "typescript",
+      "sizeLines": 139,
+      "fileCategory": "code"
+    },
+    {
+      "path": "scripts/baseline-migrations.ts",
+      "language": "typescript",
+      "sizeLines": 348,
+      "fileCategory": "code"
+    },
+    {
+      "path": "scripts/seed-demo-data.ts",
+      "language": "typescript",
+      "sizeLines": 396,
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/__tests__/audit.test.ts",
+      "language": "typescript",
+      "sizeLines": 252,
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/__tests__/auditRetention.integration.test.ts",
+      "language": "typescript",
+      "sizeLines": 226,
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/__tests__/authz.test.ts",
+      "language": "typescript",
+      "sizeLines": 479,
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/__tests__/errors.test.ts",
+      "language": "typescript",
+      "sizeLines": 207,
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/__tests__/jotformWebhook.test.ts",
+      "language": "typescript",
+      "sizeLines": 173,
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/__tests__/objectStorage.test.ts",
+      "language": "typescript",
+      "sizeLines": 223,
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/__tests__/ownership.test.ts",
+      "language": "typescript",
+      "sizeLines": 355,
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/__tests__/region.test.ts",
+      "language": "typescript",
+      "sizeLines": 52,
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/__tests__/routeAccess.test.ts",
+      "language": "typescript",
+      "sizeLines": 1536,
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/__tests__/schedules.test.ts",
+      "language": "typescript",
+      "sizeLines": 135,
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/__tests__/uploadAccess.test.ts",
+      "language": "typescript",
+      "sizeLines": 280,
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/audit.ts",
+      "language": "typescript",
+      "sizeLines": 283,
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/auth.ts",
+      "language": "typescript",
+      "sizeLines": 275,
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/authz.ts",
+      "language": "typescript",
+      "sizeLines": 346,
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/config.ts",
+      "language": "typescript",
+      "sizeLines": 209,
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/db.ts",
+      "language": "typescript",
+      "sizeLines": 144,
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/errors.ts",
+      "language": "typescript",
+      "sizeLines": 249,
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/health.ts",
+      "language": "typescript",
+      "sizeLines": 30,
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/index.ts",
+      "language": "typescript",
+      "sizeLines": 219,
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/logger.ts",
+      "language": "typescript",
+      "sizeLines": 18,
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/migrateRegions.ts",
+      "language": "typescript",
+      "sizeLines": 98,
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/objectStorage/index.ts",
+      "language": "typescript",
+      "sizeLines": 92,
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/objectStorage/local.ts",
+      "language": "typescript",
+      "sizeLines": 65,
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/objectStorage/supabase.ts",
+      "language": "typescript",
+      "sizeLines": 133,
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/objectStorage/types.ts",
+      "language": "typescript",
+      "sizeLines": 95,
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/routes.ts",
+      "language": "typescript",
+      "sizeLines": 2299,
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/schedules.ts",
+      "language": "typescript",
+      "sizeLines": 132,
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/security.ts",
+      "language": "typescript",
+      "sizeLines": 120,
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/static.ts",
+      "language": "typescript",
+      "sizeLines": 27,
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/storage.ts",
+      "language": "typescript",
+      "sizeLines": 980,
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/uploadLimits.ts",
+      "language": "typescript",
+      "sizeLines": 169,
+      "fileCategory": "code"
+    },
+    {
+      "path": "server/vite.ts",
+      "language": "typescript",
+      "sizeLines": 63,
+      "fileCategory": "code"
+    },
+    {
+      "path": "shared/audit.ts",
+      "language": "typescript",
+      "sizeLines": 65,
+      "fileCategory": "code"
+    },
+    {
+      "path": "shared/schema.ts",
+      "language": "typescript",
+      "sizeLines": 638,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tailwind.config.ts",
+      "language": "typescript",
+      "sizeLines": 120,
+      "fileCategory": "code"
+    },
+    {
+      "path": "tsconfig.json",
+      "language": "json",
+      "sizeLines": 23,
+      "fileCategory": "config"
+    },
+    {
+      "path": "vite.config.ts",
+      "language": "typescript",
+      "sizeLines": 25,
+      "fileCategory": "code"
+    },
+    {
+      "path": "vitest.config.ts",
+      "language": "typescript",
+      "sizeLines": 25,
+      "fileCategory": "code"
+    }
+  ],
+  "totalFiles": 139,
+  "filteredByIgnore": 22,
+  "estimatedComplexity": "moderate",
+  "importMap": {
+    ".env.example": [],
+    ".github/workflows/ci.yml": [],
+    ".github/workflows/e2e.yml": [],
+    "CLAUDE.md": [],
+    "client/index.html": [],
+    "client/public/theme-init.js": [],
+    "client/src/App.tsx": [
+      "client/src/components/app-sidebar.tsx",
+      "client/src/components/ErrorBoundary.tsx",
+      "client/src/components/ThemeToggle.tsx",
+      "client/src/components/UserMenu.tsx",
+      "client/src/hooks/useAuth.ts",
+      "client/src/lib/queryClient.ts",
+      "client/src/pages/AdminDashboard.tsx",
+      "client/src/pages/Assets.tsx",
+      "client/src/pages/Contacts.tsx",
+      "client/src/pages/Finances.tsx",
+      "client/src/pages/Landing.tsx",
+      "client/src/pages/Maintenance.tsx",
+      "client/src/pages/MyRequests.tsx",
+      "client/src/pages/not-found.tsx",
+      "client/src/pages/Properties.tsx",
+      "client/src/pages/ResidentDashboard.tsx",
+      "client/src/pages/Residents.tsx",
+      "client/src/pages/Safety.tsx",
+      "client/src/pages/Settings.tsx",
+      "client/src/pages/Styleguide.tsx",
+      "client/src/pages/SubmitRequest.tsx",
+      "client/src/pages/Walkthroughs.tsx",
+      "client/src/providers/ThemeProvider.tsx"
+    ],
+    "client/src/components/ActivityLog.tsx": [
+      "client/src/components/data-table.tsx",
+      "client/src/components/states.tsx",
+      "client/src/lib/format.ts",
+      "client/src/lib/queryClient.ts",
+      "shared/audit.ts",
+      "shared/schema.ts"
+    ],
+    "client/src/components/app-sidebar.tsx": [],
+    "client/src/components/AssetTracker.tsx": [
+      "client/src/components/states.tsx",
+      "client/src/lib/format.ts",
+      "shared/schema.ts"
+    ],
+    "client/src/components/BuildingSelector.tsx": [],
+    "client/src/components/ContactsInvoices.tsx": [
+      "client/src/components/states.tsx",
+      "client/src/lib/format.ts",
+      "shared/schema.ts"
+    ],
+    "client/src/components/data-table.tsx": [
+      "client/src/components/states.tsx",
+      "client/src/lib/utils.ts"
+    ],
+    "client/src/components/ErrorBoundary.tsx": [],
+    "client/src/components/layout/page.tsx": [
+      "client/src/lib/utils.ts"
+    ],
+    "client/src/components/MaintenanceEditDialog.tsx": [
+      "client/src/components/PhotoUpload.tsx",
+      "client/src/hooks/use-toast.ts",
+      "client/src/lib/format.ts",
+      "client/src/lib/queryClient.ts",
+      "shared/schema.ts"
+    ],
+    "client/src/components/MaintenanceRequestCard.tsx": [
+      "client/src/lib/format.ts",
+      "shared/schema.ts"
+    ],
+    "client/src/components/MaintenanceRequestForm.tsx": [],
+    "client/src/components/PhotoGallery.tsx": [
+      "client/src/components/states.tsx",
+      "client/src/lib/format.ts",
+      "shared/schema.ts"
+    ],
+    "client/src/components/PhotoUpload.tsx": [
+      "client/src/lib/utils.ts"
+    ],
+    "client/src/components/RegionSelector.tsx": [],
+    "client/src/components/RoomCard.tsx": [
+      "shared/schema.ts"
+    ],
+    "client/src/components/RoomDetailDrawer.tsx": [
+      "client/src/components/PhotoGallery.tsx",
+      "client/src/components/PhotoUpload.tsx",
+      "client/src/hooks/use-toast.ts",
+      "client/src/hooks/useAuth.ts",
+      "client/src/lib/queryClient.ts",
+      "shared/schema.ts"
+    ],
+    "client/src/components/stat-tile.tsx": [
+      "client/src/components/states.tsx",
+      "client/src/lib/utils.ts"
+    ],
+    "client/src/components/states.tsx": [
+      "client/src/lib/utils.ts"
+    ],
+    "client/src/components/ThemeToggle.tsx": [
+      "client/src/providers/ThemeProvider.tsx"
+    ],
+    "client/src/components/UserMenu.tsx": [],
+    "client/src/hooks/use-mobile.tsx": [],
+    "client/src/hooks/use-toast.ts": [],
+    "client/src/hooks/use-url-state.ts": [],
+    "client/src/hooks/useAuth.ts": [
+      "client/src/lib/authUtils.ts"
+    ],
+    "client/src/index.css": [],
+    "client/src/lib/authUtils.ts": [],
+    "client/src/lib/chart-palette.ts": [],
+    "client/src/lib/format.ts": [],
+    "client/src/lib/queryClient.ts": [],
+    "client/src/lib/utils.ts": [],
+    "client/src/main.tsx": [
+      "client/src/App.tsx",
+      "client/src/components/ErrorBoundary.tsx",
+      "client/src/index.css"
+    ],
+    "client/src/pages/AdminDashboard.tsx": [
+      "client/src/components/layout/page.tsx",
+      "client/src/components/MaintenanceEditDialog.tsx",
+      "client/src/components/MaintenanceRequestCard.tsx",
+      "client/src/components/stat-tile.tsx",
+      "client/src/components/states.tsx",
+      "client/src/lib/format.ts",
+      "shared/schema.ts"
+    ],
+    "client/src/pages/Assets.tsx": [
+      "client/src/components/AssetTracker.tsx",
+      "client/src/components/BuildingSelector.tsx",
+      "client/src/components/layout/page.tsx",
+      "client/src/components/PhotoUpload.tsx",
+      "client/src/components/RegionSelector.tsx",
+      "client/src/components/states.tsx",
+      "client/src/hooks/use-toast.ts",
+      "client/src/hooks/useAuth.ts",
+      "client/src/lib/queryClient.ts",
+      "shared/schema.ts"
+    ],
+    "client/src/pages/Contacts.tsx": [
+      "client/src/components/BuildingSelector.tsx",
+      "client/src/components/ContactsInvoices.tsx",
+      "client/src/components/layout/page.tsx",
+      "client/src/components/RegionSelector.tsx",
+      "client/src/components/states.tsx",
+      "client/src/hooks/use-toast.ts",
+      "client/src/hooks/useAuth.ts",
+      "client/src/lib/queryClient.ts",
+      "shared/schema.ts"
+    ],
+    "client/src/pages/Finances.tsx": [
+      "client/src/components/BuildingSelector.tsx",
+      "client/src/components/layout/page.tsx",
+      "client/src/components/RegionSelector.tsx",
+      "client/src/components/states.tsx",
+      "client/src/hooks/use-toast.ts",
+      "client/src/hooks/useAuth.ts",
+      "client/src/lib/format.ts",
+      "client/src/lib/queryClient.ts",
+      "shared/schema.ts"
+    ],
+    "client/src/pages/Landing.tsx": [
+      "client/src/components/layout/page.tsx"
+    ],
+    "client/src/pages/Maintenance.tsx": [
+      "client/src/components/BuildingSelector.tsx",
+      "client/src/components/layout/page.tsx",
+      "client/src/components/MaintenanceEditDialog.tsx",
+      "client/src/components/MaintenanceRequestCard.tsx",
+      "client/src/components/PhotoUpload.tsx",
+      "client/src/components/RegionSelector.tsx",
+      "client/src/components/states.tsx",
+      "client/src/hooks/use-toast.ts",
+      "client/src/hooks/use-url-state.ts",
+      "client/src/hooks/useAuth.ts",
+      "client/src/lib/queryClient.ts",
+      "shared/schema.ts"
+    ],
+    "client/src/pages/MyRequests.tsx": [
+      "client/src/components/layout/page.tsx",
+      "client/src/components/MaintenanceRequestCard.tsx",
+      "client/src/components/states.tsx",
+      "shared/schema.ts"
+    ],
+    "client/src/pages/not-found.tsx": [
+      "client/src/components/layout/page.tsx"
+    ],
+    "client/src/pages/Properties.tsx": [
+      "client/src/components/layout/page.tsx",
+      "client/src/components/states.tsx",
+      "client/src/hooks/use-toast.ts",
+      "client/src/lib/queryClient.ts",
+      "shared/schema.ts"
+    ],
+    "client/src/pages/ResidentDashboard.tsx": [
+      "client/src/components/layout/page.tsx",
+      "client/src/components/MaintenanceRequestCard.tsx",
+      "client/src/components/states.tsx",
+      "client/src/hooks/useAuth.ts",
+      "shared/schema.ts"
+    ],
+    "client/src/pages/Residents.tsx": [
+      "client/src/components/BuildingSelector.tsx",
+      "client/src/components/layout/page.tsx",
+      "client/src/components/RegionSelector.tsx",
+      "client/src/components/states.tsx",
+      "client/src/hooks/use-toast.ts",
+      "client/src/hooks/useAuth.ts",
+      "client/src/lib/format.ts",
+      "client/src/lib/queryClient.ts",
+      "shared/schema.ts"
+    ],
+    "client/src/pages/Safety.tsx": [
+      "client/src/components/BuildingSelector.tsx",
+      "client/src/components/layout/page.tsx",
+      "client/src/components/RegionSelector.tsx",
+      "client/src/components/states.tsx",
+      "client/src/hooks/use-toast.ts",
+      "client/src/hooks/useAuth.ts",
+      "client/src/lib/format.ts",
+      "client/src/lib/queryClient.ts",
+      "shared/schema.ts"
+    ],
+    "client/src/pages/Settings.tsx": [
+      "client/src/components/ActivityLog.tsx",
+      "client/src/components/data-table.tsx",
+      "client/src/components/layout/page.tsx",
+      "client/src/components/states.tsx",
+      "client/src/hooks/use-toast.ts",
+      "client/src/hooks/useAuth.ts",
+      "client/src/lib/format.ts",
+      "client/src/lib/queryClient.ts",
+      "shared/schema.ts"
+    ],
+    "client/src/pages/Styleguide.tsx": [
+      "client/src/components/layout/page.tsx",
+      "client/src/components/states.tsx",
+      "client/src/hooks/use-toast.ts",
+      "client/src/lib/chart-palette.ts",
+      "client/src/lib/format.ts",
+      "client/src/providers/ThemeProvider.tsx"
+    ],
+    "client/src/pages/SubmitRequest.tsx": [
+      "client/src/components/layout/page.tsx",
+      "client/src/components/MaintenanceRequestForm.tsx"
+    ],
+    "client/src/pages/Walkthroughs.tsx": [
+      "client/src/components/layout/page.tsx",
+      "client/src/components/PhotoUpload.tsx",
+      "client/src/components/RoomCard.tsx",
+      "client/src/components/RoomDetailDrawer.tsx",
+      "client/src/components/states.tsx",
+      "client/src/hooks/use-toast.ts",
+      "client/src/hooks/useAuth.ts",
+      "client/src/lib/queryClient.ts",
+      "shared/schema.ts"
+    ],
+    "client/src/providers/ThemeProvider.tsx": [],
+    "components.json": [],
+    "design_guidelines.md": [],
+    "docs/ONBOARDING_AUDIT.md": [],
+    "docs/PRODUCTION_MIGRATION.md": [],
+    "docs/spo-design-system.md": [],
+    "drizzle.config.ts": [],
+    "e2e/a11y.spec.ts": [],
+    "e2e/assets.spec.ts": [],
+    "e2e/auth.spec.ts": [],
+    "e2e/dashboard.spec.ts": [],
+    "e2e/finances.spec.ts": [],
+    "e2e/global-setup.ts": [],
+    "e2e/mobile.spec.ts": [],
+    "e2e/properties.spec.ts": [],
+    "e2e/resident.spec.ts": [],
+    "e2e/residents.spec.ts": [],
+    "e2e/safety.spec.ts": [],
+    "eslint.config.js": [],
+    "migrations/0000_baseline_current_schema.sql": [],
+    "migrations/0001_add_uploads_table.sql": [],
+    "migrations/0002_drop_monday_item_id.sql": [],
+    "migrations/0003_add_audit_log.sql": [],
+    "migrations/0004_add_audit_log_filter_indexes.sql": [],
+    "migrations/0005_add_property_chapter.sql": [],
+    "migrations/0006_drop_question_answers.sql": [],
+    "migrations/0007_add_maintenance_schedules.sql": [],
+    "migrations/0008_add_residents.sql": [],
+    "migrations/0009_add_resident_finances.sql": [],
+    "migrations/meta/_journal.json": [],
+    "migrations/meta/0000_snapshot.json": [],
+    "migrations/meta/0001_snapshot.json": [],
+    "migrations/meta/0002_snapshot.json": [],
+    "migrations/meta/0003_snapshot.json": [],
+    "migrations/meta/0004_snapshot.json": [],
+    "migrations/meta/0005_snapshot.json": [],
+    "migrations/meta/0006_snapshot.json": [],
+    "migrations/meta/0007_snapshot.json": [],
+    "migrations/meta/0008_snapshot.json": [],
+    "migrations/meta/0009_snapshot.json": [],
+    "package.json": [],
+    "playwright.config.ts": [],
+    "postcss.config.js": [],
+    "README.md": [],
+    "scripts/__tests__/baselineMigrations.test.ts": [
+      "scripts/baseline-migrations.ts"
+    ],
+    "scripts/baseline-migrations.ts": [],
+    "scripts/seed-demo-data.ts": [
+      "server/db.ts",
+      "server/objectStorage/index.ts",
+      "server/storage.ts"
+    ],
+    "server/__tests__/audit.test.ts": [
+      "server/audit.ts",
+      "server/authz.ts"
+    ],
+    "server/__tests__/auditRetention.integration.test.ts": [
+      "shared/schema.ts"
+    ],
+    "server/__tests__/authz.test.ts": [
+      "server/authz.ts"
+    ],
+    "server/__tests__/errors.test.ts": [
+      "server/errors.ts"
+    ],
+    "server/__tests__/jotformWebhook.test.ts": [
+      "server/errors.ts",
+      "server/routes.ts"
+    ],
+    "server/__tests__/objectStorage.test.ts": [
+      "server/objectStorage/index.ts"
+    ],
+    "server/__tests__/ownership.test.ts": [
+      "server/routes.ts"
+    ],
+    "server/__tests__/region.test.ts": [
+      "server/migrateRegions.ts"
+    ],
+    "server/__tests__/routeAccess.test.ts": [
+      "server/errors.ts",
+      "server/routes.ts"
+    ],
+    "server/__tests__/schedules.test.ts": [
+      "server/schedules.ts",
+      "shared/schema.ts"
+    ],
+    "server/__tests__/uploadAccess.test.ts": [
+      "server/authz.ts",
+      "server/storage.ts",
+      "shared/schema.ts"
+    ],
+    "server/audit.ts": [
+      "server/authz.ts",
+      "server/errors.ts",
+      "server/storage.ts",
+      "shared/audit.ts"
+    ],
+    "server/auth.ts": [
+      "server/config.ts",
+      "server/db.ts",
+      "server/storage.ts"
+    ],
+    "server/authz.ts": [
+      "server/auth.ts",
+      "server/migrateRegions.ts",
+      "server/storage.ts",
+      "shared/schema.ts"
+    ],
+    "server/config.ts": [
+      "server/objectStorage/index.ts",
+      "server/objectStorage/supabase.ts"
+    ],
+    "server/db.ts": [
+      "server/errors.ts",
+      "shared/schema.ts"
+    ],
+    "server/errors.ts": [],
+    "server/health.ts": [
+      "server/db.ts"
+    ],
+    "server/index.ts": [
+      "server/config.ts",
+      "server/errors.ts",
+      "server/logger.ts",
+      "server/security.ts"
+    ],
+    "server/logger.ts": [],
+    "server/migrateRegions.ts": [
+      "server/db.ts",
+      "shared/schema.ts"
+    ],
+    "server/objectStorage/index.ts": [
+      "server/objectStorage/local.ts",
+      "server/objectStorage/supabase.ts",
+      "server/objectStorage/types.ts"
+    ],
+    "server/objectStorage/local.ts": [
+      "server/objectStorage/types.ts"
+    ],
+    "server/objectStorage/supabase.ts": [
+      "server/objectStorage/types.ts"
+    ],
+    "server/objectStorage/types.ts": [],
+    "server/routes.ts": [
+      "server/audit.ts",
+      "server/auth.ts",
+      "server/authz.ts",
+      "server/errors.ts",
+      "server/objectStorage/index.ts",
+      "server/schedules.ts",
+      "server/security.ts",
+      "server/storage.ts",
+      "server/uploadLimits.ts",
+      "shared/audit.ts",
+      "shared/schema.ts"
+    ],
+    "server/schedules.ts": [
+      "server/errors.ts",
+      "server/storage.ts",
+      "shared/schema.ts"
+    ],
+    "server/security.ts": [
+      "server/config.ts"
+    ],
+    "server/static.ts": [],
+    "server/storage.ts": [
+      "server/db.ts",
+      "shared/schema.ts"
+    ],
+    "server/uploadLimits.ts": [],
+    "server/vite.ts": [
+      "vite.config.ts"
+    ],
+    "shared/audit.ts": [],
+    "shared/schema.ts": [],
+    "tailwind.config.ts": [],
+    "tsconfig.json": [],
+    "vite.config.ts": [],
+    "vitest.config.ts": []
+  }
+}

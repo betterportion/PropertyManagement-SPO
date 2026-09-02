@@ -34,6 +34,8 @@ import {
   type InsertWalkthrough,
   type WalkthroughItem,
   type InsertWalkthroughItem,
+  type FlaggedWalkthroughItem,
+  WALKTHROUGH_FLAGGED_CONDITIONS,
   type WalkthroughTemplateRoom,
   type InsertWalkthroughTemplateRoom,
   type WalkthroughTemplateItem,
@@ -72,7 +74,7 @@ import {
 } from "@shared/schema";
 import { db } from "./db";
 import { REGIONS } from "@shared/regions";
-import { eq, and, or, desc, asc, inArray, lt, lte, gte, ilike, count, notInArray } from "drizzle-orm";
+import { eq, and, or, desc, asc, inArray, lt, lte, gte, ilike, count, notInArray, sql } from "drizzle-orm";
 
 // Helper function to filter out undefined values from partial updates
 function filterUndefined<T extends Record<string, any>>(obj: T): Partial<T> {
@@ -177,6 +179,8 @@ export interface IStorage {
   getAllWalkthroughItems(): Promise<WalkthroughItem[]>;
   getWalkthroughItemsByRoom(roomId: string): Promise<WalkthroughItem[]>;
   getWalkthroughItemsByWalkthrough(walkthroughId: string): Promise<WalkthroughItem[]>;
+  /** Every item recorded poor or damaged, newest walkthrough first. */
+  getFlaggedWalkthroughItems(): Promise<FlaggedWalkthroughItem[]>;
   updateWalkthroughItem(id: string, data: Partial<InsertWalkthroughItem>): Promise<WalkthroughItem>;
   deleteWalkthroughItem(id: string): Promise<void>;
 
@@ -700,6 +704,50 @@ export class DatabaseStorage implements IStorage {
       .where(eq(walkthroughRooms.walkthroughId, walkthroughId))
       .orderBy(walkthroughRooms.displayOrder, walkthroughItems.displayOrder);
     return rows.map((row) => row.item);
+  }
+
+  /**
+   * Every checklist item across every walkthrough whose condition needs
+   * attention.
+   *
+   * One query for the whole list, joined up to the walkthrough so each row can
+   * name its house: the caller filters by region against `region` on the
+   * walkthrough itself, exactly as it would over `getAllWalkthroughs`, without
+   * a per-row lookup to find out where an item lives.
+   *
+   * The photo count is a correlated subquery rather than a join, so a room
+   * with three photos still produces one row per item rather than three.
+   */
+  async getFlaggedWalkthroughItems(): Promise<FlaggedWalkthroughItem[]> {
+    const photoCount = db
+      .select({ value: count() })
+      .from(walkthroughPhotos)
+      .where(eq(walkthroughPhotos.roomId, walkthroughRooms.id));
+
+    const rows = await db
+      .select({
+        itemId: walkthroughItems.id,
+        label: walkthroughItems.label,
+        condition: walkthroughItems.condition,
+        notes: walkthroughItems.notes,
+        roomId: walkthroughRooms.id,
+        roomName: walkthroughRooms.name,
+        walkthroughId: walkthroughs.id,
+        walkthroughDate: walkthroughs.walkthroughDate,
+        walkthroughType: walkthroughs.type,
+        walkthroughStatus: walkthroughs.status,
+        propertyId: walkthroughs.propertyId,
+        buildingAddress: walkthroughs.buildingAddress,
+        region: walkthroughs.region,
+        roomPhotoCount: sql<number>`(${photoCount})`.mapWith(Number),
+      })
+      .from(walkthroughItems)
+      .innerJoin(walkthroughRooms, eq(walkthroughItems.roomId, walkthroughRooms.id))
+      .innerJoin(walkthroughs, eq(walkthroughRooms.walkthroughId, walkthroughs.id))
+      .where(inArray(walkthroughItems.condition, [...WALKTHROUGH_FLAGGED_CONDITIONS]))
+      .orderBy(desc(walkthroughs.walkthroughDate), walkthroughRooms.displayOrder, walkthroughItems.displayOrder);
+
+    return rows;
   }
 
   async updateWalkthroughItem(id: string, data: Partial<InsertWalkthroughItem>): Promise<WalkthroughItem> {

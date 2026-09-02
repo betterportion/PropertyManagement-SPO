@@ -1682,6 +1682,80 @@ describe("walkthroughs and walkthrough items", () => {
  * assertions is over real HTTP with the real guards running, and every refusal
  * asserts the refused work never happened rather than only the status.
  */
+describe("the flagged-items list across walkthroughs", () => {
+  const WEST_FLAG = {
+    itemId: "item-west",
+    label: "Wall",
+    condition: "damaged",
+    roomId: "room-west",
+    roomName: "Living room",
+    walkthroughId: "wt-west",
+    propertyId: "prop-west",
+    buildingAddress: "1 Main St",
+    region: "West Central",
+    roomPhotoCount: 1,
+  };
+  const EAST_FLAG = { ...WEST_FLAG, itemId: "item-east", walkthroughId: "wt-east", propertyId: "prop-east", buildingAddress: "2 River Rd", region: "East Central" };
+
+  const bothFlagged = () =>
+    storageMock.getFlaggedWalkthroughItems.mockResolvedValue([WEST_FLAG, EAST_FLAG]);
+
+  it("refuses an anonymous caller", async () => {
+    expect((await get("/api/walkthrough-flagged-items")).status).toBe(401);
+  });
+
+  it("refuses staff holding no walkthrough permission, without running the query", async () => {
+    actAs(STAFF, { ...ALL_MAINTENANCE, allowedRegions: ["West Central"] });
+    bothFlagged();
+    expect((await get("/api/walkthrough-flagged-items")).status).toBe(403);
+    expect(storageMock.getFlaggedWalkthroughItems).not.toHaveBeenCalled();
+  });
+
+  it("refuses a resident who cannot complete walkthroughs", async () => {
+    actAs(ALICE, ALL_MAINTENANCE);
+    bothFlagged();
+    expect((await get("/api/walkthrough-flagged-items")).status).toBe(403);
+    expect(storageMock.getFlaggedWalkthroughItems).not.toHaveBeenCalled();
+  });
+
+  // The positive control: without it every "not called" above could pass on a
+  // typo in the storage method name.
+  it("gives a regional lead only their own regions' items", async () => {
+    actAs(STAFF, { canViewWalkthroughs: true, allowedRegions: ["West Central"] });
+    bothFlagged();
+    const { status, body } = await get("/api/walkthrough-flagged-items");
+    expect(status).toBe(200);
+    expect(storageMock.getFlaggedWalkthroughItems).toHaveBeenCalled();
+    expect(body.map((row: { itemId: string }) => row.itemId)).toEqual(["item-west"]);
+  });
+
+  it("gives a staff account with no regions an empty list, never everything", async () => {
+    actAs(STAFF, { canViewWalkthroughs: true, allowedRegions: [] });
+    bothFlagged();
+    expect((await get("/api/walkthrough-flagged-items")).body).toEqual([]);
+  });
+
+  it("narrows a household leader to their own house, with no region path", async () => {
+    // Their permissions row names a region deliberately: a resident must not
+    // pick up the region rule even when one is set on the row.
+    actAs({ ...ALICE, propertyId: "prop-east" } as typeof ALICE, {
+      canCompleteWalkthroughs: true,
+      allowedRegions: ["West Central"],
+    });
+    storageMock.getProperty.mockResolvedValue({ id: "prop-east", address: "2 River Rd", region: "East Central" });
+    bothFlagged();
+    const { status, body } = await get("/api/walkthrough-flagged-items");
+    expect(status).toBe(200);
+    expect(body.map((row: { itemId: string }) => row.itemId)).toEqual(["item-east"]);
+  });
+
+  it("gives a leader whose account is linked to no house an empty list", async () => {
+    actAs(ALICE, { canCompleteWalkthroughs: true, allowedRegions: ["West Central"] });
+    bothFlagged();
+    expect((await get("/api/walkthrough-flagged-items")).body).toEqual([]);
+  });
+});
+
 describe("residents completing their own house's walkthrough", () => {
   const HOUSE_A = "1 Main St";
   const HOUSE_B = "2 River Rd";

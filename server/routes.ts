@@ -1287,6 +1287,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return await storage.getWalkthrough(room.walkthroughId);
   }
 
+  /**
+   * Every item across every walkthrough the caller can see whose condition is
+   * poor or damaged.
+   *
+   * The pain point this answers is a deep hole in a wall going unnoticed
+   * because finding it means opening walkthroughs one at a time. So this is a
+   * read over the whole visible set rather than one house's.
+   *
+   * Scoped by `visibleWalkthroughs`, not `filterByRegion`, for the same reason
+   * the walkthrough list is: a household leader has no regions and must never
+   * acquire any here. Theirs narrows to their own house, and an account with
+   * no house claim gets an empty list rather than falling through to the
+   * region rule.
+   */
+  app.get('/api/walkthrough-flagged-items', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireWalkthroughPermission(res, ctx, "view")) return;
+
+      res.json(
+        visibleWalkthroughs(
+          ctx,
+          await storage.getFlaggedWalkthroughItems(),
+          await residentHouseAddress(ctx),
+        ),
+      );
+    } catch (error) {
+      sendError(res, error, "Failed to fetch flagged walkthrough items");
+    }
+  });
+
   app.get('/api/walkthrough-rooms/:roomId/items', isAuthenticated, async (req: any, res) => {
     try {
       const ctx = await requireActiveUser(req, res);

@@ -16,6 +16,7 @@ import Landing from "@/pages/Landing";
 import AdminDashboard from "@/pages/AdminDashboard";
 import Maintenance from "@/pages/Maintenance";
 import Walkthroughs from "@/pages/Walkthroughs";
+import FlaggedItems from "@/pages/FlaggedItems";
 import WalkthroughRun from "@/pages/WalkthroughRun";
 import Assets from "@/pages/Assets";
 import Safety from "@/pages/Safety";
@@ -57,6 +58,8 @@ function Router() {
         <Route path="/finances" component={Finances} />
         <Route path="/maintenance" component={Maintenance} />
         <Route path="/walkthroughs" component={Walkthroughs} />
+        {/* Literal path first: wouter matches in order, so :id would swallow it. */}
+        <Route path="/walkthroughs/flagged" component={FlaggedItems} />
         <Route path="/walkthroughs/:id" component={WalkthroughRun} />
         <Route path="/assets" component={Assets} />
         <Route path="/safety" component={Safety} />

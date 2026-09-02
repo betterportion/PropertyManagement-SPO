@@ -314,6 +314,37 @@ export const insertWalkthroughItemSchema = createInsertSchema(walkthroughItems)
 export type WalkthroughItem = typeof walkthroughItems.$inferSelect;
 export type InsertWalkthroughItem = z.infer<typeof insertWalkthroughItemSchema>;
 
+/**
+ * One flagged checklist item, carrying enough of its room, walkthrough and
+ * house to be read on a list without a second request per row.
+ *
+ * The stated pain point this answers is a deep hole in a wall surfacing
+ * without somebody opening every walkthrough one by one. That means the row
+ * has to name the house and the room, not just the item -- so this is a
+ * flattened read shape rather than a `WalkthroughItem`, and it is assembled by
+ * one join in the storage layer rather than N+1 lookups in a handler.
+ *
+ * Deliberately not a table. Nothing is stored in this shape; it exists only
+ * as the answer to one query.
+ */
+export interface FlaggedWalkthroughItem {
+  itemId: string;
+  label: string;
+  condition: WalkthroughCondition;
+  notes: string | null;
+  roomId: string;
+  roomName: string;
+  walkthroughId: string;
+  walkthroughDate: Date | string;
+  walkthroughType: Walkthrough["type"];
+  walkthroughStatus: Walkthrough["status"];
+  propertyId: string;
+  buildingAddress: string;
+  region: string;
+  /** How many photos the room carries, so a row can say whether there is one. */
+  roomPhotoCount: number;
+}
+
 // Walkthrough Photos
 export const walkthroughPhotos = pgTable("walkthrough_photos", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),

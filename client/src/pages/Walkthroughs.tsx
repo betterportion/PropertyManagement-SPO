@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
-import { ArrowLeft, Building2, CalendarDays, ChevronRight, ClipboardList, MapPin, Plus } from "lucide-react";
+import { ArrowLeft, Building2, CalendarDays, ChevronRight, ClipboardList, MapPin, Plus, TriangleAlert } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -97,6 +97,14 @@ export default function Walkthroughs() {
             }
             actions={
               <>
+                <Button
+                  variant="secondary"
+                  onClick={() => navigate("/walkthroughs/flagged")}
+                  data-testid="button-flagged-items"
+                >
+                  <TriangleAlert className="h-4 w-4" />
+                  Needs attention
+                </Button>
                 {selectedProperty && (
                   <Button
                     variant="ghost"

@@ -209,7 +209,8 @@ client/                 React frontend
   src/
     pages/              One file per screen, split by role
                         (Walkthroughs.tsx is the staff index, MyWalkthroughs.tsx
-                        the resident one; both open WalkthroughRun.tsx)
+                        the resident one; both open WalkthroughRun.tsx.
+                        FlaggedItems.tsx lists what came back poor or damaged)
     components/         Shared components
       ui/               shadcn/ui primitives (generated — avoid hand-editing)
     hooks/              useAuth and friends

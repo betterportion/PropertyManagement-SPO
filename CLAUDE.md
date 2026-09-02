@@ -193,6 +193,16 @@ Labels carry forward; **condition and notes never do**. A new walkthrough starts
 
 `Walkthroughs.tsx` is the staff index: pick a house, see its dated inspections, start a new one. Both indexes start one through `useStartWalkthrough` rather than each holding their own copy of the mutation, so the request, the cache invalidation and the "the checklist came back empty" warning cannot drift apart. `MyWalkthroughs.tsx` is the resident one, and is a separate file rather than a role branch — staff pick out of every house they cover, a leader has exactly one, and the resident page has no house picker and no `/api/properties` call behind it (a resident account cannot read that list). It shows what `GET /api/walkthroughs` returns and never filters again, so the server's house rule and the screen cannot drift. The old room-per-property shape it used to render — along with `RoomCard.tsx` and `RoomDetailDrawer.tsx` — is gone, because two live shapes is how drift starts. The phone-width acceptance criteria live in `e2e/mobile.spec.ts`.
 
+### The flagged-items list
+
+`GET /api/walkthrough-flagged-items` and `client/src/pages/FlaggedItems.tsx` at `/walkthroughs/flagged` answer one stated pain point: a deep hole in a wall should surface without somebody opening every walkthrough one at a time. It lists every item recorded `poor` or `damaged` across the walkthroughs the caller can see, newest first, each row linking to `/walkthroughs/:id?room=<roomId>` so the item opens in the room it came from.
+
+Three things to preserve:
+
+- **Scoped by `visibleWalkthroughs`, never `filterByRegion`.** It is a second read path over walkthrough data, which is the shape of both historic authorization gaps here. A household leader has no regions and must not acquire any on this route: theirs narrows to their own house, and no house claim means an empty list.
+- **One query, not N+1.** `storage.getFlaggedWalkthroughItems()` joins item → room → walkthrough and returns the flattened `FlaggedWalkthroughItem` read shape, carrying the house and room so a row reads without a follow-up request. The room's photo count is a correlated subquery, not a join, so a room with three photos still yields one row per item.
+- **No summarising and no scoring.** The server sends the items; the screen groups them by house and sorts damage first. AI summaries are deferred deliberately — this list is what that idea was actually for.
+
 ### Walkthrough conditions
 
 `WALKTHROUGH_CONDITIONS` in `shared/schema.ts` is the vocabulary. Two of its values look alike and are not:
