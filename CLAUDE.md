@@ -82,7 +82,7 @@ Three conventions in that suite, all of which exist because of a real miss:
 
 ### Frontend (`client/src/`)
 
-- **Routing** is Wouter, and it is *role-based*: `App.tsx` renders a completely different `<Switch>` depending on whether the user is an admin/regional administrator or a resident. There is no route guard — unauthenticated users only ever get the `Landing` page.
+- **Routing** is Wouter, and it is *role-based*: `App.tsx` renders a completely different `<Switch>` depending on whether the user is an admin/regional administrator or a resident. There is no route guard — unauthenticated users only ever get the `Landing` page. The one path both switches carry is `/walkthroughs/:id`; the resident switch registers it, and its own `/walkthroughs` index (`MyWalkthroughs.tsx`), only for an account holding `canCompleteWalkthroughs`. That registration is convenience, not security — the server decides which walkthrough anybody may open.
 - **Server state** is TanStack Query, configured in `lib/queryClient.ts` with `staleTime: Infinity`, no refetch on focus, and no retries. This means **you must invalidate queries manually after a mutation** or the UI will show stale data.
 - The default query function derives the URL by joining the query key with `/`, so `queryKey: ["/api/assets"]` fetches `/api/assets`.
 - `apiRequest(method, url, data)` is the mutation helper. It throws on non-2xx.
@@ -99,8 +99,8 @@ Defined in `shared/schema.ts` using Drizzle, with Zod insert schemas generated b
 | Table | Purpose | Key relationships |
 |---|---|---|
 | `sessions` | Express session store | Managed by `connect-pg-simple`, not by app code |
-| `users` | Accounts. `role` is `admin` / `regional_administrator` / `resident`, plus `isActive`; resident accounts carry a `propertyId` linking them to their house | `id` is the identity provider's subject claim; `email` is unique |
-| `user_permissions` | One row per user, seventeen boolean flags (including the two finance flags, and two that gate surfaces not built yet) plus `allowedRegions` (text array) | `userId` unique, cascades on user delete |
+| `users` | Accounts. `role` is `admin` / `regional_administrator` / `resident`, plus `isActive`; resident accounts carry a `propertyId` linking them to their house — the house whose maintenance requests that login may read *and* whose walkthroughs it may write | `id` is the identity provider's subject claim; `email` is unique |
+| `user_permissions` | One row per user, seventeen boolean flags (including the two finance flags, `canCompleteWalkthroughs` which is the resident-tier walkthrough grant, and one that gates a surface not built yet) plus `allowedRegions` (text array) | `userId` unique, cascades on user delete |
 | `maintenance_requests` | The core workflow. Priority includes a `wishlist` level; status is pending/in_progress/completed/cancelled. `completedDate` is the **close** date, set for `cancelled` as well as `completed`. `photoUrl` is the single photo filed *with* the request; anything added later lives in `maintenance_request_photos` | `submittedBy` stores an **email**, see gotchas |
 | `maintenance_request_photos` | Photos added to a request after it was filed, each with its uploader and date | `requestId` → `maintenance_requests`, cascades |
 | `maintenance_schedules` | Recurring upkeep on a house — `category` is `safety` or `preventive`, `intervalMonths` sets the cadence. A daily job turns a due schedule into an ordinary maintenance request, so there is no second queue to watch | `propertyId` → `properties` cascades; optional `assetId` → `assets` set-null; `region`/`buildingAddress` denormalised for region scoping |
@@ -174,7 +174,7 @@ Three properties to preserve:
 
 - **A walkthrough owns copies of these rows, never references.** That is what makes "editing the template never retroactively changes a property's copy" true by construction rather than by care. Do not replace the copy with a foreign key.
 - **A repeat walkthrough copies that property's own last one, not the template.** Once an RA has deleted the smoke detector a house lacks and added the porch it has, that shape is what should come back next year.
-- **Changing the template is `requireAdmin`, not `canManageWalkthroughs`.** That flag is a grant over your own houses; the template is national, so an edit reaches every region. They are different things and need different grants.
+- **Changing the template is `requireAdmin`, not `canManageWalkthroughs`.** That flag is a grant over your own houses; the template is national, so an edit reaches every region. They are different things and need different grants. Reading the *rooms* is wider than reading the *items*: `GET /api/walkthrough-template/rooms` is what the add-a-room picker lists, so a household leader reaches it too — it names room types and no house.
 
 Labels carry forward; **condition and notes never do**. A new walkthrough starts unassessed, for the same reason the `0017` backfill refused to turn "unchanged" into a condition. The seeded template content is **provisional** — SPO's own forms are still outstanding — which is why it is ordinary editable rows rather than constants.
 
@@ -191,7 +191,7 @@ Labels carry forward; **condition and notes never do**. A new walkthrough starts
 - **Adding a room requires a room type.** The type is what brings the standard items with it, and a room added by name alone would arrive empty with nothing to fill it in. Removing an item a house does not have is the editing this screen offers; adding one back, deleting a room and deleting a photo are deliberately absent until a ticket asks for them.
 - **Empty is not finished.** A room with no items reports 0%, never 100% — the one lie this screen cannot afford.
 
-`Walkthroughs.tsx` is now only the index: pick a house, see its dated inspections, start a new one. The old room-per-property shape it used to render — along with `RoomCard.tsx` and `RoomDetailDrawer.tsx` — is gone, because two live shapes is how drift starts. The phone-width acceptance criteria live in `e2e/mobile.spec.ts`.
+`Walkthroughs.tsx` is the staff index: pick a house, see its dated inspections, start a new one. Both indexes start one through `useStartWalkthrough` rather than each holding their own copy of the mutation, so the request, the cache invalidation and the "the checklist came back empty" warning cannot drift apart. `MyWalkthroughs.tsx` is the resident one, and is a separate file rather than a role branch — staff pick out of every house they cover, a leader has exactly one, and the resident page has no house picker and no `/api/properties` call behind it (a resident account cannot read that list). It shows what `GET /api/walkthroughs` returns and never filters again, so the server's house rule and the screen cannot drift. The old room-per-property shape it used to render — along with `RoomCard.tsx` and `RoomDetailDrawer.tsx` — is gone, because two live shapes is how drift starts. The phone-width acceptance criteria live in `e2e/mobile.spec.ts`.
 
 ### Walkthrough conditions
 
@@ -212,6 +212,22 @@ Non-admins only see records in their `allowedRegions`.
 - `requireRegionMove(res, ctx, existingRegion, incomingRegion)` — on update, checks *both*, so a record cannot be moved into a region the user cannot reach.
 
 Region names are compared in one canonical form, so a stored legacy `west-central` still matches `West Central`.
+
+### Resident access to walkthroughs
+
+Walkthroughs are the one part of the portal two tiers reach through the same routes by two different rules. A household leader or steward — a `resident` account holding `canCompleteWalkthroughs` — fills in and reads **their own house's** walkthroughs. Staff are scoped by region as everywhere else.
+
+Both halves live in `server/authz.ts` so no handler decides them for itself:
+
+- `hasWalkthroughPermission(ctx, "view" | "manage")` — the tier gate. A resident needs `canCompleteWalkthroughs` and **nothing else will do**: reading `canManageWalkthroughs` off a resident row would hand that account the region path this rule exists to deny. The mirror holds too — `canCompleteWalkthroughs` on a staff account grants nothing.
+- `canAccessWalkthrough(ctx, walkthrough, residentHouse)` / `requireWalkthroughAccess` — the scope. Staff by region; a resident by an exact match between the walkthrough's `buildingAddress` and `residentHouseAddress(ctx)`, the same comparison and the same fail-closed cases as the maintenance house rule. **There is no region branch for a resident at any point.**
+- `visibleWalkthroughs(ctx, items, residentHouse)` — the list filter. Not `filterByRegion`: a resident with no house claim gets an empty list rather than falling through to the region rule.
+
+What a leader *can* write is exactly what the walkthrough screen offers: conditions and notes on a checklist item, removing an item their house does not have, and adding a room (which is what brings the standard items with it). What the grant does **not** widen: editing or deleting the walkthrough record itself, the `/api/walkthrough-rooms` CRUD routes, `POST /api/walkthrough-items`, photos, and the national template all stay staff-only. Completing a walkthrough is not managing one. Photos are staff-only in both directions — a resident cannot upload one and `canReadUploadReference` will not serve them one — so `client/src/lib/walkthrough.ts` hides the section rather than offering a control every request behind it would refuse.
+
+**Prior years are read-only for a leader**, and that is a date rule, not a status one. `isCurrentWalkthrough` compares a walkthrough's own date against the newest on that house: the current inspection is writable, earlier ones open read-only, ties are writable (a move-in and a move-out can share a day) and an undated walkthrough fails closed. Deliberately not `status` — nothing moves a walkthrough out of `draft`, so a status gate would lock everything or nothing, and inventing a submit step would decide on SPO's behalf what "finished" means, which is the same reason `WalkthroughRun` has no submit button. **Staff are exempt**, and that exemption is what makes the restriction safe: anything a leader gets wrong, their regional administrator can still correct.
+
+`users.propertyId` therefore now decides which house's walkthroughs a login may **write**, not only which house's maintenance requests it may read. It is audited as `user.property_changed` and stays on `AUDIT_ACTIONS_KEPT_INDEFINITELY` — that is access history, and this is why.
 
 ### Identity
 

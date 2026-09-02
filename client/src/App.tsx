@@ -9,6 +9,7 @@ import ThemeToggle from "@/components/ThemeToggle";
 import UserMenu from "@/components/UserMenu";
 import { ThemeProvider } from "@/providers/ThemeProvider";
 import { useAuth } from "@/hooks/useAuth";
+import { canFillInWalkthroughs, type WalkthroughUser } from "@/lib/walkthrough";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import NotFound from "@/pages/not-found";
 import Landing from "@/pages/Landing";
@@ -24,6 +25,7 @@ import Tasks from "@/pages/Tasks";
 import Contacts from "@/pages/Contacts";
 import Properties from "@/pages/Properties";
 import PropertyDetail from "@/pages/PropertyDetail";
+import MyWalkthroughs from "@/pages/MyWalkthroughs";
 import ResidentDashboard from "@/pages/ResidentDashboard";
 import SubmitRequest from "@/pages/SubmitRequest";
 import MyRequests from "@/pages/MyRequests";
@@ -67,11 +69,19 @@ function Router() {
     );
   }
 
+  // A household leader or steward reaches the walkthrough screens too, behind
+  // the same flag the server checks. The routes are registered either way and
+  // the server binds them to their own house -- this only decides whether the
+  // pages are reachable from the app at all.
+  const canCompleteWalkthroughs = canFillInWalkthroughs(user as WalkthroughUser | null);
+
   return (
     <Switch>
       <Route path="/" component={ResidentDashboard} />
       <Route path="/submit-request" component={SubmitRequest} />
       <Route path="/my-requests" component={MyRequests} />
+      {canCompleteWalkthroughs && <Route path="/walkthroughs" component={MyWalkthroughs} />}
+      {canCompleteWalkthroughs && <Route path="/walkthroughs/:id" component={WalkthroughRun} />}
       <Route component={NotFound} />
     </Switch>
   );
@@ -101,11 +111,16 @@ function AppContent() {
   }
 
   const role = (user as any)?.role || "resident";
+  const canCompleteWalkthroughs = canFillInWalkthroughs(user as WalkthroughUser | null);
 
   return (
     <SidebarProvider style={style as React.CSSProperties}>
       <div className="flex h-screen w-full overflow-hidden bg-background">
-        <AppSidebar role={role} currentPath={location} />
+        <AppSidebar
+          role={role}
+          currentPath={location}
+          canCompleteWalkthroughs={canCompleteWalkthroughs}
+        />
         <div className="flex flex-1 flex-col overflow-hidden">
           <header className="flex h-16 shrink-0 items-center justify-between border-b border-border bg-background px-4 lg:px-6">
             <SidebarTrigger data-testid="button-sidebar-toggle" />

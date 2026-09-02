@@ -1673,6 +1673,361 @@ describe("walkthroughs and walkthrough items", () => {
 });
 
 /**
+ * The second way into the walkthrough routes: a household leader or steward.
+ *
+ * A resident-tier account holding canCompleteWalkthroughs reaches the same
+ * routes staff do, by a different rule — their own house, resolved from
+ * `users.propertyId`, and no region path at any point. That is the exact shape
+ * of both historic authorization gaps in this codebase, so every one of these
+ * assertions is over real HTTP with the real guards running, and every refusal
+ * asserts the refused work never happened rather than only the status.
+ */
+describe("residents completing their own house's walkthrough", () => {
+  const HOUSE_A = "1 Main St";
+  const HOUSE_B = "2 River Rd";
+
+  const PROPERTY_A = { id: "prop-a", name: "Cleveland House", region: "West Central", address: HOUSE_A };
+  const PROPERTY_B = { id: "prop-b", name: "Como House", region: "East Central", address: HOUSE_B };
+
+  const THIS_YEAR = "2026-09-01T00:00:00.000Z";
+  const LAST_YEAR = "2025-09-01T00:00:00.000Z";
+
+  const WT_A = { id: "wt-a", propertyId: "prop-a", region: "West Central", buildingAddress: HOUSE_A, status: "draft", walkthroughDate: THIS_YEAR };
+  const WT_B = { id: "wt-b", propertyId: "prop-b", region: "East Central", buildingAddress: HOUSE_B, status: "draft", walkthroughDate: THIS_YEAR };
+  /** Last year's inspection of house A: readable by its leader, not writable. */
+  const WT_A_PRIOR = { ...WT_A, id: "wt-a-prior", walkthroughDate: LAST_YEAR };
+  const ROOM_A_PRIOR = { id: "room-a-prior", name: "Kitchen", walkthroughId: "wt-a-prior" };
+  const ITEM_A_PRIOR = { id: "item-a-prior", roomId: "room-a-prior", label: "Sink", condition: "good" };
+
+  const ROOM_A = { id: "room-a", name: "Kitchen", walkthroughId: "wt-a" };
+  const ROOM_B = { id: "room-b", name: "Kitchen", walkthroughId: "wt-b" };
+  const ITEM_A = { id: "item-a", roomId: "room-a", label: "Sink", condition: "not_recorded" };
+  const ITEM_B = { id: "item-b", roomId: "room-b", label: "Sink", condition: "not_recorded" };
+
+  const COMPLETE = { canCompleteWalkthroughs: true };
+
+  /** Alice leads house A: the flag, and a login linked to that property. */
+  const leaderOfHouseA = (permissions: Record<string, unknown> = COMPLETE) => {
+    actAs({ ...ALICE, propertyId: "prop-a" } as typeof ALICE, permissions);
+    storageMock.getProperty.mockImplementation(async (id: string) =>
+      id === "prop-a" ? PROPERTY_A : id === "prop-b" ? PROPERTY_B : undefined,
+    );
+  };
+
+  /** Their own house's records, primed for the happy path. */
+  const ownHouse = () => {
+    storageMock.getWalkthrough.mockResolvedValue(WT_A);
+    storageMock.getWalkthroughRoom.mockResolvedValue(ROOM_A);
+    storageMock.getWalkthroughItem.mockResolvedValue(ITEM_A);
+    storageMock.getWalkthroughsByProperty.mockResolvedValue([WT_A, WT_A_PRIOR]);
+  };
+
+  /** Their own house, but the inspection they finished last year. */
+  const ownHousePriorYear = () => {
+    storageMock.getWalkthrough.mockResolvedValue(WT_A_PRIOR);
+    storageMock.getWalkthroughRoom.mockResolvedValue(ROOM_A_PRIOR);
+    storageMock.getWalkthroughItem.mockResolvedValue(ITEM_A_PRIOR);
+    storageMock.getWalkthroughsByProperty.mockResolvedValue([WT_A, WT_A_PRIOR]);
+  };
+
+  /** Somebody else's house, at every id the routes could be given. */
+  const otherHouse = () => {
+    storageMock.getWalkthrough.mockResolvedValue(WT_B);
+    storageMock.getWalkthroughRoom.mockResolvedValue(ROOM_B);
+    storageMock.getWalkthroughItem.mockResolvedValue(ITEM_B);
+  };
+
+  const seedsNothing = () => {
+    storageMock.getWalkthroughsByProperty.mockResolvedValue([]);
+    storageMock.getAllWalkthroughTemplateRooms.mockResolvedValue([]);
+    storageMock.getAllWalkthroughTemplateItems.mockResolvedValue([]);
+  };
+
+  const expectNoWalkthroughWrite = () => {
+    expect(storageMock.createWalkthrough).not.toHaveBeenCalled();
+    expect(storageMock.updateWalkthrough).not.toHaveBeenCalled();
+    expect(storageMock.deleteWalkthrough).not.toHaveBeenCalled();
+    expect(storageMock.createWalkthroughRoom).not.toHaveBeenCalled();
+    expect(storageMock.createWalkthroughItem).not.toHaveBeenCalled();
+    expect(storageMock.updateWalkthroughItem).not.toHaveBeenCalled();
+    expect(storageMock.deleteWalkthroughItem).not.toHaveBeenCalled();
+  };
+
+  // ── What a leader may do on their own house ──────────────────────────────
+  //
+  // These are the positive controls. Without them every "not called" assertion
+  // below could pass because the route never does that work at all.
+
+  it("lists their own house's walkthroughs, and only those", async () => {
+    leaderOfHouseA();
+    storageMock.getAllWalkthroughs.mockResolvedValue([WT_A, WT_B]);
+
+    const { status, body } = await request("GET", "/api/walkthroughs");
+    expect(status).toBe(200);
+    expect(body.map((w: { id: string }) => w.id)).toEqual(["wt-a"]);
+  });
+
+  it("opens their own house's walkthrough, its rooms and its checklist", async () => {
+    leaderOfHouseA();
+    ownHouse();
+    storageMock.getWalkthroughRoomsByWalkthrough.mockResolvedValue([ROOM_A]);
+    storageMock.getWalkthroughItemsByWalkthrough.mockResolvedValue([ITEM_A]);
+    storageMock.getWalkthroughItemsByRoom.mockResolvedValue([ITEM_A]);
+
+    expect((await request("GET", "/api/walkthroughs/wt-a")).status).toBe(200);
+    expect((await request("GET", "/api/walkthroughs/wt-a/rooms")).body).toHaveLength(1);
+    expect((await request("GET", "/api/walkthroughs/wt-a/items")).body).toHaveLength(1);
+    expect((await request("GET", "/api/walkthrough-rooms/room-a/items")).body).toHaveLength(1);
+  });
+
+  it("records a condition on their own house's checklist", async () => {
+    leaderOfHouseA();
+    ownHouse();
+    storageMock.updateWalkthroughItem.mockResolvedValue({ ...ITEM_A, condition: "damaged" });
+
+    const { status } = await request("PATCH", "/api/walkthrough-items/item-a", {
+      body: { condition: "damaged", notes: "Cracked basin" },
+    });
+
+    expect(status).toBe(200);
+    expect(storageMock.updateWalkthroughItem).toHaveBeenCalledWith(
+      "item-a",
+      expect.objectContaining({ condition: "damaged", notes: "Cracked basin" }),
+    );
+  });
+
+  it("removes an item their house does not have, and adds a room it does", async () => {
+    leaderOfHouseA();
+    ownHouse();
+    storageMock.getWalkthroughRoomsByWalkthrough.mockResolvedValue([ROOM_A]);
+    storageMock.getWalkthroughTemplateRoom.mockResolvedValue({ id: "t-bath", name: "Bathroom" });
+    storageMock.getAllWalkthroughTemplateItems.mockResolvedValue([]);
+    storageMock.createWalkthroughRoom.mockResolvedValue({ id: "room-new", name: "Bathroom" });
+
+    expect((await request("DELETE", "/api/walkthrough-items/item-a")).status).toBe(200);
+    expect(storageMock.deleteWalkthroughItem).toHaveBeenCalledWith("item-a");
+
+    const added = await request("POST", "/api/walkthroughs/wt-a/rooms", { body: { templateRoomId: "t-bath" } });
+    expect(added.status).toBe(200);
+    expect(storageMock.createWalkthroughRoom).toHaveBeenCalledWith(
+      expect.objectContaining({ walkthroughId: "wt-a", propertyId: "prop-a" }),
+    );
+  });
+
+  it("starts a walkthrough on their own house, filed under that house", async () => {
+    leaderOfHouseA();
+    seedsNothing();
+    storageMock.createWalkthrough.mockImplementation(async (w: Record<string, unknown>) => ({ id: "wt-new", ...w }));
+
+    const { status } = await request("POST", "/api/walkthroughs", {
+      body: { propertyId: "prop-a", type: "annual", walkthroughDate: "2026-09-02" },
+    });
+
+    expect(status).toBe(200);
+    expect(storageMock.createWalkthrough).toHaveBeenCalledWith(
+      expect.objectContaining({
+        propertyId: "prop-a",
+        region: "West Central",
+        buildingAddress: HOUSE_A,
+        performedBy: ALICE.email,
+      }),
+    );
+  });
+
+  it("reads the national room-type list, which is what the add-a-room picker needs", async () => {
+    leaderOfHouseA();
+    storageMock.getAllWalkthroughTemplateRooms.mockResolvedValue([{ id: "t-bath", name: "Bathroom" }]);
+    const { status, body } = await request("GET", "/api/walkthrough-template/rooms");
+    expect(status).toBe(200);
+    expect(body).toHaveLength(1);
+  });
+
+  // ── And nothing at all on anybody else's ─────────────────────────────────
+
+  const OTHER_HOUSE_ROUTES: [string, string][] = [
+    ["GET", "/api/walkthroughs/wt-b"],
+    ["GET", "/api/walkthroughs/wt-b/rooms"],
+    ["GET", "/api/walkthroughs/wt-b/items"],
+    ["GET", "/api/walkthrough-rooms/room-b/items"],
+    ["POST", "/api/walkthroughs/wt-b/rooms"],
+    ["PATCH", "/api/walkthrough-items/item-b"],
+    ["DELETE", "/api/walkthrough-items/item-b"],
+  ];
+
+  it.each(OTHER_HOUSE_ROUTES)("refuses another house by id: %s %s", async (method, path) => {
+    leaderOfHouseA();
+    otherHouse();
+    const { status } = await request(method, path, method === "GET" ? undefined : { body: {} });
+    expect(status).toBe(403);
+    expectNoWalkthroughWrite();
+    expect(storageMock.getWalkthroughRoomsByWalkthrough).not.toHaveBeenCalled();
+    expect(storageMock.getWalkthroughItemsByWalkthrough).not.toHaveBeenCalled();
+    expect(storageMock.getWalkthroughItemsByRoom).not.toHaveBeenCalled();
+  });
+
+  // ── Prior years are readable, and read-only ──────────────────────────────
+
+  it("opens a prior year's walkthrough and its checklist", async () => {
+    // The positive control for the refusals below: reading last year really
+    // does work, so the 403s that follow are about writing and nothing else.
+    leaderOfHouseA();
+    ownHousePriorYear();
+    storageMock.getWalkthroughRoomsByWalkthrough.mockResolvedValue([ROOM_A_PRIOR]);
+    storageMock.getWalkthroughItemsByWalkthrough.mockResolvedValue([ITEM_A_PRIOR]);
+    storageMock.getWalkthroughItemsByRoom.mockResolvedValue([ITEM_A_PRIOR]);
+
+    expect((await request("GET", "/api/walkthroughs/wt-a-prior")).status).toBe(200);
+    expect((await request("GET", "/api/walkthroughs/wt-a-prior/rooms")).body).toHaveLength(1);
+    expect((await request("GET", "/api/walkthroughs/wt-a-prior/items")).body).toHaveLength(1);
+    expect((await request("GET", "/api/walkthrough-rooms/room-a-prior/items")).body).toHaveLength(1);
+  });
+
+  it("lists prior years alongside the current one", async () => {
+    leaderOfHouseA();
+    storageMock.getAllWalkthroughs.mockResolvedValue([WT_A, WT_A_PRIOR, WT_B]);
+    const { body } = await request("GET", "/api/walkthroughs");
+    expect(body.map((w: { id: string }) => w.id)).toEqual(["wt-a", "wt-a-prior"]);
+  });
+
+  const PRIOR_YEAR_WRITES: [string, string][] = [
+    ["POST", "/api/walkthroughs/wt-a-prior/rooms"],
+    ["PATCH", "/api/walkthrough-items/item-a-prior"],
+    ["DELETE", "/api/walkthrough-items/item-a-prior"],
+  ];
+
+  it.each(PRIOR_YEAR_WRITES)("refuses a leader writing to a prior year: %s %s", async (method, path) => {
+    leaderOfHouseA();
+    ownHousePriorYear();
+    const { status, body } = await request(method, path, { body: { condition: "damaged" } });
+    expect(status).toBe(403);
+    expect(body.message).toContain("read-only");
+    expectNoWalkthroughWrite();
+  });
+
+  it.each(PRIOR_YEAR_WRITES)("lets staff correct a prior year: %s %s", async (method, path) => {
+    // The restriction is resident-tier only, which is what makes it safe:
+    // anything a leader gets wrong, their regional administrator can fix.
+    actAs(STAFF, { canViewWalkthroughs: true, canManageWalkthroughs: true, allowedRegions: ["West Central"] });
+    ownHousePriorYear();
+    storageMock.getWalkthroughRoomsByWalkthrough.mockResolvedValue([ROOM_A_PRIOR]);
+    storageMock.getWalkthroughTemplateRoom.mockResolvedValue({ id: "t-bath", name: "Bathroom" });
+    storageMock.getAllWalkthroughTemplateItems.mockResolvedValue([]);
+    storageMock.createWalkthroughRoom.mockResolvedValue({ id: "room-new", name: "Bathroom" });
+    storageMock.updateWalkthroughItem.mockResolvedValue(ITEM_A_PRIOR);
+
+    const { status } = await request(method, path, { body: { condition: "damaged", templateRoomId: "t-bath" } });
+    expect(status).toBe(200);
+  });
+
+  it("refuses to start a walkthrough on another house", async () => {
+    leaderOfHouseA();
+    seedsNothing();
+    const { status } = await request("POST", "/api/walkthroughs", { body: { propertyId: "prop-b" } });
+    expect(status).toBe(403);
+    expect(storageMock.createWalkthrough).not.toHaveBeenCalled();
+  });
+
+  it("gains no region reach from allowedRegions, however generous", async () => {
+    // The failure this exists to catch: a resident falling through to the
+    // region rule. "all" is the widest grant there is, and it must buy nothing.
+    leaderOfHouseA({ ...COMPLETE, allowedRegions: ["all"] });
+    otherHouse();
+    storageMock.getAllWalkthroughs.mockResolvedValue([WT_A, WT_B]);
+
+    expect((await request("GET", "/api/walkthroughs")).body.map((w: { id: string }) => w.id)).toEqual(["wt-a"]);
+    expect((await request("GET", "/api/walkthroughs/wt-b")).status).toBe(403);
+  });
+
+  // ── Accounts that must get nothing ───────────────────────────────────────
+
+  const OWN_HOUSE_ROUTES: [string, string][] = [
+    ["GET", "/api/walkthroughs/wt-a"],
+    ["GET", "/api/walkthroughs/wt-a/rooms"],
+    ["GET", "/api/walkthroughs/wt-a/items"],
+    ["GET", "/api/walkthrough-rooms/room-a/items"],
+    ["POST", "/api/walkthroughs/wt-a/rooms"],
+    ["PATCH", "/api/walkthrough-items/item-a"],
+    ["DELETE", "/api/walkthrough-items/item-a"],
+  ];
+
+  it.each(OWN_HOUSE_ROUTES)("refuses a leader whose login is linked to no house: %s %s", async (method, path) => {
+    // Nothing resolves to a house, so nothing is theirs -- not even the house
+    // whose walkthrough the id points at.
+    actAs(ALICE, COMPLETE);
+    ownHouse();
+    const { status } = await request(method, path, method === "GET" ? undefined : { body: {} });
+    expect(status).toBe(403);
+    expectNoWalkthroughWrite();
+  });
+
+  it("gives an unlinked leader an empty list rather than every house", async () => {
+    // allowedRegions is deliberately the widest grant there is: if the list
+    // ever fell through to the region rule for want of a house, this account
+    // would receive both houses instead of neither.
+    actAs(ALICE, { ...COMPLETE, allowedRegions: ["all"] });
+    storageMock.getAllWalkthroughs.mockResolvedValue([WT_A, WT_B]);
+    expect((await request("GET", "/api/walkthroughs")).body).toEqual([]);
+  });
+
+  it("refuses a leader whose linked property has been deleted", async () => {
+    actAs({ ...ALICE, propertyId: "prop-gone" } as typeof ALICE, COMPLETE);
+    storageMock.getProperty.mockResolvedValue(undefined);
+    ownHouse();
+    expect((await request("GET", "/api/walkthroughs/wt-a")).status).toBe(403);
+  });
+
+  it.each(OWN_HOUSE_ROUTES)("refuses a linked resident without the flag: %s %s", async (method, path) => {
+    // The flag is what turns the house link into walkthrough access. Living in
+    // the house is not enough on its own.
+    leaderOfHouseA(ALL_MAINTENANCE);
+    ownHouse();
+    const { status } = await request(method, path, method === "GET" ? undefined : { body: {} });
+    expect(status).toBe(403);
+    expectNoWalkthroughWrite();
+  });
+
+  it("will not accept a staff walkthrough flag on a resident account", async () => {
+    // A resident row carrying canManageWalkthroughs must not be read as the
+    // staff grant, or the region path would come with it.
+    leaderOfHouseA({ canViewWalkthroughs: true, canManageWalkthroughs: true, allowedRegions: ["all"] });
+    ownHouse();
+    expect((await request("GET", "/api/walkthroughs/wt-a")).status).toBe(403);
+  });
+
+  // ── The routes a leader still cannot reach at all ────────────────────────
+
+  it.each([
+    ["PATCH", "/api/walkthroughs/wt-a"],
+    ["DELETE", "/api/walkthroughs/wt-a"],
+    ["POST", "/api/walkthrough-items"],
+    ["POST", "/api/walkthrough-rooms"],
+    ["PATCH", "/api/walkthrough-rooms/room-a"],
+    ["DELETE", "/api/walkthrough-rooms/room-a"],
+    ["GET", "/api/walkthrough-photos"],
+    ["GET", "/api/walkthrough-photos/room/room-a"],
+    ["POST", "/api/walkthrough-photos"],
+    ["GET", "/api/walkthrough-template/items"],
+    ["POST", "/api/walkthrough-template/rooms"],
+  ] as [string, string][])(
+    "refuses a leader on a staff-only walkthrough route: %s %s",
+    async (method, path) => {
+      // Completing a walkthrough is not managing one. Editing the record
+      // itself, the rooms, the photos and the national template all stay with
+      // staff, so the grant widens nothing beyond filling in the checklist.
+      leaderOfHouseA();
+      ownHouse();
+      const { status } = await request(method, path, method === "GET" ? undefined : { body: {} });
+      expect(status).toBe(403);
+      expectNoWalkthroughWrite();
+      expect(storageMock.createWalkthroughPhoto).not.toHaveBeenCalled();
+      expect(storageMock.updateWalkthroughRoom).not.toHaveBeenCalled();
+      expect(storageMock.deleteWalkthroughRoom).not.toHaveBeenCalled();
+      expect(storageMock.createWalkthroughTemplateRoom).not.toHaveBeenCalled();
+    },
+  );
+});
+
+/**
  * The national walkthrough template.
  *
  * The interesting boundary here is not resident-versus-staff, it is

@@ -14,7 +14,10 @@ import { formatDate } from "@/lib/format";
 import {
   WALKTHROUGH_STATUS_BADGE,
   WALKTHROUGH_TYPE_LABEL,
-  canManageWalkthroughs,
+  canFillInWalkthroughs,
+  canSeeWalkthroughPhotos,
+  canWriteWalkthrough,
+  isResidentAccount,
   itemsByRoom,
   progressOf,
   type WalkthroughUser,
@@ -49,10 +52,17 @@ export default function WalkthroughRun() {
 
   const typedUser = user as (WalkthroughUser & { email?: string }) | null;
 
-  // The guard is computed, never returned early on: a return placed above the
-  // queries below would change the hook count the moment the auth query
-  // resolves, and React throws. This crashed the Settings page once.
-  const canManage = canManageWalkthroughs(typedUser);
+  // Every guard here is computed, never returned early on: a return placed
+  // above the queries below would change the hook count the moment the auth
+  // query resolves, and React throws. This crashed the Settings page once.
+  //
+  // Photos stay with staff. A resident cannot upload a file outside a
+  // maintenance request, and cannot read a walkthrough photo back either, so
+  // the section is hidden rather than shown and refused on every request.
+  const showPhotos = canSeeWalkthroughPhotos(typedUser);
+  // A resident-tier account is bound to their own house, never to a region, so
+  // the two tiers are told different things about why one would not open.
+  const isResidentTier = isResidentAccount(typedUser);
 
   const {
     data: walkthrough,
@@ -76,6 +86,21 @@ export default function WalkthroughRun() {
     enabled: !!walkthroughId,
   });
 
+  // A leader's prior years are read-only, and knowing which year this is means
+  // knowing what else their house has. `/api/walkthroughs` is already scoped to
+  // their own house by the server, so this is one small request and only for
+  // the tier that needs it -- staff writability does not depend on it.
+  const { data: houseWalkthroughs = [] } = useQuery<Walkthrough[]>({
+    queryKey: ["/api/walkthroughs"],
+    enabled: isResidentTier && canFillInWalkthroughs(typedUser),
+  });
+
+  // Whether the controls belong on screen at all, for THIS walkthrough.
+  const canManage = canWriteWalkthrough(typedUser, walkthrough, houseWalkthroughs);
+  // Disabled controls with no explanation read as a broken page. Say why.
+  const isReadOnlyPriorYear =
+    isResidentTier && canFillInWalkthroughs(typedUser) && !!walkthrough && !canManage;
+
   const grouped = useMemo(() => itemsByRoom(items), [items]);
   const itemsFor = (roomId: string) => grouped.get(roomId) ?? [];
 
@@ -95,7 +120,13 @@ export default function WalkthroughRun() {
     body = <LoadingState message="Loading this walkthrough..." />;
   } else if (walkthroughError || !walkthrough) {
     body = (
-      <ErrorState message="This walkthrough could not be opened. It may have been deleted, or it belongs to a region you do not cover." />
+      <ErrorState
+        message={
+          isResidentTier
+            ? "This walkthrough could not be opened. It may have been deleted, or it belongs to a house other than yours."
+            : "This walkthrough could not be opened. It may have been deleted, or it belongs to a region you do not cover."
+        }
+      />
     );
   } else if (!currentRoom) {
     body = (
@@ -117,6 +148,15 @@ export default function WalkthroughRun() {
     const roomProgress = progressOf(roomItems);
     body = (
       <div className="space-y-6">
+        {isReadOnlyPriorYear && (
+          <p
+            className="rounded-md border border-border bg-muted px-3 py-2 text-sm text-muted-foreground"
+            data-testid="text-read-only-notice"
+          >
+            This is an earlier walkthrough of your house, so it can be read but not changed. Your
+            most recent one is the one to fill in.
+          </p>
+        )}
         <div className="flex items-baseline justify-between gap-3">
           <h2 className="text-2xl font-semibold tracking-tight" data-testid="text-current-room">
             {currentRoom.name}
@@ -128,12 +168,14 @@ export default function WalkthroughRun() {
 
         <RoomChecklist walkthroughId={walkthroughId} items={roomItems} canManage={canManage} />
 
-        <RoomPhotos
-          walkthrough={walkthrough}
-          room={currentRoom}
-          canManage={canManage}
-          uploaderEmail={typedUser?.email ?? ""}
-        />
+        {showPhotos && (
+          <RoomPhotos
+            walkthrough={walkthrough}
+            room={currentRoom}
+            canManage={canManage}
+            uploaderEmail={typedUser?.email ?? ""}
+          />
+        )}
       </div>
     );
   }
