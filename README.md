@@ -220,6 +220,7 @@ server/                 Express backend
   audit.ts              Records access, money and document events
   actionItems.ts        What the dashboard says needs attention (pure, testable)
   maintenanceStatus.ts  When a request closed, from its status transition (pure)
+  walkthroughTemplate.ts What a new walkthrough starts out containing (pure)
   residentImport.ts     Roster CSV parsing, validation and duplicates (pure)
   regionSummary.ts      The per-region rollup for a national admin (pure)
   schedules.ts          Preventive/safety schedules and their daily generator

@@ -50,6 +50,8 @@ import {
   insertWalkthroughRoomSchema,
   insertWalkthroughSchema,
   insertWalkthroughItemSchema,
+  insertWalkthroughTemplateRoomSchema,
+  insertWalkthroughTemplateItemSchema,
   insertWalkthroughPhotoSchema,
   insertAssetSchema,
   insertAssetPhotoSchema,
@@ -68,6 +70,7 @@ import {
 import { STANDARD_SCHEDULE_TEMPLATES, addMonths } from "./schedules";
 import { buildActionItems } from "./actionItems";
 import { closedDateChange } from "./maintenanceStatus";
+import { planFromTemplate, planFromPreviousWalkthrough, templateRoomItems } from "./walkthroughTemplate";
 import { parseResidentCsv, buildImportPreview } from "./residentImport";
 import { buildRegionSummaries, type RegionStaff } from "./regionSummary";
 import { normalizeRegions } from "./migrateRegions";
@@ -795,6 +798,146 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Walkthrough Rooms Routes
   // ---------------------------------------------------------------------------
+  // The national walkthrough template
+  //
+  // One template for the whole organisation: the standard rooms, and the
+  // standard items in each. Reading it needs the ordinary walkthrough
+  // permission -- an RA picking a room type has to see the list.
+  //
+  // CHANGING it is admin-only, and deliberately not `canManageWalkthroughs`.
+  // That flag is region-scoped in intent: a regional administrator manages
+  // their own houses. This template is national, so an edit here reaches every
+  // region, which is a different thing from managing walkthroughs and needs a
+  // different grant. requireAdmin is that grant.
+  //
+  // Editing the template never changes a property's existing walkthrough,
+  // because a walkthrough owns copies of these rows rather than references.
+  // ---------------------------------------------------------------------------
+
+  app.get('/api/walkthrough-template/rooms', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canViewWalkthroughs", "canManageWalkthroughs")) return;
+
+      // National, so no region filter: the room types are the same everywhere.
+      res.json(await storage.getAllWalkthroughTemplateRooms());
+    } catch (error) {
+      sendError(res, error, "Failed to fetch the walkthrough template");
+    }
+  });
+
+  app.get('/api/walkthrough-template/items', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canViewWalkthroughs", "canManageWalkthroughs")) return;
+
+      res.json(await storage.getAllWalkthroughTemplateItems());
+    } catch (error) {
+      sendError(res, error, "Failed to fetch the walkthrough template");
+    }
+  });
+
+  app.post('/api/walkthrough-template/rooms', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireAdmin(res, ctx)) return;
+
+      res.json(await storage.createWalkthroughTemplateRoom(insertWalkthroughTemplateRoomSchema.parse(req.body)));
+    } catch (error) {
+      sendError(res, error, "Failed to add the room type");
+    }
+  });
+
+  app.patch('/api/walkthrough-template/rooms/:id', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireAdmin(res, ctx)) return;
+
+      if (!(await storage.getWalkthroughTemplateRoom(req.params.id))) {
+        return res.status(404).json({ message: "Room type not found" });
+      }
+      const data = insertWalkthroughTemplateRoomSchema.partial().parse(req.body ?? {});
+      res.json(await storage.updateWalkthroughTemplateRoom(req.params.id, data));
+    } catch (error) {
+      sendError(res, error, "Failed to update the room type");
+    }
+  });
+
+  app.delete('/api/walkthrough-template/rooms/:id', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireAdmin(res, ctx)) return;
+
+      if (!(await storage.getWalkthroughTemplateRoom(req.params.id))) {
+        return res.status(404).json({ message: "Room type not found" });
+      }
+      // Its template items cascade. Walkthroughs already created keep their
+      // own copies, which is the point of copying rather than referencing.
+      await storage.deleteWalkthroughTemplateRoom(req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      sendError(res, error, "Failed to delete the room type");
+    }
+  });
+
+  app.post('/api/walkthrough-template/items', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireAdmin(res, ctx)) return;
+
+      const data = insertWalkthroughTemplateItemSchema.parse(req.body);
+      if (!(await storage.getWalkthroughTemplateRoom(data.templateRoomId))) {
+        return res.status(404).json({ message: "Room type not found" });
+      }
+      res.json(await storage.createWalkthroughTemplateItem(data));
+    } catch (error) {
+      sendError(res, error, "Failed to add the item");
+    }
+  });
+
+  app.patch('/api/walkthrough-template/items/:id', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireAdmin(res, ctx)) return;
+
+      if (!(await storage.getWalkthroughTemplateItem(req.params.id))) {
+        return res.status(404).json({ message: "Item not found" });
+      }
+      // An item cannot be moved between room types; delete and re-add instead.
+      const { templateRoomId: _t, ...editable } = req.body ?? {};
+      const data = insertWalkthroughTemplateItemSchema.partial().parse(editable);
+      res.json(await storage.updateWalkthroughTemplateItem(req.params.id, data));
+    } catch (error) {
+      sendError(res, error, "Failed to update the item");
+    }
+  });
+
+  app.delete('/api/walkthrough-template/items/:id', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireAdmin(res, ctx)) return;
+
+      if (!(await storage.getWalkthroughTemplateItem(req.params.id))) {
+        return res.status(404).json({ message: "Item not found" });
+      }
+      await storage.deleteWalkthroughTemplateItem(req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      sendError(res, error, "Failed to delete the item");
+    }
+  });
+
+  // ---------------------------------------------------------------------------
   // Walkthroughs
   //
   // A dated inspection event for one house. Rooms hang off one of these rather
@@ -882,9 +1025,142 @@ export async function registerRoutes(app: Express): Promise<Server> {
         performedBy: ctx.user.email ?? null,
       });
 
-      res.json(await storage.createWalkthrough(validatedData));
+      const walkthrough = await storage.createWalkthrough(validatedData);
+
+      // Seeding happens after the walkthrough exists, so a failure here leaves
+      // a real but empty walkthrough rather than nothing. Returning a 500 at
+      // that point would tell an RA the whole thing failed when it did not, and
+      // they would start a second one. Instead the error is logged and the
+      // count comes back, so the UI can say the checklist did not load and
+      // offer to add rooms by hand.
+      let roomsCreated = 0;
+      try {
+        roomsCreated = await seedWalkthroughStructure(walkthrough);
+      } catch (error) {
+        logError("Failed to seed a new walkthrough from the template", error);
+      }
+
+      res.json({ ...walkthrough, roomsCreated });
     } catch (error) {
       sendError(res, error, "Failed to create walkthrough");
+    }
+  });
+
+  /**
+   * Fills a brand-new walkthrough with the rooms and items it should start
+   * with: the national template on a property's first, and that property's
+   * most recent walkthrough on every one after.
+   *
+   * Structure only. Conditions start unassessed and photos are never copied --
+   * a new walkthrough is a fresh inspection, not a duplicate of the last one.
+   */
+  async function seedWalkthroughStructure(walkthrough: {
+    id: string;
+    propertyId: string;
+    buildingAddress?: string;
+  }): Promise<number> {
+    const previous = ((await storage.getWalkthroughsByProperty(walkthrough.propertyId)) ?? [])
+      .filter((w) => w.id !== walkthrough.id);
+
+    let planned;
+    if (previous.length === 0) {
+      const [templateRooms, templateItems] = await Promise.all([
+        storage.getAllWalkthroughTemplateRooms(),
+        storage.getAllWalkthroughTemplateItems(),
+      ]);
+      planned = planFromTemplate(templateRooms ?? [], templateItems ?? []);
+    } else {
+      // getWalkthroughsByProperty is newest first.
+      const rooms = (await storage.getWalkthroughRoomsByWalkthrough(previous[0].id)) ?? [];
+      const items = (
+        await Promise.all(rooms.map(async (room) => (await storage.getWalkthroughItemsByRoom(room.id)) ?? []))
+      ).flat();
+      planned = planFromPreviousWalkthrough(rooms, items);
+    }
+
+    for (const room of planned) {
+      const created = await storage.createWalkthroughRoom({
+        name: room.name,
+        walkthroughId: walkthrough.id,
+        propertyId: walkthrough.propertyId,
+        buildingAddress: walkthrough.buildingAddress ?? "",
+        displayOrder: room.displayOrder,
+      });
+      for (const item of room.items) {
+        await storage.createWalkthroughItem({
+          roomId: created.id,
+          label: item.label,
+          displayOrder: item.displayOrder,
+        });
+      }
+    }
+    return planned.length;
+  }
+
+  /**
+   * Adds one room to an existing walkthrough, prefilled from a known room type.
+   *
+   * The prefill is the point: add a bathroom and get sink, toilet, tub and
+   * shower, then delete what is not there. Typing four items by hand is what
+   * stops people editing the checklist at all.
+   */
+  app.post('/api/walkthroughs/:id/rooms', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageWalkthroughs")) return;
+
+      const walkthrough = await storage.getWalkthrough(req.params.id);
+      if (!walkthrough) {
+        return res.status(404).json({ message: "Walkthrough not found" });
+      }
+      if (!requireRegion(res, ctx, walkthrough.region)) return;
+
+      const body = z
+        .object({
+          templateRoomId: z.string().optional(),
+          name: z.string().min(1).optional(),
+          displayOrder: z.number().int().min(0).optional(),
+        })
+        .parse(req.body ?? {});
+
+      let name = body.name;
+      let items: { label: string; displayOrder: number }[] = [];
+
+      if (body.templateRoomId) {
+        const templateRoom = await storage.getWalkthroughTemplateRoom(body.templateRoomId);
+        if (!templateRoom) {
+          return res.status(404).json({ message: "Room type not found" });
+        }
+        name = name ?? templateRoom.name;
+        items = templateRoomItems(body.templateRoomId, await storage.getAllWalkthroughTemplateItems());
+      }
+
+      if (!name) {
+        return res.status(400).json({ message: "Give the room a name, or choose a room type" });
+      }
+
+      const existing = await storage.getWalkthroughRoomsByWalkthrough(walkthrough.id);
+      const room = await storage.createWalkthroughRoom({
+        name,
+        walkthroughId: walkthrough.id,
+        propertyId: walkthrough.propertyId,
+        buildingAddress: walkthrough.buildingAddress,
+        displayOrder: body.displayOrder ?? existing.length,
+      });
+
+      for (const item of items) {
+        await storage.createWalkthroughItem({
+          roomId: room.id,
+          label: item.label,
+          displayOrder: item.displayOrder,
+        });
+      }
+
+      res.json({ ...room, itemsCreated: items.length });
+    } catch (error) {
+      sendError(res, error, "Failed to add the room");
     }
   });
 

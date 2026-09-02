@@ -6,6 +6,8 @@ import {
   walkthroughRooms,
   walkthroughs,
   walkthroughItems,
+  walkthroughTemplateRooms,
+  walkthroughTemplateItems,
   walkthroughPhotos,
   assets,
   assetPhotos,
@@ -32,6 +34,10 @@ import {
   type InsertWalkthrough,
   type WalkthroughItem,
   type InsertWalkthroughItem,
+  type WalkthroughTemplateRoom,
+  type InsertWalkthroughTemplateRoom,
+  type WalkthroughTemplateItem,
+  type InsertWalkthroughTemplateItem,
   type InsertWalkthroughRoom,
   type WalkthroughPhoto,
   type InsertWalkthroughPhoto,
@@ -144,6 +150,18 @@ export interface IStorage {
   getMaintenanceRequestPhotosByRequest(requestId: string): Promise<MaintenanceRequestPhoto[]>;
   getAllMaintenanceRequestPhotos(): Promise<MaintenanceRequestPhoto[]>;
   deleteMaintenanceRequestPhoto(id: string): Promise<void>;
+
+  // Walkthrough template (national)
+  getAllWalkthroughTemplateRooms(): Promise<WalkthroughTemplateRoom[]>;
+  getWalkthroughTemplateRoom(id: string): Promise<WalkthroughTemplateRoom | undefined>;
+  createWalkthroughTemplateRoom(room: InsertWalkthroughTemplateRoom): Promise<WalkthroughTemplateRoom>;
+  updateWalkthroughTemplateRoom(id: string, data: Partial<InsertWalkthroughTemplateRoom>): Promise<WalkthroughTemplateRoom>;
+  deleteWalkthroughTemplateRoom(id: string): Promise<void>;
+  getAllWalkthroughTemplateItems(): Promise<WalkthroughTemplateItem[]>;
+  getWalkthroughTemplateItem(id: string): Promise<WalkthroughTemplateItem | undefined>;
+  createWalkthroughTemplateItem(item: InsertWalkthroughTemplateItem): Promise<WalkthroughTemplateItem>;
+  updateWalkthroughTemplateItem(id: string, data: Partial<InsertWalkthroughTemplateItem>): Promise<WalkthroughTemplateItem>;
+  deleteWalkthroughTemplateItem(id: string): Promise<void>;
 
   // Walkthroughs
   createWalkthrough(walkthrough: InsertWalkthrough): Promise<Walkthrough>;
@@ -550,6 +568,61 @@ export class DatabaseStorage implements IStorage {
 
   async deleteMaintenanceRequestPhoto(id: string): Promise<void> {
     await db.delete(maintenanceRequestPhotos).where(eq(maintenanceRequestPhotos.id, id));
+  }
+
+  // Walkthrough template Implementation
+  async getAllWalkthroughTemplateRooms(): Promise<WalkthroughTemplateRoom[]> {
+    return await db.select().from(walkthroughTemplateRooms).orderBy(walkthroughTemplateRooms.displayOrder);
+  }
+
+  async getWalkthroughTemplateRoom(id: string): Promise<WalkthroughTemplateRoom | undefined> {
+    const [row] = await db.select().from(walkthroughTemplateRooms).where(eq(walkthroughTemplateRooms.id, id));
+    return row;
+  }
+
+  async createWalkthroughTemplateRoom(data: InsertWalkthroughTemplateRoom): Promise<WalkthroughTemplateRoom> {
+    const [row] = await db.insert(walkthroughTemplateRooms).values(data).returning();
+    return row;
+  }
+
+  async updateWalkthroughTemplateRoom(id: string, data: Partial<InsertWalkthroughTemplateRoom>): Promise<WalkthroughTemplateRoom> {
+    const [row] = await db
+      .update(walkthroughTemplateRooms)
+      .set({ ...filterUndefined(data), updatedAt: new Date() })
+      .where(eq(walkthroughTemplateRooms.id, id))
+      .returning();
+    return row;
+  }
+
+  async deleteWalkthroughTemplateRoom(id: string): Promise<void> {
+    await db.delete(walkthroughTemplateRooms).where(eq(walkthroughTemplateRooms.id, id));
+  }
+
+  async getAllWalkthroughTemplateItems(): Promise<WalkthroughTemplateItem[]> {
+    return await db.select().from(walkthroughTemplateItems).orderBy(walkthroughTemplateItems.displayOrder);
+  }
+
+  async getWalkthroughTemplateItem(id: string): Promise<WalkthroughTemplateItem | undefined> {
+    const [row] = await db.select().from(walkthroughTemplateItems).where(eq(walkthroughTemplateItems.id, id));
+    return row;
+  }
+
+  async createWalkthroughTemplateItem(data: InsertWalkthroughTemplateItem): Promise<WalkthroughTemplateItem> {
+    const [row] = await db.insert(walkthroughTemplateItems).values(data).returning();
+    return row;
+  }
+
+  async updateWalkthroughTemplateItem(id: string, data: Partial<InsertWalkthroughTemplateItem>): Promise<WalkthroughTemplateItem> {
+    const [row] = await db
+      .update(walkthroughTemplateItems)
+      .set({ ...filterUndefined(data), updatedAt: new Date() })
+      .where(eq(walkthroughTemplateItems.id, id))
+      .returning();
+    return row;
+  }
+
+  async deleteWalkthroughTemplateItem(id: string): Promise<void> {
+    await db.delete(walkthroughTemplateItems).where(eq(walkthroughTemplateItems.id, id));
   }
 
   // Walkthroughs Implementation

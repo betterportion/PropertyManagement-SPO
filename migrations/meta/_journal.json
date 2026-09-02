@@ -127,6 +127,13 @@
       "when": 1788298881059,
       "tag": "0017_walkthrough_events_and_items",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1788316451047,
+      "tag": "0018_walkthrough_template",
+      "breakpoints": true
     }
   ]
 }

@@ -206,6 +206,57 @@ export type WalkthroughCondition = (typeof WALKTHROUGH_CONDITIONS)[number];
 /** The conditions the flagged-items view treats as needing attention. */
 export const WALKTHROUGH_FLAGGED_CONDITIONS = ["poor", "damaged"] as const;
 
+// Walkthrough template
+//
+// One national template: the standard rooms, and the standard items in each.
+// It does two jobs, which is why it is one table pair rather than two:
+//
+//   1. The rooms marked includeByDefault are copied to a property on its FIRST
+//      walkthrough, so an RA starts from a filled-in checklist rather than a
+//      blank page.
+//   2. Every room is a known room TYPE. Adding a bathroom to a walkthrough
+//      later copies that room's standard items -- sink, toilet, tub, shower --
+//      so the RA deletes what is not there instead of typing what is.
+//
+// A property's walkthrough owns COPIES of these rows, never references to
+// them. That is what makes "editing the global template never retroactively
+// changes a property's copy" true by construction rather than by care.
+export const walkthroughTemplateRooms = pgTable("walkthrough_template_rooms", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: varchar("name").notNull(),
+  // Whether a property's first walkthrough starts with this room. A garage is
+  // a known room type but not every house has one.
+  includeByDefault: boolean("include_by_default").notNull().default(true),
+  displayOrder: integer("display_order").notNull().default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertWalkthroughTemplateRoomSchema = createInsertSchema(walkthroughTemplateRooms)
+  .omit({ id: true, createdAt: true, updatedAt: true })
+  .extend({ displayOrder: nonNegativeInt });
+
+export type WalkthroughTemplateRoom = typeof walkthroughTemplateRooms.$inferSelect;
+export type InsertWalkthroughTemplateRoom = z.infer<typeof insertWalkthroughTemplateRoomSchema>;
+
+export const walkthroughTemplateItems = pgTable("walkthrough_template_items", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  templateRoomId: varchar("template_room_id")
+    .notNull()
+    .references(() => walkthroughTemplateRooms.id, { onDelete: "cascade" }),
+  label: varchar("label").notNull(),
+  displayOrder: integer("display_order").notNull().default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertWalkthroughTemplateItemSchema = createInsertSchema(walkthroughTemplateItems)
+  .omit({ id: true, createdAt: true, updatedAt: true })
+  .extend({ displayOrder: nonNegativeInt });
+
+export type WalkthroughTemplateItem = typeof walkthroughTemplateItems.$inferSelect;
+export type InsertWalkthroughTemplateItem = z.infer<typeof insertWalkthroughTemplateItemSchema>;
+
 // Walkthroughs
 //
 // A dated inspection event for one house. This is the record that did not
