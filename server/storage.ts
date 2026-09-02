@@ -15,6 +15,7 @@ import {
   invoices,
   billingRecords,
   properties,
+  propertySetupItems,
   residents,
   rentPayments,
   securityDeposits,
@@ -55,6 +56,8 @@ import {
   type InsertBillingRecord,
   type Property,
   type InsertPropertyWithAddress,
+  type PropertySetupItem,
+  type InsertPropertySetupItem,
   type MaintenanceSchedule,
   type InsertMaintenanceSchedule,
   type Resident,
@@ -293,6 +296,18 @@ export interface IStorage {
   getProperty(id: string): Promise<Property | undefined>;
   getAllProperties(): Promise<Property[]>;
 
+  // Property setup checklist
+  getPropertySetupItems(propertyId: string): Promise<PropertySetupItem[]>;
+  getAllPropertySetupItems(): Promise<PropertySetupItem[]>;
+  /** Seeds a new house's checklist. Ignores rows that already exist. */
+  createPropertySetupItems(rows: InsertPropertySetupItem[]): Promise<PropertySetupItem[]>;
+  /** Sets one item's state, creating the row if the house predates it. */
+  setPropertySetupItem(
+    propertyId: string,
+    itemKey: string,
+    patch: { status: PropertySetupItem["status"]; note?: string | null; region: string; setByUserId: string | null; setAt: Date },
+  ): Promise<PropertySetupItem>;
+
   // Request Contacts (linking)
   getRequestContacts(requestId: string): Promise<MaintenanceContact[]>;
   linkContactToRequest(requestId: string, contactId: string): Promise<void>;
@@ -357,7 +372,8 @@ export type UploadReference =
   | { kind: "maintenanceRequestPhoto"; record: MaintenanceRequestPhoto }
   | { kind: "walkthroughPhoto"; record: WalkthroughPhoto }
   | { kind: "assetPhoto"; record: AssetPhoto }
-  | { kind: "billingRecord"; record: BillingRecord };
+  | { kind: "billingRecord"; record: BillingRecord }
+  | { kind: "property"; record: Property };
 
 export class DatabaseStorage implements IStorage {
   async getUser(id: string): Promise<User | undefined> {
@@ -1344,11 +1360,78 @@ export class DatabaseStorage implements IStorage {
     return found;
   }
 
+  // Property setup checklist Implementation
+  async getPropertySetupItems(propertyId: string): Promise<PropertySetupItem[]> {
+    return await db
+      .select()
+      .from(propertySetupItems)
+      .where(eq(propertySetupItems.propertyId, propertyId));
+  }
+
+  async getAllPropertySetupItems(): Promise<PropertySetupItem[]> {
+    return await db.select().from(propertySetupItems);
+  }
+
+  /**
+   * Seeds a new house's checklist.
+   *
+   * `onConflictDoNothing` rather than an upsert: seeding runs once at property
+   * creation, and a second run must never reset an item somebody has already
+   * marked done.
+   */
+  async createPropertySetupItems(rows: InsertPropertySetupItem[]): Promise<PropertySetupItem[]> {
+    if (rows.length === 0) return [];
+    return await db
+      .insert(propertySetupItems)
+      .values(rows)
+      .onConflictDoNothing({ target: [propertySetupItems.propertyId, propertySetupItems.itemKey] })
+      .returning();
+  }
+
+  /**
+   * Sets one item's state.
+   *
+   * An upsert rather than an update, because a house created before the
+   * checklist existed has no rows at all -- an RA who starts filling one in is
+   * creating it, and refusing them would make the feature unreachable for
+   * every existing house.
+   */
+  async setPropertySetupItem(
+    propertyId: string,
+    itemKey: string,
+    patch: { status: PropertySetupItem["status"]; note?: string | null; region: string; setByUserId: string | null; setAt: Date },
+  ): Promise<PropertySetupItem> {
+    const [row] = await db
+      .insert(propertySetupItems)
+      .values({
+        propertyId,
+        itemKey,
+        status: patch.status,
+        note: patch.note ?? null,
+        region: patch.region,
+        setByUserId: patch.setByUserId,
+        setAt: patch.setAt,
+      })
+      .onConflictDoUpdate({
+        target: [propertySetupItems.propertyId, propertySetupItems.itemKey],
+        set: {
+          status: patch.status,
+          note: patch.note ?? null,
+          region: patch.region,
+          setByUserId: patch.setByUserId,
+          setAt: patch.setAt,
+          updatedAt: new Date(),
+        },
+      })
+      .returning();
+    return row;
+  }
+
   async findUploadReferences(url: string): Promise<UploadReference[]> {
     // Each of these is the full set of columns in which the application stores
     // an uploaded file's URL. A new column holding one has to be added here, or
     // downloads of those files will be refused to everyone but the uploader.
-    const [requests, requestPhotos, walkthrough, asset, billing] = await Promise.all([
+    const [requests, requestPhotos, walkthrough, asset, billing, property] = await Promise.all([
       db.select().from(maintenanceRequests).where(eq(maintenanceRequests.photoUrl, url)),
       db.select().from(maintenanceRequestPhotos).where(eq(maintenanceRequestPhotos.imageUrl, url)),
       db.select().from(walkthroughPhotos).where(eq(walkthroughPhotos.imageUrl, url)),
@@ -1363,6 +1446,7 @@ export class DatabaseStorage implements IStorage {
             eq(billingRecords.w9Url, url),
           ),
         ),
+      db.select().from(properties).where(eq(properties.photoUrl, url)),
     ]);
 
     return [
@@ -1371,6 +1455,7 @@ export class DatabaseStorage implements IStorage {
       ...walkthrough.map((record) => ({ kind: "walkthroughPhoto" as const, record })),
       ...asset.map((record) => ({ kind: "assetPhoto" as const, record })),
       ...billing.map((record) => ({ kind: "billingRecord" as const, record })),
+      ...property.map((record) => ({ kind: "property" as const, record })),
     ];
   }
 }

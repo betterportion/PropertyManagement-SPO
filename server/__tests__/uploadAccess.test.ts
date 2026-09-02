@@ -340,6 +340,73 @@ describe("canReadUpload, through an asset photo", () => {
   });
 });
 
+describe("canReadUpload, through a property's front-of-house photo", () => {
+  const propertyReference: UploadReference = {
+    kind: "property",
+    record: { id: "prop-1", region: "Twin Cities", address: "1 Main St" } as never,
+  };
+
+  beforeEach(() => {
+    findUploadReferences.mockResolvedValue([propertyReference]);
+  });
+
+  it("lets staff in their region see the house they cover", async () => {
+    const ctx = context({
+      permissions: permissions({ canViewProperties: true }),
+      allowedRegions: ["Twin Cities"],
+    });
+    expect(await canReadUpload(ctx, KEY, undefined)).toBe(true);
+  });
+
+  it("refuses staff covering another region", async () => {
+    const ctx = context({
+      permissions: permissions({ canViewProperties: true }),
+      allowedRegions: ["Chicago"],
+    });
+    expect(await canReadUpload(ctx, KEY, undefined)).toBe(false);
+  });
+
+  it("refuses staff holding no property permission, even in the right region", async () => {
+    const ctx = context({
+      permissions: permissions({ canViewMaintenance: true }),
+      allowedRegions: ["Twin Cities"],
+    });
+    expect(await canReadUpload(ctx, KEY, undefined)).toBe(false);
+  });
+
+  it("lets a resident see the photo of the house their account is linked to", async () => {
+    // A photo of their own front door is not a disclosure, and the resource
+    // hub shows it. The house match is the same one the maintenance rule uses.
+    getProperty.mockResolvedValue({ id: "prop-1", address: "1 Main St", region: "Twin Cities" });
+    const ctx = context({
+      role: "resident",
+      userId: "res-1",
+      allowedRegions: ["Twin Cities"],
+    });
+    (ctx.user as { propertyId?: string }).propertyId = "prop-1";
+    expect(await canReadUpload(ctx, KEY, undefined)).toBe(true);
+  });
+
+  it("refuses a resident the photo of somebody else's house", async () => {
+    // Their permissions row names the property's region deliberately: a
+    // resident must not pick up a region path here either.
+    getProperty.mockResolvedValue({ id: "prop-2", address: "2 River Rd", region: "Twin Cities" });
+    const ctx = context({
+      role: "resident",
+      userId: "res-2",
+      allowedRegions: ["Twin Cities"],
+    });
+    (ctx.user as { propertyId?: string }).propertyId = "prop-2";
+    expect(await canReadUpload(ctx, KEY, undefined)).toBe(false);
+  });
+
+  it("refuses a resident whose account is linked to no house", async () => {
+    getProperty.mockResolvedValue(undefined);
+    const ctx = context({ role: "resident", userId: "res-3", allowedRegions: ["Twin Cities"] });
+    expect(await canReadUpload(ctx, KEY, undefined)).toBe(false);
+  });
+});
+
 describe("canReadUpload, when several records share a file", () => {
   it("allows access as soon as one of them is readable", async () => {
     findUploadReferences.mockResolvedValue([

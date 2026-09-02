@@ -115,7 +115,8 @@ Defined in `shared/schema.ts` using Drizzle, with Zod insert schemas generated b
 | `maintenance_contacts` | Vendors | Referenced by invoices and request links |
 | `invoices` | Invoice records with amount, status, due/paid dates | `contactId` and `maintenanceRequestId`, both set-null on delete |
 | `billing_records` | Vendor billing with three document URLs (contract/invoice, COI, W-9) | `contactId` is a plain column, **not** a foreign key |
-| `properties` | Property records. `address` is computed from the four address parts and is unique; `chapter` (free text) records which SPO chapter uses the property; `ownership` (`owned`/`rented`) carries the three lease dates and a `renewalDecision` | Referenced loosely by rooms and assets; referenced with a real FK by residents and schedules |
+| `properties` | Property records. `address` is computed from the four address parts and is unique; `chapter` (free text) records which SPO chapter uses the property; `ownership` (`owned`/`rented`) carries the three lease dates and a `renewalDecision`, plus `leaseDocumentUrl` and `maintenancePortalUrl` (links, never documents or logins) and one of two contact links. `photoUrl` is the front-of-house photo and `notes` is free text | Referenced loosely by rooms and assets; referenced with a real FK by residents and schedules |
+| `property_setup_items` | One row per checklist item per house: three states (open/done/not applicable), who set it, when, and an optional note. The item list itself is fixed in code (`shared/propertySetup.ts`), so the row stores an `itemKey` rather than a label | `propertyId` → `properties` cascades; `setByUserId` → `users` set-null; unique on (property, item) |
 | `residents` | People living in a house: name, email, optional phone and notes, move-in/move-out dates, `isActive`. Deliberately **not** `users` — a resident on the roster need not have a login | `propertyId` → `properties`, cascades; `region`/`buildingAddress` denormalised |
 | `rent_payments` | One row per resident per `YYYY-MM` period: amount, status (`unpaid`/`paid`/`waived`/`failed`), paid date, free-text `reference`. `failed` is a bounced payment and still counts as outstanding. The `reference` is a note like "check #1234" or a processor ID — **never** an account or card number | `residentId` → `residents` cascades; unique on (resident, period) |
 | `security_deposits` | One deposit per resident: amount held, status (`held`/`returned`/`partially_returned`/`withheld`), amount returned, and deductions as a note rather than an itemised ledger | `residentId` → `residents`, cascades, unique |
@@ -223,6 +224,21 @@ Non-admins only see records in their `allowedRegions`.
 
 Region names are compared in one canonical form, so a stored legacy `west-central` still matches `West Central`.
 
+### The property setup checklist
+
+What has to happen when SPO takes on a house. `shared/propertySetup.ts` owns the item list, the three states and `summarizeSetup`; `property_setup_items` holds the per-house state. Four things decided here, recorded so they are not relitigated:
+
+- **A dedicated table, not `tasks`.** `tasks` has no property link, so a house would live as an address inside a title string, and it has no not-applicable state, so insurance on a rented house would have to be marked done when it never happened. `tasks` is recurring calendar work with an owner and a due date; this is one-time per-property state.
+- **The four utilities are separate items.** One "utilities" checkbox hides which one is missing, and the missing one is exactly what gets forgotten.
+- **Three states, and the third is the point.** `not_applicable` lets an RA say an item does not apply without the record claiming work that never happened.
+- **A house with no rows is untracked, not incomplete.** Rows are generated on property creation and deliberately never backfilled. `summarizeSetup` reports zero rows as `tracked: false` **and zeroes the counts**, so a caller reading `open` without checking the flag still cannot put every pre-existing house on the dashboard.
+
+The module lives in `shared/` rather than `server/` because four surfaces read it — the property card, the badge on the property list row, the dashboard action item and the route that validates a write. A second copy on the client is how the screen and the server come to disagree about what a house is asked for.
+
+The dashboard raises **one aggregated item per house** ("Setup incomplete — 3 of 8 still to do"), never one per open check; that space belongs to maintenance triage. It carries no due date, because setting up a house has no deadline SPO has agreed and inventing one would put every new house at the top of the list.
+
+`PUT /api/properties/:propertyId/setup/:itemKey` takes the status and note from the body and **the actor, the timestamp and the region from the server** — "who said the gas was on" is worth nothing if the client is the one saying. An unknown item key, or one belonging to the other kind of house, is a 400 rather than a new row.
+
 ### Resident access to walkthroughs
 
 Walkthroughs are the one part of the portal two tiers reach through the same routes by two different rules. A household leader or steward — a `resident` account holding `canCompleteWalkthroughs` — fills in and reads **their own house's** walkthroughs. Staff are scoped by region as everywhere else.
@@ -293,6 +309,8 @@ Any new upload route should go through `guardedUpload()` too, and its permission
 - **The property is in the URL, not a form field**, so the multipart request still carries one part and no text fields — the property the other upload routes rely on to bound what a request can cost.
 - **The CSV is never stored.** It is decoded, parsed and dropped. That is also why there is no magic-byte check here: a CSV has no signature, and nothing reaches a bucket for a disguised file to sit in.
 - **The confirm step re-derives everything** — it re-reads the roster, re-runs the duplicate check, and takes `propertyId`, `region` and `buildingAddress` from the property rather than from the body. The rows arrive from a client that could have edited them, and the roster can have moved on between the two calls.
+
+A property's front-of-house photo is authorized through `findUploadReferences` like every other file, with the same two-tier rule walkthroughs use: staff by region and the property permission, a resident by an exact match against the house their login is linked to. **There is no region path for a resident here either.**
 
 ### Reading files back
 

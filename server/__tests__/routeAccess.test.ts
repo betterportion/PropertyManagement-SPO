@@ -2466,6 +2466,225 @@ describe("adding a room to a walkthrough", () => {
   });
 });
 
+describe("the per-property setup checklist", () => {
+  const WEST = { id: "prop-west", name: "Cleveland House", region: "West Central", address: "1 Main St", ownership: "owned" };
+  const EAST = { id: "prop-east", name: "Como House", region: "East Central", address: "2 River Rd", ownership: "rented" };
+
+  const SETUP = { canManagePropertySetup: true, canViewProperties: true };
+
+  const westLead = (permissions: Record<string, unknown> = SETUP) =>
+    actAs(STAFF, { ...permissions, allowedRegions: ["West Central"] });
+
+  beforeEach(() => {
+    storageMock.getProperty.mockImplementation(async (id: string) =>
+      id === "prop-west" ? WEST : id === "prop-east" ? EAST : undefined,
+    );
+    storageMock.getPropertySetupItems.mockResolvedValue([]);
+    storageMock.setPropertySetupItem.mockImplementation(async (propertyId, itemKey, patch) => ({
+      id: "setup-1",
+      propertyId,
+      itemKey,
+      ...patch,
+    }));
+  });
+
+  const setItem = (propertyId: string, itemKey: string, body: unknown) =>
+    request("PUT", `/api/properties/${propertyId}/setup/${itemKey}`, { body });
+
+  // ── The three layers ─────────────────────────────────────────────────────
+
+  it("refuses an anonymous caller on both the read and the write", async () => {
+    expect((await get("/api/properties/prop-west/setup")).status).toBe(401);
+    expect((await setItem("prop-west", "electric", { status: "done" })).status).toBe(401);
+  });
+
+  it("refuses a resident, without reading the checklist", async () => {
+    actAs(ALICE, ALL_MAINTENANCE);
+    expect((await get("/api/properties/prop-west/setup")).status).toBe(403);
+    expect(storageMock.getPropertySetupItems).not.toHaveBeenCalled();
+  });
+
+  it("refuses staff holding no property-setup permission, without writing", async () => {
+    westLead({ canViewProperties: true });
+    const { status } = await setItem("prop-west", "electric", { status: "done" });
+    expect(status).toBe(403);
+    expect(storageMock.setPropertySetupItem).not.toHaveBeenCalled();
+  });
+
+  it("refuses a house in another region, without writing", async () => {
+    westLead();
+    const { status } = await setItem("prop-east", "electric", { status: "done" });
+    expect(status).toBe(403);
+    expect(storageMock.setPropertySetupItem).not.toHaveBeenCalled();
+  });
+
+  // The positive control: without it every "not called" above could pass on a
+  // typo in the storage method name.
+  it("lets a regional lead set an item on a house they cover", async () => {
+    westLead();
+    const { status } = await setItem("prop-west", "electric", { status: "done", note: "Xcel, in SPO's name" });
+    expect(status).toBe(200);
+    expect(storageMock.setPropertySetupItem).toHaveBeenCalled();
+  });
+
+  // ── Server-owned attribution ─────────────────────────────────────────────
+
+  it("takes who set it and when from the session, never from the body", async () => {
+    // "Who said the gas was on" is worthless if the client is the one saying.
+    westLead();
+    await setItem("prop-west", "gas", {
+      status: "done",
+      setByUserId: "u-somebody-else",
+      setAt: "1999-01-01T00:00:00.000Z",
+    });
+    const [, , patch] = storageMock.setPropertySetupItem.mock.calls[0];
+    expect(patch.setByUserId).toBe(STAFF.id);
+    expect(patch.setAt.getTime()).toBeGreaterThan(new Date("2020-01-01").getTime());
+  });
+
+  it("takes the region from the property, never from the body", async () => {
+    westLead();
+    await setItem("prop-west", "water", { status: "done", region: "East Central" });
+    const [, , patch] = storageMock.setPropertySetupItem.mock.calls[0];
+    expect(patch.region).toBe("West Central");
+  });
+
+  // ── Input validation ─────────────────────────────────────────────────────
+
+  it("refuses a status outside the three the checklist has", async () => {
+    westLead();
+    const { status } = await setItem("prop-west", "electric", { status: "probably" });
+    expect(status).toBe(400);
+    expect(storageMock.setPropertySetupItem).not.toHaveBeenCalled();
+  });
+
+  it("refuses an item key that is not in the checklist", async () => {
+    // The list is fixed in code. Accepting an arbitrary key would let a caller
+    // write rows nothing ever reads, and the summary would silently ignore them.
+    westLead();
+    const { status } = await setItem("prop-west", "buy_a_yacht", { status: "done" });
+    expect(status).toBe(400);
+    expect(storageMock.setPropertySetupItem).not.toHaveBeenCalled();
+  });
+
+  it("refuses an item belonging to the other kind of house", async () => {
+    // prop-west is owned, so it is never asked for a lease.
+    westLead();
+    const { status } = await setItem("prop-west", "lease_on_file", { status: "done" });
+    expect(status).toBe(400);
+    expect(storageMock.setPropertySetupItem).not.toHaveBeenCalled();
+  });
+
+  it("answers 404 for a house that does not exist, without writing", async () => {
+    westLead();
+    const { status } = await setItem("prop-nowhere", "electric", { status: "done" });
+    expect(status).toBe(404);
+    expect(storageMock.setPropertySetupItem).not.toHaveBeenCalled();
+  });
+
+  // ── The list behind the badge on the property row ────────────────────────
+
+  it("refuses an anonymous caller on the list", async () => {
+    expect((await get("/api/property-setup-items")).status).toBe(401);
+  });
+
+  it("refuses a resident the list, without reading it", async () => {
+    actAs(ALICE, ALL_MAINTENANCE);
+    expect((await get("/api/property-setup-items")).status).toBe(403);
+    expect(storageMock.getAllPropertySetupItems).not.toHaveBeenCalled();
+  });
+
+  it("gives a regional lead only their own regions' rows", async () => {
+    westLead();
+    storageMock.getAllPropertySetupItems.mockResolvedValue([
+      { id: "si-w", propertyId: "prop-west", itemKey: "electric", status: "open", region: "West Central" },
+      { id: "si-e", propertyId: "prop-east", itemKey: "electric", status: "open", region: "East Central" },
+    ]);
+    const { status, body } = await get("/api/property-setup-items");
+    expect(status).toBe(200);
+    expect(body.map((r: { id: string }) => r.id)).toEqual(["si-w"]);
+  });
+
+  it("gives a staff account with no regions an empty list, never everything", async () => {
+    actAs(STAFF, { ...SETUP, allowedRegions: [] });
+    storageMock.getAllPropertySetupItems.mockResolvedValue([
+      { id: "si-w", propertyId: "prop-west", itemKey: "electric", status: "open", region: "West Central" },
+    ]);
+    expect((await get("/api/property-setup-items")).body).toEqual([]);
+  });
+
+  // ── Seeding on creation ──────────────────────────────────────────────────
+
+  it("seeds the checklist when a house is created", async () => {
+    actAs(ADMIN);
+    storageMock.createProperty.mockResolvedValue({ ...WEST, id: "prop-new" });
+    storageMock.createPropertySetupItems.mockResolvedValue([]);
+
+    const { status } = await request("POST", "/api/properties", {
+      body: {
+        name: "New House",
+        streetAddress: "9 Oak Ave",
+        city: "St Paul",
+        state: "MN",
+        zipCode: "55104",
+        region: "West Central",
+        chapter: "St Paul",
+        ownership: "owned",
+      },
+    });
+
+    expect(status).toBe(200);
+    const [rows] = storageMock.createPropertySetupItems.mock.calls[0];
+    const keys = rows.map((r: { itemKey: string }) => r.itemKey);
+    // The four utilities are separate entries; one combined checkbox hides
+    // which one is missing.
+    expect(keys).toEqual(expect.arrayContaining(["electric", "gas", "water", "internet"]));
+    // An owned house is never asked for a lease.
+    expect(keys).not.toContain("lease_on_file");
+    expect(rows.every((r: { status: string }) => r.status === "open")).toBe(true);
+  });
+
+  it("refuses to create a house with no chapter", async () => {
+    // Required to save, alongside the address parts, region and ownership.
+    actAs(ADMIN);
+    const { status } = await request("POST", "/api/properties", {
+      body: {
+        name: "New House",
+        streetAddress: "9 Oak Ave",
+        city: "St Paul",
+        state: "MN",
+        zipCode: "55104",
+        region: "West Central",
+        ownership: "owned",
+      },
+    });
+    expect(status).toBe(400);
+    expect(storageMock.createProperty).not.toHaveBeenCalled();
+  });
+
+  it("still creates the house when seeding the checklist fails", async () => {
+    // The checklist is a convenience. A house that exists without one is
+    // recoverable; a create that half-succeeded and reported failure is not.
+    actAs(ADMIN);
+    storageMock.createProperty.mockResolvedValue({ ...WEST, id: "prop-new" });
+    storageMock.createPropertySetupItems.mockRejectedValue(new Error("nope"));
+
+    const { status } = await request("POST", "/api/properties", {
+      body: {
+        name: "New House",
+        streetAddress: "9 Oak Ave",
+        city: "St Paul",
+        state: "MN",
+        zipCode: "55104",
+        region: "West Central",
+        chapter: "St Paul",
+        ownership: "owned",
+      },
+    });
+    expect(status).toBe(200);
+  });
+});
+
 describe("who may read the activity log", () => {
   const EVENT = {
     id: "evt-1",
@@ -3429,6 +3648,7 @@ describe("tasks & action items (regional leads only)", () => {
     storageMock.getAllResidents.mockResolvedValue([]);
     storageMock.getAllTasks.mockResolvedValue([]);
     storageMock.getAllProperties.mockResolvedValue([]);
+    storageMock.getAllPropertySetupItems.mockResolvedValue([]);
     const { status, body } = await get("/api/action-items");
     expect(status).toBe(200);
     // The East-Central rent is filtered out by region.
@@ -3445,6 +3665,7 @@ describe("tasks & action items (regional leads only)", () => {
     storageMock.getAllResidents.mockResolvedValue([]);
     storageMock.getAllTasks.mockResolvedValue([]);
     storageMock.getAllProperties.mockResolvedValue([]);
+    storageMock.getAllPropertySetupItems.mockResolvedValue([]);
     const { status, body } = await get("/api/action-items");
     expect(status).toBe(200);
     expect(body).toEqual([]);
@@ -3462,6 +3683,7 @@ describe("tasks & action items (regional leads only)", () => {
       { id: "prop-w", name: "Cleveland House", address: "1 Main St", region: "West Central", ownership: "rented", leaseRenewalDate: soon, renewalDecision: "undecided" },
       { id: "prop-e", name: "Buckeye House", address: "9 Elm", region: "East Central", ownership: "rented", leaseRenewalDate: soon, renewalDecision: "undecided" },
     ]);
+    storageMock.getAllPropertySetupItems.mockResolvedValue([]);
     const { status, body } = await get("/api/action-items");
     expect(status).toBe(200);
     expect(body.map((i: { id: string; source: string }) => i.id)).toEqual(["prop-w"]);

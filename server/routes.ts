@@ -76,6 +76,7 @@ import { buildActionItems } from "./actionItems";
 import { closedDateChange } from "./maintenanceStatus";
 import { planFromTemplate, planFromPreviousWalkthrough, templateRoomItems } from "./walkthroughTemplate";
 import { parseResidentCsv, buildImportPreview } from "./residentImport";
+import { SETUP_ITEMS, SETUP_ITEM_STATUSES, setupItemsFor } from "@shared/propertySetup";
 import { buildRegionSummaries, type RegionStaff } from "./regionSummary";
 import { normalizeRegions } from "./migrateRegions";
 import { REGIONS } from "@shared/regions";
@@ -2775,13 +2776,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!requireStaff(res, ctx)) return;
       const seesFinance = hasPermission(ctx, "canViewFinancials", "canManageFinancials");
 
-      const [schedules, rentPayments, deposits, residents, allTasks, properties] = await Promise.all([
+      const [schedules, rentPayments, deposits, residents, allTasks, properties, setupItems] = await Promise.all([
         storage.getAllMaintenanceSchedules(),
         seesFinance ? storage.getAllRentPayments() : [],
         seesFinance ? storage.getAllSecurityDeposits() : [],
         storage.getAllResidents(),
         storage.getAllTasks(),
         storage.getAllProperties(),
+        storage.getAllPropertySetupItems(),
       ]);
 
       const items = buildActionItems({
@@ -2794,6 +2796,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         residents,
         tasks: allTasks.filter((t) => canSeeTask(ctx, t)),
         properties: filterByRegion(ctx, properties),
+        // Not filtered: the checklist rows are only ever read against the
+        // already-filtered property list above, so a row whose house is out of
+        // region has nothing to attach to.
+        setupItems,
       });
       res.json(items);
     } catch (error) {
@@ -3293,6 +3299,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Compute full address from components
       const address = `${validatedData.streetAddress}, ${validatedData.city}, ${validatedData.state} ${validatedData.zipCode}`;
       const property = await storage.createProperty({ ...validatedData, address });
+
+      // Seed the setup checklist for the new house. Deliberately best-effort:
+      // a house that exists without a checklist is recoverable (the PUT below
+      // upserts), whereas a create that half-succeeded and then reported
+      // failure would leave the RA re-entering an address that now conflicts.
+      // Existing houses are never backfilled -- see summarizeSetup.
+      try {
+        await storage.createPropertySetupItems(
+          setupItemsFor(property.ownership).map((item) => ({
+            propertyId: property.id,
+            itemKey: item.key,
+            status: "open" as const,
+            region: property.region,
+          })),
+        );
+      } catch (error) {
+        logError("Failed to seed the property setup checklist", error);
+      }
+
       res.json(property);
     } catch (error) {
       // Validation failures are turned into a 400 by sendError. The raw error
@@ -3353,6 +3378,121 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ success: true });
     } catch (error) {
       sendError(res, error, "Failed to delete property");
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // Per-property setup checklist
+  //
+  // What has to happen when SPO takes on a house, and where each of those
+  // things stands. A dedicated table rather than a `tasks` row -- the reasoning
+  // is in server/propertySetup.ts, which also owns the item list and the
+  // counts, so a screen never computes its own.
+  //
+  // Staff only. A household leader is told what is set up by their RA, not by
+  // a screen that would also let them change it.
+  // ---------------------------------------------------------------------------
+
+  /** The property, once, with the checks a setup route always makes. */
+  async function propertyForSetup(req: any, res: any, ctx: AuthContext) {
+    const property = await storage.getProperty(req.params.propertyId);
+    if (!property) {
+      res.status(404).json({ message: "Property not found" });
+      return undefined;
+    }
+    if (!requireRegion(res, ctx, property.region)) return undefined;
+    return property;
+  }
+
+  /**
+   * Every checklist row the caller can see, in one request.
+   *
+   * The badge on each property list row needs a house's counts before anybody
+   * opens it, and one request per row would be a query per house on a page
+   * that already lists them all.
+   */
+  app.get('/api/property-setup-items', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canViewProperties", "canManageProperties", "canManagePropertySetup")) return;
+
+      res.json(filterByRegion(ctx, await storage.getAllPropertySetupItems()));
+    } catch (error) {
+      sendError(res, error, "Failed to fetch the setup checklists");
+    }
+  });
+
+  app.get('/api/properties/:propertyId/setup', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canViewProperties", "canManageProperties", "canManagePropertySetup")) return;
+
+      const property = await propertyForSetup(req, res, ctx);
+      if (!property) return;
+
+      res.json(await storage.getPropertySetupItems(property.id));
+    } catch (error) {
+      sendError(res, error, "Failed to fetch the setup checklist");
+    }
+  });
+
+  /**
+   * Sets one checklist item.
+   *
+   * A PUT on (property, item) rather than a POST of a row: the pair is unique
+   * and the request is idempotent, and the storage method upserts so a house
+   * created before the checklist existed can still be filled in.
+   *
+   * Three things come from the server and never from the body -- who set it,
+   * when, and the region -- because "who said the gas was on" is exactly the
+   * question this record exists to answer, and an answer the client supplied
+   * would be worth nothing.
+   */
+  app.put('/api/properties/:propertyId/setup/:itemKey', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManagePropertySetup", "canManageProperties")) return;
+
+      const property = await propertyForSetup(req, res, ctx);
+      if (!property) return;
+
+      // The item list is fixed in code, so an unknown key is a client error
+      // rather than a new row: accepting it would write something no summary
+      // ever reads. An item belonging to the other kind of house is refused
+      // for the same reason.
+      const allowed = setupItemsFor(property.ownership);
+      if (!allowed.some((item) => item.key === req.params.itemKey)) {
+        return res.status(400).json({
+          message: SETUP_ITEMS.some((item) => item.key === req.params.itemKey)
+            ? "That item does not apply to this kind of property"
+            : "Unknown checklist item",
+        });
+      }
+
+      const body = z
+        .object({
+          status: z.enum(SETUP_ITEM_STATUSES),
+          note: z.string().trim().max(500, "Keep the note under 500 characters").nullish(),
+        })
+        .parse(req.body);
+
+      const item = await storage.setPropertySetupItem(property.id, req.params.itemKey, {
+        status: body.status,
+        note: body.note ?? null,
+        region: property.region,
+        setByUserId: ctx.userId,
+        setAt: new Date(),
+      });
+
+      res.json(item);
+    } catch (error) {
+      sendError(res, error, "Failed to update the setup checklist");
     }
   });
 

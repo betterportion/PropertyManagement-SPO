@@ -22,7 +22,9 @@ import type {
   Resident,
   Task,
   Property,
+  PropertySetupItem,
 } from "@shared/schema";
+import { summarizeSetup } from "@shared/propertySetup";
 
 /** How far ahead a recurring schedule becomes an action item. */
 export const SCHEDULE_LOOKAHEAD_DAYS = 30;
@@ -32,7 +34,7 @@ export const LEASE_LOOKAHEAD_DAYS = 60;
 
 const DAY_MS = 24 * 60 * 60 * 1_000;
 
-export type ActionItemSource = "schedule" | "rent" | "deposit" | "task" | "lease";
+export type ActionItemSource = "schedule" | "rent" | "deposit" | "task" | "lease" | "setup";
 export type ActionItemCategory = "property" | "safety" | "finance" | "general";
 
 export interface ActionItem {
@@ -57,6 +59,7 @@ export interface ActionItemInputs {
   residents: Resident[];
   tasks: Task[];
   properties: Property[];
+  setupItems: PropertySetupItem[];
 }
 
 /** The last calendar day of a "YYYY-MM" period, as a UTC-midnight date. */
@@ -122,6 +125,39 @@ export function buildActionItems(inputs: ActionItemInputs, now: Date = new Date(
       subtitle: p.address,
       dueDate: iso(due),
       overdue: due < now,
+      region: p.region,
+    });
+  }
+
+  // Property — one aggregated item per house whose setup is unfinished.
+  //
+  // One entry, never one per open check: seven rows for a single house would
+  // bury the maintenance triage this space actually belongs to. It clears the
+  // moment the last item resolves.
+  //
+  // A house with no checklist rows says nothing at all. The checklist is
+  // generated on property creation and deliberately not backfilled, so every
+  // house SPO already has would otherwise light up on the day this ships --
+  // summarizeSetup reports those as untracked rather than as everything open.
+  const setupByProperty = new Map<string, PropertySetupItem[]>();
+  for (const row of inputs.setupItems) {
+    const existing = setupByProperty.get(row.propertyId);
+    if (existing) existing.push(row);
+    else setupByProperty.set(row.propertyId, [row]);
+  }
+  for (const p of inputs.properties) {
+    const summary = summarizeSetup(setupByProperty.get(p.id) ?? [], p.ownership);
+    if (!summary.tracked || summary.complete) continue;
+    items.push({
+      id: p.id,
+      source: "setup",
+      category: "property",
+      title: `Setup incomplete — ${p.name}`,
+      subtitle: `${summary.open} of ${summary.total} still to do · ${p.address}`,
+      // No deadline: setting up a house has no date SPO has agreed, and
+      // inventing one would put every new house at the top of the list.
+      dueDate: null,
+      overdue: false,
       region: p.region,
     });
   }

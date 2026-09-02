@@ -1,6 +1,7 @@
+import { useQuery } from "@tanstack/react-query";
 import { type UseFormReturn } from "react-hook-form";
 import { z } from "zod";
-import { insertPropertySchema } from "@shared/schema";
+import { insertPropertySchema, type MaintenanceContact } from "@shared/schema";
 import { FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -15,16 +16,73 @@ export const propertyFormSchema = insertPropertySchema.extend({
   leaseStartDate: z.string().optional(),
   leaseEndDate: z.string().optional(),
   leaseRenewalDate: z.string().optional(),
+  // Links, not documents. Settled with SPO: no lease is uploaded into the
+  // portal, and a rented house's maintenance portal is reached by URL with a
+  // contact beside it -- never a stored login.
+  leaseDocumentUrl: z.string().trim().url("Paste the full link, starting with https://").or(z.literal("")).nullish(),
+  maintenancePortalUrl: z.string().trim().url("Paste the full link, starting with https://").or(z.literal("")).nullish(),
 });
 export type PropertyForm = z.infer<typeof propertyFormSchema>;
 
+/** The "nobody" option. A Select cannot carry an empty string as a value. */
+const NO_CONTACT = "__none__";
+
 /**
- * Ownership + lease fields shared by the add and edit property dialogs. The
- * lease dates and renewal decision only show once a property is marked rented —
- * SPO owns some houses and rents others, and only rented ones have a lease.
+ * Ownership, lease and who-to-call fields, shared by the add and edit property
+ * dialogs.
+ *
+ * The two branches ask for different things because they mean different things:
+ * a rented house has a rental company and a portal its repairs are filed in, an
+ * owned one has whoever SPO has made responsible. The recurring complaint was
+ * that rental company contact details are hard to find, which is what the
+ * linked contact solves — a real reference to a `maintenance_contacts` row, not
+ * a name retyped into a notes field.
  */
 export default function PropertyLeaseFields({ form }: { form: UseFormReturn<PropertyForm> }) {
   const isRented = form.watch("ownership") === "rented";
+
+  // Contacts are the vendor list the rest of the app already keeps. A staff
+  // account that cannot read them simply gets an empty picker rather than a
+  // broken form.
+  const { data: contacts = [] } = useQuery<MaintenanceContact[]>({
+    queryKey: ["/api/contacts"],
+  });
+
+  const contactField = (
+    name: "rentalCompanyContactId" | "responsibleContactId",
+    label: string,
+    hint: string,
+  ) => (
+    <FormField
+      control={form.control}
+      name={name}
+      render={({ field }) => (
+        <FormItem>
+          <FormLabel>{label}</FormLabel>
+          <Select
+            onValueChange={(value) => field.onChange(value === NO_CONTACT ? null : value)}
+            value={field.value ?? NO_CONTACT}
+          >
+            <FormControl>
+              <SelectTrigger data-testid={`select-property-${name}`}>
+                <SelectValue placeholder="Nobody chosen yet" />
+              </SelectTrigger>
+            </FormControl>
+            <SelectContent>
+              <SelectItem value={NO_CONTACT}>Nobody chosen yet</SelectItem>
+              {contacts.map((contact) => (
+                <SelectItem key={contact.id} value={contact.id}>
+                  {contact.company} — {contact.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">{hint}</p>
+          <FormMessage />
+        </FormItem>
+      )}
+    />
+  );
 
   return (
     <>
@@ -98,6 +156,58 @@ export default function PropertyLeaseFields({ form }: { form: UseFormReturn<Prop
 
           <FormField
             control={form.control}
+            name="leaseDocumentUrl"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Link to the lease on Drive</FormLabel>
+                <FormControl>
+                  <Input
+                    type="url"
+                    placeholder="https://drive.google.com/..."
+                    {...field}
+                    value={field.value ?? ""}
+                    data-testid="input-property-lease-document"
+                  />
+                </FormControl>
+                <p className="text-xs text-muted-foreground">
+                  The portal stores the link, never the document. Keep the lease on Drive.
+                </p>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+
+          <FormField
+            control={form.control}
+            name="maintenancePortalUrl"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Maintenance portal</FormLabel>
+                <FormControl>
+                  <Input
+                    type="url"
+                    placeholder="https://..."
+                    {...field}
+                    value={field.value ?? ""}
+                    data-testid="input-property-maintenance-portal"
+                  />
+                </FormControl>
+                <p className="text-xs text-muted-foreground">
+                  Where this house's repairs get filed. Never save a login here.
+                </p>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+
+          {contactField(
+            "rentalCompanyContactId",
+            "Rental company contact",
+            "Who to call about this house. Add them under Contacts first if they are not listed.",
+          )}
+
+          <FormField
+            control={form.control}
             name="renewalDecision"
             render={({ field }) => (
               <FormItem>
@@ -120,6 +230,13 @@ export default function PropertyLeaseFields({ form }: { form: UseFormReturn<Prop
           />
         </>
       )}
+
+      {!isRented &&
+        contactField(
+          "responsibleContactId",
+          "Responsible maintenance person",
+          "The contact SPO calls first for this house. Institutional memory that otherwise dies at handover.",
+        )}
     </>
   );
 }

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
-import { Building2, Wrench, DollarSign, CalendarClock, ShieldCheck, ArrowLeft } from "lucide-react";
+import { Building2, Wrench, DollarSign, CalendarClock, ShieldCheck, ArrowLeft, Plus } from "lucide-react";
 
 import { useAuth } from "@/hooks/useAuth";
 import MaintenanceRequestCard from "@/components/MaintenanceRequestCard";
@@ -80,6 +80,18 @@ export default function AdminDashboard() {
           <PageHeader
             title="Dashboard"
             description={isAdmin ? "How each region is doing across your properties." : "What needs your attention."}
+            actions={
+              // Taking on a house starts here. An RA should be able to get a
+              // property recorded in under two minutes and fill in the rest
+              // later, and hunting for the page first is part of what makes
+              // that not happen.
+              <Button variant="primary" asChild data-testid="button-add-property">
+                <Link href="/properties?add=1">
+                  <Plus className="h-4 w-4" />
+                  Add a property
+                </Link>
+              </Button>
+            }
           />
 
           <StatGrid>

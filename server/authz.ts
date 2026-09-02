@@ -385,6 +385,21 @@ export async function canReadUploadReference(
         hasPermission(ctx, "canViewBilling", "canManageBilling") &&
         canAccessRegion(ctx, reference.record.region)
       );
+
+    case "property": {
+      // A house's front-of-house photo. Two tiers again, and for the same
+      // reason as walkthroughs: a resident is bound to the one house their
+      // login is linked to and has no region path here, however their
+      // permissions row is set. A photo of their own front door is not a
+      // disclosure -- the resource hub shows it -- but somebody else's is.
+      if (ctx.isResident) {
+        return isOwnHouse(await residentHouseAddress(ctx), reference.record.address);
+      }
+      return (
+        hasPermission(ctx, "canViewProperties", "canManageProperties") &&
+        canAccessRegion(ctx, reference.record.region)
+      );
+    }
   }
 }
 

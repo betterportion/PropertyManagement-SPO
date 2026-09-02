@@ -134,6 +134,13 @@
       "when": 1788316451047,
       "tag": "0018_walkthrough_template",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1788392565046,
+      "tag": "0019_property_details_and_setup_checklist",
+      "breakpoints": true
     }
   ]
 }

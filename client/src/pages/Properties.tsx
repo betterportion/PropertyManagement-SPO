@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Link } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -10,11 +10,14 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { PhotoUpload } from "@/components/PhotoUpload";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Plus, Building2, MapPin, MoreVertical } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { type Property } from "@shared/schema";
+import { type Property, type PropertySetupItem } from "@shared/schema";
+import { summarizeSetup } from "@shared/propertySetup";
 import { REGIONS, chaptersForRegion, ALL_CHAPTERS } from "@shared/regions";
 import PropertyLeaseFields, { propertyFormSchema, type PropertyForm } from "@/components/PropertyLeaseFields";
 import { Section, Container, PageHeader, PageStack } from "@/components/layout/page";
@@ -29,7 +32,12 @@ import {
 
 
 export default function Properties() {
-  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+  // The dashboard links here with ?add=1 so "Add a property" opens the form
+  // rather than landing on a list the RA then has to scan for a button. Read
+  // once on mount: after that the dialog owns its own state.
+  const [isAddDialogOpen, setIsAddDialogOpen] = useState(
+    () => new URLSearchParams(window.location.search).get("add") === "1",
+  );
   const [editingProperty, setEditingProperty] = useState<Property | null>(null);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [deletingPropertyId, setDeletingPropertyId] = useState<string | null>(null);
@@ -41,6 +49,23 @@ export default function Properties() {
   const { data: properties, isLoading } = useQuery<Property[]>({
     queryKey: ["/api/properties"],
   });
+
+  // One request for every house's checklist rather than one per row. The badge
+  // reads the same summarizeSetup the property page and the dashboard do, so
+  // the three cannot disagree about how much of a house is left to set up.
+  const { data: setupRows = [] } = useQuery<PropertySetupItem[]>({
+    queryKey: ["/api/property-setup-items"],
+  });
+
+  const setupByProperty = useMemo(() => {
+    const grouped = new Map<string, PropertySetupItem[]>();
+    for (const row of setupRows) {
+      const existing = grouped.get(row.propertyId);
+      if (existing) existing.push(row);
+      else grouped.set(row.propertyId, [row]);
+    }
+    return grouped;
+  }, [setupRows]);
 
   // The chapter filter offers the official chapters (every one when no region is
   // picked, or just the chosen region's), so the full catalogue is visible even
@@ -72,6 +97,10 @@ export default function Properties() {
     leaseStartDate: data.leaseStartDate || null,
     leaseEndDate: data.leaseEndDate || null,
     leaseRenewalDate: data.leaseRenewalDate || null,
+    // An untouched URL input sends "", which is not a URL. Send null so the
+    // server reads it as unset rather than rejecting the whole form.
+    leaseDocumentUrl: data.leaseDocumentUrl || null,
+    maintenancePortalUrl: data.maintenancePortalUrl || null,
   });
 
   const createPropertyMutation = useMutation({
@@ -158,6 +187,12 @@ export default function Properties() {
       leaseEndDate: "",
       leaseRenewalDate: "",
       renewalDecision: "undecided",
+      leaseDocumentUrl: "",
+      maintenancePortalUrl: "",
+      rentalCompanyContactId: null,
+      responsibleContactId: null,
+      photoUrl: null,
+      notes: "",
     },
   });
 
@@ -188,6 +223,12 @@ export default function Properties() {
       leaseEndDate: asDateInput(property.leaseEndDate),
       leaseRenewalDate: asDateInput(property.leaseRenewalDate),
       renewalDecision: property.renewalDecision,
+      leaseDocumentUrl: property.leaseDocumentUrl || "",
+      maintenancePortalUrl: property.maintenancePortalUrl || "",
+      rentalCompanyContactId: property.rentalCompanyContactId,
+      responsibleContactId: property.responsibleContactId,
+      photoUrl: property.photoUrl,
+      notes: property.notes || "",
     });
     setIsEditDialogOpen(true);
   };
@@ -431,6 +472,51 @@ export default function Properties() {
                   )}
                 />
 
+
+                <FormField
+                  control={addForm.control}
+                  name="photoUrl"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Front-of-house photo (Optional)</FormLabel>
+                      <FormControl>
+                        {/* One image, replaceable. Download access is
+                            authorized against the property itself, so it
+                            follows the same region rule as the house. */}
+                        <PhotoUpload
+                          existingUrl={field.value ?? undefined}
+                          onUpload={(url) => field.onChange(url)}
+                          onRemove={() => field.onChange(null)}
+                          onError={(message) =>
+                            toast({ title: "That photo did not upload", description: message, variant: "destructive" })
+                          }
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={addForm.control}
+                  name="notes"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Notes (Optional)</FormLabel>
+                      <FormControl>
+                        <Textarea
+                          rows={3}
+                          placeholder="Anything the next RA should know about this house."
+                          {...field}
+                          value={field.value ?? ""}
+                          data-testid="textarea-property-notes"
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
                 <PropertyLeaseFields form={addForm} />
 
                 <DialogFooter>
@@ -496,6 +582,23 @@ export default function Properties() {
                         {property.ownership === "rented" && (
                           <Badge variant="warning" data-testid={`badge-property-rented-${property.id}`}>Rented</Badge>
                         )}
+                        {/* Only for a house that actually has a checklist.
+                            Houses predating it are untracked, not unfinished. */}
+                        {(() => {
+                          const setup = summarizeSetup(
+                            setupByProperty.get(property.id) ?? [],
+                            property.ownership,
+                          );
+                          if (!setup.tracked || setup.complete) return null;
+                          return (
+                            <Badge
+                              variant="outline"
+                              data-testid={`badge-property-setup-${property.id}`}
+                            >
+                              Setup: {setup.open} to do
+                            </Badge>
+                          );
+                        })()}
                       </div>
                       {property.propertyManager && (
                         <p className="text-xs text-muted-foreground mt-2">
@@ -710,6 +813,51 @@ export default function Properties() {
                     <FormLabel>Square Footage (Optional)</FormLabel>
                     <FormControl>
                       <Input type="number" {...field} value={field.value ?? ""} onChange={e => field.onChange(e.target.value ? parseInt(e.target.value) : undefined)} placeholder="e.g. 1200" />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+
+              <FormField
+                control={editForm.control}
+                name="photoUrl"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Front-of-house photo (Optional)</FormLabel>
+                    <FormControl>
+                      {/* One image, replaceable. Download access is
+                          authorized against the property itself, so it
+                          follows the same region rule as the house. */}
+                      <PhotoUpload
+                        existingUrl={field.value ?? undefined}
+                        onUpload={(url) => field.onChange(url)}
+                        onRemove={() => field.onChange(null)}
+                        onError={(message) =>
+                          toast({ title: "That photo did not upload", description: message, variant: "destructive" })
+                        }
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={editForm.control}
+                name="notes"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Notes (Optional)</FormLabel>
+                    <FormControl>
+                      <Textarea
+                        rows={3}
+                        placeholder="Anything the next RA should know about this house."
+                        {...field}
+                        value={field.value ?? ""}
+                        data-testid="textarea-property-notes"
+                      />
                     </FormControl>
                     <FormMessage />
                   </FormItem>

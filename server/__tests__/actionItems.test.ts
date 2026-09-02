@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { buildActionItems, type ActionItemInputs } from "../actionItems";
-import type { MaintenanceSchedule, RentPayment, SecurityDeposit, Resident, Task, Property } from "@shared/schema";
+import type { MaintenanceSchedule, RentPayment, SecurityDeposit, Resident, Task, Property, PropertySetupItem } from "@shared/schema";
 
 // buildActionItems only reads a handful of fields off each record, so the
 // factories fill just those and cast; a full row would be noise.
@@ -29,7 +29,92 @@ function property(over: Partial<Property>): Property {
   } as Property;
 }
 
-const empty: ActionItemInputs = { schedules: [], rentPayments: [], deposits: [], residents: [], tasks: [], properties: [] };
+const empty: ActionItemInputs = { schedules: [], rentPayments: [], deposits: [], residents: [], tasks: [], properties: [], setupItems: [] };
+
+function setupItem(over: Partial<PropertySetupItem>): PropertySetupItem {
+  return { id: "si1", propertyId: "p1", itemKey: "electric", status: "open", region: "West Central", ...over } as PropertySetupItem;
+}
+
+describe("the setup checklist on the dashboard", () => {
+  const owned = property({ id: "p1", ownership: "owned", leaseRenewalDate: null });
+
+  it("raises one item per house, never one per open check", () => {
+    // Seven separate entries for one house would bury the maintenance triage
+    // this space actually belongs to.
+    const items = buildActionItems({
+      ...empty,
+      properties: [owned],
+      setupItems: [
+        setupItem({ id: "a", itemKey: "electric", status: "open" }),
+        setupItem({ id: "b", itemKey: "gas", status: "open" }),
+        setupItem({ id: "c", itemKey: "water", status: "done" }),
+      ],
+    }, NOW);
+
+    const setup = items.filter((i) => i.source === "setup");
+    expect(setup).toHaveLength(1);
+    expect(setup[0].id).toBe("p1");
+    // Eight items on an owned house: two stored open, one done, and the five
+    // never written yet also count as open.
+    expect(setup[0].subtitle).toContain("7 of 8");
+  });
+
+  it("says nothing about a house that has no checklist at all", () => {
+    // Existing houses are deliberately not backfilled. If "no rows" read as
+    // "everything open", every house SPO already has would light up on the day
+    // this ships.
+    const items = buildActionItems({ ...empty, properties: [owned], setupItems: [] }, NOW);
+    expect(items.filter((i) => i.source === "setup")).toHaveLength(0);
+  });
+
+  it("clears the moment the last item resolves", () => {
+    const rows = [
+      setupItem({ id: "a", itemKey: "electric", status: "done" }),
+      setupItem({ id: "b", itemKey: "gas", status: "done" }),
+      setupItem({ id: "c", itemKey: "water", status: "done" }),
+      setupItem({ id: "d", itemKey: "internet", status: "done" }),
+      setupItem({ id: "e", itemKey: "insurance", status: "not_applicable" }),
+      setupItem({ id: "f", itemKey: "responsible_maintenance_person", status: "done" }),
+      setupItem({ id: "g", itemKey: "startup_budget", status: "done" }),
+      setupItem({ id: "h", itemKey: "communicated_to_household", status: "done" }),
+    ];
+    const items = buildActionItems({ ...empty, properties: [owned], setupItems: rows }, NOW);
+    expect(items.filter((i) => i.source === "setup")).toHaveLength(0);
+  });
+
+  it("reads a rented house against the rented checklist", () => {
+    // A rented house is asked for its lease; an owned one never is. Summarising
+    // a rented house against the owned list would report it finished early.
+    const rented = property({ id: "p2", ownership: "rented", leaseRenewalDate: null });
+    const items = buildActionItems({
+      ...empty,
+      properties: [rented],
+      setupItems: [setupItem({ id: "a", propertyId: "p2", itemKey: "electric", status: "done" })],
+    }, NOW);
+    const setup = items.filter((i) => i.source === "setup");
+    expect(setup).toHaveLength(1);
+    // Nine on a rented house — the two an owned house is never asked for.
+    expect(setup[0].subtitle).toContain("8 of 9");
+  });
+
+  it("carries the house's region so it is filtered like everything else", () => {
+    const items = buildActionItems({
+      ...empty,
+      properties: [owned],
+      setupItems: [setupItem({ id: "a", status: "open" })],
+    }, NOW);
+    expect(items.find((i) => i.source === "setup")!.region).toBe("West Central");
+  });
+
+  it("ignores checklist rows belonging to a house that is not in the list", () => {
+    const items = buildActionItems({
+      ...empty,
+      properties: [owned],
+      setupItems: [setupItem({ id: "a", propertyId: "p-deleted", status: "open" })],
+    }, NOW);
+    expect(items.filter((i) => i.source === "setup")).toHaveLength(0);
+  });
+});
 
 describe("buildActionItems", () => {
   it("includes a schedule due within the 30-day window and marks overdue ones", () => {

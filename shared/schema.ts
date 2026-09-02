@@ -578,6 +578,26 @@ export const properties = pgTable("properties", {
   leaseEndDate: timestamp("lease_end_date"),
   leaseRenewalDate: timestamp("lease_renewal_date"),
   renewalDecision: varchar("renewal_decision", { enum: ["undecided", "renewing", "not_renewing"] }).notNull().default("undecided"),
+  // A link to the lease on Drive, never the document itself. Settled with SPO:
+  // no lease documents are uploaded into the portal. The recurring complaint
+  // was that the current lease is hard to find, and a link solves that without
+  // the portal becoming a document store it would then have to secure.
+  leaseDocumentUrl: varchar("lease_document_url"),
+  // Where a rented house's repairs are actually filed. A URL and a contact --
+  // never a stored login, per the financial and credential rules.
+  maintenancePortalUrl: varchar("maintenance_portal_url"),
+  // Who to call. Two columns rather than one because they mean different
+  // things: a rented house has a rental company, an owned one has whoever SPO
+  // makes responsible. Set null on delete so removing a vendor never deletes
+  // a house.
+  rentalCompanyContactId: varchar("rental_company_contact_id").references(() => maintenanceContacts.id, { onDelete: "set null" }),
+  responsibleContactId: varchar("responsible_contact_id").references(() => maintenanceContacts.id, { onDelete: "set null" }),
+  // One front-of-house photo, replaceable. Holds the "/uploads/<key>" URL, and
+  // download access is authorized against the property through
+  // findUploadReferences -- which is why authz.ts had to learn about
+  // properties at all.
+  photoUrl: varchar("photo_url"),
+  notes: text("notes"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -590,6 +610,11 @@ export const insertPropertySchema = createInsertSchema(properties)
     updatedAt: true,
   })
   .extend({
+    // Required to save, alongside the four address parts, region and
+    // ownership. The COLUMN stays nullable: houses created before this rule
+    // have no chapter, and a NOT NULL migration would either fail or invent
+    // one for them. The boundary is where the rule belongs.
+    chapter: z.string().trim().min(1, "Which SPO chapter uses this house?"),
     bedrooms: nonNegativeInt.nullish(),
     bathrooms: nonNegativeAmount.nullish(),
     squareFootage: nonNegativeInt.nullish(),
@@ -597,6 +622,62 @@ export const insertPropertySchema = createInsertSchema(properties)
     leaseEndDate: dateFromClient.nullish(),
     leaseRenewalDate: dateFromClient.nullish(),
   });
+
+/**
+ * The per-property setup checklist: one row per item per house.
+ *
+ * A dedicated table rather than a `tasks` row, settled and recorded in
+ * server/propertySetup.ts. What lives here is only the state; the item list
+ * itself is fixed in code, which is why the row stores `itemKey` rather than a
+ * label -- if SPO later edits the list themselves it becomes a config table
+ * and these rows keep working unchanged.
+ *
+ * Every row records who set it and when, because "who said the gas was on" is
+ * the question that actually gets asked. `region` is denormalised from the
+ * property, as on residents and schedules, so region scoping applies without a
+ * join.
+ *
+ * Rows are generated on property creation only and deliberately never
+ * backfilled: a house with no rows is untracked rather than incomplete. See
+ * summarizeSetup.
+ */
+export const propertySetupItems = pgTable(
+  "property_setup_items",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    propertyId: varchar("property_id").notNull().references(() => properties.id, { onDelete: "cascade" }),
+    /** Matches a key in SETUP_ITEMS. Not an enum column: the list is code, and
+     *  a database enum would need a migration every time SPO adds an item. */
+    itemKey: varchar("item_key").notNull(),
+    status: varchar("status", { enum: ["open", "done", "not_applicable"] }).notNull().default("open"),
+    note: text("note"),
+    // Set null rather than restrict: the checklist outlives the RA who filled
+    // it in, and deleting a user must never be blocked.
+    setByUserId: varchar("set_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    setAt: timestamp("set_at"),
+    region: varchar("region").notNull(),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [uniqueIndex("IDX_property_setup_item").on(table.propertyId, table.itemKey)],
+);
+
+export const insertPropertySetupItemSchema = createInsertSchema(propertySetupItems)
+  .omit({
+    id: true,
+    // Server-owned: taken from the authenticated actor and the clock, never a
+    // request body. "Who said the gas was on" is worthless if the client says.
+    setByUserId: true,
+    setAt: true,
+    createdAt: true,
+    updatedAt: true,
+  })
+  .extend({
+    note: z.string().max(500, "Keep the note under 500 characters").nullish(),
+  });
+
+export type PropertySetupItem = typeof propertySetupItems.$inferSelect;
+export type InsertPropertySetupItem = z.infer<typeof insertPropertySetupItemSchema>;
 
 export type Property = typeof properties.$inferSelect;
 export type InsertProperty = z.infer<typeof insertPropertySchema>;
