@@ -50,11 +50,28 @@ test.describe("mobile layout", () => {
  * criteria belong rather than in the desktop suite.
  */
 test.describe("filling in a walkthrough on a phone", () => {
-  /** Starts a fresh walkthrough on the first house and lands on its screen. */
+  /**
+   * Starts a fresh walkthrough and lands on its screen.
+   *
+   * Prefers a house nobody has walked yet, so the walkthrough is seeded from
+   * the national template rather than copied from that house's last one --
+   * which is the path the first test below is actually about. Falls back to
+   * any house once the never-walked ones are used up.
+   */
   async function startWalkthrough(page: import("@playwright/test").Page) {
     await page.goto("/walkthroughs");
-    await page.locator('[data-testid^="card-property-"]').first().click();
-    await page.getByTestId("button-start-walkthrough").or(page.getByTestId("button-start-first-walkthrough")).click();
+    const neverWalked = page
+      .locator('[data-testid^="card-property-"]')
+      .filter({ hasText: "Never walked" });
+    const card = (await neverWalked.count()) > 0
+      ? neverWalked.first()
+      : page.locator('[data-testid^="card-property-"]').first();
+    await card.click();
+    // The header control, not the empty-state one. Both are on screen for a
+    // house with no walkthroughs yet, so `.or()` matches two elements and
+    // fails strict mode -- which is what a database with no walkthroughs in it
+    // looks like, and exactly what CI starts from.
+    await page.getByTestId("button-start-walkthrough").click();
     await page.getByTestId("button-confirm-start-walkthrough").click();
     await expect(page).toHaveURL(/\/walkthroughs\/[0-9a-f-]{36}$/);
     await expect(page.getByTestId("text-current-room")).toBeVisible();

@@ -184,38 +184,134 @@ async function seed(): Promise<void> {
   await storage.linkContactToRequest(requests[9].id, contacts[0].id);
   console.log("Linked 3 vendor contacts to requests");
 
-  // ── Walkthrough rooms and photos ──────────────────────────────────────────
-  const roomRows = [
-    { name: "Kitchen", property: cleveland, displayOrder: 1, requiredQuestions: ["Are all appliances working?", "Any leaks under the sink?"] },
-    { name: "Living Room", property: cleveland, displayOrder: 2, requiredQuestions: ["Condition of walls and floors?"] },
-    { name: "Kitchen", property: como, displayOrder: 1, requiredQuestions: ["Are all appliances working?"] },
-    { name: "Basement", property: como, displayOrder: 2, requiredQuestions: ["Any signs of moisture?", "Is the furnace area clear?"] },
+  // ── Walkthroughs, their rooms, items and photos ───────────────────────────
+  //
+  // Rooms belong to a dated walkthrough, not to a property. Seeding them
+  // without one would recreate the pre-2.1 shape: rows that exist in the
+  // database and appear on no screen.
+  //
+  // Two walkthroughs, deliberately in different states, so the index shows
+  // both and there is something half-finished to open:
+  //   - Cleveland, submitted, every item assessed and one of them damaged.
+  //   - Como, still a draft, with a room nobody has reached yet.
+  const walkthroughRows = [
+    {
+      property: cleveland,
+      type: "annual" as const,
+      status: "submitted" as const,
+      walkthroughDate: daysAgo(45),
+      performedBy: "ra.northwest@spo.org",
+      notes: "Annual inspection. Kitchen sink needs a plumber.",
+      rooms: [
+        {
+          name: "Kitchen",
+          displayOrder: 1,
+          photoNote: null,
+          items: [
+            { label: "Sink and taps", condition: "damaged" as const, notes: "Cold tap drips constantly; cabinet below is swollen." },
+            { label: "Cooker and hob", condition: "good" as const, notes: null },
+            { label: "Fridge", condition: "good" as const, notes: null },
+            { label: "Smoke detector", condition: "not_applicable" as const, notes: "No detector in the kitchen itself; the hallway one covers it." },
+          ],
+        },
+        {
+          name: "Living Room",
+          displayOrder: 2,
+          photoNote: null,
+          items: [
+            { label: "Walls and ceiling", condition: "fair" as const, notes: "Scuffs along the south wall, nothing structural." },
+            { label: "Flooring", condition: "good" as const, notes: null },
+            { label: "Windows", condition: "good" as const, notes: null },
+          ],
+        },
+      ],
+    },
+    {
+      property: como,
+      type: "annual" as const,
+      status: "draft" as const,
+      walkthroughDate: daysAgo(3),
+      performedBy: "ra.northwest@spo.org",
+      notes: null,
+      rooms: [
+        {
+          name: "Kitchen",
+          displayOrder: 1,
+          photoNote: null,
+          items: [
+            { label: "Sink and taps", condition: "good" as const, notes: null },
+            { label: "Cooker and hob", condition: "fair" as const, notes: "One ring is slow to light." },
+            { label: "Fridge", condition: "not_recorded" as const, notes: null },
+          ],
+        },
+        {
+          // Nobody has reached this room yet, so the progress bar and the room
+          // switcher both have something honest to show.
+          name: "Basement",
+          displayOrder: 2,
+          photoNote: "Water staining on the north wall since last visit.",
+          items: [
+            { label: "Walls and floor", condition: "not_recorded" as const, notes: null },
+            { label: "Furnace area", condition: "not_recorded" as const, notes: null },
+            { label: "Sump pump", condition: "not_recorded" as const, notes: null },
+          ],
+        },
+      ],
+    },
   ];
-  const rooms = [];
-  for (const row of roomRows) {
-    rooms.push(
-      await storage.createWalkthroughRoom({
-        name: row.name,
+
+  let roomCount = 0;
+  let itemCount = 0;
+  for (const row of walkthroughRows) {
+    const walkthrough = await storage.createWalkthrough({
+      propertyId: row.property.id,
+      walkthroughDate: row.walkthroughDate,
+      type: row.type,
+      status: row.status,
+      performedBy: row.performedBy,
+      notes: row.notes,
+      region: row.property.region,
+      buildingAddress: row.property.address,
+    });
+
+    for (const roomRow of row.rooms) {
+      const room = await storage.createWalkthroughRoom({
+        name: roomRow.name,
+        walkthroughId: walkthrough.id,
         propertyId: row.property.id,
         buildingAddress: row.property.address,
-        displayOrder: row.displayOrder,
-        requiredQuestions: row.requiredQuestions,
-      }),
-    );
+        displayOrder: roomRow.displayOrder,
+      });
+      roomCount += 1;
+
+      for (const [index, item] of roomRow.items.entries()) {
+        await storage.createWalkthroughItem({
+          roomId: room.id,
+          label: item.label,
+          condition: item.condition,
+          notes: item.notes,
+          displayOrder: index,
+        });
+        itemCount += 1;
+      }
+
+      // The legacy `condition` column on a photo records *change* since the
+      // last visit, not state, so seeded photos leave it unset exactly as the
+      // app does. Condition lives on the items above.
+      await storage.createWalkthroughPhoto({
+        roomId: room.id,
+        imageUrl: await seedImage(`walkthrough-${roomRow.name.toLowerCase().replace(/\s+/g, "-")}-${roomCount}.png`),
+        notes: roomRow.photoNote,
+        region: row.property.region,
+        buildingAddress: row.property.address,
+        location: roomRow.name,
+        uploadedBy: "seed-script",
+      });
+    }
   }
-  for (const [i, room] of rooms.entries()) {
-    await storage.createWalkthroughPhoto({
-      roomId: room.id,
-      imageUrl: await seedImage(`walkthrough-${room.name.toLowerCase().replace(/\s+/g, "-")}-${i}.png`),
-      condition: i === 3 ? "additional_damage" : "same_as_last_walkthrough",
-      notes: i === 3 ? "Water staining on the north wall since last visit." : null,
-      region: roomRows[i].property.region,
-      buildingAddress: room.buildingAddress,
-      location: room.name,
-      uploadedBy: "seed-script",
-    });
-  }
-  console.log(`Seeded ${rooms.length} walkthrough rooms with a photo each`);
+  console.log(
+    `Seeded ${walkthroughRows.length} walkthroughs, ${roomCount} rooms with a photo each, ${itemCount} checklist items`,
+  );
 
   // ── Assets ────────────────────────────────────────────────────────────────
   const assetRows = [
