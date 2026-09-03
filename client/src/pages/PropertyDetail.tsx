@@ -40,6 +40,39 @@ import type {
 
 const DAY = 24 * 60 * 60 * 1000;
 
+/**
+ * A stored link, or the same dash every other unset fact shows.
+ *
+ * The scheme is checked at the API boundary (see httpUrlFromClient in
+ * shared/schema.ts), so what reaches here is already http or https.
+ */
+function ExternalLinkOrDash({
+  href,
+  label,
+  testId,
+}: {
+  href: string | null | undefined;
+  label: string;
+  testId: string;
+}) {
+  if (!href) return <>{formatValue(null)}</>;
+  return (
+    <a
+      className="inline-flex items-center gap-1 underline underline-offset-2"
+      href={href}
+      target="_blank"
+      rel="noreferrer noopener"
+      data-testid={testId}
+    >
+      {label}
+      <ExternalLink className="h-3 w-3" />
+    </a>
+  );
+}
+
+const formatDateOrDash = (value: Date | string | null | undefined) =>
+  value ? formatDate(value) : formatValue(null);
+
 /** The current month as "YYYY-MM", read from the local calendar. */
 function currentPeriod(): string {
   const now = new Date();
@@ -277,6 +310,61 @@ export default function PropertyDetail() {
               }
             />
           </dl>
+
+          {/* Above the tabs, not inside one. The recurring complaint was that
+              rental company contact details are hard to find, and an RA
+              looking for a phone number will not think to open "Setup". */}
+          <Card>
+            <CardHeader>
+              <CardTitle>
+                {property.ownership === "rented" ? "Landlord and lease" : "Who maintains this house"}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <dl className="grid gap-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
+                <Fact
+                  label={property.ownership === "rented" ? "Rental company" : "Responsible for maintenance"}
+                  value={formatValue(whoToCall ? `${whoToCall.company} — ${whoToCall.name}` : null)}
+                />
+                <Fact label="Phone" value={formatValue(whoToCall?.phone)} />
+                <Fact label="Email" value={formatValue(whoToCall?.email)} />
+                {property.ownership === "rented" && (
+                  <div>
+                    <dt className="text-muted-foreground">Maintenance portal</dt>
+                    <dd className="mt-0.5 font-medium">
+                      <ExternalLinkOrDash
+                        href={property.maintenancePortalUrl}
+                        label="Open the portal"
+                        testId="link-maintenance-portal"
+                      />
+                    </dd>
+                  </div>
+                )}
+                {property.ownership === "rented" && (
+                  <>
+                    <Fact label="Lease start" value={formatDateOrDash(property.leaseStartDate)} />
+                    <Fact label="Lease end" value={formatDateOrDash(property.leaseEndDate)} />
+                    <div>
+                      <dt className="text-muted-foreground">Lease document</dt>
+                      <dd className="mt-0.5 font-medium">
+                        <ExternalLinkOrDash
+                          href={property.leaseDocumentUrl}
+                          label="Open on Drive"
+                          testId="link-lease-document"
+                        />
+                      </dd>
+                    </div>
+                  </>
+                )}
+              </dl>
+
+              {property.notes && (
+                <p className="mt-4 whitespace-pre-line text-sm" data-testid="text-property-notes">
+                  {property.notes}
+                </p>
+              )}
+            </CardContent>
+          </Card>
 
           <Tabs defaultValue="residents">
             <TabsList>
@@ -574,72 +662,6 @@ export default function PropertyDetail() {
 
             <TabsContent value="setup" className="mt-4 space-y-6">
               <PropertySetupChecklist property={property} canManage={canManageSetup} />
-
-              <Card>
-                <CardHeader>
-                  <CardTitle>Who to call, and where the paperwork lives</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {/* The recurring complaint was that this is hard to find.
-                      Links, never documents and never a stored login. */}
-                  <dl className="grid gap-4 text-sm sm:grid-cols-2">
-                    <Fact
-                      label={property.ownership === "rented" ? "Rental company" : "Responsible for maintenance"}
-                      value={formatValue(whoToCall ? `${whoToCall.company} — ${whoToCall.name}` : null)}
-                    />
-                    <Fact label="Phone" value={formatValue(whoToCall?.phone)} />
-                    <Fact label="Email" value={formatValue(whoToCall?.email)} />
-                    {property.ownership === "rented" && (
-                      <div>
-                        <dt className="text-muted-foreground">Maintenance portal</dt>
-                        <dd className="mt-0.5 font-medium">
-                          {property.maintenancePortalUrl ? (
-                            <a
-                              className="inline-flex items-center gap-1 underline underline-offset-2"
-                              href={property.maintenancePortalUrl}
-                              target="_blank"
-                              rel="noreferrer noopener"
-                              data-testid="link-maintenance-portal"
-                            >
-                              Open the portal
-                              <ExternalLink className="h-3 w-3" />
-                            </a>
-                          ) : (
-                            formatValue(null)
-                          )}
-                        </dd>
-                      </div>
-                    )}
-                    {property.ownership === "rented" && (
-                      <div>
-                        <dt className="text-muted-foreground">Lease</dt>
-                        <dd className="mt-0.5 font-medium">
-                          {property.leaseDocumentUrl ? (
-                            <a
-                              className="inline-flex items-center gap-1 underline underline-offset-2"
-                              href={property.leaseDocumentUrl}
-                              target="_blank"
-                              rel="noreferrer noopener"
-                              data-testid="link-lease-document"
-                            >
-                              Open on Drive
-                              <ExternalLink className="h-3 w-3" />
-                            </a>
-                          ) : (
-                            formatValue(null)
-                          )}
-                        </dd>
-                      </div>
-                    )}
-                  </dl>
-
-                  {property.notes && (
-                    <p className="mt-4 whitespace-pre-line text-sm" data-testid="text-property-notes">
-                      {property.notes}
-                    </p>
-                  )}
-                </CardContent>
-              </Card>
             </TabsContent>
           </Tabs>
         </PageStack>

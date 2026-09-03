@@ -4,6 +4,8 @@ import { z } from "zod";
 import { insertPropertySchema, type MaintenanceContact } from "@shared/schema";
 import { FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { PhotoUpload } from "@/components/PhotoUpload";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 /**
@@ -237,6 +239,67 @@ export default function PropertyLeaseFields({ form }: { form: UseFormReturn<Prop
           "Responsible maintenance person",
           "The contact SPO calls first for this house. Institutional memory that otherwise dies at handover.",
         )}
+    </>
+  );
+}
+
+/**
+ * The front-of-house photo and the free-text notes, shared by the add and edit
+ * dialogs for the same reason the lease fields are: two copies of a form field
+ * is two places for a label, a limit or a test id to drift.
+ *
+ * `onPhotoError` is passed in rather than raising a toast here, so the page
+ * that owns the dialog owns its own error surface.
+ */
+export function PropertyPhotoAndNotes({
+  form,
+  onPhotoError,
+}: {
+  form: UseFormReturn<PropertyForm>;
+  onPhotoError: (message: string) => void;
+}) {
+  return (
+    <>
+      <FormField
+        control={form.control}
+        name="photoUrl"
+        render={({ field }) => (
+          <FormItem>
+            <FormLabel>Front-of-house photo (Optional)</FormLabel>
+            <FormControl>
+              {/* One image, replaceable. Download access is authorized against
+                  the property itself, so it follows the house's region rule. */}
+              <PhotoUpload
+                existingUrl={field.value ?? undefined}
+                onUpload={(url) => field.onChange(url)}
+                onRemove={() => field.onChange(null)}
+                onError={onPhotoError}
+              />
+            </FormControl>
+            <FormMessage />
+          </FormItem>
+        )}
+      />
+
+      <FormField
+        control={form.control}
+        name="notes"
+        render={({ field }) => (
+          <FormItem>
+            <FormLabel>Notes (Optional)</FormLabel>
+            <FormControl>
+              <Textarea
+                rows={3}
+                placeholder="Anything the next RA should know about this house."
+                {...field}
+                value={field.value ?? ""}
+                data-testid="textarea-property-notes"
+              />
+            </FormControl>
+            <FormMessage />
+          </FormItem>
+        )}
+      />
     </>
   );
 }

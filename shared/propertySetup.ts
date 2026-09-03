@@ -218,3 +218,22 @@ export const SETUP_ITEM_STATUS_LABEL: Record<SetupItemStatus, string> = {
   done: "Done",
   not_applicable: "Not needed",
 };
+
+/**
+ * Checklist rows grouped by the house they belong to.
+ *
+ * Here rather than in each caller: the dashboard aggregate and the badge on
+ * the property list row both need it, and two copies of a group-by is two
+ * places to get the key wrong.
+ */
+export function setupRowsByProperty<T extends { propertyId: string }>(
+  rows: readonly T[],
+): Map<string, T[]> {
+  const grouped = new Map<string, T[]>();
+  for (const row of rows) {
+    const existing = grouped.get(row.propertyId);
+    if (existing) existing.push(row);
+    else grouped.set(row.propertyId, [row]);
+  }
+  return grouped;
+}

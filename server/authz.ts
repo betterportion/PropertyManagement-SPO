@@ -386,20 +386,18 @@ export async function canReadUploadReference(
         canAccessRegion(ctx, reference.record.region)
       );
 
-    case "property": {
-      // A house's front-of-house photo. Two tiers again, and for the same
-      // reason as walkthroughs: a resident is bound to the one house their
-      // login is linked to and has no region path here, however their
-      // permissions row is set. A photo of their own front door is not a
-      // disclosure -- the resource hub shows it -- but somebody else's is.
-      if (ctx.isResident) {
-        return isOwnHouse(await residentHouseAddress(ctx), reference.record.address);
-      }
+    case "property":
+      // A house's front-of-house photo. Staff only, and deliberately so: a
+      // resident has no surface in the portal that shows one yet, and granting
+      // reach ahead of the screen that needs it is access widened for nothing.
+      // When the resource hub (which does show a house its own photo) is built,
+      // the branch to add here is a house match against residentHouseAddress --
+      // never a region path, exactly as on walkthroughs.
       return (
+        !ctx.isResident &&
         hasPermission(ctx, "canViewProperties", "canManageProperties") &&
         canAccessRegion(ctx, reference.record.region)
       );
-    }
   }
 }
 

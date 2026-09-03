@@ -31,6 +31,7 @@ export const AUDIT_ACTIONS = {
   SECURITY_DEPOSIT_CREATED: "security_deposit.created",
   SECURITY_DEPOSIT_UPDATED: "security_deposit.updated",
   SECURITY_DEPOSIT_DELETED: "security_deposit.deleted",
+  PROPERTY_DOCUMENTS_CHANGED: "property.documents_changed",
   DOCUMENT_UPLOADED: "document.uploaded",
   DOCUMENT_DOWNLOADED: "document.downloaded",
 } as const;
@@ -65,6 +66,7 @@ export const AUDIT_ACTION_LABELS: Record<AuditAction, string> = {
   "security_deposit.created": "Security deposit recorded",
   "security_deposit.updated": "Security deposit updated",
   "security_deposit.deleted": "Security deposit deleted",
+  "property.documents_changed": "Property lease link or photo changed",
   "document.uploaded": "Document uploaded",
   "document.downloaded": "Document downloaded",
 };

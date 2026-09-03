@@ -53,6 +53,23 @@ export default function PropertySetupChecklist({
     queryKey: ["/api/properties", property.id, "setup"],
   });
 
+  // Rows store a user id; a person reads a name. Only staff can reach this
+  // card at all, and only an account holding canManageUsers can read the list
+  // — everyone else simply sees the date without a name rather than a broken
+  // card, which is why the failure here is silent by design.
+  const { data: staff = [] } = useQuery<Array<{ id: string; firstName?: string | null; lastName?: string | null; email?: string | null }>>({
+    queryKey: ["/api/users"],
+    retry: false,
+  });
+
+  const setterName = (userId: string | null | undefined) => {
+    if (!userId) return null;
+    const person = staff.find((candidate) => candidate.id === userId);
+    if (!person) return null;
+    const name = [person.firstName, person.lastName].filter(Boolean).join(" ").trim();
+    return name || person.email || null;
+  };
+
   const definitions = useMemo(() => setupItemsFor(property.ownership), [property.ownership]);
   const byKey = useMemo(() => new Map(rows.map((row) => [row.itemKey, row])), [rows]);
   const summary = useMemo(() => summarizeSetup(rows, property.ownership), [rows, property.ownership]);
@@ -117,9 +134,9 @@ export default function PropertySetupChecklist({
       <CardContent className="space-y-1">
         {!summary.tracked && (
           <p className="pb-3 text-sm text-muted-foreground" data-testid="text-setup-untracked">
-            This house predates the checklist, so nothing here has been recorded. Setting any item
-            below starts tracking it — until then it stays off the dashboard rather than showing as
-            seven things nobody has done.
+            Nothing has been recorded for this house yet — either it predates the checklist, or it
+            never got one. Setting any item below starts tracking it; until then it stays off the
+            dashboard rather than showing as a list of things nobody has done.
           </p>
         )}
 
@@ -164,6 +181,10 @@ export default function PropertySetupChecklist({
                   {row?.setAt && (
                     <p className="mt-1 text-xs text-muted-foreground" data-testid={`text-setup-set-${definition.key}`}>
                       {SETUP_ITEM_STATUS_LABEL[status]} on {formatDate(row.setAt)}
+                      {/* Who, not just when. "Who said the gas was on" is the
+                          question this record exists to answer, and a date
+                          alone cannot answer it. */}
+                      {setterName(row.setByUserId) ? ` by ${setterName(row.setByUserId)}` : ""}
                     </p>
                   )}
 

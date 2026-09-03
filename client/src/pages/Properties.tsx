@@ -10,16 +10,14 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import { PhotoUpload } from "@/components/PhotoUpload";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Plus, Building2, MapPin, MoreVertical } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { type Property, type PropertySetupItem } from "@shared/schema";
-import { summarizeSetup } from "@shared/propertySetup";
+import { summarizeSetup, setupRowsByProperty } from "@shared/propertySetup";
 import { REGIONS, chaptersForRegion, ALL_CHAPTERS } from "@shared/regions";
-import PropertyLeaseFields, { propertyFormSchema, type PropertyForm } from "@/components/PropertyLeaseFields";
+import PropertyLeaseFields, { PropertyPhotoAndNotes, propertyFormSchema, type PropertyForm } from "@/components/PropertyLeaseFields";
 import { Section, Container, PageHeader, PageStack } from "@/components/layout/page";
 import { LoadingState, EmptyState } from "@/components/states";
 import { formatDate } from "@/lib/format";
@@ -30,6 +28,34 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
+
+/**
+ * How much of a house's setup is left, on its list row.
+ *
+ * Silent for a house with no checklist and for a finished one: an untracked
+ * house is not an unfinished one, and a badge reading "0 to do" is noise on
+ * every row that is already done.
+ */
+/**
+ * The official chapters for a region, plus whatever this house already has.
+ *
+ * Chapter names have changed over time and the stored value is the truth about
+ * a house until somebody deliberately changes it.
+ */
+function withStoredChapter(chapters: readonly string[], stored: string | null | undefined): string[] {
+  if (!stored || chapters.includes(stored)) return [...chapters];
+  return [stored, ...chapters];
+}
+
+function SetupBadge({ property, rows }: { property: Property; rows: PropertySetupItem[] }) {
+  const setup = summarizeSetup(rows, property.ownership);
+  if (!setup.tracked || setup.complete) return null;
+  return (
+    <Badge variant="outline" data-testid={`badge-property-setup-${property.id}`}>
+      Setup: {setup.open} to do
+    </Badge>
+  );
+}
 
 export default function Properties() {
   // The dashboard links here with ?add=1 so "Add a property" opens the form
@@ -57,15 +83,7 @@ export default function Properties() {
     queryKey: ["/api/property-setup-items"],
   });
 
-  const setupByProperty = useMemo(() => {
-    const grouped = new Map<string, PropertySetupItem[]>();
-    for (const row of setupRows) {
-      const existing = grouped.get(row.propertyId);
-      if (existing) existing.push(row);
-      else grouped.set(row.propertyId, [row]);
-    }
-    return grouped;
-  }, [setupRows]);
+  const setupByProperty = useMemo(() => setupRowsByProperty(setupRows), [setupRows]);
 
   // The chapter filter offers the official chapters (every one when no region is
   // picked, or just the chosen region's), so the full catalogue is visible even
@@ -472,49 +490,11 @@ export default function Properties() {
                   )}
                 />
 
-
-                <FormField
-                  control={addForm.control}
-                  name="photoUrl"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Front-of-house photo (Optional)</FormLabel>
-                      <FormControl>
-                        {/* One image, replaceable. Download access is
-                            authorized against the property itself, so it
-                            follows the same region rule as the house. */}
-                        <PhotoUpload
-                          existingUrl={field.value ?? undefined}
-                          onUpload={(url) => field.onChange(url)}
-                          onRemove={() => field.onChange(null)}
-                          onError={(message) =>
-                            toast({ title: "That photo did not upload", description: message, variant: "destructive" })
-                          }
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={addForm.control}
-                  name="notes"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Notes (Optional)</FormLabel>
-                      <FormControl>
-                        <Textarea
-                          rows={3}
-                          placeholder="Anything the next RA should know about this house."
-                          {...field}
-                          value={field.value ?? ""}
-                          data-testid="textarea-property-notes"
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
+                <PropertyPhotoAndNotes
+                  form={addForm}
+                  onPhotoError={(message) =>
+                    toast({ title: "That photo did not upload", description: message, variant: "destructive" })
+                  }
                 />
 
                 <PropertyLeaseFields form={addForm} />
@@ -582,23 +562,10 @@ export default function Properties() {
                         {property.ownership === "rented" && (
                           <Badge variant="warning" data-testid={`badge-property-rented-${property.id}`}>Rented</Badge>
                         )}
-                        {/* Only for a house that actually has a checklist.
-                            Houses predating it are untracked, not unfinished. */}
-                        {(() => {
-                          const setup = summarizeSetup(
-                            setupByProperty.get(property.id) ?? [],
-                            property.ownership,
-                          );
-                          if (!setup.tracked || setup.complete) return null;
-                          return (
-                            <Badge
-                              variant="outline"
-                              data-testid={`badge-property-setup-${property.id}`}
-                            >
-                              Setup: {setup.open} to do
-                            </Badge>
-                          );
-                        })()}
+                        <SetupBadge
+                          property={property}
+                          rows={setupByProperty.get(property.id) ?? []}
+                        />
                       </div>
                       {property.propertyManager && (
                         <p className="text-xs text-muted-foreground mt-2">
@@ -740,7 +707,16 @@ export default function Properties() {
                 control={editForm.control}
                 name="chapter"
                 render={({ field }) => {
-                  const regionChapters = chaptersForRegion(editForm.watch("region"));
+                  // A house recorded before the catalogue settled can carry a
+                  // chapter that is no longer in it. Offering the stored value
+                  // alongside the official list means editing anything else
+                  // about that house does not force the RA to relabel it --
+                  // and chapter is required to save, so without this the form
+                  // would be unsubmittable with no way to re-enter the value.
+                  const regionChapters = withStoredChapter(
+                    chaptersForRegion(editForm.watch("region")),
+                    editingProperty?.chapter,
+                  );
                   return (
                     <FormItem>
                       <FormLabel>Chapter (Optional)</FormLabel>
@@ -820,48 +796,11 @@ export default function Properties() {
               />
 
 
-              <FormField
-                control={editForm.control}
-                name="photoUrl"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Front-of-house photo (Optional)</FormLabel>
-                    <FormControl>
-                      {/* One image, replaceable. Download access is
-                          authorized against the property itself, so it
-                          follows the same region rule as the house. */}
-                      <PhotoUpload
-                        existingUrl={field.value ?? undefined}
-                        onUpload={(url) => field.onChange(url)}
-                        onRemove={() => field.onChange(null)}
-                        onError={(message) =>
-                          toast({ title: "That photo did not upload", description: message, variant: "destructive" })
-                        }
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={editForm.control}
-                name="notes"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Notes (Optional)</FormLabel>
-                    <FormControl>
-                      <Textarea
-                        rows={3}
-                        placeholder="Anything the next RA should know about this house."
-                        {...field}
-                        value={field.value ?? ""}
-                        data-testid="textarea-property-notes"
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
+              <PropertyPhotoAndNotes
+                form={editForm}
+                onPhotoError={(message) =>
+                  toast({ title: "That photo did not upload", description: message, variant: "destructive" })
+                }
               />
 
               <PropertyLeaseFields form={editForm} />

@@ -374,35 +374,20 @@ describe("canReadUpload, through a property's front-of-house photo", () => {
     expect(await canReadUpload(ctx, KEY, undefined)).toBe(false);
   });
 
-  it("lets a resident see the photo of the house their account is linked to", async () => {
-    // A photo of their own front door is not a disclosure, and the resource
-    // hub shows it. The house match is the same one the maintenance rule uses.
+  it("refuses a resident, including one linked to that very house", async () => {
+    // No resident surface shows a house photo yet, so nobody at that tier has
+    // a reason to fetch one. The linked-to-this-house case is the one worth
+    // pinning: it is the case a later change would be tempted to allow, and
+    // when the resource hub needs it the rule to add is a house match, never
+    // the region path their permissions row happens to name.
     getProperty.mockResolvedValue({ id: "prop-1", address: "1 Main St", region: "Twin Cities" });
     const ctx = context({
       role: "resident",
       userId: "res-1",
+      permissions: permissions({ canViewProperties: true }),
       allowedRegions: ["Twin Cities"],
     });
     (ctx.user as { propertyId?: string }).propertyId = "prop-1";
-    expect(await canReadUpload(ctx, KEY, undefined)).toBe(true);
-  });
-
-  it("refuses a resident the photo of somebody else's house", async () => {
-    // Their permissions row names the property's region deliberately: a
-    // resident must not pick up a region path here either.
-    getProperty.mockResolvedValue({ id: "prop-2", address: "2 River Rd", region: "Twin Cities" });
-    const ctx = context({
-      role: "resident",
-      userId: "res-2",
-      allowedRegions: ["Twin Cities"],
-    });
-    (ctx.user as { propertyId?: string }).propertyId = "prop-2";
-    expect(await canReadUpload(ctx, KEY, undefined)).toBe(false);
-  });
-
-  it("refuses a resident whose account is linked to no house", async () => {
-    getProperty.mockResolvedValue(undefined);
-    const ctx = context({ role: "resident", userId: "res-3", allowedRegions: ["Twin Cities"] });
     expect(await canReadUpload(ctx, KEY, undefined)).toBe(false);
   });
 });

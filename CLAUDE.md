@@ -310,7 +310,9 @@ Any new upload route should go through `guardedUpload()` too, and its permission
 - **The CSV is never stored.** It is decoded, parsed and dropped. That is also why there is no magic-byte check here: a CSV has no signature, and nothing reaches a bucket for a disguised file to sit in.
 - **The confirm step re-derives everything** — it re-reads the roster, re-runs the duplicate check, and takes `propertyId`, `region` and `buildingAddress` from the property rather than from the body. The rows arrive from a client that could have edited them, and the roster can have moved on between the two calls.
 
-A property's front-of-house photo is authorized through `findUploadReferences` like every other file, with the same two-tier rule walkthroughs use: staff by region and the property permission, a resident by an exact match against the house their login is linked to. **There is no region path for a resident here either.**
+**Any URL the portal stores and later renders into an `href` is scheme-checked at the API boundary**, by `httpUrlFromClient` in `shared/schema.ts` — http and https only. `new URL()` on its own accepts `javascript:`, and the property page renders `leaseDocumentUrl` and `maintenancePortalUrl` as clickable links, so a form-only check would leave the API accepting whatever it was sent. An empty string means "cleared" and normalises to null, because an untouched input sends one. Changing either link, or the photo, records `property.documents_changed`.
+
+A property's front-of-house photo is authorized through `findUploadReferences` like every other file, and is **staff-only**: no resident surface shows a house photo yet, and granting reach ahead of the screen that needs it is access widened for nothing. When the resource hub (Phase 8.1) shows a house its own photo, the branch to add is a house match against `residentHouseAddress` — never a region path, exactly as on walkthroughs.
 
 ### Reading files back
 
@@ -320,7 +322,7 @@ A property's front-of-house photo is authorized through `findUploadReferences` l
 
 ## Audit log
 
-`server/audit.ts` records the actions somebody may need to account for later: **user, permission and house-link changes, maintenance status changes, invoice and billing changes, rent charge and security-deposit changes, and document uploads and downloads.** `AUDIT_ACTIONS` is the full vocabulary.
+`server/audit.ts` records the actions somebody may need to account for later: **user, permission and house-link changes, maintenance status changes, invoice and billing changes, rent charge and security-deposit changes, property document-link changes, and document uploads and downloads.** `AUDIT_ACTIONS` is the full vocabulary.
 
 Admins read it in the app: the activity trail in Settings, backed by `GET /api/audit-log` and `client/src/components/ActivityLog.tsx`. Reporting beyond that is a separate piece of work. It can also be read with SQL:
 

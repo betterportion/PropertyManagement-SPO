@@ -69,6 +69,7 @@ import {
   insertRentPaymentSchema,
   insertSecurityDepositSchema,
   insertTaskSchema,
+  setPropertySetupItemSchema,
   type InsertPropertyWithAddress,
 } from "@shared/schema";
 import { STANDARD_SCHEDULE_TEMPLATES, addMonths } from "./schedules";
@@ -76,7 +77,7 @@ import { buildActionItems } from "./actionItems";
 import { closedDateChange } from "./maintenanceStatus";
 import { planFromTemplate, planFromPreviousWalkthrough, templateRoomItems } from "./walkthroughTemplate";
 import { parseResidentCsv, buildImportPreview } from "./residentImport";
-import { SETUP_ITEMS, SETUP_ITEM_STATUSES, setupItemsFor } from "@shared/propertySetup";
+import { SETUP_ITEMS, setupItemsFor } from "@shared/propertySetup";
 import { buildRegionSummaries, type RegionStaff } from "./regionSummary";
 import { normalizeRegions } from "./migrateRegions";
 import { REGIONS } from "@shared/regions";
@@ -3354,6 +3355,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       const property = await storage.updateProperty(req.params.id, updateData);
+
+      // Properties now carry document references -- the lease link and the
+      // front-of-house photo -- and CLAUDE.md's standing rule is that anything
+      // changing documents is recorded. Only these three fields, so an
+      // ordinary edit to a bedroom count does not fill the trail with noise.
+      const DOCUMENT_FIELDS = ["leaseDocumentUrl", "maintenancePortalUrl", "photoUrl"];
+      const documentFields = changedFields(
+        existingProperty as unknown as Record<string, unknown>,
+        updateData as Record<string, unknown>,
+      ).filter((field) => DOCUMENT_FIELDS.includes(field));
+      if (documentFields.length > 0) {
+        recordAuditEvent(ctx, {
+          action: AUDIT_ACTIONS.PROPERTY_DOCUMENTS_CHANGED,
+          entityType: "property",
+          entityId: property.id,
+          summary: `Changed ${documentFields.join(", ")} on ${property.name} (${property.address})`,
+          details: { fields: documentFields, region: property.region },
+        });
+      }
+
       res.json(property);
     } catch (error) {
       sendError(res, error, "Failed to update property");
@@ -3386,7 +3407,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   //
   // What has to happen when SPO takes on a house, and where each of those
   // things stands. A dedicated table rather than a `tasks` row -- the reasoning
-  // is in server/propertySetup.ts, which also owns the item list and the
+  // is in shared/propertySetup.ts, which also owns the item list and the
   // counts, so a screen never computes its own.
   //
   // Staff only. A household leader is told what is set up by their RA, not by
@@ -3475,15 +3496,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      const body = z
-        .object({
-          status: z.enum(SETUP_ITEM_STATUSES),
-          note: z.string().trim().max(500, "Keep the note under 500 characters").nullish(),
-        })
-        .parse(req.body);
+      const body = setPropertySetupItemSchema.parse(req.body);
 
       const item = await storage.setPropertySetupItem(property.id, req.params.itemKey, {
-        status: body.status,
+        status: body.status ?? "open",
         note: body.note ?? null,
         region: property.region,
         setByUserId: ctx.userId,

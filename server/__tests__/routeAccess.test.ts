@@ -2874,6 +2874,118 @@ describe("asset creation input validation", () => {
   });
 });
 
+describe("recording a change to a property's documents", () => {
+  const WEST = { id: "prop-1", name: "Cleveland House", address: "1 Main St", region: "West Central", ownership: "rented", leaseDocumentUrl: null, photoUrl: null };
+
+  beforeEach(() => {
+    storageMock.getProperty.mockResolvedValue(WEST);
+    storageMock.updateProperty.mockImplementation(async (_id, patch) => ({ ...WEST, ...patch }));
+  });
+
+  it("records the lease link changing, naming the house", async () => {
+    actAs(ADMIN);
+    await request("PATCH", "/api/properties/prop-1", {
+      body: { leaseDocumentUrl: "https://drive.google.com/file/d/abc/view" },
+    });
+    expect(storageMock.createAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "property.documents_changed",
+        entityType: "property",
+        entityId: "prop-1",
+        summary: expect.stringContaining("Cleveland House"),
+      }),
+    );
+  });
+
+  it("stays quiet for an edit that touches no document", async () => {
+    // Otherwise an ordinary bedroom-count edit fills the trail with noise and
+    // buries the changes somebody actually has to account for.
+    actAs(ADMIN);
+    await request("PATCH", "/api/properties/prop-1", { body: { bedrooms: 5 } });
+    expect(storageMock.createAuditEvent).not.toHaveBeenCalled();
+  });
+});
+
+describe("links a property stores and later renders as an href", () => {
+  const base = {
+    name: "New House",
+    streetAddress: "9 Oak Ave",
+    city: "St Paul",
+    state: "MN",
+    zipCode: "55104",
+    region: "West Central",
+    chapter: "St Paul",
+    ownership: "rented",
+  };
+
+  beforeEach(() => {
+    storageMock.createProperty.mockImplementation(async (data: Record<string, unknown>) => ({ id: "prop-new", ...data }));
+    storageMock.createPropertySetupItems.mockResolvedValue([]);
+  });
+
+  // The property page renders both of these straight into an href. Validating
+  // in the form only would leave the API accepting whatever it is sent.
+  it.each(["leaseDocumentUrl", "maintenancePortalUrl"])(
+    "refuses a javascript: URL in %s, without storing anything",
+    async (field) => {
+      actAs(ADMIN);
+      const { status } = await request("POST", "/api/properties", {
+        body: { ...base, [field]: "javascript:alert(document.cookie)" },
+      });
+      expect(status).toBe(400);
+      expect(storageMock.createProperty).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["data:text/html,<script>alert(1)</script>", "vbscript:msgbox(1)", "not a url at all"])(
+    "refuses %s",
+    async (value) => {
+      actAs(ADMIN);
+      const { status } = await request("POST", "/api/properties", {
+        body: { ...base, maintenancePortalUrl: value },
+      });
+      expect(status).toBe(400);
+      expect(storageMock.createProperty).not.toHaveBeenCalled();
+    },
+  );
+
+  it("refuses one on update too, without writing", async () => {
+    actAs(ADMIN);
+    storageMock.getProperty.mockResolvedValue({ id: "prop-1", region: "West Central", ownership: "rented" });
+    const { status } = await request("PATCH", "/api/properties/prop-1", {
+      body: { leaseDocumentUrl: "javascript:alert(1)" },
+    });
+    expect(status).toBe(400);
+    expect(storageMock.updateProperty).not.toHaveBeenCalled();
+  });
+
+  // The positive control: without it every refusal above could pass on a
+  // schema that rejects everything.
+  it("accepts an ordinary https link and stores it", async () => {
+    actAs(ADMIN);
+    const { status } = await request("POST", "/api/properties", {
+      body: { ...base, leaseDocumentUrl: "https://drive.google.com/file/d/abc/view" },
+    });
+    expect(status).toBe(200);
+    expect(storageMock.createProperty).toHaveBeenCalledWith(
+      expect.objectContaining({ leaseDocumentUrl: "https://drive.google.com/file/d/abc/view" }),
+    );
+  });
+
+  it("reads an untouched input's empty string as cleared, not as invalid", async () => {
+    // The form sends "" for a field nobody filled in. Rejecting the whole
+    // property for that would be wrong.
+    actAs(ADMIN);
+    const { status } = await request("POST", "/api/properties", {
+      body: { ...base, leaseDocumentUrl: "", maintenancePortalUrl: "" },
+    });
+    expect(status).toBe(200);
+    expect(storageMock.createProperty).toHaveBeenCalledWith(
+      expect.objectContaining({ leaseDocumentUrl: null, maintenancePortalUrl: null }),
+    );
+  });
+});
+
 describe("property creation input validation", () => {
   const baseProperty = {
     name: "Edel House",

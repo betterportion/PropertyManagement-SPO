@@ -32,6 +32,33 @@ const nonNegativeInt = z.coerce
 /** A calendar date or timestamp. Accepts the date string a form sends. */
 const dateFromClient = z.coerce.date();
 
+/**
+ * A link the portal stores and later renders into an `href`.
+ *
+ * Restricted to http and https on purpose. `new URL()` alone accepts
+ * `javascript:`, and every one of these columns is displayed as a clickable
+ * link — so a scheme check at the boundary is what stands between a pasted
+ * string and script running in a staff member's session. Client-side
+ * validation is not that check: the API accepts what the API accepts.
+ *
+ * An empty string means "cleared", not "invalid": an untouched URL input sends
+ * one, and rejecting the whole form for a field nobody filled in would be
+ * wrong. It normalises to null.
+ */
+const httpUrlFromClient = z
+  .string()
+  .trim()
+  .transform((value: string) => (value === "" ? null : value))
+  .refine((value: string | null) => {
+    if (value === null) return true;
+    try {
+      const parsed = new URL(value);
+      return parsed.protocol === "http:" || parsed.protocol === "https:";
+    } catch {
+      return false;
+    }
+  }, "Enter a full web address starting with http:// or https://");
+
 export const sessions = pgTable(
   "sessions",
   {
@@ -388,6 +415,49 @@ export const assets = pgTable("assets", {
   assetTagId: varchar("asset_tag_id"),
   propertyId: varchar("property_id"), // References properties table
   location: varchar("location").notNull(),
+  // ── Lifecycle ────────────────────────────────────────────────────────────
+  // When SPO got it. Nullable and stays that way: tracking is admittedly
+  // patchy, and an asset without one is UNRATED rather than guessed at. The
+  // legacy `ageInYears` above is kept because it is what existing rows have,
+  // but nothing computes a replacement date from it -- a whole-number age with
+  // no reference point cannot be turned back into a date.
+  acquisitionDate: timestamp("acquisition_date"),
+  // Per-asset override of the category default in shared/assetLifecycle.ts.
+  // The category carries the default because per-asset entry alone would be
+  // mostly blank.
+  expectedLifespanYears: integer("expected_lifespan_years"),
+  // An explicit date, which beats anything computed. Editing this is the
+  // PERMANENT correction; the snooze below is the temporary one.
+  replacementDueDate: timestamp("replacement_due_date"),
+  // ── Snooze ───────────────────────────────────────────────────────────────
+  // An RA confident a boiler has more life in it needs to clear it from view
+  // without falsifying the date. It records who, when, why and until when, and
+  // it returns. The reason is the point -- it is what makes next year's budget
+  // conversation possible.
+  snoozedUntil: timestamp("snoozed_until"),
+  snoozeReason: text("snooze_reason"),
+  snoozedByUserId: varchar("snoozed_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  snoozedAt: timestamp("snoozed_at"),
+  // ── Value ────────────────────────────────────────────────────────────────
+  // Alongside purchasePrice, never replacing it: used equipment can be worth
+  // more than it cost, insurance cares about value rather than purchase price,
+  // and dropping the purchase price would lose history nothing can rebuild.
+  currentValue: numeric("current_value", { precision: 12, scale: 2 }),
+  valuedOn: timestamp("valued_on"),
+  // ── Assignment (movable assets) ──────────────────────────────────────────
+  // Optional, and a real reference wherever one exists -- a resident or a staff
+  // account -- with free text only as the fallback for somebody who is neither.
+  // The use case is a staff departure: collect the iPad, the guitar and the
+  // laptop before he leaves.
+  assignedResidentId: varchar("assigned_resident_id").references(() => residents.id, { onDelete: "set null" }),
+  assignedUserId: varchar("assigned_user_id").references(() => users.id, { onDelete: "set null" }),
+  assignedToName: varchar("assigned_to_name"),
+  expectedReturnDate: timestamp("expected_return_date"),
+  // ── Provenance ───────────────────────────────────────────────────────────
+  // Where it came from and how the experience went. Institutional memory that
+  // currently dies at RA handover.
+  acquisitionNotes: text("acquisition_notes"),
+  supplierContactId: varchar("supplier_contact_id").references(() => maintenanceContacts.id, { onDelete: "set null" }),
   region: varchar("region").notNull(),
   buildingAddress: varchar("building_address").notNull(),
   createdAt: timestamp("created_at").defaultNow(),
@@ -400,10 +470,24 @@ export const insertAssetSchema = createInsertSchema(assets)
     createdAt: true,
     updatedAt: true,
   })
+  .omit({
+    // Server-owned: the snooze records who parked the asset and when, taken
+    // from the authenticated actor and the clock. A client-supplied answer to
+    // "who said this boiler was fine" would be worth nothing.
+    snoozedByUserId: true,
+    snoozedAt: true,
+  })
   .extend({
     ageInYears: nonNegativeInt,
     purchasePrice: nonNegativeAmount.nullish(),
+    currentValue: nonNegativeAmount.nullish(),
     lastServiced: dateFromClient.nullish(),
+    acquisitionDate: dateFromClient.nullish(),
+    replacementDueDate: dateFromClient.nullish(),
+    expectedReturnDate: dateFromClient.nullish(),
+    valuedOn: dateFromClient.nullish(),
+    snoozedUntil: dateFromClient.nullish(),
+    expectedLifespanYears: nonNegativeInt.nullish(),
   });
 
 export type Asset = typeof assets.$inferSelect;
@@ -615,6 +699,10 @@ export const insertPropertySchema = createInsertSchema(properties)
     // have no chapter, and a NOT NULL migration would either fail or invent
     // one for them. The boundary is where the rule belongs.
     chapter: z.string().trim().min(1, "Which SPO chapter uses this house?"),
+    // Rendered into an href on the property page, so the scheme is checked
+    // here rather than only in the form -- see httpUrlFromClient.
+    leaseDocumentUrl: httpUrlFromClient.nullish(),
+    maintenancePortalUrl: httpUrlFromClient.nullish(),
     bedrooms: nonNegativeInt.nullish(),
     bathrooms: nonNegativeAmount.nullish(),
     squareFootage: nonNegativeInt.nullish(),
@@ -627,7 +715,7 @@ export const insertPropertySchema = createInsertSchema(properties)
  * The per-property setup checklist: one row per item per house.
  *
  * A dedicated table rather than a `tasks` row, settled and recorded in
- * server/propertySetup.ts. What lives here is only the state; the item list
+ * shared/propertySetup.ts. What lives here is only the state; the item list
  * itself is fixed in code, which is why the row stores `itemKey` rather than a
  * label -- if SPO later edits the list themselves it becomes a config table
  * and these rows keep working unchanged.
@@ -673,8 +761,22 @@ export const insertPropertySetupItemSchema = createInsertSchema(propertySetupIte
     updatedAt: true,
   })
   .extend({
-    note: z.string().max(500, "Keep the note under 500 characters").nullish(),
+    note: z.string().trim().max(500, "Keep the note under 500 characters").nullish(),
   });
+
+/**
+ * What a caller may actually send when setting one checklist item.
+ *
+ * Picked from the schema above rather than written out again: the status
+ * vocabulary and the 500-character limit have exactly one definition, and a
+ * later change to either cannot leave the route enforcing the old one. The
+ * property and the item come from the URL; the region, the actor and the
+ * timestamp come from the server.
+ */
+export const setPropertySetupItemSchema = insertPropertySetupItemSchema.pick({
+  status: true,
+  note: true,
+});
 
 export type PropertySetupItem = typeof propertySetupItems.$inferSelect;
 export type InsertPropertySetupItem = z.infer<typeof insertPropertySetupItemSchema>;
