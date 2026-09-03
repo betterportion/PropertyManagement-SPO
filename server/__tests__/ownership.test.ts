@@ -505,3 +505,111 @@ describe("GET /api/maintenance-requests — ownership filter", () => {
     expect(mockGetProperty).toHaveBeenCalledTimes(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// The closed-request window, over real HTTP
+//
+// The unit tests in authz.test.ts pin the rule. These prove the ROUTE applies
+// it: filtering server-side is the whole point, because a client-side filter
+// over a full fetch hands a household leader exactly the closed requests this
+// narrowing exists to withhold.
+// ---------------------------------------------------------------------------
+
+describe("GET /api/maintenance-requests — the closed-request window", () => {
+  const DAY = 24 * 60 * 60 * 1000;
+  const daysAgo = (n: number) => new Date(Date.now() - n * DAY);
+
+  /** A housemate's request, closed n days ago. */
+  const bobsClosedRequest = (id: string, closedDaysAgo: number | null) => ({
+    id,
+    title: "Old repair",
+    submittedBy: BOB_EMAIL,
+    region: "West Central",
+    buildingAddress: PROPERTY_A.address,
+    status: "completed",
+    completedDate: closedDaysAgo === null ? null : daysAgo(closedDaysAgo),
+  });
+
+  const bobsOpenRequest = {
+    id: "req-open",
+    title: "Current repair",
+    submittedBy: BOB_EMAIL,
+    region: "West Central",
+    buildingAddress: PROPERTY_A.address,
+    status: "pending",
+    completedDate: null,
+  };
+
+  it("withholds an old closed request from a housemate, in the response itself", async () => {
+    mockGetAllRequests.mockResolvedValue([
+      bobsOpenRequest,
+      bobsClosedRequest("req-recent", 10),
+      bobsClosedRequest("req-old", 400),
+    ]);
+    actAsResident(ALICE_ID, ALICE_EMAIL, PROPERTY_A.id);
+
+    const { status, body } = await getJson("/api/maintenance-requests");
+    expect(status).toBe(200);
+    // The old one is absent from the payload, not merely hidden on screen.
+    expect((body as any[]).map((r) => r.id).sort()).toEqual(["req-open", "req-recent"]);
+  });
+
+  it("withholds one closed before close dates were recorded, failing closed", async () => {
+    mockGetAllRequests.mockResolvedValue([bobsClosedRequest("req-undated", null)]);
+    actAsResident(ALICE_ID, ALICE_EMAIL, PROPERTY_A.id);
+
+    const { body } = await getJson("/api/maintenance-requests");
+    expect(body).toEqual([]);
+  });
+
+  it("still gives a resident their own old closed request", async () => {
+    // The window narrows the housemate path, not the ownership one.
+    const alicesOld = { ...bobsClosedRequest("req-mine", 400), submittedBy: ALICE_EMAIL };
+    mockGetAllRequests.mockResolvedValue([alicesOld]);
+    actAsResident(ALICE_ID, ALICE_EMAIL, PROPERTY_A.id);
+
+    const { body } = await getJson("/api/maintenance-requests");
+    expect((body as any[]).map((r) => r.id)).toEqual(["req-mine"]);
+  });
+
+  it("refuses the detail route for an old closed housemate request", async () => {
+    mockGetRequest.mockResolvedValue(bobsClosedRequest("req-old", 400));
+    actAsResident(ALICE_ID, ALICE_EMAIL, PROPERTY_A.id);
+
+    const { status } = await getJson("/api/maintenance-requests/req-old");
+    expect(status).toBe(403);
+  });
+
+  it("allows the detail route for a recently closed one", async () => {
+    // The positive control: without it the refusal above could pass on a rule
+    // that refuses everything.
+    mockGetRequest.mockResolvedValue(bobsClosedRequest("req-recent", 10));
+    actAsResident(ALICE_ID, ALICE_EMAIL, PROPERTY_A.id);
+
+    const { status } = await getJson("/api/maintenance-requests/req-recent");
+    expect(status).toBe(200);
+  });
+
+  it("leaves staff with the full history", async () => {
+    mockGetAllRequests.mockResolvedValue([bobsClosedRequest("req-old", 400)]);
+    activeUserId.value = STAFF_ID;
+    mockGetUser.mockResolvedValue({ id: STAFF_ID, email: STAFF_EMAIL, role: "regional_administrator", isActive: true, propertyId: null });
+    mockGetPermissions.mockResolvedValue(canViewPerms);
+
+    const { body } = await getJson("/api/maintenance-requests");
+    expect((body as any[]).map((r) => r.id)).toEqual(["req-old"]);
+  });
+
+  it("hides an out-of-window photo from a housemate too", async () => {
+    // The photo list inherits each request's visibility, so the window has to
+    // reach it as well -- otherwise the photos outlive the request they are on.
+    mockGetRequest.mockResolvedValue(bobsClosedRequest("req-old", 400));
+    mockGetAllRequestPhotos.mockResolvedValue([
+      { id: "photo-old", requestId: "req-old", imageUrl: "/uploads/abc.jpg" },
+    ]);
+    actAsResident(ALICE_ID, ALICE_EMAIL, PROPERTY_A.id);
+
+    const { body } = await getJson("/api/maintenance-request-photos");
+    expect(body).toEqual([]);
+  });
+});

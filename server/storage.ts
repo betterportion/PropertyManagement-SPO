@@ -12,6 +12,7 @@ import {
   assets,
   assetPhotos,
   maintenanceContacts,
+  contactNotes,
   invoices,
   billingRecords,
   properties,
@@ -50,6 +51,8 @@ import {
   type InsertAssetPhoto,
   type MaintenanceContact,
   type InsertMaintenanceContact,
+  type ContactNote,
+  type InsertContactNote,
   type Invoice,
   type InsertInvoice,
   type BillingRecord,
@@ -287,6 +290,16 @@ export interface IStorage {
   getAllMaintenanceContacts(): Promise<MaintenanceContact[]>;
   updateMaintenanceContact(id: string, data: Partial<InsertMaintenanceContact>): Promise<MaintenanceContact>;
   deleteMaintenanceContact(id: string): Promise<void>;
+
+  // Contractor history
+  /** Every maintenance request this vendor was linked to, newest first. */
+  getRequestsForContact(contactId: string): Promise<MaintenanceRequest[]>;
+  getContactNotes(contactId: string): Promise<ContactNote[]>;
+  getContactNote(id: string): Promise<ContactNote | undefined>;
+  createContactNote(
+    note: InsertContactNote & { contactId: string; authorUserId: string | null; authorEmail: string | null; region: string },
+  ): Promise<ContactNote>;
+  deleteContactNote(id: string): Promise<void>;
 
   // Invoices
   createInvoice(invoice: InsertInvoice): Promise<Invoice>;
@@ -1376,6 +1389,44 @@ export class DatabaseStorage implements IStorage {
   async getUploadByStorageKey(storageKey: string): Promise<Upload | undefined> {
     const [found] = await db.select().from(uploads).where(eq(uploads.storageKey, storageKey));
     return found;
+  }
+
+  // Contractor history Implementation
+  //
+  // Mostly a read over data that already exists: request_contacts has linked
+  // vendors to requests all along, there was simply nowhere to read it from.
+  async getRequestsForContact(contactId: string): Promise<MaintenanceRequest[]> {
+    const rows = await db
+      .select({ request: maintenanceRequests })
+      .from(requestContacts)
+      .innerJoin(maintenanceRequests, eq(requestContacts.requestId, maintenanceRequests.id))
+      .where(eq(requestContacts.contactId, contactId))
+      .orderBy(desc(maintenanceRequests.submittedDate));
+    return rows.map((row) => row.request);
+  }
+
+  async getContactNotes(contactId: string): Promise<ContactNote[]> {
+    return await db
+      .select()
+      .from(contactNotes)
+      .where(eq(contactNotes.contactId, contactId))
+      .orderBy(desc(contactNotes.createdAt));
+  }
+
+  async getContactNote(id: string): Promise<ContactNote | undefined> {
+    const [row] = await db.select().from(contactNotes).where(eq(contactNotes.id, id));
+    return row;
+  }
+
+  async createContactNote(
+    note: InsertContactNote & { contactId: string; authorUserId: string | null; authorEmail: string | null; region: string },
+  ): Promise<ContactNote> {
+    const [row] = await db.insert(contactNotes).values(note).returning();
+    return row;
+  }
+
+  async deleteContactNote(id: string): Promise<void> {
+    await db.delete(contactNotes).where(eq(contactNotes.id, id));
   }
 
   // Property setup checklist Implementation

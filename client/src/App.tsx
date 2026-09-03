@@ -26,6 +26,7 @@ import Residents from "@/pages/Residents";
 import Finances from "@/pages/Finances";
 import Tasks from "@/pages/Tasks";
 import Contacts from "@/pages/Contacts";
+import ContactDetail from "@/pages/ContactDetail";
 import Properties from "@/pages/Properties";
 import PropertyDetail from "@/pages/PropertyDetail";
 import MyWalkthroughs from "@/pages/MyWalkthroughs";
@@ -69,6 +70,7 @@ function Router() {
         <Route path="/assets/:id" component={AssetDetail} />
         <Route path="/safety" component={Safety} />
         <Route path="/contacts" component={Contacts} />
+        <Route path="/contacts/:id" component={ContactDetail} />
         <Route path="/settings" component={AdminSettings} />
         {/* Internal design reference — staff only; residents fall through to Not Found. */}
         <Route path="/styleguide" component={Styleguide} />

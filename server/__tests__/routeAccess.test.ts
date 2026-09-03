@@ -2816,6 +2816,208 @@ describe("paging and filtering the activity log", () => {
 // caller name someone else as the author of a photo.
 // ---------------------------------------------------------------------------
 
+describe("what an RA knows about a contractor", () => {
+  const WEST_CONTACT = { id: "c-west", name: "Dana Ruiz", company: "Ruiz Plumbing", region: "West Central" };
+  const EAST_CONTACT = { id: "c-east", name: "Sam Fox", company: "Fox HVAC", region: "East Central" };
+
+  const CONTACTS = { canViewContacts: true, canManageContacts: true };
+  const westLead = (permissions: Record<string, unknown> = CONTACTS) =>
+    actAs(STAFF, { ...permissions, allowedRegions: ["West Central"] });
+
+  beforeEach(() => {
+    storageMock.getMaintenanceContact.mockImplementation(async (id: string) =>
+      id === "c-west" ? WEST_CONTACT : id === "c-east" ? EAST_CONTACT : undefined,
+    );
+    storageMock.getRequestsForContact.mockResolvedValue([]);
+    storageMock.getContactNotes.mockResolvedValue([]);
+    storageMock.createContactNote.mockImplementation(async (note) => ({ id: "note-1", ...note }));
+  });
+
+  // ── Reading their history ────────────────────────────────────────────────
+
+  it("refuses an anonymous caller on both reads", async () => {
+    expect((await get("/api/contacts/c-west/requests")).status).toBe(401);
+    expect((await get("/api/contacts/c-west/notes")).status).toBe(401);
+  });
+
+  it("refuses a resident, without reading anything", async () => {
+    actAs(ALICE, ALL_MAINTENANCE);
+    expect((await get("/api/contacts/c-west/requests")).status).toBe(403);
+    expect(storageMock.getRequestsForContact).not.toHaveBeenCalled();
+  });
+
+  it("refuses a contractor in another region, without reading their history", async () => {
+    westLead();
+    expect((await get("/api/contacts/c-east/requests")).status).toBe(403);
+    expect(storageMock.getRequestsForContact).not.toHaveBeenCalled();
+  });
+
+  it("gives a lead the requests a contractor in their region touched", async () => {
+    westLead();
+    storageMock.getRequestsForContact.mockResolvedValue([
+      { id: "req-1", title: "Leaky tap", region: "West Central" },
+    ]);
+    const { status, body } = await get("/api/contacts/c-west/requests");
+    expect(status).toBe(200);
+    expect(body.map((r: { id: string }) => r.id)).toEqual(["req-1"]);
+  });
+
+  it("filters out a linked request that sits outside the caller's regions", async () => {
+    // A vendor can work across regions. Reading their page must not become a
+    // way to see requests the caller could not otherwise open.
+    westLead();
+    storageMock.getRequestsForContact.mockResolvedValue([
+      { id: "req-west", region: "West Central" },
+      { id: "req-east", region: "East Central" },
+    ]);
+    const { body } = await get("/api/contacts/c-west/requests");
+    expect(body.map((r: { id: string }) => r.id)).toEqual(["req-west"]);
+  });
+
+  // ── Writing a note ───────────────────────────────────────────────────────
+
+  const addNote = (contactId: string, body: unknown) =>
+    request("POST", `/api/contacts/${contactId}/notes`, { body });
+
+  it("refuses a note from staff holding only the view permission", async () => {
+    westLead({ canViewContacts: true });
+    const { status } = await addNote("c-west", { body: "Turned up late twice" });
+    expect(status).toBe(403);
+    expect(storageMock.createContactNote).not.toHaveBeenCalled();
+  });
+
+  it("refuses a note on a contractor in another region", async () => {
+    westLead();
+    const { status } = await addNote("c-east", { body: "Good work" });
+    expect(status).toBe(403);
+    expect(storageMock.createContactNote).not.toHaveBeenCalled();
+  });
+
+  it("refuses an empty note", async () => {
+    // An empty note tells the next RA nothing, which is the only thing this
+    // record is for.
+    westLead();
+    expect((await addNote("c-west", { body: "   " })).status).toBe(400);
+    expect(storageMock.createContactNote).not.toHaveBeenCalled();
+  });
+
+  // The positive control.
+  it("takes the author and the region from the server, never the body", async () => {
+    westLead();
+    const { status } = await addNote("c-west", {
+      body: "Only ones who will touch this boiler",
+      authorUserId: "u-somebody-else",
+      authorEmail: "someone@else.com",
+      region: "East Central",
+    });
+    expect(status).toBe(200);
+    const [note] = storageMock.createContactNote.mock.calls[0];
+    expect(note.authorUserId).toBe(STAFF.id);
+    expect(note.authorEmail).toBe(STAFF.email);
+    expect(note.region).toBe("West Central");
+    expect(note.contactId).toBe("c-west");
+  });
+
+  it("has no rating field to set", async () => {
+    // Deliberate: a star score on a vendor SPO may have to keep using invites
+    // arguments about the number and tells an incoming RA less than a
+    // paragraph does. A rating sent anyway is dropped, never stored.
+    westLead();
+    await addNote("c-west", { body: "Fine", rating: 5 });
+    const [note] = storageMock.createContactNote.mock.calls[0];
+    expect(note).not.toHaveProperty("rating");
+  });
+
+  it("answers 404 for a contractor that does not exist, without writing", async () => {
+    westLead();
+    expect((await addNote("c-nowhere", { body: "x" })).status).toBe(404);
+    expect(storageMock.createContactNote).not.toHaveBeenCalled();
+  });
+
+  // ── Deleting one ─────────────────────────────────────────────────────────
+
+  it("refuses to delete a note in another region, without deleting", async () => {
+    westLead();
+    storageMock.getContactNote.mockResolvedValue({ id: "note-9", contactId: "c-east", region: "East Central" });
+    const { status } = await request("DELETE", "/api/contact-notes/note-9", {});
+    expect(status).toBe(403);
+    expect(storageMock.deleteContactNote).not.toHaveBeenCalled();
+  });
+
+  it("deletes one in the caller's own region", async () => {
+    westLead();
+    storageMock.getContactNote.mockResolvedValue({ id: "note-1", contactId: "c-west", region: "West Central" });
+    const { status } = await request("DELETE", "/api/contact-notes/note-1", {});
+    expect(status).toBe(200);
+    expect(storageMock.deleteContactNote).toHaveBeenCalledWith("note-1");
+  });
+});
+
+describe("suggesting where in the house a problem is", () => {
+  const WEST = { id: "prop-west", name: "Cleveland House", region: "West Central", address: "1 Main St" };
+  const EAST = { id: "prop-east", name: "Como House", region: "East Central", address: "9 Elm" };
+
+  beforeEach(() => {
+    storageMock.getProperty.mockImplementation(async (id: string) =>
+      id === "prop-west" ? WEST : id === "prop-east" ? EAST : undefined,
+    );
+    storageMock.getWalkthroughRoomsByBuilding.mockImplementation(async (address: string) =>
+      address === "1 Main St"
+        ? [
+            { id: "r1", name: "Kitchen", displayOrder: 0 },
+            { id: "r2", name: "Living room", displayOrder: 1 },
+            // The same room from an earlier walkthrough of the same house.
+            { id: "r3", name: "Kitchen", displayOrder: 0 },
+          ]
+        : [{ id: "r9", name: "Basement", displayOrder: 0 }],
+    );
+  });
+
+  it("refuses an anonymous caller", async () => {
+    expect((await get("/api/maintenance-locations?propertyId=prop-west")).status).toBe(401);
+  });
+
+  it("gives staff the room names of a house they cover, each once", async () => {
+    // Rooms repeat across a house's walkthroughs; the vocabulary does not.
+    actAs(STAFF, { ...ALL_MAINTENANCE, allowedRegions: ["West Central"] });
+    const { status, body } = await get("/api/maintenance-locations?propertyId=prop-west");
+    expect(status).toBe(200);
+    expect(body).toEqual(["Kitchen", "Living room"]);
+  });
+
+  it("refuses staff a house outside their regions, without reading its rooms", async () => {
+    actAs(STAFF, { ...ALL_MAINTENANCE, allowedRegions: ["West Central"] });
+    const { status } = await get("/api/maintenance-locations?propertyId=prop-east");
+    expect(status).toBe(403);
+    expect(storageMock.getWalkthroughRoomsByBuilding).not.toHaveBeenCalled();
+  });
+
+  it("ignores the propertyId a resident asks for and uses their own house", async () => {
+    // Otherwise this route becomes a way to enumerate another house's rooms,
+    // which is a second read path into walkthrough data -- the exact shape of
+    // both historic authorization gaps in this codebase.
+    actAs({ ...ALICE, propertyId: "prop-west" } as typeof ALICE, ALL_MAINTENANCE);
+    const { status, body } = await get("/api/maintenance-locations?propertyId=prop-east");
+    expect(status).toBe(200);
+    expect(body).toEqual(["Kitchen", "Living room"]);
+    expect(storageMock.getWalkthroughRoomsByBuilding).toHaveBeenCalledWith("1 Main St");
+  });
+
+  it("gives a resident with no linked house an empty list, not an error", async () => {
+    // A blank suggestion list still leaves the free-text field usable, which
+    // is the fallback the whole feature is built around.
+    actAs(ALICE, ALL_MAINTENANCE);
+    const { status, body } = await get("/api/maintenance-locations");
+    expect(status).toBe(200);
+    expect(body).toEqual([]);
+  });
+
+  it("answers 404 for a house that does not exist", async () => {
+    actAs(STAFF, { ...ALL_MAINTENANCE, allowedRegions: ["West Central"] });
+    expect((await get("/api/maintenance-locations?propertyId=prop-nowhere")).status).toBe(404);
+  });
+});
+
 describe("snoozing an asset an RA is confident about", () => {
   const WEST_ASSET = { id: "asset-west", name: "Rheem water heater", region: "West Central", buildingAddress: "1 Main St" };
   const EAST_ASSET = { id: "asset-east", name: "Carrier furnace", region: "East Central", buildingAddress: "9 Elm" };

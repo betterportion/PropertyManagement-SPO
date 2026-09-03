@@ -60,6 +60,7 @@ import {
   insertAssetSchema,
   insertAssetPhotoSchema,
   insertMaintenanceContactSchema,
+  insertContactNoteSchema,
   insertInvoiceSchema,
   insertBillingRecordSchema,
   insertPropertySchema,
@@ -540,6 +541,60 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(filteredRequests);
     } catch (error) {
       sendError(res, error, "Failed to fetch maintenance requests");
+    }
+  });
+
+  /**
+   * The room names to offer when somebody says where a problem is.
+   *
+   * Free text alone will not group "living room" and "Living Rm", which
+   * defeats the point -- the point being to notice that these blinds have
+   * broken every year since we started renting this house. So the suggestions
+   * come from the house's own walkthrough rooms, and free text stays available
+   * as the fallback for anything the checklist has no word for.
+   *
+   * A resident's house is taken from their account and the query parameter is
+   * ignored outright. Honouring it would turn this into a way to enumerate
+   * another house's rooms -- a second read path into walkthrough data, which
+   * is the exact shape of both historic authorization gaps in this codebase.
+   */
+  app.get('/api/maintenance-locations', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requirePermission(res, ctx, "canViewMaintenance", "canManageMaintenance")) return;
+
+      let buildingAddress: string | null;
+
+      if (ctx.isResident) {
+        buildingAddress = await residentHouseAddress(ctx);
+        // No house claim means no suggestions -- and the free-text field still
+        // works, which is the fallback this whole feature is built around.
+        if (!buildingAddress) return res.json([]);
+      } else {
+        const property = await storage.getProperty(String(req.query.propertyId ?? ""));
+        if (!property) {
+          return res.status(404).json({ message: "Property not found" });
+        }
+        if (!requireRegion(res, ctx, property.region)) return;
+        buildingAddress = property.address;
+      }
+
+      const rooms = await storage.getWalkthroughRoomsByBuilding(buildingAddress);
+
+      // One entry per room name. A house's rooms repeat across its
+      // walkthroughs; its vocabulary does not.
+      const names: string[] = [];
+      const seen = new Set<string>();
+      for (const room of rooms) {
+        if (seen.has(room.name)) continue;
+        seen.add(room.name);
+        names.push(room.name);
+      }
+
+      res.json(names);
+    } catch (error) {
+      sendError(res, error, "Failed to fetch locations");
     }
   });
 
@@ -3126,6 +3181,116 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Invoices Routes
+  // ---------------------------------------------------------------------------
+  // Contractor history
+  //
+  // Mostly a read over data that already exists: request_contacts has linked
+  // vendors to requests all along, and invoices already carry a contactId --
+  // there was simply nowhere to read it. The concern this answers is real
+  // though: what an RA learned working with a vendor currently dies at
+  // handover.
+  //
+  // There is deliberately NO RATING. A star score on a vendor SPO may have to
+  // keep using invites arguments about the number, and tells an incoming RA
+  // far less than a paragraph does.
+  // ---------------------------------------------------------------------------
+
+  /** The contact, once, with the checks every contractor-history route makes. */
+  async function contactForHistory(req: any, res: any, ctx: AuthContext) {
+    const contact = await storage.getMaintenanceContact(req.params.id);
+    if (!contact) {
+      res.status(404).json({ message: "Contact not found" });
+      return undefined;
+    }
+    if (!requireRegion(res, ctx, contact.region)) return undefined;
+    return contact;
+  }
+
+  app.get('/api/contacts/:id/requests', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canViewContacts", "canManageContacts")) return;
+
+      const contact = await contactForHistory(req, res, ctx);
+      if (!contact) return;
+
+      // Filtered again by the REQUEST's own region, not the contact's: a
+      // vendor can work across regions, and reading their page must not become
+      // a way to see requests the caller could not otherwise open.
+      res.json(filterByRegion(ctx, await storage.getRequestsForContact(contact.id)));
+    } catch (error) {
+      sendError(res, error, "Failed to fetch this contractor's requests");
+    }
+  });
+
+  app.get('/api/contacts/:id/notes', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canViewContacts", "canManageContacts")) return;
+
+      const contact = await contactForHistory(req, res, ctx);
+      if (!contact) return;
+
+      res.json(await storage.getContactNotes(contact.id));
+    } catch (error) {
+      sendError(res, error, "Failed to fetch notes on this contractor");
+    }
+  });
+
+  app.post('/api/contacts/:id/notes', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageContacts")) return;
+
+      const contact = await contactForHistory(req, res, ctx);
+      if (!contact) return;
+
+      // Only `body` survives the parse. Everything that says whose note this
+      // is comes from the session, and the region from the contact -- a note
+      // whose author the client chose would be worth nothing. Anything else
+      // sent (a rating, say) is dropped rather than stored.
+      const { body } = insertContactNoteSchema.parse(req.body);
+
+      const note = await storage.createContactNote({
+        body,
+        contactId: contact.id,
+        authorUserId: ctx.userId,
+        authorEmail: ctx.user.email ?? null,
+        region: contact.region,
+      });
+
+      res.json(note);
+    } catch (error) {
+      sendError(res, error, "Failed to save the note");
+    }
+  });
+
+  app.delete('/api/contact-notes/:id', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageContacts")) return;
+
+      const note = await storage.getContactNote(req.params.id);
+      if (!note) {
+        return res.status(404).json({ message: "Note not found" });
+      }
+      if (!requireRegion(res, ctx, note.region)) return;
+
+      await storage.deleteContactNote(req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      sendError(res, error, "Failed to delete the note");
+    }
+  });
+
   app.get('/api/invoices', isAuthenticated, async (req: any, res) => {
     try {
       const ctx = await requireActiveUser(req, res);

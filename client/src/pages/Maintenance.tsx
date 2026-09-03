@@ -24,6 +24,7 @@ import { z } from "zod";
 import { Section, Container, PageHeader, PageStack } from "@/components/layout/page";
 import { EmptyState, ErrorState, LoadingState } from "@/components/states";
 import { useUrlState } from "@/hooks/use-url-state";
+import { CLOSED_RANGES, closedWithinRange, locationOptions, type ClosedRange } from "@/lib/maintenanceFilters";
 import { ClipboardList, SlidersHorizontal } from "lucide-react";
 
 const createRequestSchema = insertMaintenanceRequestSchema.extend({
@@ -53,10 +54,21 @@ interface User {
 }
 
 export default function Maintenance() {
-  const [filters, setFilters, resetFilters] = useUrlState({ q: "", region: "all", building: "all" });
+  const [filters, setFilters, resetFilters] = useUrlState({
+    q: "",
+    region: "all",
+    building: "all",
+    room: "all",
+    // 90 days by default rather than "all": an RA opening this page wants
+    // what is happening, not four years of finished work. "All closed
+    // requests" is one click away.
+    closed: "90",
+  });
   const searchQuery = filters.q;
   const selectedRegion = filters.region;
   const selectedBuilding = filters.building;
+  const selectedRoom = filters.room;
+  const closedRange = filters.closed as ClosedRange;
   const [selectedRequest, setSelectedRequest] = useState<MaintenanceRequest | null>(null);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
@@ -84,12 +96,23 @@ export default function Maintenance() {
     }
   };
 
-  const filteredRequests = requests.filter((r) => {
+  // The room options come from the house in view, not from the whole
+  // portfolio -- offering every room name SPO has ever recorded would make the
+  // filter useless the moment there is more than one house.
+  const requestsInScope = requests.filter(
+    (r) =>
+      (selectedRegion === "all" || r.region === selectedRegion) &&
+      (selectedBuilding === "all" || r.buildingAddress === selectedBuilding),
+  );
+  const roomOptions = locationOptions(requestsInScope);
+
+  const filteredRequests = requestsInScope.filter((r) => {
     const matchesSearch = r.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       r.location.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesRegion = selectedRegion === "all" || r.region === selectedRegion;
-    const matchesBuilding = selectedBuilding === "all" || r.buildingAddress === selectedBuilding;
-    return matchesSearch && matchesRegion && matchesBuilding;
+    const matchesRoom = selectedRoom === "all" || r.location === selectedRoom;
+    // Open work always survives the range; the range is about history.
+    const matchesRange = closedWithinRange(r, closedRange);
+    return matchesSearch && matchesRoom && matchesRange;
   });
 
   const pendingRequests = filteredRequests.filter((r) => r.status === "pending");
@@ -328,6 +351,31 @@ export default function Maintenance() {
           onBuildingChange={(value) => setFilters({ building: value })}
           buildings={uniqueBuildings}
         />
+        {roomOptions.length > 0 && (
+          <Select value={selectedRoom} onValueChange={(value) => setFilters({ room: value })}>
+            <SelectTrigger className="w-44" data-testid="select-filter-room" aria-label="Filter by room">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Every room</SelectItem>
+              {roomOptions.map((room) => (
+                <SelectItem key={room} value={room}>{room}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+
+        <Select value={closedRange} onValueChange={(value) => setFilters({ closed: value })}>
+          <SelectTrigger className="w-56" data-testid="select-filter-closed-range" aria-label="How far back to show closed requests">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {CLOSED_RANGES.map((range) => (
+              <SelectItem key={range.value} value={range.value}>{range.label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
         <div className="relative flex-1 min-w-0 md:min-w-64">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input

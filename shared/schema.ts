@@ -562,6 +562,59 @@ export const insertMaintenanceContactSchema = createInsertSchema(maintenanceCont
   updatedAt: true,
 });
 
+/**
+ * Dated notes on a vendor.
+ *
+ * What an RA learned working with somebody: they turned up late twice, they
+ * are the only ones who will touch this boiler, do not use them for tile. That
+ * knowledge currently dies at RA handover, which is the whole reason this
+ * exists.
+ *
+ * **There is deliberately no rating field.** A star score on a vendor SPO may
+ * have to keep using invites arguments about the number, and tells an incoming
+ * RA far less than a paragraph does. Dated entries in somebody's own words are
+ * the record worth keeping.
+ *
+ * Notes are append-and-delete rather than editable: a dated note somebody
+ * revised later is no longer the record of what they thought at the time.
+ * `region` is denormalised from the contact so region scoping applies without
+ * a join, as everywhere else.
+ */
+export const contactNotes = pgTable("contact_notes", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  contactId: varchar("contact_id").notNull().references(() => maintenanceContacts.id, { onDelete: "cascade" }),
+  body: text("body").notNull(),
+  // Set null rather than restrict: the note outlives the RA who wrote it, and
+  // deleting a user must never be blocked.
+  authorUserId: varchar("author_user_id").references(() => users.id, { onDelete: "set null" }),
+  /** Kept alongside the id so a deleted account's note still says who wrote it. */
+  authorEmail: varchar("author_email"),
+  region: varchar("region").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertContactNoteSchema = createInsertSchema(contactNotes)
+  .omit({
+    id: true,
+    // Server-owned: the author and the region come from the session and the
+    // contact. A note whose author the client chose is worth nothing.
+    authorUserId: true,
+    authorEmail: true,
+    region: true,
+    contactId: true,
+    createdAt: true,
+  })
+  .extend({
+    body: z
+      .string()
+      .trim()
+      .min(1, "Write something — an empty note tells the next RA nothing")
+      .max(2000, "Keep the note under 2000 characters"),
+  });
+
+export type ContactNote = typeof contactNotes.$inferSelect;
+export type InsertContactNote = z.infer<typeof insertContactNoteSchema>;
+
 export type MaintenanceContact = typeof maintenanceContacts.$inferSelect;
 export type InsertMaintenanceContact = z.infer<typeof insertMaintenanceContactSchema>;
 
