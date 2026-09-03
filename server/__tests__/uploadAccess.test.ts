@@ -340,6 +340,58 @@ describe("canReadUpload, through an asset photo", () => {
   });
 });
 
+describe("canReadUpload, through a property's front-of-house photo", () => {
+  const propertyReference: UploadReference = {
+    kind: "property",
+    record: { id: "prop-1", region: "Twin Cities", address: "1 Main St" } as never,
+  };
+
+  beforeEach(() => {
+    findUploadReferences.mockResolvedValue([propertyReference]);
+  });
+
+  it("lets staff in their region see the house they cover", async () => {
+    const ctx = context({
+      permissions: permissions({ canViewProperties: true }),
+      allowedRegions: ["Twin Cities"],
+    });
+    expect(await canReadUpload(ctx, KEY, undefined)).toBe(true);
+  });
+
+  it("refuses staff covering another region", async () => {
+    const ctx = context({
+      permissions: permissions({ canViewProperties: true }),
+      allowedRegions: ["Chicago"],
+    });
+    expect(await canReadUpload(ctx, KEY, undefined)).toBe(false);
+  });
+
+  it("refuses staff holding no property permission, even in the right region", async () => {
+    const ctx = context({
+      permissions: permissions({ canViewMaintenance: true }),
+      allowedRegions: ["Twin Cities"],
+    });
+    expect(await canReadUpload(ctx, KEY, undefined)).toBe(false);
+  });
+
+  it("refuses a resident, including one linked to that very house", async () => {
+    // No resident surface shows a house photo yet, so nobody at that tier has
+    // a reason to fetch one. The linked-to-this-house case is the one worth
+    // pinning: it is the case a later change would be tempted to allow, and
+    // when the resource hub needs it the rule to add is a house match, never
+    // the region path their permissions row happens to name.
+    getProperty.mockResolvedValue({ id: "prop-1", address: "1 Main St", region: "Twin Cities" });
+    const ctx = context({
+      role: "resident",
+      userId: "res-1",
+      permissions: permissions({ canViewProperties: true }),
+      allowedRegions: ["Twin Cities"],
+    });
+    (ctx.user as { propertyId?: string }).propertyId = "prop-1";
+    expect(await canReadUpload(ctx, KEY, undefined)).toBe(false);
+  });
+});
+
 describe("canReadUpload, when several records share a file", () => {
   it("allows access as soon as one of them is readable", async () => {
     findUploadReferences.mockResolvedValue([

@@ -32,11 +32,21 @@ export const SEASONAL_CREATE_WINDOW_DAYS = 60;
 
 const DAY_MS = 24 * 60 * 60 * 1_000;
 
+/**
+ * How far ahead the renew-or-leave decision is raised — two months.
+ *
+ * The same horizon the dashboard's lease item uses, so the reminder and the
+ * dashboard cannot tell an RA two different things about the same date.
+ */
+export const LEASE_RENEWAL_NOTICE_DAYS = 60;
+
 export interface SeasonalLease {
   propertyId: string;
   name: string;
   region: string;
   leaseEndDate: Date;
+  /** When the renew-or-leave decision is due. Null for a house with none. */
+  leaseRenewalDate: Date | null;
   renewalDecision: string;
 }
 
@@ -101,6 +111,30 @@ export function dueSeasonalTasks(inputs: SeasonalInputs, now: Date): SeasonalTas
     }
   }
 
+  // The renew-or-leave decision, off the lease renewal date. It resolves when
+  // the decision is recorded either way -- properties.renewalDecision already
+  // exists, so the reminder can stop rather than nag about something somebody
+  // has already settled.
+  for (const lease of inputs.rentedLeases) {
+    if (lease.renewalDecision !== "undecided") continue;
+    // The renewal date when there is one, and the lease END otherwise: a house
+    // that never had a decision date still has a lease that runs out, and that
+    // is the date the decision is actually against.
+    const decisionBy = lease.leaseRenewalDate ?? lease.leaseEndDate;
+    if (!decisionBy) continue;
+    const appear = daysBefore(decisionBy, LEASE_RENEWAL_NOTICE_DAYS);
+    if (inCreateWindow(appear, now)) {
+      specs.push({
+        sourceKey: `lease-renewal:${lease.propertyId}:${isoDay(decisionBy)}`,
+        title: `Renew or leave? — ${lease.name}`,
+        notes:
+          "This house's lease renewal decision is due. Record the decision on the property so this reminder clears.",
+        region: lease.region,
+        dueDate: decisionBy,
+      });
+    }
+  }
+
   for (const lease of inputs.rentedLeases) {
     if (lease.renewalDecision === "renewing") continue; // staying put — no shut-off
     const appear = daysBefore(lease.leaseEndDate, 14);
@@ -129,6 +163,7 @@ export async function generateSeasonalTasks(now: Date): Promise<number> {
       name: p.name,
       region: p.region,
       leaseEndDate: new Date(p.leaseEndDate as Date),
+      leaseRenewalDate: p.leaseRenewalDate ? new Date(p.leaseRenewalDate) : null,
       renewalDecision: p.renewalDecision,
     }));
 

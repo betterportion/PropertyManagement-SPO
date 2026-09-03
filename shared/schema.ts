@@ -32,6 +32,33 @@ const nonNegativeInt = z.coerce
 /** A calendar date or timestamp. Accepts the date string a form sends. */
 const dateFromClient = z.coerce.date();
 
+/**
+ * A link the portal stores and later renders into an `href`.
+ *
+ * Restricted to http and https on purpose. `new URL()` alone accepts
+ * `javascript:`, and every one of these columns is displayed as a clickable
+ * link — so a scheme check at the boundary is what stands between a pasted
+ * string and script running in a staff member's session. Client-side
+ * validation is not that check: the API accepts what the API accepts.
+ *
+ * An empty string means "cleared", not "invalid": an untouched URL input sends
+ * one, and rejecting the whole form for a field nobody filled in would be
+ * wrong. It normalises to null.
+ */
+const httpUrlFromClient = z
+  .string()
+  .trim()
+  .transform((value: string) => (value === "" ? null : value))
+  .refine((value: string | null) => {
+    if (value === null) return true;
+    try {
+      const parsed = new URL(value);
+      return parsed.protocol === "http:" || parsed.protocol === "https:";
+    } catch {
+      return false;
+    }
+  }, "Enter a full web address starting with http:// or https://");
+
 export const sessions = pgTable(
   "sessions",
   {
@@ -92,6 +119,13 @@ export const userPermissions = pgTable("user_permissions", {
   // starts from nobody, not from everybody; admins bypass it as they bypass
   // every flag.
   canManagePropertySetup: boolean("can_manage_property_setup").notNull().default(false),
+  // The resource hub -- the one page a household leader or steward goes to.
+  // A separate flag rather than reading canCompleteWalkthroughs, for the same
+  // reason that flag is separate from canManageWalkthroughs: they are
+  // different grants, and honouring one for the other means a later change to
+  // either silently moves the other. Granted by hand per account; no role gets
+  // it by default.
+  canViewResourceHub: boolean("can_view_resource_hub").notNull().default(false),
   allowedRegions: text("allowed_regions").array().default([]),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
@@ -133,6 +167,26 @@ export const maintenanceRequests = pgTable("maintenance_requests", {
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
+
+/**
+ * The statuses that mean a request is finished.
+ *
+ * Beside the table whose column it describes, and shared, because three
+ * separate places decide what "closed" means: the close-date stamping in
+ * server/maintenanceStatus.ts, the resident visibility window in
+ * server/authz.ts, and the range filter on the maintenance list. Adding a
+ * fifth status with three copies of this list would silently widen or narrow
+ * what a household leader can read, which is the quietest possible way to get
+ * an authorization rule wrong.
+ *
+ * `cancelled` counts. `completedDate` is the *close* date and is stamped for a
+ * cancelled request too, so a cancelled request is finished work.
+ */
+export const CLOSED_MAINTENANCE_STATUSES = ["completed", "cancelled"] as const;
+
+export function isClosedMaintenanceStatus(status: string | null | undefined): boolean {
+  return status != null && (CLOSED_MAINTENANCE_STATUSES as readonly string[]).includes(status);
+}
 
 export const insertMaintenanceRequestSchema = createInsertSchema(maintenanceRequests).omit({
   id: true,
@@ -314,6 +368,37 @@ export const insertWalkthroughItemSchema = createInsertSchema(walkthroughItems)
 export type WalkthroughItem = typeof walkthroughItems.$inferSelect;
 export type InsertWalkthroughItem = z.infer<typeof insertWalkthroughItemSchema>;
 
+/**
+ * One flagged checklist item, carrying enough of its room, walkthrough and
+ * house to be read on a list without a second request per row.
+ *
+ * The stated pain point this answers is a deep hole in a wall surfacing
+ * without somebody opening every walkthrough one by one. That means the row
+ * has to name the house and the room, not just the item -- so this is a
+ * flattened read shape rather than a `WalkthroughItem`, and it is assembled by
+ * one join in the storage layer rather than N+1 lookups in a handler.
+ *
+ * Deliberately not a table. Nothing is stored in this shape; it exists only
+ * as the answer to one query.
+ */
+export interface FlaggedWalkthroughItem {
+  itemId: string;
+  label: string;
+  condition: WalkthroughCondition;
+  notes: string | null;
+  roomId: string;
+  roomName: string;
+  walkthroughId: string;
+  walkthroughDate: Date | string;
+  walkthroughType: Walkthrough["type"];
+  walkthroughStatus: Walkthrough["status"];
+  propertyId: string;
+  buildingAddress: string;
+  region: string;
+  /** How many photos the room carries, so a row can say whether there is one. */
+  roomPhotoCount: number;
+}
+
 // Walkthrough Photos
 export const walkthroughPhotos = pgTable("walkthrough_photos", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -357,6 +442,49 @@ export const assets = pgTable("assets", {
   assetTagId: varchar("asset_tag_id"),
   propertyId: varchar("property_id"), // References properties table
   location: varchar("location").notNull(),
+  // ── Lifecycle ────────────────────────────────────────────────────────────
+  // When SPO got it. Nullable and stays that way: tracking is admittedly
+  // patchy, and an asset without one is UNRATED rather than guessed at. The
+  // legacy `ageInYears` above is kept because it is what existing rows have,
+  // but nothing computes a replacement date from it -- a whole-number age with
+  // no reference point cannot be turned back into a date.
+  acquisitionDate: timestamp("acquisition_date"),
+  // Per-asset override of the category default in shared/assetLifecycle.ts.
+  // The category carries the default because per-asset entry alone would be
+  // mostly blank.
+  expectedLifespanYears: integer("expected_lifespan_years"),
+  // An explicit date, which beats anything computed. Editing this is the
+  // PERMANENT correction; the snooze below is the temporary one.
+  replacementDueDate: timestamp("replacement_due_date"),
+  // ── Snooze ───────────────────────────────────────────────────────────────
+  // An RA confident a boiler has more life in it needs to clear it from view
+  // without falsifying the date. It records who, when, why and until when, and
+  // it returns. The reason is the point -- it is what makes next year's budget
+  // conversation possible.
+  snoozedUntil: timestamp("snoozed_until"),
+  snoozeReason: text("snooze_reason"),
+  snoozedByUserId: varchar("snoozed_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  snoozedAt: timestamp("snoozed_at"),
+  // ── Value ────────────────────────────────────────────────────────────────
+  // Alongside purchasePrice, never replacing it: used equipment can be worth
+  // more than it cost, insurance cares about value rather than purchase price,
+  // and dropping the purchase price would lose history nothing can rebuild.
+  currentValue: numeric("current_value", { precision: 12, scale: 2 }),
+  valuedOn: timestamp("valued_on"),
+  // ── Assignment (movable assets) ──────────────────────────────────────────
+  // Optional, and a real reference wherever one exists -- a resident or a staff
+  // account -- with free text only as the fallback for somebody who is neither.
+  // The use case is a staff departure: collect the iPad, the guitar and the
+  // laptop before he leaves.
+  assignedResidentId: varchar("assigned_resident_id").references(() => residents.id, { onDelete: "set null" }),
+  assignedUserId: varchar("assigned_user_id").references(() => users.id, { onDelete: "set null" }),
+  assignedToName: varchar("assigned_to_name"),
+  expectedReturnDate: timestamp("expected_return_date"),
+  // ── Provenance ───────────────────────────────────────────────────────────
+  // Where it came from and how the experience went. Institutional memory that
+  // currently dies at RA handover.
+  acquisitionNotes: text("acquisition_notes"),
+  supplierContactId: varchar("supplier_contact_id").references(() => maintenanceContacts.id, { onDelete: "set null" }),
   region: varchar("region").notNull(),
   buildingAddress: varchar("building_address").notNull(),
   createdAt: timestamp("created_at").defaultNow(),
@@ -369,10 +497,31 @@ export const insertAssetSchema = createInsertSchema(assets)
     createdAt: true,
     updatedAt: true,
   })
+  .omit({
+    // The WHOLE snooze is server-owned, not just its attribution.
+    //
+    // Omitting only the actor and the timestamp left the ordinary asset PATCH
+    // able to set `snoozedUntil` directly -- and since `assetLifecycle` reads
+    // the snooze off that column alone, an asset could be cleared from the
+    // dashboard with no reason, no actor and no date recorded, which is
+    // exactly what the dedicated route exists to prevent. Every guarantee that
+    // route makes is only worth as much as the sibling paths that cannot make
+    // it. The snooze routes are the only writers.
+    snoozedUntil: true,
+    snoozeReason: true,
+    snoozedByUserId: true,
+    snoozedAt: true,
+  })
   .extend({
     ageInYears: nonNegativeInt,
     purchasePrice: nonNegativeAmount.nullish(),
+    currentValue: nonNegativeAmount.nullish(),
     lastServiced: dateFromClient.nullish(),
+    acquisitionDate: dateFromClient.nullish(),
+    replacementDueDate: dateFromClient.nullish(),
+    expectedReturnDate: dateFromClient.nullish(),
+    valuedOn: dateFromClient.nullish(),
+    expectedLifespanYears: nonNegativeInt.nullish(),
   });
 
 export type Asset = typeof assets.$inferSelect;
@@ -446,6 +595,59 @@ export const insertMaintenanceContactSchema = createInsertSchema(maintenanceCont
   createdAt: true,
   updatedAt: true,
 });
+
+/**
+ * Dated notes on a vendor.
+ *
+ * What an RA learned working with somebody: they turned up late twice, they
+ * are the only ones who will touch this boiler, do not use them for tile. That
+ * knowledge currently dies at RA handover, which is the whole reason this
+ * exists.
+ *
+ * **There is deliberately no rating field.** A star score on a vendor SPO may
+ * have to keep using invites arguments about the number, and tells an incoming
+ * RA far less than a paragraph does. Dated entries in somebody's own words are
+ * the record worth keeping.
+ *
+ * Notes are append-and-delete rather than editable: a dated note somebody
+ * revised later is no longer the record of what they thought at the time.
+ * `region` is denormalised from the contact so region scoping applies without
+ * a join, as everywhere else.
+ */
+export const contactNotes = pgTable("contact_notes", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  contactId: varchar("contact_id").notNull().references(() => maintenanceContacts.id, { onDelete: "cascade" }),
+  body: text("body").notNull(),
+  // Set null rather than restrict: the note outlives the RA who wrote it, and
+  // deleting a user must never be blocked.
+  authorUserId: varchar("author_user_id").references(() => users.id, { onDelete: "set null" }),
+  /** Kept alongside the id so a deleted account's note still says who wrote it. */
+  authorEmail: varchar("author_email"),
+  region: varchar("region").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertContactNoteSchema = createInsertSchema(contactNotes)
+  .omit({
+    id: true,
+    // Server-owned: the author and the region come from the session and the
+    // contact. A note whose author the client chose is worth nothing.
+    authorUserId: true,
+    authorEmail: true,
+    region: true,
+    contactId: true,
+    createdAt: true,
+  })
+  .extend({
+    body: z
+      .string()
+      .trim()
+      .min(1, "Write something — an empty note tells the next RA nothing")
+      .max(2000, "Keep the note under 2000 characters"),
+  });
+
+export type ContactNote = typeof contactNotes.$inferSelect;
+export type InsertContactNote = z.infer<typeof insertContactNoteSchema>;
 
 export type MaintenanceContact = typeof maintenanceContacts.$inferSelect;
 export type InsertMaintenanceContact = z.infer<typeof insertMaintenanceContactSchema>;
@@ -547,6 +749,40 @@ export const properties = pgTable("properties", {
   leaseEndDate: timestamp("lease_end_date"),
   leaseRenewalDate: timestamp("lease_renewal_date"),
   renewalDecision: varchar("renewal_decision", { enum: ["undecided", "renewing", "not_renewing"] }).notNull().default("undecided"),
+  // A link to the lease on Drive, never the document itself. Settled with SPO:
+  // no lease documents are uploaded into the portal. The recurring complaint
+  // was that the current lease is hard to find, and a link solves that without
+  // the portal becoming a document store it would then have to secure.
+  leaseDocumentUrl: varchar("lease_document_url"),
+  // Where a rented house's repairs are actually filed. A URL and a contact --
+  // never a stored login, per the financial and credential rules.
+  maintenancePortalUrl: varchar("maintenance_portal_url"),
+  // Who to call. Two columns rather than one because they mean different
+  // things: a rented house has a rental company, an owned one has whoever SPO
+  // makes responsible. Set null on delete so removing a vendor never deletes
+  // a house.
+  rentalCompanyContactId: varchar("rental_company_contact_id").references(() => maintenanceContacts.id, { onDelete: "set null" }),
+  responsibleContactId: varchar("responsible_contact_id").references(() => maintenanceContacts.id, { onDelete: "set null" }),
+  // One front-of-house photo, replaceable. Holds the "/uploads/<key>" URL, and
+  // download access is authorized against the property through
+  // findUploadReferences -- which is why authz.ts had to learn about
+  // properties at all.
+  photoUrl: varchar("photo_url"),
+  notes: text("notes"),
+  // ── Deposits ─────────────────────────────────────────────────────────────
+  // The deposit this house takes, with a per-person override on each
+  // resident's own record. A house figure with an override beats asking an RA
+  // to retype the same number eight times every August.
+  depositAmount: numeric("deposit_amount", { precision: 12, scale: 2 }),
+  // How many days after a resident moves out SPO means to have their deposit
+  // back. An ADMIN-SET NUMBER PER PROPERTY, never a lookup: the states SPO
+  // operates in have materially different rules -- Arizona counts business
+  // days, Florida and Kansas are two-stage -- and a state-to-deadline table
+  // would bake legal advice into the repo and go stale silently. SPO's admin
+  // and finance teams are responsible for compliance; the portal reminds.
+  depositReturnDays: integer("deposit_return_days"),
+  /** What that number is based on, in SPO's own words. */
+  depositNotes: text("deposit_notes"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -559,13 +795,94 @@ export const insertPropertySchema = createInsertSchema(properties)
     updatedAt: true,
   })
   .extend({
+    // Required to save, alongside the four address parts, region and
+    // ownership. The COLUMN stays nullable: houses created before this rule
+    // have no chapter, and a NOT NULL migration would either fail or invent
+    // one for them. The boundary is where the rule belongs.
+    chapter: z.string().trim().min(1, "Which SPO chapter uses this house?"),
+    // Rendered into an href on the property page, so the scheme is checked
+    // here rather than only in the form -- see httpUrlFromClient.
+    leaseDocumentUrl: httpUrlFromClient.nullish(),
+    maintenancePortalUrl: httpUrlFromClient.nullish(),
     bedrooms: nonNegativeInt.nullish(),
     bathrooms: nonNegativeAmount.nullish(),
     squareFootage: nonNegativeInt.nullish(),
     leaseStartDate: dateFromClient.nullish(),
     leaseEndDate: dateFromClient.nullish(),
     leaseRenewalDate: dateFromClient.nullish(),
+    depositAmount: nonNegativeAmount.nullish(),
+    depositReturnDays: nonNegativeInt.nullish(),
   });
+
+/**
+ * The per-property setup checklist: one row per item per house.
+ *
+ * A dedicated table rather than a `tasks` row, settled and recorded in
+ * shared/propertySetup.ts. What lives here is only the state; the item list
+ * itself is fixed in code, which is why the row stores `itemKey` rather than a
+ * label -- if SPO later edits the list themselves it becomes a config table
+ * and these rows keep working unchanged.
+ *
+ * Every row records who set it and when, because "who said the gas was on" is
+ * the question that actually gets asked. `region` is denormalised from the
+ * property, as on residents and schedules, so region scoping applies without a
+ * join.
+ *
+ * Rows are generated on property creation only and deliberately never
+ * backfilled: a house with no rows is untracked rather than incomplete. See
+ * summarizeSetup.
+ */
+export const propertySetupItems = pgTable(
+  "property_setup_items",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    propertyId: varchar("property_id").notNull().references(() => properties.id, { onDelete: "cascade" }),
+    /** Matches a key in SETUP_ITEMS. Not an enum column: the list is code, and
+     *  a database enum would need a migration every time SPO adds an item. */
+    itemKey: varchar("item_key").notNull(),
+    status: varchar("status", { enum: ["open", "done", "not_applicable"] }).notNull().default("open"),
+    note: text("note"),
+    // Set null rather than restrict: the checklist outlives the RA who filled
+    // it in, and deleting a user must never be blocked.
+    setByUserId: varchar("set_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    setAt: timestamp("set_at"),
+    region: varchar("region").notNull(),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [uniqueIndex("IDX_property_setup_item").on(table.propertyId, table.itemKey)],
+);
+
+export const insertPropertySetupItemSchema = createInsertSchema(propertySetupItems)
+  .omit({
+    id: true,
+    // Server-owned: taken from the authenticated actor and the clock, never a
+    // request body. "Who said the gas was on" is worthless if the client says.
+    setByUserId: true,
+    setAt: true,
+    createdAt: true,
+    updatedAt: true,
+  })
+  .extend({
+    note: z.string().trim().max(500, "Keep the note under 500 characters").nullish(),
+  });
+
+/**
+ * What a caller may actually send when setting one checklist item.
+ *
+ * Picked from the schema above rather than written out again: the status
+ * vocabulary and the 500-character limit have exactly one definition, and a
+ * later change to either cannot leave the route enforcing the old one. The
+ * property and the item come from the URL; the region, the actor and the
+ * timestamp come from the server.
+ */
+export const setPropertySetupItemSchema = insertPropertySetupItemSchema.pick({
+  status: true,
+  note: true,
+});
+
+export type PropertySetupItem = typeof propertySetupItems.$inferSelect;
+export type InsertPropertySetupItem = z.infer<typeof insertPropertySetupItemSchema>;
 
 export type Property = typeof properties.$inferSelect;
 export type InsertProperty = z.infer<typeof insertPropertySchema>;
@@ -597,6 +914,10 @@ export const residents = pgTable("residents", {
   // RA reads, not a channel the app uses.
   phone: varchar("phone"),
   notes: text("notes"),
+  /** Overrides the house's `depositAmount` for this person. Null means the
+   *  house figure applies -- a scholarship or a partial term is a different
+   *  number, not a different model. */
+  depositAmountOverride: numeric("deposit_amount_override", { precision: 12, scale: 2 }),
   moveInDate: timestamp("move_in_date"),
   moveOutDate: timestamp("move_out_date"),
   isActive: boolean("is_active").notNull().default(true),
@@ -614,6 +935,7 @@ export const insertResidentSchema = createInsertSchema(residents)
   })
   .extend({
     email: z.string().email("Enter a valid email address"),
+    depositAmountOverride: nonNegativeAmount.nullish(),
     moveInDate: dateFromClient.nullish(),
     moveOutDate: dateFromClient.nullish(),
   });
@@ -688,9 +1010,27 @@ export const securityDeposits = pgTable(
     residentId: varchar("resident_id").notNull().references(() => residents.id, { onDelete: "cascade" }),
     propertyId: varchar("property_id").notNull(),
     amountHeld: numeric("amount_held", { precision: 12, scale: 2 }).notNull(),
-    status: varchar("status", { enum: ["held", "returned", "partially_returned", "withheld"] }).notNull().default("held"),
+    // "statement_sent" is added rather than replacing the vocabulary: existing
+    // rows already carry the other four, and renaming a stored status leaves
+    // history behind under the old word.
+    status: varchar("status", { enum: ["held", "statement_sent", "returned", "partially_returned", "withheld"] }).notNull().default("held"),
     amountReturned: numeric("amount_returned", { precision: 12, scale: 2 }),
     returnedDate: timestamp("returned_date"),
+    /** The date the RA says they handed the statement over. Delivery happens
+     *  outside the portal, so the date somebody recorded is the one worth
+     *  keeping -- there is no send action to infer it from. */
+    statementProvidedOn: timestamp("statement_provided_on"),
+    /**
+     * The QuickBooks or Ramp reference for the transaction that returned the
+     * money. A REFERENCE ONLY -- never an account number, a routing number or
+     * anything that could move money. This is what makes reconciliation
+     * possible later without the portal holding a banking credential.
+     */
+    closeoutReference: varchar("closeout_reference"),
+    /** Legacy free text from before deductions were itemised. Displayed as
+     *  history and deliberately never parsed into rows: it is written by
+     *  people, and a migration that guesses will be wrong in ways nobody
+     *  notices until a deposit is short. */
     deductionsNotes: text("deductions_notes"),
     region: varchar("region").notNull(),
     buildingAddress: varchar("building_address").notNull(),
@@ -710,7 +1050,84 @@ export const insertSecurityDepositSchema = createInsertSchema(securityDeposits)
     amountHeld: nonNegativeAmount,
     amountReturned: nonNegativeAmount.nullish(),
     returnedDate: dateFromClient.nullish(),
+    statementProvidedOn: dateFromClient.nullish(),
   });
+
+/**
+ * One deduction against one resident's deposit.
+ *
+ * This reverses an earlier decision, deliberately: `security_deposits` used to
+ * hold deductions "as a note rather than an itemised ledger". An itemised
+ * record is what any deposit statement has to be built from, so the note stays
+ * as legacy history and is **never parsed into rows** — it is free text
+ * written by people, and a migration that guesses would be wrong in ways
+ * nobody notices until a deposit comes back short.
+ *
+ * A common-area charge divided across a house is stored as individual
+ * per-person rows, never as a shared charge with a divisor. `splitGroupId` is
+ * kept for provenance and display only: **recomputing a split later would
+ * silently re-divide somebody's settled balance.**
+ *
+ * Finance data, and the standing rule applies without exception: descriptions,
+ * amounts, dates and references only. Never an account or card number.
+ */
+export const depositDeductions = pgTable("deposit_deductions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  residentId: varchar("resident_id").notNull().references(() => residents.id, { onDelete: "cascade" }),
+  propertyId: varchar("property_id").notNull(),
+  description: varchar("description").notNull(),
+  amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),
+  /** When the damage or charge happened, which is not when it was recorded. */
+  chargeDate: timestamp("charge_date").notNull(),
+  // Who recorded it. The email is kept alongside the id so a deduction still
+  // says who entered it after that account is gone -- this is money, and the
+  // question gets asked.
+  recordedByUserId: varchar("recorded_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  recordedByEmail: varchar("recorded_by_email"),
+  // Where the charge came from, where there is something to point at. Loose
+  // references rather than hard FKs, matching how rooms and assets point at
+  // properties: a deduction must survive the walkthrough item being edited or
+  // the request being deleted, because the money has already moved.
+  walkthroughItemId: varchar("walkthrough_item_id"),
+  maintenanceRequestId: varchar("maintenance_request_id"),
+  /** Provenance for a split, never a basis for recomputing one. */
+  splitGroupId: varchar("split_group_id"),
+  region: varchar("region").notNull(),
+  buildingAddress: varchar("building_address").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertDepositDeductionSchema = createInsertSchema(depositDeductions)
+  .omit({
+    id: true,
+    // Server-owned: taken from the authenticated actor, never a request body.
+    recordedByUserId: true,
+    recordedByEmail: true,
+    // Derived from the resident the deduction is against, so that a caller
+    // cannot name a region they cannot reach and land a charge there. The
+    // route resolves the resident, checks the region, and copies all three.
+    propertyId: true,
+    region: true,
+    buildingAddress: true,
+    // Set by the split route, never by a caller: a group id the client chose
+    // could tie unrelated charges together in the display.
+    splitGroupId: true,
+    createdAt: true,
+    updatedAt: true,
+  })
+  .extend({
+    description: z
+      .string()
+      .trim()
+      .min(1, "Say what the deduction is for")
+      .max(300, "Keep the description under 300 characters"),
+    amount: nonNegativeAmount,
+    chargeDate: dateFromClient,
+  });
+
+export type DepositDeduction = typeof depositDeductions.$inferSelect;
+export type InsertDepositDeduction = z.infer<typeof insertDepositDeductionSchema>;
 
 export type SecurityDeposit = typeof securityDeposits.$inferSelect;
 export type InsertSecurityDeposit = z.infer<typeof insertSecurityDepositSchema>;
@@ -823,6 +1240,129 @@ export const insertTaskSchema = createInsertSchema(tasks)
 
 export type Task = typeof tasks.$inferSelect;
 export type InsertTask = z.infer<typeof insertTaskSchema>;
+
+// Resource hub
+//
+// The one page a household leader or steward needs to go to. The framing
+// matters: for many students this is one of their few interactions with SPO as
+// an organisation, so it should feel professional and relational.
+//
+// Most of the content lives on Drive. **This table stores links, never
+// documents** -- duplicating a deep-clean checklist into the portal means two
+// copies that disagree within a term.
+export const resourceLinks = pgTable("resource_links", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  title: varchar("title").notNull(),
+  url: varchar("url").notNull(),
+  description: text("description"),
+  // Grouping on the page. Free text rather than an enum: SPO adds categories
+  // faster than anybody would ship a migration for one.
+  category: varchar("category").notNull().default("General"),
+  /**
+   * Who sees it. Null means national -- everybody. A region name limits it to
+   * the houses in that region, which is what lets one region publish its own
+   * guidance without it reaching the rest.
+   */
+  region: varchar("region"),
+  displayOrder: integer("display_order").notNull().default(0),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertResourceLinkSchema = createInsertSchema(resourceLinks)
+  .omit({ id: true, createdAt: true, updatedAt: true })
+  .extend({
+    title: z.string().trim().min(1, "Give the link a name").max(200),
+    // Rendered into an href on a page residents read, so the scheme is checked
+    // here -- see httpUrlFromClient.
+    url: httpUrlFromClient.refine((value: string | null) => value !== null, "A link needs an address"),
+    description: z.string().trim().max(500).nullish(),
+    // The column has a default, so a caller adding a link need not order it --
+    // the page groups by category and falls back to the title.
+    displayOrder: nonNegativeInt.optional(),
+  });
+
+export type ResourceLink = typeof resourceLinks.$inferSelect;
+export type InsertResourceLink = z.infer<typeof insertResourceLinkSchema>;
+
+// Liability paperwork
+//
+// Per resident, per document: signed or not, and when. **Set by an RA, not
+// e-signed** -- e-signature is a vendor integration and a separate decision,
+// and pretending a checkbox is one would be worse than not having it.
+export const residentDocuments = pgTable(
+  "resident_documents",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    residentId: varchar("resident_id").notNull().references(() => residents.id, { onDelete: "cascade" }),
+    /** Matches a key in RESIDENT_DOCUMENTS. Not an enum column: the list is
+     *  code, and a database enum would need a migration for every addition. */
+    documentKey: varchar("document_key").notNull(),
+    /** When it was signed. Null means it has not been. */
+    signedOn: timestamp("signed_on"),
+    notes: text("notes"),
+    recordedByUserId: varchar("recorded_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    recordedByEmail: varchar("recorded_by_email"),
+    region: varchar("region").notNull(),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [uniqueIndex("IDX_resident_document").on(table.residentId, table.documentKey)],
+);
+
+export const insertResidentDocumentSchema = createInsertSchema(residentDocuments)
+  .omit({
+    id: true,
+    // Server-owned: the actor comes from the session and the region from the
+    // resident. "Who said this was signed" is worthless if the client says.
+    recordedByUserId: true,
+    recordedByEmail: true,
+    region: true,
+    residentId: true,
+    documentKey: true,
+    createdAt: true,
+    updatedAt: true,
+  })
+  .extend({
+    signedOn: dateFromClient.nullish(),
+    notes: z.string().trim().max(500).nullish(),
+  });
+
+export type ResidentDocument = typeof residentDocuments.$inferSelect;
+export type InsertResidentDocument = z.infer<typeof insertResidentDocumentSchema>;
+
+// Startup budget
+//
+// One amount per property per year, plus notes. An OPERATING figure -- what
+// the house has to furnish and settle itself -- and therefore not deposit or
+// rent data, which is why a household leader may see their own house's without
+// the finance rule being bent.
+export const propertyBudgets = pgTable(
+  "property_budgets",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    propertyId: varchar("property_id").notNull().references(() => properties.id, { onDelete: "cascade" }),
+    year: integer("year").notNull(),
+    amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),
+    notes: text("notes"),
+    region: varchar("region").notNull(),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [uniqueIndex("IDX_property_budget_year").on(table.propertyId, table.year)],
+);
+
+export const insertPropertyBudgetSchema = createInsertSchema(propertyBudgets)
+  .omit({ id: true, region: true, createdAt: true, updatedAt: true })
+  .extend({
+    year: z.coerce.number().int().min(2000, "Use a four-digit year").max(2100),
+    amount: nonNegativeAmount,
+    notes: z.string().trim().max(1000).nullish(),
+  });
+
+export type PropertyBudget = typeof propertyBudgets.$inferSelect;
+export type InsertPropertyBudget = z.infer<typeof insertPropertyBudgetSchema>;
 
 // Uploaded Files
 //

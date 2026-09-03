@@ -51,6 +51,9 @@ export interface WalkthroughUser {
   permissions?: {
     canManageWalkthroughs?: boolean | null;
     canCompleteWalkthroughs?: boolean | null;
+    canViewResourceHub?: boolean | null;
+    canViewProperties?: boolean | null;
+    canManageProperties?: boolean | null;
   } | null;
 }
 
@@ -257,4 +260,29 @@ export function itemsByRoom(items: readonly WalkthroughItem[]): Map<string, Walk
     group.sort((a: WalkthroughItem, b: WalkthroughItem) => a.displayOrder - b.displayOrder);
   }
   return grouped;
+}
+
+/**
+ * Whether this account reaches the resource hub.
+ *
+ * A resident-tier capability gated on its own flag, exactly as walkthrough
+ * completion is — and deliberately NOT `canCompleteWalkthroughs`, because a
+ * leader who fills in walkthroughs and a leader who has been given the hub are
+ * two grants, and honouring one for the other means a later change to either
+ * silently moves the other.
+ *
+ * Staff reach it under the property permission, so they can see what their
+ * households are being told. Mirrors the server's rule on the three hub routes.
+ *
+ * Lives here rather than in a component because the page and the sidebar both
+ * ask, and an answer computed twice is an answer that drifts.
+ */
+export function canSeeResourceHub(user: WalkthroughUser | null | undefined): boolean {
+  if (!user) return false;
+  if (user.role === "admin") return true;
+  if (isResidentAccount(user)) return user.permissions?.canViewResourceHub === true;
+  return (
+    user.permissions?.canViewProperties === true ||
+    user.permissions?.canManageProperties === true
+  );
 }

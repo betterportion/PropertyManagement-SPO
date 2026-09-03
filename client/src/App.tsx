@@ -9,24 +9,30 @@ import ThemeToggle from "@/components/ThemeToggle";
 import UserMenu from "@/components/UserMenu";
 import { ThemeProvider } from "@/providers/ThemeProvider";
 import { useAuth } from "@/hooks/useAuth";
-import { canFillInWalkthroughs, type WalkthroughUser } from "@/lib/walkthrough";
+import { canFillInWalkthroughs, canSeeResourceHub, type WalkthroughUser } from "@/lib/walkthrough";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import NotFound from "@/pages/not-found";
 import Landing from "@/pages/Landing";
 import AdminDashboard from "@/pages/AdminDashboard";
 import Maintenance from "@/pages/Maintenance";
 import Walkthroughs from "@/pages/Walkthroughs";
+import FlaggedItems from "@/pages/FlaggedItems";
 import WalkthroughRun from "@/pages/WalkthroughRun";
 import Assets from "@/pages/Assets";
+import AssetDetail from "@/pages/AssetDetail";
+import AssignedAssets from "@/pages/AssignedAssets";
 import Safety from "@/pages/Safety";
 import Residents from "@/pages/Residents";
+import ResidentDetail from "@/pages/ResidentDetail";
 import Finances from "@/pages/Finances";
 import Tasks from "@/pages/Tasks";
 import Contacts from "@/pages/Contacts";
+import ContactDetail from "@/pages/ContactDetail";
 import Properties from "@/pages/Properties";
 import PropertyDetail from "@/pages/PropertyDetail";
 import MyWalkthroughs from "@/pages/MyWalkthroughs";
 import ResidentDashboard from "@/pages/ResidentDashboard";
+import ResourceHub from "@/pages/ResourceHub";
 import SubmitRequest from "@/pages/SubmitRequest";
 import MyRequests from "@/pages/MyRequests";
 import AdminSettings from "@/pages/Settings";
@@ -54,13 +60,23 @@ function Router() {
         <Route path="/properties" component={Properties} />
         <Route path="/properties/:id" component={PropertyDetail} />
         <Route path="/residents" component={Residents} />
+        <Route path="/residents/:id" component={ResidentDetail} />
         <Route path="/finances" component={Finances} />
         <Route path="/maintenance" component={Maintenance} />
         <Route path="/walkthroughs" component={Walkthroughs} />
+        {/* Literal path first: wouter matches in order, so :id would swallow it. */}
+        <Route path="/walkthroughs/flagged" component={FlaggedItems} />
         <Route path="/walkthroughs/:id" component={WalkthroughRun} />
         <Route path="/assets" component={Assets} />
+        {/* Literal path first: wouter matches in order, so :id would swallow it. */}
+        <Route path="/assets/assigned" component={AssignedAssets} />
+        <Route path="/assets/:id" component={AssetDetail} />
         <Route path="/safety" component={Safety} />
         <Route path="/contacts" component={Contacts} />
+        <Route path="/contacts/:id" component={ContactDetail} />
+        {/* Staff read it too, under the property permission, so they can see
+            what their households are being told. */}
+        <Route path="/resources" component={ResourceHub} />
         <Route path="/settings" component={AdminSettings} />
         {/* Internal design reference — staff only; residents fall through to Not Found. */}
         <Route path="/styleguide" component={Styleguide} />
@@ -74,12 +90,18 @@ function Router() {
   // the server binds them to their own house -- this only decides whether the
   // pages are reachable from the app at all.
   const canCompleteWalkthroughs = canFillInWalkthroughs(user as WalkthroughUser | null);
+  const canUseResourceHub = canSeeResourceHub(user as WalkthroughUser | null);
 
   return (
     <Switch>
       <Route path="/" component={ResidentDashboard} />
       <Route path="/submit-request" component={SubmitRequest} />
       <Route path="/my-requests" component={MyRequests} />
+      {/* Behind its own flag, like the walkthrough screens above: a
+          resident-tier capability is granted per account. Registered only when
+          granted -- the server refuses either way, so this decides whether the
+          page is reachable from the app at all. */}
+      {canUseResourceHub && <Route path="/resources" component={ResourceHub} />}
       {canCompleteWalkthroughs && <Route path="/walkthroughs" component={MyWalkthroughs} />}
       {canCompleteWalkthroughs && <Route path="/walkthroughs/:id" component={WalkthroughRun} />}
       <Route component={NotFound} />
@@ -120,6 +142,7 @@ function AppContent() {
           role={role}
           currentPath={location}
           canCompleteWalkthroughs={canCompleteWalkthroughs}
+          canViewResourceHub={canSeeResourceHub(user as WalkthroughUser | null)}
         />
         <div className="flex flex-1 flex-col overflow-hidden">
           <header className="flex h-16 shrink-0 items-center justify-between border-b border-border bg-background px-4 lg:px-6">

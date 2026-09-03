@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Link } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -14,9 +14,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Plus, Building2, MapPin, MoreVertical } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { type Property } from "@shared/schema";
+import { type Property, type PropertySetupItem } from "@shared/schema";
+import { summarizeSetup, setupRowsByProperty } from "@shared/propertySetup";
 import { REGIONS, chaptersForRegion, ALL_CHAPTERS } from "@shared/regions";
-import PropertyLeaseFields, { propertyFormSchema, type PropertyForm } from "@/components/PropertyLeaseFields";
+import PropertyLeaseFields, { PropertyPhotoAndNotes, propertyFormSchema, type PropertyForm } from "@/components/PropertyLeaseFields";
 import { Section, Container, PageHeader, PageStack } from "@/components/layout/page";
 import { LoadingState, EmptyState } from "@/components/states";
 import { formatDate } from "@/lib/format";
@@ -28,8 +29,41 @@ import {
 } from "@/components/ui/dropdown-menu";
 
 
+/**
+ * How much of a house's setup is left, on its list row.
+ *
+ * Silent for a house with no checklist and for a finished one: an untracked
+ * house is not an unfinished one, and a badge reading "0 to do" is noise on
+ * every row that is already done.
+ */
+/**
+ * The official chapters for a region, plus whatever this house already has.
+ *
+ * Chapter names have changed over time and the stored value is the truth about
+ * a house until somebody deliberately changes it.
+ */
+function withStoredChapter(chapters: readonly string[], stored: string | null | undefined): string[] {
+  if (!stored || chapters.includes(stored)) return [...chapters];
+  return [stored, ...chapters];
+}
+
+function SetupBadge({ property, rows }: { property: Property; rows: PropertySetupItem[] }) {
+  const setup = summarizeSetup(rows, property.ownership);
+  if (!setup.tracked || setup.complete) return null;
+  return (
+    <Badge variant="outline" data-testid={`badge-property-setup-${property.id}`}>
+      Setup: {setup.open} to do
+    </Badge>
+  );
+}
+
 export default function Properties() {
-  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+  // The dashboard links here with ?add=1 so "Add a property" opens the form
+  // rather than landing on a list the RA then has to scan for a button. Read
+  // once on mount: after that the dialog owns its own state.
+  const [isAddDialogOpen, setIsAddDialogOpen] = useState(
+    () => new URLSearchParams(window.location.search).get("add") === "1",
+  );
   const [editingProperty, setEditingProperty] = useState<Property | null>(null);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [deletingPropertyId, setDeletingPropertyId] = useState<string | null>(null);
@@ -41,6 +75,15 @@ export default function Properties() {
   const { data: properties, isLoading } = useQuery<Property[]>({
     queryKey: ["/api/properties"],
   });
+
+  // One request for every house's checklist rather than one per row. The badge
+  // reads the same summarizeSetup the property page and the dashboard do, so
+  // the three cannot disagree about how much of a house is left to set up.
+  const { data: setupRows = [] } = useQuery<PropertySetupItem[]>({
+    queryKey: ["/api/property-setup-items"],
+  });
+
+  const setupByProperty = useMemo(() => setupRowsByProperty(setupRows), [setupRows]);
 
   // The chapter filter offers the official chapters (every one when no region is
   // picked, or just the chosen region's), so the full catalogue is visible even
@@ -72,6 +115,10 @@ export default function Properties() {
     leaseStartDate: data.leaseStartDate || null,
     leaseEndDate: data.leaseEndDate || null,
     leaseRenewalDate: data.leaseRenewalDate || null,
+    // An untouched URL input sends "", which is not a URL. Send null so the
+    // server reads it as unset rather than rejecting the whole form.
+    leaseDocumentUrl: data.leaseDocumentUrl || null,
+    maintenancePortalUrl: data.maintenancePortalUrl || null,
   });
 
   const createPropertyMutation = useMutation({
@@ -158,6 +205,15 @@ export default function Properties() {
       leaseEndDate: "",
       leaseRenewalDate: "",
       renewalDecision: "undecided",
+      leaseDocumentUrl: "",
+      maintenancePortalUrl: "",
+      rentalCompanyContactId: null,
+      responsibleContactId: null,
+      photoUrl: null,
+      notes: "",
+      depositAmount: null,
+      depositReturnDays: null,
+      depositNotes: "",
     },
   });
 
@@ -188,6 +244,15 @@ export default function Properties() {
       leaseEndDate: asDateInput(property.leaseEndDate),
       leaseRenewalDate: asDateInput(property.leaseRenewalDate),
       renewalDecision: property.renewalDecision,
+      leaseDocumentUrl: property.leaseDocumentUrl || "",
+      maintenancePortalUrl: property.maintenancePortalUrl || "",
+      rentalCompanyContactId: property.rentalCompanyContactId,
+      responsibleContactId: property.responsibleContactId,
+      photoUrl: property.photoUrl,
+      notes: property.notes || "",
+      depositAmount: property.depositAmount ? Number(property.depositAmount) : null,
+      depositReturnDays: property.depositReturnDays,
+      depositNotes: property.depositNotes || "",
     });
     setIsEditDialogOpen(true);
   };
@@ -431,6 +496,13 @@ export default function Properties() {
                   )}
                 />
 
+                <PropertyPhotoAndNotes
+                  form={addForm}
+                  onPhotoError={(message) =>
+                    toast({ title: "That photo did not upload", description: message, variant: "destructive" })
+                  }
+                />
+
                 <PropertyLeaseFields form={addForm} />
 
                 <DialogFooter>
@@ -496,6 +568,10 @@ export default function Properties() {
                         {property.ownership === "rented" && (
                           <Badge variant="warning" data-testid={`badge-property-rented-${property.id}`}>Rented</Badge>
                         )}
+                        <SetupBadge
+                          property={property}
+                          rows={setupByProperty.get(property.id) ?? []}
+                        />
                       </div>
                       {property.propertyManager && (
                         <p className="text-xs text-muted-foreground mt-2">
@@ -637,7 +713,16 @@ export default function Properties() {
                 control={editForm.control}
                 name="chapter"
                 render={({ field }) => {
-                  const regionChapters = chaptersForRegion(editForm.watch("region"));
+                  // A house recorded before the catalogue settled can carry a
+                  // chapter that is no longer in it. Offering the stored value
+                  // alongside the official list means editing anything else
+                  // about that house does not force the RA to relabel it --
+                  // and chapter is required to save, so without this the form
+                  // would be unsubmittable with no way to re-enter the value.
+                  const regionChapters = withStoredChapter(
+                    chaptersForRegion(editForm.watch("region")),
+                    editingProperty?.chapter,
+                  );
                   return (
                     <FormItem>
                       <FormLabel>Chapter (Optional)</FormLabel>
@@ -714,6 +799,14 @@ export default function Properties() {
                     <FormMessage />
                   </FormItem>
                 )}
+              />
+
+
+              <PropertyPhotoAndNotes
+                form={editForm}
+                onPhotoError={(message) =>
+                  toast({ title: "That photo did not upload", description: message, variant: "destructive" })
+                }
               />
 
               <PropertyLeaseFields form={editForm} />

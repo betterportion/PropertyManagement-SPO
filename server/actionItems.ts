@@ -22,7 +22,13 @@ import type {
   Resident,
   Task,
   Property,
+  PropertySetupItem,
+  Asset,
 } from "@shared/schema";
+import { summarizeSetup, setupRowsByProperty } from "@shared/propertySetup";
+import { assetLifecycle } from "@shared/assetLifecycle";
+import { depositReturnDeadline } from "@shared/depositLedger";
+import type { ActionItemCategory, ActionItemSource } from "@shared/actionItems";
 
 /** How far ahead a recurring schedule becomes an action item. */
 export const SCHEDULE_LOOKAHEAD_DAYS = 30;
@@ -30,10 +36,18 @@ export const SCHEDULE_LOOKAHEAD_DAYS = 30;
 /** How far ahead a lease renewal becomes an action item — two months. */
 export const LEASE_LOOKAHEAD_DAYS = 60;
 
+/**
+ * How far ahead a coming move-out raises its deposit.
+ *
+ * Before somebody has even left, so the money is ready rather than being
+ * chased after the fact.
+ */
+export const DEPOSIT_LOOKAHEAD_DAYS = 30;
+
 const DAY_MS = 24 * 60 * 60 * 1_000;
 
-export type ActionItemSource = "schedule" | "rent" | "deposit" | "task" | "lease";
-export type ActionItemCategory = "property" | "safety" | "finance" | "general";
+// One definition, shared with the client -- see shared/actionItems.ts for why.
+export type { ActionItemSource, ActionItemCategory } from "@shared/actionItems";
 
 export interface ActionItem {
   /** The underlying record's id — what the client resolves against. */
@@ -57,6 +71,8 @@ export interface ActionItemInputs {
   residents: Resident[];
   tasks: Task[];
   properties: Property[];
+  setupItems: PropertySetupItem[];
+  assets: Asset[];
 }
 
 /** The last calendar day of a "YYYY-MM" period, as a UTC-midnight date. */
@@ -126,6 +142,61 @@ export function buildActionItems(inputs: ActionItemInputs, now: Date = new Date(
     });
   }
 
+  // Property — one aggregated item per house whose setup is unfinished.
+  //
+  // One entry, never one per open check: seven rows for a single house would
+  // bury the maintenance triage this space actually belongs to. It clears the
+  // moment the last item resolves.
+  //
+  // A house with no checklist rows says nothing at all. The checklist is
+  // generated on property creation and deliberately not backfilled, so every
+  // house SPO already has would otherwise light up on the day this ships --
+  // summarizeSetup reports those as untracked rather than as everything open.
+  const setupByProperty = setupRowsByProperty(inputs.setupItems);
+  for (const p of inputs.properties) {
+    const summary = summarizeSetup(setupByProperty.get(p.id) ?? [], p.ownership);
+    if (!summary.tracked || summary.complete) continue;
+    items.push({
+      id: p.id,
+      source: "setup",
+      category: "property",
+      title: `Setup incomplete — ${p.name}`,
+      subtitle: `${summary.open} of ${summary.total} still to do · ${p.address}`,
+      // No deadline: setting up a house has no date SPO has agreed, and
+      // inventing one would put every new house at the top of the list.
+      dueDate: null,
+      overdue: false,
+      region: p.region,
+    });
+  }
+
+  // Property — an asset coming up for replacement.
+  //
+  // Three rules, all from assetLifecycle:
+  //   - an UNRATED asset (nothing to reason from) says nothing at all. A guess
+  //     here would be indistinguishable from a real warning, and people would
+  //     stop reading both;
+  //   - only the warning window and worse reach the dashboard. "Not due yet"
+  //     is not something anybody needs to be told today;
+  //   - a SNOOZED asset is hidden HERE ONLY. It stays visible, and visibly
+  //     snoozed, on the asset screen -- hiding it everywhere is how a boiler
+  //     gets forgotten for three years.
+  for (const a of inputs.assets) {
+    const lifecycle = assetLifecycle(a, now);
+    if (lifecycle.status === "unrated" || lifecycle.status === "ok") continue;
+    if (lifecycle.snoozed) continue;
+    items.push({
+      id: a.id,
+      source: "asset",
+      category: "property",
+      title: `${lifecycle.label} — ${a.name}`,
+      subtitle: a.buildingAddress,
+      dueDate: iso(lifecycle.dueDate),
+      overdue: lifecycle.status === "overdue",
+      region: a.region,
+    });
+  }
+
   // Finance — rent still owed: never paid, or a payment that bounced. A
   // "failed" charge is still outstanding money; dropping it here would make
   // the dashboard look better the moment a check bounces.
@@ -145,23 +216,66 @@ export function buildActionItems(inputs: ActionItemInputs, now: Date = new Date(
     });
   }
 
-  // Finance — deposits still held for a resident who has moved out.
-  const movedOut = new Set(inputs.residents.filter((r) => !r.isActive).map((r) => r.id));
+  // Finance — deposits that have to go back.
+  //
+  // Raised for somebody who has already left, and for somebody leaving within
+  // DEPOSIT_LOOKAHEAD_DAYS so the money is ready rather than chased after the
+  // fact. It clears when the deposit is marked returned -- "statement sent" is
+  // progress, not completion, and the money is still held.
+  //
+  // The deadline comes from the resident's MOVE-OUT DATE and the house's
+  // admin-set depositReturnDays. No setting means no deadline rather than an
+  // invented one: the states SPO operates in have materially different rules,
+  // and a default standing in for a figure nobody chose would be the portal
+  // making a legal determination it must not make. The item is still raised --
+  // a deposit held for somebody who has gone is worth surfacing either way.
+  const residentsById = new Map(inputs.residents.map((r) => [r.id, r]));
+  const propertiesById = new Map(inputs.properties.map((p) => [p.id, p]));
+  const depositHorizon = new Date(now.getTime() + DEPOSIT_LOOKAHEAD_DAYS * DAY_MS);
+
+  // "held" and "statement_sent" are the outstanding states. Returned, withheld
+  // and partially returned all mean somebody has dealt with it -- leaving a
+  // withheld deposit on the dashboard forever is a permanent false alarm.
+  const OUTSTANDING_DEPOSIT_STATUSES = new Set(["held", "statement_sent"]);
+
   for (const d of inputs.deposits) {
-    if (d.status !== "held") continue;
-    if (!movedOut.has(d.residentId)) continue;
+    if (!OUTSTANDING_DEPOSIT_STATUSES.has(d.status)) continue;
+
+    const resident = residentsById.get(d.residentId);
+    const movingOut = resident?.moveOutDate
+      ? resident.moveOutDate instanceof Date
+        ? resident.moveOutDate
+        : new Date(resident.moveOutDate)
+      : null;
+
+    // Somebody still living there with no departure planned needs nothing.
+    const hasLeft = resident ? !resident.isActive : false;
+    const leavingSoon =
+      movingOut !== null && !Number.isNaN(movingOut.getTime()) && movingOut <= depositHorizon;
+    if (!hasLeft && !leavingSoon) continue;
+
+    const deadline = depositReturnDeadline(
+      movingOut,
+      propertiesById.get(d.propertyId)?.depositReturnDays,
+    );
+
+    // No setting means no deadline -- but not "no urgency". Every house has
+    // depositReturnDays null the day this ships, and an undated item sorts
+    // BELOW every dated one, so a held deposit for somebody who has already
+    // left would quietly fall off the dashboard's top few. For a resident who
+    // has gone, the honest fallback is the one this had before deadlines
+    // existed: it is due now.
+    const dueDate = deadline ?? (hasLeft ? now : null);
+
     items.push({
       id: d.id,
       source: "deposit",
       category: "finance",
-      title: "Deposit to return",
+      title: leavingSoon && !hasLeft ? "Deposit to return soon" : "Deposit to return",
       subtitle: d.buildingAddress,
       amount: d.amountHeld,
-      // A held deposit for someone who has left needs returning now; it has no
-      // stored deadline yet (that model is still being reconciled with SPO), so
-      // it always reads as due.
-      dueDate: iso(now),
-      overdue: true,
+      dueDate: iso(dueDate),
+      overdue: deadline !== null ? deadline < now : hasLeft,
       region: d.region,
     });
   }

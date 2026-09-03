@@ -1,7 +1,7 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "wouter";
-import { ArrowLeft, Building2, Package, UsersRound, Wrench } from "lucide-react";
+import { ArrowLeft, Building2, ExternalLink, ListChecks, Mail, Package, UsersRound, Wrench } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -10,9 +10,15 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { DataTable } from "@/components/data-table";
 import { Container, PageHeader, PageStack, Section } from "@/components/layout/page";
 import { EmptyState, LoadingState } from "@/components/states";
+import PropertySetupChecklist from "@/components/PropertySetupChecklist";
+import ResidentPaperwork from "@/components/ResidentPaperwork";
+import PropertyBudgetCard from "@/components/PropertyBudgetCard";
+import EmailHouseholdDialog from "@/components/EmailHouseholdDialog";
+import { useAuth } from "@/hooks/useAuth";
 import { formatCurrency, formatDate, formatValue } from "@/lib/format";
 import type {
   Asset,
+  MaintenanceContact,
   MaintenanceRequest,
   MaintenanceSchedule,
   Property,
@@ -36,6 +42,39 @@ import type {
  */
 
 const DAY = 24 * 60 * 60 * 1000;
+
+/**
+ * A stored link, or the same dash every other unset fact shows.
+ *
+ * The scheme is checked at the API boundary (see httpUrlFromClient in
+ * shared/schema.ts), so what reaches here is already http or https.
+ */
+function ExternalLinkOrDash({
+  href,
+  label,
+  testId,
+}: {
+  href: string | null | undefined;
+  label: string;
+  testId: string;
+}) {
+  if (!href) return <>{formatValue(null)}</>;
+  return (
+    <a
+      className="inline-flex items-center gap-1 underline underline-offset-2"
+      href={href}
+      target="_blank"
+      rel="noreferrer noopener"
+      data-testid={testId}
+    >
+      {label}
+      <ExternalLink className="h-3 w-3" />
+    </a>
+  );
+}
+
+const formatDateOrDash = (value: Date | string | null | undefined) =>
+  value ? formatDate(value) : formatValue(null);
 
 /** The current month as "YYYY-MM", read from the local calendar. */
 function currentPeriod(): string {
@@ -79,6 +118,7 @@ const DEPOSIT_STATUS: Record<
   { label: string; variant: "info" | "success" | "warning" | "destructive" }
 > = {
   held: { label: "Held", variant: "info" },
+  statement_sent: { label: "Statement sent", variant: "warning" },
   returned: { label: "Returned", variant: "success" },
   partially_returned: { label: "Partly returned", variant: "warning" },
   withheld: { label: "Withheld", variant: "destructive" },
@@ -101,8 +141,31 @@ export default function PropertyDetail() {
   const assetsQuery = useQuery<Asset[]>({ queryKey: ["/api/assets"] });
   const rentQuery = useQuery<RentPayment[]>({ queryKey: ["/api/rent-payments"] });
   const depositsQuery = useQuery<SecurityDeposit[]>({ queryKey: ["/api/security-deposits"] });
+  const contactsQuery = useQuery<MaintenanceContact[]>({ queryKey: ["/api/contacts"] });
+
+  const { user } = useAuth();
+  const [isEmailOpen, setIsEmailOpen] = useState(false);
 
   const property = propertiesQuery.data?.find((p) => p.id === propertyId);
+
+  // Computed below the hooks, never returned on above them: a guard placed
+  // over a useQuery changes the hook count once the auth query resolves and
+  // React throws. This crashed Settings once.
+  const typedUser = user as { role?: string; permissions?: Record<string, boolean> } | null;
+  const canManageSetup =
+    typedUser?.role === "admin" ||
+    typedUser?.permissions?.canManagePropertySetup === true ||
+    typedUser?.permissions?.canManageProperties === true;
+
+  // Whichever contact this kind of house names. Two columns rather than one
+  // because a rental company and a responsible person are different things.
+  const whoToCall = useMemo(() => {
+    const id =
+      property?.ownership === "rented"
+        ? property?.rentalCompanyContactId
+        : property?.responsibleContactId;
+    return id ? contactsQuery.data?.find((c) => c.id === id) : undefined;
+  }, [property, contactsQuery.data]);
 
   const residents = useMemo(
     () =>
@@ -197,7 +260,29 @@ export default function PropertyDetail() {
         <PageStack>
           <BackLink />
 
-          <PageHeader title={property.name} description={property.address} />
+          <PageHeader
+            title={property.name}
+            description={property.address}
+            actions={
+              canManageSetup ? (
+                <Button
+                  variant="secondary"
+                  onClick={() => setIsEmailOpen(true)}
+                  data-testid="button-email-household"
+                >
+                  <Mail className="h-4 w-4" />
+                  Email the household
+                </Button>
+              ) : undefined
+            }
+          />
+
+          <EmailHouseholdDialog
+            property={property}
+            residents={residents}
+            open={isEmailOpen}
+            onOpenChange={setIsEmailOpen}
+          />
 
           <div className="flex flex-wrap items-center gap-2" data-testid="property-facts">
             <Badge variant="secondary">{property.region}</Badge>
@@ -253,6 +338,61 @@ export default function PropertyDetail() {
             />
           </dl>
 
+          {/* Above the tabs, not inside one. The recurring complaint was that
+              rental company contact details are hard to find, and an RA
+              looking for a phone number will not think to open "Setup". */}
+          <Card>
+            <CardHeader>
+              <CardTitle>
+                {property.ownership === "rented" ? "Landlord and lease" : "Who maintains this house"}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <dl className="grid gap-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
+                <Fact
+                  label={property.ownership === "rented" ? "Rental company" : "Responsible for maintenance"}
+                  value={formatValue(whoToCall ? `${whoToCall.company} — ${whoToCall.name}` : null)}
+                />
+                <Fact label="Phone" value={formatValue(whoToCall?.phone)} />
+                <Fact label="Email" value={formatValue(whoToCall?.email)} />
+                {property.ownership === "rented" && (
+                  <div>
+                    <dt className="text-muted-foreground">Maintenance portal</dt>
+                    <dd className="mt-0.5 font-medium">
+                      <ExternalLinkOrDash
+                        href={property.maintenancePortalUrl}
+                        label="Open the portal"
+                        testId="link-maintenance-portal"
+                      />
+                    </dd>
+                  </div>
+                )}
+                {property.ownership === "rented" && (
+                  <>
+                    <Fact label="Lease start" value={formatDateOrDash(property.leaseStartDate)} />
+                    <Fact label="Lease end" value={formatDateOrDash(property.leaseEndDate)} />
+                    <div>
+                      <dt className="text-muted-foreground">Lease document</dt>
+                      <dd className="mt-0.5 font-medium">
+                        <ExternalLinkOrDash
+                          href={property.leaseDocumentUrl}
+                          label="Open on Drive"
+                          testId="link-lease-document"
+                        />
+                      </dd>
+                    </div>
+                  </>
+                )}
+              </dl>
+
+              {property.notes && (
+                <p className="mt-4 whitespace-pre-line text-sm" data-testid="text-property-notes">
+                  {property.notes}
+                </p>
+              )}
+            </CardContent>
+          </Card>
+
           <Tabs defaultValue="residents">
             <TabsList>
               <TabsTrigger value="residents" data-testid="tab-residents">
@@ -263,6 +403,10 @@ export default function PropertyDetail() {
               </TabsTrigger>
               <TabsTrigger value="assets" data-testid="tab-assets">
                 Assets
+              </TabsTrigger>
+              <TabsTrigger value="setup" data-testid="tab-setup">
+                <ListChecks className="mr-1 h-4 w-4" />
+                Setup
               </TabsTrigger>
             </TabsList>
 
@@ -541,6 +685,19 @@ export default function PropertyDetail() {
                   />
                 </CardContent>
               </Card>
+            </TabsContent>
+
+            <TabsContent value="setup" className="mt-4 space-y-6">
+              <PropertySetupChecklist property={property} canManage={canManageSetup} />
+
+              {/* An OPERATING figure -- what the house has to furnish and
+                  settle itself. Not deposit or rent data, which is why the
+                  household's own leaders see it on their Resources page. */}
+              <PropertyBudgetCard property={property} canManage={canManageSetup} />
+
+              {residents.filter((resident) => resident.isActive).map((resident) => (
+                <ResidentPaperwork key={resident.id} resident={resident} canManage={canManageSetup} />
+              ))}
             </TabsContent>
           </Tabs>
         </PageStack>

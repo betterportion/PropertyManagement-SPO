@@ -38,24 +38,110 @@ describe("dueSeasonalTasks", () => {
     const inputs: SeasonalInputs = {
       regions: [],
       rentedLeases: [
-        { propertyId: "p1", name: "Cleveland House", region: "Northwest", leaseEndDate: utc(2026, 9, 1), renewalDecision: "undecided" },
+        { propertyId: "p1", name: "Cleveland House", region: "Northwest", leaseEndDate: utc(2026, 9, 1), leaseRenewalDate: null, renewalDecision: "undecided" },
       ],
     };
     // Aug 18 is exactly 14 days before Sep 1.
     const specs = dueSeasonalTasks(inputs, utc(2026, 8, 18));
-    expect(specs).toHaveLength(1);
-    expect(specs[0].sourceKey).toBe("utilities-lease:p1:2026-09-01");
-    expect(specs[0].title).toContain("Cleveland House");
-    expect(specs[0].dueDate).toEqual(utc(2026, 9, 1));
+    const utilities = specs.filter((spec) => spec.sourceKey.startsWith("utilities-lease:"));
+    expect(utilities).toHaveLength(1);
+    expect(utilities[0].sourceKey).toBe("utilities-lease:p1:2026-09-01");
+    expect(utilities[0].title).toContain("Cleveland House");
+    expect(utilities[0].dueDate).toEqual(utc(2026, 9, 1));
+  });
+
+  it("raises both reminders for a lease ending with no decision recorded", () => {
+    // Two different actions on one house: decide whether to renew, and shut
+    // the utilities off if not. They are separate tasks with separate source
+    // keys, so an RA can check one off without losing the other.
+    const inputs: SeasonalInputs = {
+      regions: [],
+      rentedLeases: [
+        { propertyId: "p1", name: "Cleveland House", region: "Northwest", leaseEndDate: utc(2026, 9, 1), leaseRenewalDate: null, renewalDecision: "undecided" },
+      ],
+    };
+    const specs = dueSeasonalTasks(inputs, utc(2026, 8, 18));
+    expect(specs.map((spec) => spec.sourceKey).sort()).toEqual([
+      "lease-renewal:p1:2026-09-01",
+      "utilities-lease:p1:2026-09-01",
+    ]);
   });
 
   it("skips the lease utilities reminder when the house is renewing", () => {
     const inputs: SeasonalInputs = {
       regions: [],
       rentedLeases: [
-        { propertyId: "p1", name: "Cleveland House", region: "Northwest", leaseEndDate: utc(2026, 9, 1), renewalDecision: "renewing" },
+        { propertyId: "p1", name: "Cleveland House", region: "Northwest", leaseEndDate: utc(2026, 9, 1), leaseRenewalDate: null, renewalDecision: "renewing" },
       ],
     };
     expect(dueSeasonalTasks(inputs, utc(2026, 8, 18))).toHaveLength(0);
+  });
+});
+
+describe("the lease renewal reminder", () => {
+  const NOW = new Date("2026-08-15T00:00:00Z");
+  const renewalOn = (iso: string, renewalDecision = "undecided") => ({
+    regions: [],
+    rentedLeases: [
+      {
+        propertyId: "p1",
+        name: "Cleveland House",
+        region: "West Central",
+        leaseEndDate: new Date("2027-06-30T00:00:00Z"),
+        leaseRenewalDate: new Date(iso),
+        renewalDecision,
+      },
+    ],
+  });
+
+  const renewalSpecs = (inputs: Parameters<typeof dueSeasonalTasks>[0]) =>
+    dueSeasonalTasks(inputs, NOW).filter((spec) => spec.sourceKey.startsWith("lease-renewal:"));
+
+  it("appears two months before the decision is due", () => {
+    // Off the Phase 3.3 date, alongside the lease-end utilities reminder.
+    const specs = renewalSpecs(renewalOn("2026-09-15T00:00:00Z"));
+    expect(specs).toHaveLength(1);
+    expect(specs[0].title).toContain("Cleveland House");
+    expect(specs[0].region).toBe("West Central");
+  });
+
+  it("stays quiet while the decision is still far off", () => {
+    expect(renewalSpecs(renewalOn("2027-06-01T00:00:00Z"))).toHaveLength(0);
+  });
+
+  it("clears once the decision has been recorded, either way", () => {
+    // properties.renewalDecision already exists, so the reminder can resolve
+    // rather than nagging about something somebody has already decided.
+    expect(renewalSpecs(renewalOn("2026-09-15T00:00:00Z", "renewing"))).toHaveLength(0);
+    expect(renewalSpecs(renewalOn("2026-09-15T00:00:00Z", "not_renewing"))).toHaveLength(0);
+  });
+
+  it("falls back to the lease end when a house has no renewal date", () => {
+    // "Off the Phase 3.3 dates" -- a house that never had a decision date
+    // still has a lease that runs out, and that is what the decision is
+    // against. Sixty days before it, not two weeks.
+    const specs = dueSeasonalTasks(
+      {
+        regions: [],
+        rentedLeases: [
+          {
+            propertyId: "p1",
+            name: "Cleveland House",
+            region: "West Central",
+            leaseEndDate: new Date("2027-06-30T00:00:00Z"),
+            leaseRenewalDate: null,
+            renewalDecision: "undecided",
+          },
+        ],
+      },
+      new Date("2027-05-15T00:00:00Z"),
+    ).filter((spec) => spec.sourceKey.startsWith("lease-renewal:"));
+    expect(specs).toHaveLength(1);
+    expect(specs[0].sourceKey).toBe("lease-renewal:p1:2027-06-30");
+  });
+
+  it("keys on the house and the date, so re-running never duplicates it", () => {
+    const specs = renewalSpecs(renewalOn("2026-09-15T00:00:00Z"));
+    expect(specs[0].sourceKey).toBe("lease-renewal:p1:2026-09-15");
   });
 });

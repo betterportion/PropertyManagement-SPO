@@ -47,7 +47,12 @@ export default function WalkthroughRun() {
   const walkthroughId = params.id;
   const { user } = useAuth();
 
-  const [activeRoomId, setActiveRoomId] = useState<string | null>(null);
+  // Seeded from `?room=` so the flagged-items list can link straight to the
+  // room an item came from. Read once, not tracked: after the first render the
+  // room switcher owns this, and re-reading the URL would fight it.
+  const [activeRoomId, setActiveRoomId] = useState<string | null>(
+    () => new URLSearchParams(window.location.search).get("room"),
+  );
   const [isSwitcherOpen, setIsSwitcherOpen] = useState(false);
 
   const typedUser = user as (WalkthroughUser & { email?: string }) | null;

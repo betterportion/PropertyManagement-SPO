@@ -134,6 +134,48 @@
       "when": 1788316451047,
       "tag": "0018_walkthrough_template",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1788392565046,
+      "tag": "0019_property_details_and_setup_checklist",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1788393396525,
+      "tag": "0020_asset_lifecycle_snooze_and_assignment",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1788394884286,
+      "tag": "0021_contact_notes",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1788395293016,
+      "tag": "0022_deposit_ledger",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1788396961412,
+      "tag": "0023_resource_hub_documents_and_budgets",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1788398640831,
+      "tag": "0024_add_resource_hub_permission",
+      "breakpoints": true
     }
   ]
 }

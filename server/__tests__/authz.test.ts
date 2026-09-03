@@ -47,6 +47,7 @@ import {
   filterByRelatedRegion,
   ownsRecord,
   canReadMaintenanceRequest,
+  RESIDENT_CLOSED_REQUEST_DAYS,
   requireMaintenanceRequestAccess,
   residentHouseAddress,
   hasWalkthroughPermission,
@@ -615,6 +616,162 @@ describe("canReadMaintenanceRequest — housemates", () => {
         HOUSE_A,
       ),
     ).toBe(false);
+  });
+});
+
+describe("canReadMaintenanceRequest — the closed-request window on the house path", () => {
+  /**
+   * A household leader sees their house's OPEN requests always, and a closed
+   * one only for a while afterwards. Michael asked for less than the whole
+   * history, and this is the narrowing.
+   *
+   * The time dimension applies to the HOUSE path only. What somebody filed
+   * themselves they can always read back — that is their own report, not a
+   * housemate's history — and nothing here touches staff at all.
+   */
+  const HOUSE_A = "123 Main St, Saint Paul, MN 55101";
+  const NOW = new Date("2026-08-15T00:00:00Z");
+  const daysAgo = (n: number) => new Date(NOW.getTime() - n * 24 * 60 * 60 * 1000);
+
+  const resident = context({ role: "resident", email: "alice@example.com" });
+
+  const housemateRequest = (over: Record<string, unknown> = {}) => ({
+    region: "South East",
+    submittedBy: "bob@example.com",
+    buildingAddress: HOUSE_A,
+    status: "pending" as string,
+    completedDate: null as Date | null,
+    ...over,
+  });
+
+  it("shows an open request for their house however old it is", () => {
+    expect(
+      canReadMaintenanceRequest(resident, housemateRequest({ status: "pending" }), HOUSE_A, NOW),
+    ).toBe(true);
+    expect(
+      canReadMaintenanceRequest(resident, housemateRequest({ status: "in_progress" }), HOUSE_A, NOW),
+    ).toBe(true);
+  });
+
+  it("shows a request closed inside the window", () => {
+    expect(
+      canReadMaintenanceRequest(
+        resident,
+        housemateRequest({ status: "completed", completedDate: daysAgo(RESIDENT_CLOSED_REQUEST_DAYS - 1) }),
+        HOUSE_A,
+        NOW,
+      ),
+    ).toBe(true);
+  });
+
+  it("hides a request closed beyond the window", () => {
+    expect(
+      canReadMaintenanceRequest(
+        resident,
+        housemateRequest({ status: "completed", completedDate: daysAgo(RESIDENT_CLOSED_REQUEST_DAYS + 1) }),
+        HOUSE_A,
+        NOW,
+      ),
+    ).toBe(false);
+  });
+
+  it("treats a cancelled request as closed too", () => {
+    // completedDate is the CLOSE date and is stamped for cancelled as well as
+    // completed. A cancelled request is not open work.
+    expect(
+      canReadMaintenanceRequest(
+        resident,
+        housemateRequest({ status: "cancelled", completedDate: daysAgo(RESIDENT_CLOSED_REQUEST_DAYS + 1) }),
+        HOUSE_A,
+        NOW,
+      ),
+    ).toBe(false);
+  });
+
+  it("hides a closed request with no close date, failing closed", () => {
+    // Requests closed before completedDate started being written have none,
+    // and nothing can reconstruct when they closed. A guess would be worse
+    // than no date once a visibility window depends on it.
+    expect(
+      canReadMaintenanceRequest(
+        resident,
+        housemateRequest({ status: "completed", completedDate: null }),
+        HOUSE_A,
+        NOW,
+      ),
+    ).toBe(false);
+  });
+
+  it("hides a closed request whose close date is unparseable", () => {
+    expect(
+      canReadMaintenanceRequest(
+        resident,
+        housemateRequest({ status: "completed", completedDate: "not-a-date" }),
+        HOUSE_A,
+        NOW,
+      ),
+    ).toBe(false);
+  });
+
+  it("still shows a resident their OWN old closed request", () => {
+    // The window narrows the housemate path, not the ownership one. Somebody
+    // must be able to read back what they themselves reported.
+    expect(
+      canReadMaintenanceRequest(
+        resident,
+        housemateRequest({
+          submittedBy: "alice@example.com",
+          status: "completed",
+          completedDate: daysAgo(RESIDENT_CLOSED_REQUEST_DAYS * 5),
+        }),
+        HOUSE_A,
+        NOW,
+      ),
+    ).toBe(true);
+  });
+
+  it("still shows a resident their own old request even with no house link", () => {
+    expect(
+      canReadMaintenanceRequest(
+        resident,
+        housemateRequest({
+          submittedBy: "alice@example.com",
+          status: "completed",
+          completedDate: daysAgo(RESIDENT_CLOSED_REQUEST_DAYS * 5),
+        }),
+        null,
+        NOW,
+      ),
+    ).toBe(true);
+  });
+
+  it("leaves staff alone: full history, however old", () => {
+    const staff = context({ allowedRegions: ["South East"] });
+    expect(
+      canReadMaintenanceRequest(
+        staff,
+        housemateRequest({ status: "completed", completedDate: daysAgo(RESIDENT_CLOSED_REQUEST_DAYS * 10) }),
+        HOUSE_A,
+        NOW,
+      ),
+    ).toBe(true);
+  });
+
+  it("leaves admins alone", () => {
+    expect(
+      canReadMaintenanceRequest(
+        context({ role: "admin" }),
+        housemateRequest({ status: "completed", completedDate: daysAgo(RESIDENT_CLOSED_REQUEST_DAYS * 10) }),
+        HOUSE_A,
+        NOW,
+      ),
+    ).toBe(true);
+  });
+
+  it("is 120 days, in one place", () => {
+    // A named constant, so the server rule and anything describing it to a
+    // resident cannot drift.
+    expect(RESIDENT_CLOSED_REQUEST_DAYS).toBe(120);
   });
 });
 

@@ -24,6 +24,8 @@ import { z } from "zod";
 import { Section, Container, PageHeader, PageStack } from "@/components/layout/page";
 import { EmptyState, ErrorState, LoadingState } from "@/components/states";
 import { useUrlState } from "@/hooks/use-url-state";
+import { CLOSED_RANGES, closedWithinRange, locationOptions, type ClosedRange } from "@/lib/maintenanceFilters";
+import MaintenanceAggregates from "@/components/MaintenanceAggregates";
 import { ClipboardList, SlidersHorizontal } from "lucide-react";
 
 const createRequestSchema = insertMaintenanceRequestSchema.extend({
@@ -53,10 +55,21 @@ interface User {
 }
 
 export default function Maintenance() {
-  const [filters, setFilters, resetFilters] = useUrlState({ q: "", region: "all", building: "all" });
+  const [filters, setFilters, resetFilters] = useUrlState({
+    q: "",
+    region: "all",
+    building: "all",
+    room: "all",
+    // 90 days by default rather than "all": an RA opening this page wants
+    // what is happening, not four years of finished work. "All closed
+    // requests" is one click away.
+    closed: "90",
+  });
   const searchQuery = filters.q;
   const selectedRegion = filters.region;
   const selectedBuilding = filters.building;
+  const selectedRoom = filters.room;
+  const closedRange = filters.closed as ClosedRange;
   const [selectedRequest, setSelectedRequest] = useState<MaintenanceRequest | null>(null);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
@@ -75,21 +88,42 @@ export default function Maintenance() {
 
   const uniqueBuildings = properties.map(p => ({ id: p.address!, address: p.address! }));
 
-  const handleLocationChange = (propertyAddress: string, field: { onChange: (val: string) => void }) => {
+  /**
+   * Picking the house.
+   *
+   * This used to write the address into `location`, which meant `location`
+   * held a room for a resident-filed request and an address for a staff-filed
+   * one -- and grouping "these blinds have broken every year" cannot work
+   * across two different meanings of one column. The house now lands in
+   * `buildingAddress` where it belongs, and `location` is the room below.
+   */
+  const handlePropertyChange = (propertyAddress: string, field: { onChange: (val: string) => void }) => {
     field.onChange(propertyAddress);
     const property = properties.find(p => p.address === propertyAddress);
     if (property) {
       createForm.setValue("region", property.region);
-      createForm.setValue("buildingAddress", property.address!);
+      // A room name carried over from the last house means nothing in this one.
+      createForm.setValue("location", "");
     }
   };
 
-  const filteredRequests = requests.filter((r) => {
+  // The room options come from the house in view, not from the whole
+  // portfolio -- offering every room name SPO has ever recorded would make the
+  // filter useless the moment there is more than one house.
+  const requestsInScope = requests.filter(
+    (r) =>
+      (selectedRegion === "all" || r.region === selectedRegion) &&
+      (selectedBuilding === "all" || r.buildingAddress === selectedBuilding),
+  );
+  const roomOptions = locationOptions(requestsInScope);
+
+  const filteredRequests = requestsInScope.filter((r) => {
     const matchesSearch = r.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       r.location.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesRegion = selectedRegion === "all" || r.region === selectedRegion;
-    const matchesBuilding = selectedBuilding === "all" || r.buildingAddress === selectedBuilding;
-    return matchesSearch && matchesRegion && matchesBuilding;
+    const matchesRoom = selectedRoom === "all" || r.location === selectedRoom;
+    // Open work always survives the range; the range is about history.
+    const matchesRange = closedWithinRange(r, closedRange);
+    return matchesSearch && matchesRoom && matchesRange;
   });
 
   const pendingRequests = filteredRequests.filter((r) => r.status === "pending");
@@ -120,6 +154,23 @@ export default function Maintenance() {
       submittedBy: typedUser?.email || "",
       photoUrl: null,
     },
+  });
+
+  // The rooms of the house picked in the create dialog. Keyed on the address
+  // so switching house re-reads; disabled until one is chosen, because there
+  // is no house to ask about yet.
+  const creatingForAddress = createForm.watch("buildingAddress");
+  const creatingForProperty = properties.find((p) => p.address === creatingForAddress);
+  const { data: staffLocationSuggestions = [] } = useQuery<string[]>({
+    queryKey: ["/api/maintenance-locations", creatingForProperty?.id],
+    queryFn: async () => {
+      const response = await fetch(`/api/maintenance-locations?propertyId=${creatingForProperty!.id}`, {
+        credentials: "include",
+      });
+      if (!response.ok) return [];
+      return await response.json();
+    },
+    enabled: !!creatingForProperty,
   });
 
   const createMutation = useMutation({
@@ -244,11 +295,11 @@ export default function Maintenance() {
                 />
                 <FormField
                   control={createForm.control}
-                  name="location"
+                  name="buildingAddress"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Location (Property)</FormLabel>
-                      <Select onValueChange={(val) => handleLocationChange(val, field)} value={field.value}>
+                      <FormLabel>Property</FormLabel>
+                      <Select onValueChange={(val) => handlePropertyChange(val, field)} value={field.value}>
                         <FormControl>
                           <SelectTrigger data-testid="select-location">
                             <SelectValue placeholder="Select property" />
@@ -262,6 +313,33 @@ export default function Maintenance() {
                           ))}
                         </SelectContent>
                       </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={createForm.control}
+                  name="location"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Where in the house</FormLabel>
+                      <FormControl>
+                        {/* Suggests from the house's own walkthrough rooms
+                            without restricting: free text alone will not group
+                            "living room" and "Living Rm", and grouping is the
+                            point -- it is what lets somebody notice that these
+                            blinds have broken every year. */}
+                        <Input
+                          list="staff-request-location-suggestions"
+                          placeholder="e.g. Kitchen, Upstairs bathroom"
+                          {...field}
+                          value={field.value ?? ""}
+                          data-testid="input-staff-request-location"
+                        />
+                      </FormControl>
+                      <datalist id="staff-request-location-suggestions">
+                        {staffLocationSuggestions.map((name) => <option key={name} value={name} />)}
+                      </datalist>
                       <FormMessage />
                     </FormItem>
                   )}
@@ -328,6 +406,31 @@ export default function Maintenance() {
           onBuildingChange={(value) => setFilters({ building: value })}
           buildings={uniqueBuildings}
         />
+        {roomOptions.length > 0 && (
+          <Select value={selectedRoom} onValueChange={(value) => setFilters({ room: value })}>
+            <SelectTrigger className="w-44" data-testid="select-filter-room" aria-label="Filter by room">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Every room</SelectItem>
+              {roomOptions.map((room) => (
+                <SelectItem key={room} value={room}>{room}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+
+        <Select value={closedRange} onValueChange={(value) => setFilters({ closed: value })}>
+          <SelectTrigger className="w-56" data-testid="select-filter-closed-range" aria-label="How far back to show closed requests">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {CLOSED_RANGES.map((range) => (
+              <SelectItem key={range.value} value={range.value}>{range.label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
         <div className="relative flex-1 min-w-0 md:min-w-64">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
@@ -355,6 +458,9 @@ export default function Maintenance() {
             </TabsTrigger>
             <TabsTrigger value="completed" data-testid="tab-completed-requests">
               Completed ({completedRequests.length})
+            </TabsTrigger>
+            <TabsTrigger value="patterns" data-testid="tab-patterns">
+              Patterns
             </TabsTrigger>
           </TabsList>
         </div>
@@ -406,6 +512,13 @@ export default function Maintenance() {
           ))}
           {completedRequests.length === 0 && <EmptyState icon={ClipboardList} title="Completed work will collect here" description="Resolved requests remain available for your records." />}
         </TabsContent>
+        <TabsContent value="patterns" className="mt-6">
+          {/* Aggregates rather than filters: what KEEPS happening, which is
+              the question that settles an argument about whether to keep
+              renting a house or keep using a contractor. */}
+          <MaintenanceAggregates />
+        </TabsContent>
+
       </Tabs>
 
       {selectedRequest && (

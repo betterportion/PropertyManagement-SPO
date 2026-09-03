@@ -12,12 +12,18 @@ import {
   assets,
   assetPhotos,
   maintenanceContacts,
+  contactNotes,
   invoices,
   billingRecords,
   properties,
+  propertySetupItems,
+  resourceLinks,
+  residentDocuments,
+  propertyBudgets,
   residents,
   rentPayments,
   securityDeposits,
+  depositDeductions,
   maintenanceSchedules,
   tasks,
   requestContacts,
@@ -34,6 +40,8 @@ import {
   type InsertWalkthrough,
   type WalkthroughItem,
   type InsertWalkthroughItem,
+  type FlaggedWalkthroughItem,
+  WALKTHROUGH_FLAGGED_CONDITIONS,
   type WalkthroughTemplateRoom,
   type InsertWalkthroughTemplateRoom,
   type WalkthroughTemplateItem,
@@ -47,12 +55,21 @@ import {
   type InsertAssetPhoto,
   type MaintenanceContact,
   type InsertMaintenanceContact,
+  type ContactNote,
+  type InsertContactNote,
   type Invoice,
   type InsertInvoice,
   type BillingRecord,
   type InsertBillingRecord,
   type Property,
   type InsertPropertyWithAddress,
+  type PropertySetupItem,
+  type InsertPropertySetupItem,
+  type ResourceLink,
+  type InsertResourceLink,
+  type ResidentDocument,
+  type PropertyBudget,
+  type InsertPropertyBudget,
   type MaintenanceSchedule,
   type InsertMaintenanceSchedule,
   type Resident,
@@ -61,6 +78,8 @@ import {
   type InsertRentPayment,
   type SecurityDeposit,
   type InsertSecurityDeposit,
+  type DepositDeduction,
+  type InsertDepositDeduction,
   type Task,
   type InsertTask,
   uploads,
@@ -72,7 +91,7 @@ import {
 } from "@shared/schema";
 import { db } from "./db";
 import { REGIONS } from "@shared/regions";
-import { eq, and, or, desc, asc, inArray, lt, lte, gte, ilike, count, notInArray } from "drizzle-orm";
+import { eq, and, or, desc, asc, inArray, lt, lte, gte, ilike, count, notInArray, sql } from "drizzle-orm";
 
 // Helper function to filter out undefined values from partial updates
 function filterUndefined<T extends Record<string, any>>(obj: T): Partial<T> {
@@ -105,12 +124,13 @@ function computeDefaultPermissions(userId: string, role: "admin" | "regional_adm
     // by revoking a grant, not by rewriting guards.
     canViewFinancials: role !== "resident",
     canManageFinancials: role !== "resident",
-    // Both new-surface flags start false for every role, including staff. They
-    // gate features that do not exist yet, and the plan they come from asks for
-    // them to land ahead of the features rather than alongside them -- so the
-    // safe starting state is nobody, and turning one on is a data change.
+    // The new-surface flags start false for every role, including staff, and
+    // turning one on is a data change rather than a code change. The resource
+    // hub is the one a household leader needs: nobody has it until an admin
+    // grants it, which is the same shape as walkthrough completion.
     canCompleteWalkthroughs: false,
     canManagePropertySetup: false,
+    canViewResourceHub: false,
     allowedRegions: role === "admin" ? [...REGIONS] : [],
   };
 }
@@ -177,6 +197,8 @@ export interface IStorage {
   getAllWalkthroughItems(): Promise<WalkthroughItem[]>;
   getWalkthroughItemsByRoom(roomId: string): Promise<WalkthroughItem[]>;
   getWalkthroughItemsByWalkthrough(walkthroughId: string): Promise<WalkthroughItem[]>;
+  /** Every item recorded poor or damaged, newest walkthrough first. */
+  getFlaggedWalkthroughItems(): Promise<FlaggedWalkthroughItem[]>;
   updateWalkthroughItem(id: string, data: Partial<InsertWalkthroughItem>): Promise<WalkthroughItem>;
   deleteWalkthroughItem(id: string): Promise<void>;
 
@@ -201,7 +223,19 @@ export interface IStorage {
   createAsset(asset: InsertAsset): Promise<Asset>;
   getAsset(id: string): Promise<Asset | undefined>;
   getAllAssets(): Promise<Asset[]>;
-  updateAsset(id: string, data: Partial<InsertAsset>): Promise<Asset>;
+  // The snooze attribution is not part of the insert schema -- it is taken
+  // from the authenticated actor and the clock, never from a request body,
+  // exactly as completedDate is on a maintenance request. See the snooze
+  // routes in server/routes.ts.
+  updateAsset(
+    id: string,
+    data: Partial<InsertAsset> & {
+      snoozedUntil?: Date | null;
+      snoozeReason?: string | null;
+      snoozedByUserId?: string | null;
+      snoozedAt?: Date | null;
+    },
+  ): Promise<Asset>;
   deleteAsset(id: string): Promise<void>;
 
   // Asset Photos
@@ -255,6 +289,20 @@ export interface IStorage {
   updateSecurityDeposit(id: string, data: Partial<InsertSecurityDeposit>): Promise<SecurityDeposit>;
   deleteSecurityDeposit(id: string): Promise<void>;
 
+  // Deposit deductions
+  getAllDepositDeductions(): Promise<DepositDeduction[]>;
+  getDepositDeduction(id: string): Promise<DepositDeduction | undefined>;
+  getDepositDeductionsByResident(residentId: string): Promise<DepositDeduction[]>;
+  createDepositDeduction(
+    deduction: InsertDepositDeduction & DepositDeductionOwnedFields,
+  ): Promise<DepositDeduction>;
+  /** Writes a whole split at once, so a house is never half-charged. */
+  createDepositDeductions(
+    deductions: (InsertDepositDeduction & DepositDeductionOwnedFields)[],
+  ): Promise<DepositDeduction[]>;
+  updateDepositDeduction(id: string, data: Partial<InsertDepositDeduction>): Promise<DepositDeduction>;
+  deleteDepositDeduction(id: string): Promise<void>;
+
   // Tasks
   createTask(task: InsertTask & { createdBy: string | null; sourceKey?: string | null }): Promise<Task>;
   getTask(id: string): Promise<Task | undefined>;
@@ -269,6 +317,16 @@ export interface IStorage {
   getAllMaintenanceContacts(): Promise<MaintenanceContact[]>;
   updateMaintenanceContact(id: string, data: Partial<InsertMaintenanceContact>): Promise<MaintenanceContact>;
   deleteMaintenanceContact(id: string): Promise<void>;
+
+  // Contractor history
+  /** Every maintenance request this vendor was linked to, newest first. */
+  getRequestsForContact(contactId: string): Promise<MaintenanceRequest[]>;
+  getContactNotes(contactId: string): Promise<ContactNote[]>;
+  getContactNote(id: string): Promise<ContactNote | undefined>;
+  createContactNote(
+    note: InsertContactNote & { contactId: string; authorUserId: string | null; authorEmail: string | null; region: string },
+  ): Promise<ContactNote>;
+  deleteContactNote(id: string): Promise<void>;
 
   // Invoices
   createInvoice(invoice: InsertInvoice): Promise<Invoice>;
@@ -289,12 +347,53 @@ export interface IStorage {
   getProperty(id: string): Promise<Property | undefined>;
   getAllProperties(): Promise<Property[]>;
 
+  // Property setup checklist
+  getPropertySetupItems(propertyId: string): Promise<PropertySetupItem[]>;
+  getAllPropertySetupItems(): Promise<PropertySetupItem[]>;
+  /** Seeds a new house's checklist. Ignores rows that already exist. */
+  createPropertySetupItems(rows: InsertPropertySetupItem[]): Promise<PropertySetupItem[]>;
+  /** Sets one item's state, creating the row if the house predates it. */
+  setPropertySetupItem(
+    propertyId: string,
+    itemKey: string,
+    patch: { status: PropertySetupItem["status"]; note?: string | null; region: string; setByUserId: string | null; setAt: Date },
+  ): Promise<PropertySetupItem>;
+
   // Request Contacts (linking)
   getRequestContacts(requestId: string): Promise<MaintenanceContact[]>;
+  /** Every vendor-to-request link, for the contractor rollup. */
+  getAllRequestContactLinks(): Promise<{ contactId: string; requestId: string }[]>;
   linkContactToRequest(requestId: string, contactId: string): Promise<void>;
   unlinkContactFromRequest(requestId: string, contactId: string): Promise<void>;
   updateProperty(id: string, data: Partial<InsertPropertyWithAddress>): Promise<Property>;
   deleteProperty(id: string): Promise<void>;
+
+  // Resource hub
+  getAllResourceLinks(): Promise<ResourceLink[]>;
+  getResourceLink(id: string): Promise<ResourceLink | undefined>;
+  createResourceLink(link: InsertResourceLink): Promise<ResourceLink>;
+  updateResourceLink(id: string, data: Partial<InsertResourceLink>): Promise<ResourceLink>;
+  deleteResourceLink(id: string): Promise<void>;
+
+  // Liability paperwork
+  getAllResidentDocuments(): Promise<ResidentDocument[]>;
+  /** Sets one document's state, creating the row the first time. */
+  setResidentDocument(
+    residentId: string,
+    documentKey: string,
+    patch: {
+      signedOn: Date | null;
+      notes?: string | null;
+      region: string;
+      recordedByUserId: string | null;
+      recordedByEmail: string | null;
+    },
+  ): Promise<ResidentDocument>;
+
+  // Startup budgets
+  getAllPropertyBudgets(): Promise<PropertyBudget[]>;
+  /** Creates or replaces the figure for one house and year. */
+  upsertPropertyBudget(budget: InsertPropertyBudget & { region: string }): Promise<PropertyBudget>;
 
   // Audit log
   createAuditEvent(event: InsertAuditEvent): Promise<AuditEvent>;
@@ -348,12 +447,31 @@ export interface AuditEventPage {
   total: number;
 }
 
+/**
+ * The parts of a deduction the SERVER supplies rather than the caller.
+ *
+ * The property, region and house are copied from the resident the deduction is
+ * against, so a body cannot name a region it cannot reach; the actor comes
+ * from the session; the split group id is set by the split route alone. Named
+ * once because four signatures need it and four copies is four places to
+ * quietly drop one of them.
+ */
+export interface DepositDeductionOwnedFields {
+  propertyId: string;
+  region: string;
+  buildingAddress: string;
+  splitGroupId?: string | null;
+  recordedByUserId: string | null;
+  recordedByEmail: string | null;
+}
+
 export type UploadReference =
   | { kind: "maintenanceRequest"; record: MaintenanceRequest }
   | { kind: "maintenanceRequestPhoto"; record: MaintenanceRequestPhoto }
   | { kind: "walkthroughPhoto"; record: WalkthroughPhoto }
   | { kind: "assetPhoto"; record: AssetPhoto }
-  | { kind: "billingRecord"; record: BillingRecord };
+  | { kind: "billingRecord"; record: BillingRecord }
+  | { kind: "property"; record: Property };
 
 export class DatabaseStorage implements IStorage {
   async getUser(id: string): Promise<User | undefined> {
@@ -702,6 +820,50 @@ export class DatabaseStorage implements IStorage {
     return rows.map((row) => row.item);
   }
 
+  /**
+   * Every checklist item across every walkthrough whose condition needs
+   * attention.
+   *
+   * One query for the whole list, joined up to the walkthrough so each row can
+   * name its house: the caller filters by region against `region` on the
+   * walkthrough itself, exactly as it would over `getAllWalkthroughs`, without
+   * a per-row lookup to find out where an item lives.
+   *
+   * The photo count is a correlated subquery rather than a join, so a room
+   * with three photos still produces one row per item rather than three.
+   */
+  async getFlaggedWalkthroughItems(): Promise<FlaggedWalkthroughItem[]> {
+    const photoCount = db
+      .select({ value: count() })
+      .from(walkthroughPhotos)
+      .where(eq(walkthroughPhotos.roomId, walkthroughRooms.id));
+
+    const rows = await db
+      .select({
+        itemId: walkthroughItems.id,
+        label: walkthroughItems.label,
+        condition: walkthroughItems.condition,
+        notes: walkthroughItems.notes,
+        roomId: walkthroughRooms.id,
+        roomName: walkthroughRooms.name,
+        walkthroughId: walkthroughs.id,
+        walkthroughDate: walkthroughs.walkthroughDate,
+        walkthroughType: walkthroughs.type,
+        walkthroughStatus: walkthroughs.status,
+        propertyId: walkthroughs.propertyId,
+        buildingAddress: walkthroughs.buildingAddress,
+        region: walkthroughs.region,
+        roomPhotoCount: sql<number>`(${photoCount})`.mapWith(Number),
+      })
+      .from(walkthroughItems)
+      .innerJoin(walkthroughRooms, eq(walkthroughItems.roomId, walkthroughRooms.id))
+      .innerJoin(walkthroughs, eq(walkthroughRooms.walkthroughId, walkthroughs.id))
+      .where(inArray(walkthroughItems.condition, [...WALKTHROUGH_FLAGGED_CONDITIONS]))
+      .orderBy(desc(walkthroughs.walkthroughDate), walkthroughRooms.displayOrder, walkthroughItems.displayOrder);
+
+    return rows;
+  }
+
   async updateWalkthroughItem(id: string, data: Partial<InsertWalkthroughItem>): Promise<WalkthroughItem> {
     const [row] = await db
       .update(walkthroughItems)
@@ -810,7 +972,15 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(assets);
   }
 
-  async updateAsset(id: string, data: Partial<InsertAsset>): Promise<Asset> {
+  async updateAsset(
+    id: string,
+    data: Partial<InsertAsset> & {
+      snoozedUntil?: Date | null;
+      snoozeReason?: string | null;
+      snoozedByUserId?: string | null;
+      snoozedAt?: Date | null;
+    },
+  ): Promise<Asset> {
     const [asset] = await db
       .update(assets)
       .set({ ...filterUndefined(data), updatedAt: new Date() })
@@ -1296,11 +1466,269 @@ export class DatabaseStorage implements IStorage {
     return found;
   }
 
+  async getAllRequestContactLinks(): Promise<{ contactId: string; requestId: string }[]> {
+    return await db
+      .select({ contactId: requestContacts.contactId, requestId: requestContacts.requestId })
+      .from(requestContacts);
+  }
+
+  // Resource hub Implementation
+  async getAllResourceLinks(): Promise<ResourceLink[]> {
+    return await db
+      .select()
+      .from(resourceLinks)
+      .orderBy(resourceLinks.category, resourceLinks.displayOrder, resourceLinks.title);
+  }
+
+  async getResourceLink(id: string): Promise<ResourceLink | undefined> {
+    const [row] = await db.select().from(resourceLinks).where(eq(resourceLinks.id, id));
+    return row;
+  }
+
+  async createResourceLink(link: InsertResourceLink): Promise<ResourceLink> {
+    const [row] = await db.insert(resourceLinks).values(link).returning();
+    return row;
+  }
+
+  async updateResourceLink(id: string, data: Partial<InsertResourceLink>): Promise<ResourceLink> {
+    const [row] = await db
+      .update(resourceLinks)
+      .set({ ...filterUndefined(data), updatedAt: new Date() })
+      .where(eq(resourceLinks.id, id))
+      .returning();
+    return row;
+  }
+
+  async deleteResourceLink(id: string): Promise<void> {
+    await db.delete(resourceLinks).where(eq(resourceLinks.id, id));
+  }
+
+  // Liability paperwork Implementation
+  async getAllResidentDocuments(): Promise<ResidentDocument[]> {
+    return await db.select().from(residentDocuments);
+  }
+
+  /**
+   * An upsert rather than an update: nobody's paperwork rows exist until
+   * somebody first records something, so an RA ticking the first box is
+   * creating the row.
+   */
+  async setResidentDocument(
+    residentId: string,
+    documentKey: string,
+    patch: {
+      signedOn: Date | null;
+      notes?: string | null;
+      region: string;
+      recordedByUserId: string | null;
+      recordedByEmail: string | null;
+    },
+  ): Promise<ResidentDocument> {
+    const [row] = await db
+      .insert(residentDocuments)
+      .values({
+        residentId,
+        documentKey,
+        signedOn: patch.signedOn,
+        notes: patch.notes ?? null,
+        region: patch.region,
+        recordedByUserId: patch.recordedByUserId,
+        recordedByEmail: patch.recordedByEmail,
+      })
+      .onConflictDoUpdate({
+        target: [residentDocuments.residentId, residentDocuments.documentKey],
+        set: {
+          signedOn: patch.signedOn,
+          notes: patch.notes ?? null,
+          region: patch.region,
+          recordedByUserId: patch.recordedByUserId,
+          recordedByEmail: patch.recordedByEmail,
+          updatedAt: new Date(),
+        },
+      })
+      .returning();
+    return row;
+  }
+
+  // Startup budgets Implementation
+  async getAllPropertyBudgets(): Promise<PropertyBudget[]> {
+    return await db.select().from(propertyBudgets).orderBy(desc(propertyBudgets.year));
+  }
+
+  async upsertPropertyBudget(budget: InsertPropertyBudget & { region: string }): Promise<PropertyBudget> {
+    const [row] = await db
+      .insert(propertyBudgets)
+      .values(budget)
+      .onConflictDoUpdate({
+        target: [propertyBudgets.propertyId, propertyBudgets.year],
+        set: { amount: budget.amount, notes: budget.notes ?? null, region: budget.region, updatedAt: new Date() },
+      })
+      .returning();
+    return row;
+  }
+
+  // Deposit deductions Implementation
+  async getAllDepositDeductions(): Promise<DepositDeduction[]> {
+    return await db.select().from(depositDeductions).orderBy(desc(depositDeductions.chargeDate));
+  }
+
+  async getDepositDeduction(id: string): Promise<DepositDeduction | undefined> {
+    const [row] = await db.select().from(depositDeductions).where(eq(depositDeductions.id, id));
+    return row;
+  }
+
+  async getDepositDeductionsByResident(residentId: string): Promise<DepositDeduction[]> {
+    return await db
+      .select()
+      .from(depositDeductions)
+      .where(eq(depositDeductions.residentId, residentId))
+      .orderBy(desc(depositDeductions.chargeDate));
+  }
+
+  async createDepositDeduction(
+    deduction: InsertDepositDeduction & DepositDeductionOwnedFields,
+  ): Promise<DepositDeduction> {
+    const [row] = await db.insert(depositDeductions).values(deduction).returning();
+    return row;
+  }
+
+  /**
+   * Writes a whole split at once.
+   *
+   * One statement rather than a loop: a common-area charge that half-applied
+   * would leave some of a house charged and some not, and the shares no longer
+   * adding up to the charge.
+   */
+  async createDepositDeductions(
+    deductions: (InsertDepositDeduction & DepositDeductionOwnedFields)[],
+  ): Promise<DepositDeduction[]> {
+    if (deductions.length === 0) return [];
+    return await db.insert(depositDeductions).values(deductions).returning();
+  }
+
+  async updateDepositDeduction(id: string, data: Partial<InsertDepositDeduction>): Promise<DepositDeduction> {
+    const [row] = await db
+      .update(depositDeductions)
+      .set({ ...filterUndefined(data), updatedAt: new Date() })
+      .where(eq(depositDeductions.id, id))
+      .returning();
+    return row;
+  }
+
+  async deleteDepositDeduction(id: string): Promise<void> {
+    await db.delete(depositDeductions).where(eq(depositDeductions.id, id));
+  }
+
+  // Contractor history Implementation
+  //
+  // Mostly a read over data that already exists: request_contacts has linked
+  // vendors to requests all along, there was simply nowhere to read it from.
+  async getRequestsForContact(contactId: string): Promise<MaintenanceRequest[]> {
+    const rows = await db
+      .select({ request: maintenanceRequests })
+      .from(requestContacts)
+      .innerJoin(maintenanceRequests, eq(requestContacts.requestId, maintenanceRequests.id))
+      .where(eq(requestContacts.contactId, contactId))
+      .orderBy(desc(maintenanceRequests.submittedDate));
+    return rows.map((row) => row.request);
+  }
+
+  async getContactNotes(contactId: string): Promise<ContactNote[]> {
+    return await db
+      .select()
+      .from(contactNotes)
+      .where(eq(contactNotes.contactId, contactId))
+      .orderBy(desc(contactNotes.createdAt));
+  }
+
+  async getContactNote(id: string): Promise<ContactNote | undefined> {
+    const [row] = await db.select().from(contactNotes).where(eq(contactNotes.id, id));
+    return row;
+  }
+
+  async createContactNote(
+    note: InsertContactNote & { contactId: string; authorUserId: string | null; authorEmail: string | null; region: string },
+  ): Promise<ContactNote> {
+    const [row] = await db.insert(contactNotes).values(note).returning();
+    return row;
+  }
+
+  async deleteContactNote(id: string): Promise<void> {
+    await db.delete(contactNotes).where(eq(contactNotes.id, id));
+  }
+
+  // Property setup checklist Implementation
+  async getPropertySetupItems(propertyId: string): Promise<PropertySetupItem[]> {
+    return await db
+      .select()
+      .from(propertySetupItems)
+      .where(eq(propertySetupItems.propertyId, propertyId));
+  }
+
+  async getAllPropertySetupItems(): Promise<PropertySetupItem[]> {
+    return await db.select().from(propertySetupItems);
+  }
+
+  /**
+   * Seeds a new house's checklist.
+   *
+   * `onConflictDoNothing` rather than an upsert: seeding runs once at property
+   * creation, and a second run must never reset an item somebody has already
+   * marked done.
+   */
+  async createPropertySetupItems(rows: InsertPropertySetupItem[]): Promise<PropertySetupItem[]> {
+    if (rows.length === 0) return [];
+    return await db
+      .insert(propertySetupItems)
+      .values(rows)
+      .onConflictDoNothing({ target: [propertySetupItems.propertyId, propertySetupItems.itemKey] })
+      .returning();
+  }
+
+  /**
+   * Sets one item's state.
+   *
+   * An upsert rather than an update, because a house created before the
+   * checklist existed has no rows at all -- an RA who starts filling one in is
+   * creating it, and refusing them would make the feature unreachable for
+   * every existing house.
+   */
+  async setPropertySetupItem(
+    propertyId: string,
+    itemKey: string,
+    patch: { status: PropertySetupItem["status"]; note?: string | null; region: string; setByUserId: string | null; setAt: Date },
+  ): Promise<PropertySetupItem> {
+    const [row] = await db
+      .insert(propertySetupItems)
+      .values({
+        propertyId,
+        itemKey,
+        status: patch.status,
+        note: patch.note ?? null,
+        region: patch.region,
+        setByUserId: patch.setByUserId,
+        setAt: patch.setAt,
+      })
+      .onConflictDoUpdate({
+        target: [propertySetupItems.propertyId, propertySetupItems.itemKey],
+        set: {
+          status: patch.status,
+          note: patch.note ?? null,
+          region: patch.region,
+          setByUserId: patch.setByUserId,
+          setAt: patch.setAt,
+          updatedAt: new Date(),
+        },
+      })
+      .returning();
+    return row;
+  }
+
   async findUploadReferences(url: string): Promise<UploadReference[]> {
     // Each of these is the full set of columns in which the application stores
     // an uploaded file's URL. A new column holding one has to be added here, or
     // downloads of those files will be refused to everyone but the uploader.
-    const [requests, requestPhotos, walkthrough, asset, billing] = await Promise.all([
+    const [requests, requestPhotos, walkthrough, asset, billing, property] = await Promise.all([
       db.select().from(maintenanceRequests).where(eq(maintenanceRequests.photoUrl, url)),
       db.select().from(maintenanceRequestPhotos).where(eq(maintenanceRequestPhotos.imageUrl, url)),
       db.select().from(walkthroughPhotos).where(eq(walkthroughPhotos.imageUrl, url)),
@@ -1315,6 +1743,7 @@ export class DatabaseStorage implements IStorage {
             eq(billingRecords.w9Url, url),
           ),
         ),
+      db.select().from(properties).where(eq(properties.photoUrl, url)),
     ]);
 
     return [
@@ -1323,6 +1752,7 @@ export class DatabaseStorage implements IStorage {
       ...walkthrough.map((record) => ({ kind: "walkthroughPhoto" as const, record })),
       ...asset.map((record) => ({ kind: "assetPhoto" as const, record })),
       ...billing.map((record) => ({ kind: "billingRecord" as const, record })),
+      ...property.map((record) => ({ kind: "property" as const, record })),
     ];
   }
 }

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { buildActionItems, type ActionItemInputs } from "../actionItems";
-import type { MaintenanceSchedule, RentPayment, SecurityDeposit, Resident, Task, Property } from "@shared/schema";
+import type { MaintenanceSchedule, RentPayment, SecurityDeposit, Resident, Task, Property, PropertySetupItem, Asset } from "@shared/schema";
 
 // buildActionItems only reads a handful of fields off each record, so the
 // factories fill just those and cast; a full row would be noise.
@@ -29,7 +29,308 @@ function property(over: Partial<Property>): Property {
   } as Property;
 }
 
-const empty: ActionItemInputs = { schedules: [], rentPayments: [], deposits: [], residents: [], tasks: [], properties: [] };
+const empty: ActionItemInputs = { schedules: [], rentPayments: [], deposits: [], residents: [], tasks: [], properties: [], setupItems: [], assets: [] };
+
+function asset(over: Partial<Asset>): Asset {
+  return {
+    id: "a1", name: "Water heater", category: "Water Heater", buildingAddress: "1 Main St",
+    region: "West Central", acquisitionDate: null, expectedLifespanYears: null,
+    replacementDueDate: null, snoozedUntil: null, ...over,
+  } as Asset;
+}
+
+function setupItem(over: Partial<PropertySetupItem>): PropertySetupItem {
+  return { id: "si1", propertyId: "p1", itemKey: "electric", status: "open", region: "West Central", ...over } as PropertySetupItem;
+}
+
+describe("when a deposit has to go back", () => {
+  const HOUSE = property({ id: "p1", ownership: "owned", leaseRenewalDate: null, depositReturnDays: 21 });
+
+  const leaving = (over: Partial<Resident> = {}) =>
+    resident({ id: "res-gone", propertyId: "p1", isActive: false, moveOutDate: days(-1), ...over });
+
+  it("gives the item a deadline counted from the move-out date", () => {
+    // The clock starts when possession came back, not at lease end -- somebody
+    // can leave in April on a lease running to July.
+    const items = buildActionItems({
+      ...empty,
+      properties: [HOUSE],
+      deposits: [deposit({ propertyId: "p1" })],
+      residents: [leaving({ moveOutDate: days(-1) })],
+    }, NOW);
+
+    const item = items.find((i) => i.source === "deposit")!;
+    // Moved out yesterday, 21 days to return it.
+    expect(item.dueDate?.slice(0, 10)).toBe("2026-09-04");
+    expect(item.overdue).toBe(false);
+  });
+
+  it("reads as overdue once the window has closed", () => {
+    const items = buildActionItems({
+      ...empty,
+      properties: [HOUSE],
+      deposits: [deposit({ propertyId: "p1" })],
+      residents: [leaving({ moveOutDate: days(-60) })],
+    }, NOW);
+    expect(items.find((i) => i.source === "deposit")!.overdue).toBe(true);
+  });
+
+  it("warns before somebody has even left, so the money is ready", () => {
+    const items = buildActionItems({
+      ...empty,
+      properties: [HOUSE],
+      deposits: [deposit({ propertyId: "p1" })],
+      residents: [resident({ id: "res-gone", propertyId: "p1", isActive: true, moveOutDate: days(20) })],
+    }, NOW);
+    expect(items.filter((i) => i.source === "deposit")).toHaveLength(1);
+  });
+
+  it("stays quiet about a move-out further out than the warning window", () => {
+    const items = buildActionItems({
+      ...empty,
+      properties: [HOUSE],
+      deposits: [deposit({ propertyId: "p1" })],
+      residents: [resident({ id: "res-gone", propertyId: "p1", isActive: true, moveOutDate: days(120) })],
+    }, NOW);
+    expect(items.filter((i) => i.source === "deposit")).toHaveLength(0);
+  });
+
+  it("invents no deadline when the house has no setting, and reads as due now", () => {
+    // The number is SPO's own reminder setting, not a legal determination, so
+    // nothing here counts forward from the move-out date by some default. What
+    // it does say is "this needs doing", which is what it said before
+    // deadlines existed -- see the ranking test below for why that matters.
+    const items = buildActionItems({
+      ...empty,
+      properties: [property({ id: "p1", ownership: "owned", leaseRenewalDate: null, depositReturnDays: null })],
+      deposits: [deposit({ propertyId: "p1" })],
+      residents: [leaving({ moveOutDate: days(-40) })],
+    }, NOW);
+    const item = items.find((i) => i.source === "deposit");
+    expect(item).toBeTruthy();
+    // Now, not "40 days ago plus a guessed number of days".
+    expect(item!.dueDate).toBe(NOW.toISOString());
+  });
+
+  it("still ranks a deposit with no deadline near the top, not last", () => {
+    // Every house has depositReturnDays null the day this ships. If "no
+    // setting" meant "no due date", every held deposit for a departed
+    // resident would sort BELOW every dated item and quietly fall off the
+    // dashboard's top few -- which is the opposite of what adding deadlines
+    // was for. No setting means the deposit is due now, as it was before.
+    const items = buildActionItems({
+      ...empty,
+      properties: [property({ id: "p1", ownership: "owned", leaseRenewalDate: null, depositReturnDays: null })],
+      deposits: [deposit({ propertyId: "p1" })],
+      residents: [leaving()],
+      // A dated item that would otherwise outrank it.
+      schedules: [schedule({ id: "later", nextDueDate: days(20) })],
+    }, NOW);
+
+    const depositIndex = items.findIndex((i) => i.source === "deposit");
+    const scheduleIndex = items.findIndex((i) => i.source === "schedule");
+    expect(depositIndex).toBeLessThan(scheduleIndex);
+    expect(items[depositIndex].overdue).toBe(true);
+  });
+
+  it("does not treat somebody still living there as overdue for want of a setting", () => {
+    // The "due now" fallback is for a deposit that should already have gone
+    // back. Somebody leaving next month has not triggered anything yet.
+    const items = buildActionItems({
+      ...empty,
+      properties: [property({ id: "p1", ownership: "owned", leaseRenewalDate: null, depositReturnDays: null })],
+      deposits: [deposit({ propertyId: "p1" })],
+      residents: [resident({ id: "res-gone", propertyId: "p1", isActive: true, moveOutDate: days(20) })],
+    }, NOW);
+    expect(items.find((i) => i.source === "deposit")!.overdue).toBe(false);
+  });
+
+  it.each(["returned", "withheld", "partially_returned"] as const)(
+    "clears once the deposit is settled as %s",
+    (status) => {
+      // All three mean the deposit has been dealt with. Only "held" and
+      // "statement_sent" are still outstanding -- leaving a withheld deposit
+      // on the dashboard forever is a permanent false alarm.
+      const items = buildActionItems({
+        ...empty,
+        properties: [HOUSE],
+        deposits: [deposit({ propertyId: "p1", status })],
+        residents: [leaving()],
+      }, NOW);
+      expect(items.filter((i) => i.source === "deposit")).toHaveLength(0);
+    },
+  );
+
+  it("clears the moment the deposit is marked returned", () => {
+    const items = buildActionItems({
+      ...empty,
+      properties: [HOUSE],
+      deposits: [deposit({ propertyId: "p1", status: "returned" })],
+      residents: [leaving()],
+    }, NOW);
+    expect(items.filter((i) => i.source === "deposit")).toHaveLength(0);
+  });
+
+  it("stays raised while a statement has been sent but the money has not gone back", () => {
+    // "Statement sent" is progress, not completion. The deposit is still held.
+    const items = buildActionItems({
+      ...empty,
+      properties: [HOUSE],
+      deposits: [deposit({ propertyId: "p1", status: "statement_sent" })],
+      residents: [leaving()],
+    }, NOW);
+    expect(items.filter((i) => i.source === "deposit")).toHaveLength(1);
+  });
+});
+
+describe("assets coming up for replacement on the dashboard", () => {
+  it("raises an asset whose replacement is inside the warning window", () => {
+    const items = buildActionItems({
+      ...empty,
+      assets: [asset({ id: "boiler", replacementDueDate: days(200) })],
+    }, NOW);
+    const assetItems = items.filter((i) => i.source === "asset");
+    expect(assetItems).toHaveLength(1);
+    expect(assetItems[0].id).toBe("boiler");
+  });
+
+  it("says nothing about an asset that is years away", () => {
+    const items = buildActionItems({
+      ...empty,
+      assets: [asset({ id: "roof", replacementDueDate: days(365 * 10) })],
+    }, NOW);
+    expect(items.filter((i) => i.source === "asset")).toHaveLength(0);
+  });
+
+  it("says nothing about an unrated asset, and never guesses at one", () => {
+    // SPO's tracking is patchy on purpose-of-record. An asset with no date is
+    // unrated, and a guess here would be indistinguishable from a real warning.
+    const items = buildActionItems({
+      ...empty,
+      assets: [asset({ id: "mystery", acquisitionDate: null, replacementDueDate: null })],
+    }, NOW);
+    expect(items.filter((i) => i.source === "asset")).toHaveLength(0);
+  });
+
+  it("hides a snoozed asset from the dashboard", () => {
+    // Only the dashboard. The asset screen still shows it, and shows that it
+    // is snoozed -- hiding it everywhere is how a boiler gets forgotten.
+    const items = buildActionItems({
+      ...empty,
+      assets: [asset({ id: "boiler", replacementDueDate: days(-30), snoozedUntil: days(300) })],
+    }, NOW);
+    expect(items.filter((i) => i.source === "asset")).toHaveLength(0);
+  });
+
+  it("brings a snoozed asset back once the snooze runs out", () => {
+    const items = buildActionItems({
+      ...empty,
+      assets: [asset({ id: "boiler", replacementDueDate: days(-30), snoozedUntil: days(-1) })],
+    }, NOW);
+    expect(items.filter((i) => i.source === "asset")).toHaveLength(1);
+  });
+
+  it("marks an asset past its date as overdue and carries its region", () => {
+    const items = buildActionItems({
+      ...empty,
+      assets: [asset({ id: "boiler", replacementDueDate: days(-30) })],
+    }, NOW);
+    const item = items.find((i) => i.source === "asset")!;
+    expect(item.overdue).toBe(true);
+    expect(item.region).toBe("West Central");
+  });
+
+  it("names the asset and the house, so the row is actionable without opening it", () => {
+    const items = buildActionItems({
+      ...empty,
+      assets: [asset({ id: "boiler", name: "Rheem water heater", replacementDueDate: days(100) })],
+    }, NOW);
+    const item = items.find((i) => i.source === "asset")!;
+    expect(item.title).toContain("Rheem water heater");
+    expect(item.subtitle).toContain("1 Main St");
+  });
+});
+
+describe("the setup checklist on the dashboard", () => {
+  const owned = property({ id: "p1", ownership: "owned", leaseRenewalDate: null });
+
+  it("raises one item per house, never one per open check", () => {
+    // Seven separate entries for one house would bury the maintenance triage
+    // this space actually belongs to.
+    const items = buildActionItems({
+      ...empty,
+      properties: [owned],
+      setupItems: [
+        setupItem({ id: "a", itemKey: "electric", status: "open" }),
+        setupItem({ id: "b", itemKey: "gas", status: "open" }),
+        setupItem({ id: "c", itemKey: "water", status: "done" }),
+      ],
+    }, NOW);
+
+    const setup = items.filter((i) => i.source === "setup");
+    expect(setup).toHaveLength(1);
+    expect(setup[0].id).toBe("p1");
+    // Eight items on an owned house: two stored open, one done, and the five
+    // never written yet also count as open.
+    expect(setup[0].subtitle).toContain("7 of 8");
+  });
+
+  it("says nothing about a house that has no checklist at all", () => {
+    // Existing houses are deliberately not backfilled. If "no rows" read as
+    // "everything open", every house SPO already has would light up on the day
+    // this ships.
+    const items = buildActionItems({ ...empty, properties: [owned], setupItems: [] }, NOW);
+    expect(items.filter((i) => i.source === "setup")).toHaveLength(0);
+  });
+
+  it("clears the moment the last item resolves", () => {
+    const rows = [
+      setupItem({ id: "a", itemKey: "electric", status: "done" }),
+      setupItem({ id: "b", itemKey: "gas", status: "done" }),
+      setupItem({ id: "c", itemKey: "water", status: "done" }),
+      setupItem({ id: "d", itemKey: "internet", status: "done" }),
+      setupItem({ id: "e", itemKey: "insurance", status: "not_applicable" }),
+      setupItem({ id: "f", itemKey: "responsible_maintenance_person", status: "done" }),
+      setupItem({ id: "g", itemKey: "startup_budget", status: "done" }),
+      setupItem({ id: "h", itemKey: "communicated_to_household", status: "done" }),
+    ];
+    const items = buildActionItems({ ...empty, properties: [owned], setupItems: rows }, NOW);
+    expect(items.filter((i) => i.source === "setup")).toHaveLength(0);
+  });
+
+  it("reads a rented house against the rented checklist", () => {
+    // A rented house is asked for its lease; an owned one never is. Summarising
+    // a rented house against the owned list would report it finished early.
+    const rented = property({ id: "p2", ownership: "rented", leaseRenewalDate: null });
+    const items = buildActionItems({
+      ...empty,
+      properties: [rented],
+      setupItems: [setupItem({ id: "a", propertyId: "p2", itemKey: "electric", status: "done" })],
+    }, NOW);
+    const setup = items.filter((i) => i.source === "setup");
+    expect(setup).toHaveLength(1);
+    // Nine on a rented house — the two an owned house is never asked for.
+    expect(setup[0].subtitle).toContain("8 of 9");
+  });
+
+  it("carries the house's region so it is filtered like everything else", () => {
+    const items = buildActionItems({
+      ...empty,
+      properties: [owned],
+      setupItems: [setupItem({ id: "a", status: "open" })],
+    }, NOW);
+    expect(items.find((i) => i.source === "setup")!.region).toBe("West Central");
+  });
+
+  it("ignores checklist rows belonging to a house that is not in the list", () => {
+    const items = buildActionItems({
+      ...empty,
+      properties: [owned],
+      setupItems: [setupItem({ id: "a", propertyId: "p-deleted", status: "open" })],
+    }, NOW);
+    expect(items.filter((i) => i.source === "setup")).toHaveLength(0);
+  });
+});
 
 describe("buildActionItems", () => {
   it("includes a schedule due within the 30-day window and marks overdue ones", () => {

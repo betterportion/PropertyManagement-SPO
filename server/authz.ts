@@ -27,7 +27,7 @@ import type { Request, Response } from "express";
 import { storage, type UploadReference } from "./storage";
 import { getUserId } from "./auth";
 import { normalizeRegion, normalizeRegions } from "./migrateRegions";
-import type { Upload, User, UserPermissions } from "@shared/schema";
+import { isClosedMaintenanceStatus, type Upload, type User, type UserPermissions } from "@shared/schema";
 
 /** Names of the boolean permission columns on the user_permissions table. */
 export type PermissionName =
@@ -47,7 +47,8 @@ export type PermissionName =
   | "canViewFinancials"
   | "canManageFinancials"
   | "canCompleteWalkthroughs"
-  | "canManagePropertySetup";
+  | "canManagePropertySetup"
+  | "canViewResourceHub";
 
 /**
  * Everything a route handler needs to make an authorization decision, resolved
@@ -307,14 +308,53 @@ function isOwnHouse(
 }
 
 /**
+ * How long a household leader keeps seeing a request for their house after it
+ * closes.
+ *
+ * Michael asked for less than the whole history: open requests always,
+ * recently closed ones, and explicitly not everything ever filed. One named
+ * constant so the rule has a single definition.
+ */
+export const RESIDENT_CLOSED_REQUEST_DAYS = 120;
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Whether a closed request is still inside the resident's window.
+ *
+ * Fails closed on a missing or unparseable close date, and that case is real:
+ * requests closed before `completedDate` started being written have none, and
+ * nothing can reconstruct when they closed (`updatedAt` moves on any edit). A
+ * guessed date is worse than no date once a visibility window depends on it,
+ * so those requests simply fall outside.
+ */
+function withinResidentWindow(
+  completedDate: Date | string | null | undefined,
+  now: Date,
+): boolean {
+  if (!completedDate) return false;
+  const closedAt =
+    completedDate instanceof Date ? completedDate.getTime() : new Date(completedDate).getTime();
+  if (Number.isNaN(closedAt)) return false;
+  return now.getTime() - closedAt <= RESIDENT_CLOSED_REQUEST_DAYS * DAY_MS;
+}
+
+/**
  * The read rule for a maintenance request, which is the one place where the
  * resident and staff rules diverge:
  *
- *   - a resident may read requests they submitted, regardless of region, and
- *     requests filed for the house their account is linked to — the two
- *     resident accounts on a property (steward and household leader) share
- *     one repair history
- *   - everyone else is bound by their allowed regions
+ *   - a resident may read requests they submitted, regardless of region and
+ *     regardless of age — that is their own report, and somebody must be able
+ *     to read back what they themselves filed;
+ *   - and requests filed for the house their account is linked to, which is
+ *     how the two resident accounts on a property share one repair history —
+ *     but on that path, only while the request is open or was closed within
+ *     RESIDENT_CLOSED_REQUEST_DAYS;
+ *   - everyone else is bound by their allowed regions, with no time limit at
+ *     all. Staff keep the full history; this narrowing is resident-only.
+ *
+ * The time dimension is on the HOUSE path alone. Putting it on the ownership
+ * path too would hide somebody's own report from them, which nobody asked for.
  *
  * `residentHouse` is the caller's house from residentHouseAddress, resolved
  * once by the route rather than per record. It defaults to null — no house
@@ -323,15 +363,24 @@ function isOwnHouse(
  */
 export function canReadMaintenanceRequest(
   ctx: AuthContext,
-  request: { region?: string | null; submittedBy?: string | null; buildingAddress?: string | null },
+  request: {
+    region?: string | null;
+    submittedBy?: string | null;
+    buildingAddress?: string | null;
+    status?: string | null;
+    completedDate?: Date | string | null;
+  },
   residentHouse: string | null = null,
+  now: Date = new Date(),
 ): boolean {
   if (ctx.isAdmin) return true;
   if (ctx.isResident) {
-    return (
-      ownsRecord(ctx, request.submittedBy) ||
-      isOwnHouse(residentHouse, request.buildingAddress)
-    );
+    // Their own submission, whatever its age.
+    if (ownsRecord(ctx, request.submittedBy)) return true;
+    // A housemate's, only while it is open or recently closed.
+    if (!isOwnHouse(residentHouse, request.buildingAddress)) return false;
+    if (!isClosedMaintenanceStatus(request.status)) return true;
+    return withinResidentWindow(request.completedDate, now);
   }
   return canAccessRegion(ctx, request.region);
 }
@@ -385,6 +434,19 @@ export async function canReadUploadReference(
         hasPermission(ctx, "canViewBilling", "canManageBilling") &&
         canAccessRegion(ctx, reference.record.region)
       );
+
+    case "property":
+      // A house's front-of-house photo. Staff only, and deliberately so: a
+      // resident has no surface in the portal that shows one yet, and granting
+      // reach ahead of the screen that needs it is access widened for nothing.
+      // When the resource hub (which does show a house its own photo) is built,
+      // the branch to add here is a house match against residentHouseAddress --
+      // never a region path, exactly as on walkthroughs.
+      return (
+        !ctx.isResident &&
+        hasPermission(ctx, "canViewProperties", "canManageProperties") &&
+        canAccessRegion(ctx, reference.record.region)
+      );
   }
 }
 
@@ -428,7 +490,13 @@ export async function canReadUpload(
 export function requireMaintenanceRequestAccess(
   res: Response,
   ctx: AuthContext,
-  request: { region?: string | null; submittedBy?: string | null; buildingAddress?: string | null },
+  request: {
+    region?: string | null;
+    submittedBy?: string | null;
+    buildingAddress?: string | null;
+    status?: string | null;
+    completedDate?: Date | string | null;
+  },
   residentHouse: string | null = null,
 ): boolean {
   if (canReadMaintenanceRequest(ctx, request, residentHouse)) return true;

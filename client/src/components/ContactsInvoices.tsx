@@ -1,3 +1,4 @@
+import { Link } from "wouter";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -37,8 +38,16 @@ export default function ContactsInvoices({ contacts, invoices, onEditContact }: 
               <CardContent className="p-4">
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex-1">
-                    <h4 className="font-semibold text-base" data-testid={`text-contact-name-${contact.id}`}>
-                      {contact.name}
+                    <h4 className="font-semibold text-base">
+                      {/* The name opens their history: every job they touched,
+                          their invoices, and what the last RA learned. */}
+                      <Link
+                        href={`/contacts/${contact.id}`}
+                        className="rounded-sm hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        data-testid={`text-contact-name-${contact.id}`}
+                      >
+                        {contact.name}
+                      </Link>
                     </h4>
                     <p className="text-sm text-muted-foreground">{contact.company}</p>
                     <Badge variant="secondary" className="mt-2">

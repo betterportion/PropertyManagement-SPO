@@ -28,6 +28,8 @@ import { insertUserSchema, type User, type UserPermissions, type Property } from
 import { REGIONS } from "@shared/regions";
 import { z } from "zod";
 import { ActivityLog } from "@/components/ActivityLog";
+import ResourceLinksSettings from "@/components/ResourceLinksSettings";
+import WalkthroughTemplateSettings from "@/components/WalkthroughTemplateSettings";
 import { Section, Container, PageHeader, PageStack } from "@/components/layout/page";
 import { EmptyState } from "@/components/states";
 import { formatDate, formatValue } from "@/lib/format";
@@ -45,6 +47,7 @@ const FEATURE_PERMISSIONS = [
   { key: "canViewProperties", label: "View Properties", section: "Properties" },
   { key: "canManageProperties", label: "Manage Properties", section: "Properties" },
   { key: "canManagePropertySetup", label: "Manage Property Setup Checklist", section: "Properties" },
+  { key: "canViewResourceHub", label: "See the Resources page (resident accounts)", section: "Properties" },
   { key: "canViewBilling", label: "View Invoices", section: "Maint Contacts & Invoices" },
   { key: "canManageBilling", label: "Manage Invoices", section: "Maint Contacts & Invoices" },
   { key: "canViewContacts", label: "View Contacts", section: "Maint Contacts & Invoices" },
@@ -558,6 +561,10 @@ export default function Settings() {
 
       {/* Admin-only, like the rest of this page -- and enforced again by the
           server, which refuses the activity log to anyone else. */}
+      <WalkthroughTemplateSettings />
+
+      <ResourceLinksSettings />
+
       <ActivityLog />
 
       <Dialog open={isPermissionsDialogOpen} onOpenChange={(open) => {

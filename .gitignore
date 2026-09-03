@@ -41,3 +41,7 @@ vite.config.ts.*
 
 # Local working notes, not part of the app
 IMPLEMENTATION_PLAN_Michael.md
+
+# Local cache from the understand-anything analysis tool. Untracked before
+# this branch; a generated knowledge graph is not source.
+.understand-anything/

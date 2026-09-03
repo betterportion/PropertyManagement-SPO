@@ -60,6 +60,7 @@ import {
   insertAssetSchema,
   insertAssetPhotoSchema,
   insertMaintenanceContactSchema,
+  insertContactNoteSchema,
   insertInvoiceSchema,
   insertBillingRecordSchema,
   insertPropertySchema,
@@ -68,7 +69,12 @@ import {
   insertResidentSchema,
   insertRentPaymentSchema,
   insertSecurityDepositSchema,
+  insertDepositDeductionSchema,
   insertTaskSchema,
+  insertResourceLinkSchema,
+  insertResidentDocumentSchema,
+  insertPropertyBudgetSchema,
+  setPropertySetupItemSchema,
   type InsertPropertyWithAddress,
 } from "@shared/schema";
 import { STANDARD_SCHEDULE_TEMPLATES, addMonths } from "./schedules";
@@ -76,8 +82,15 @@ import { buildActionItems } from "./actionItems";
 import { closedDateChange } from "./maintenanceStatus";
 import { planFromTemplate, planFromPreviousWalkthrough, templateRoomItems } from "./walkthroughTemplate";
 import { parseResidentCsv, buildImportPreview } from "./residentImport";
+import { SETUP_ITEMS, setupItemsFor } from "@shared/propertySetup";
+import { RESIDENT_DOCUMENTS, isKnownResidentDocument } from "@shared/residentDocuments";
 import { buildRegionSummaries, type RegionStaff } from "./regionSummary";
-import { normalizeRegions } from "./migrateRegions";
+import { fromCents, splitEvenly, toCents } from "@shared/depositLedger";
+import { randomUUID } from "crypto";
+import { contractorLoad, recurringIssues } from "./aggregates";
+import { sendEmail } from "./email";
+import { householdEmail, maintenanceReceivedEmail, maintenanceStatusEmail } from "./notifications";
+import { normalizeRegion, normalizeRegions } from "./migrateRegions";
 import { REGIONS } from "@shared/regions";
 
 // Uploads are buffered in memory only long enough to be written to App Storage.
@@ -519,6 +532,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  /**
+   * Fires an outbound email without letting it touch the request.
+   *
+   * `sendEmail` never throws and email being unconfigured is a normal state,
+   * so the only thing left to get wrong is awaiting it: eight round trips to a
+   * mail provider should not hold a response open, and an acknowledgement is a
+   * courtesy attached to something that has already happened.
+   */
+  function notify(message: { to: string; subject: string; text: string } | null) {
+    if (message) void sendEmail(message);
+  }
+
   // Maintenance Requests Routes
   app.get('/api/maintenance-requests', isAuthenticated, async (req: any, res) => {
     try {
@@ -538,6 +563,60 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(filteredRequests);
     } catch (error) {
       sendError(res, error, "Failed to fetch maintenance requests");
+    }
+  });
+
+  /**
+   * The room names to offer when somebody says where a problem is.
+   *
+   * Free text alone will not group "living room" and "Living Rm", which
+   * defeats the point -- the point being to notice that these blinds have
+   * broken every year since we started renting this house. So the suggestions
+   * come from the house's own walkthrough rooms, and free text stays available
+   * as the fallback for anything the checklist has no word for.
+   *
+   * A resident's house is taken from their account and the query parameter is
+   * ignored outright. Honouring it would turn this into a way to enumerate
+   * another house's rooms -- a second read path into walkthrough data, which
+   * is the exact shape of both historic authorization gaps in this codebase.
+   */
+  app.get('/api/maintenance-locations', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requirePermission(res, ctx, "canViewMaintenance", "canManageMaintenance")) return;
+
+      let buildingAddress: string | null;
+
+      if (ctx.isResident) {
+        buildingAddress = await residentHouseAddress(ctx);
+        // No house claim means no suggestions -- and the free-text field still
+        // works, which is the fallback this whole feature is built around.
+        if (!buildingAddress) return res.json([]);
+      } else {
+        const property = await storage.getProperty(String(req.query.propertyId ?? ""));
+        if (!property) {
+          return res.status(404).json({ message: "Property not found" });
+        }
+        if (!requireRegion(res, ctx, property.region)) return;
+        buildingAddress = property.address;
+      }
+
+      const rooms = await storage.getWalkthroughRoomsByBuilding(buildingAddress);
+
+      // One entry per room name. A house's rooms repeat across its
+      // walkthroughs; its vocabulary does not.
+      const names: string[] = [];
+      const seen = new Set<string>();
+      for (const room of rooms) {
+        if (seen.has(room.name)) continue;
+        seen.add(room.name);
+        names.push(room.name);
+      }
+
+      res.json(names);
+    } catch (error) {
+      sendError(res, error, "Failed to fetch locations");
     }
   });
 
@@ -609,6 +688,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           ...closedDateChange(undefined, validatedData.status, new Date()),
         });
         await attachRequestPhotos(ctx, request.id, req.body?.photoUrls);
+        // One of the things JotForm used to do that the portal should do
+        // natively: without it, filing a request feels like putting a note in
+        // a drawer.
+        notify(maintenanceReceivedEmail(request));
         return res.json(request);
       }
 
@@ -625,6 +708,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ...closedDateChange(undefined, validatedData.status, new Date()),
       });
       await attachRequestPhotos(ctx, request.id, req.body?.photoUrls);
+      // Staff filing on somebody's behalf: the acknowledgement still goes to
+      // whoever submittedBy names, which for a staff-filed request is the
+      // staff member themselves.
+      notify(maintenanceReceivedEmail(request));
       res.json(request);
     } catch (error) {
       sendError(res, error, "Failed to create maintenance request");
@@ -712,6 +799,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           summary: `Moved "${existingRequest.title}" from ${existingRequest.status} to ${validatedData.status}`,
           details: { from: existingRequest.status, to: validatedData.status },
         });
+
+        // Same condition as the audit event, deliberately: an edit to a
+        // description must not email anybody about nothing.
+        notify(maintenanceStatusEmail(request, existingRequest.status));
       }
 
       res.json(request);
@@ -1287,6 +1378,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return await storage.getWalkthrough(room.walkthroughId);
   }
 
+  /**
+   * Every item across every walkthrough the caller can see whose condition is
+   * poor or damaged.
+   *
+   * The pain point this answers is a deep hole in a wall going unnoticed
+   * because finding it means opening walkthroughs one at a time. So this is a
+   * read over the whole visible set rather than one house's.
+   *
+   * Scoped by `visibleWalkthroughs`, not `filterByRegion`, for the same reason
+   * the walkthrough list is: a household leader has no regions and must never
+   * acquire any here. Theirs narrows to their own house, and an account with
+   * no house claim gets an empty list rather than falling through to the
+   * region rule.
+   */
+  app.get('/api/walkthrough-flagged-items', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireWalkthroughPermission(res, ctx, "view")) return;
+
+      res.json(
+        visibleWalkthroughs(
+          ctx,
+          await storage.getFlaggedWalkthroughItems(),
+          await residentHouseAddress(ctx),
+        ),
+      );
+    } catch (error) {
+      sendError(res, error, "Failed to fetch flagged walkthrough items");
+    }
+  });
+
   app.get('/api/walkthrough-rooms/:roomId/items', isAuthenticated, async (req: any, res) => {
     try {
       const ctx = await requireActiveUser(req, res);
@@ -1596,6 +1719,110 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(asset);
     } catch (error) {
       sendError(res, error, "Failed to create asset");
+    }
+  });
+
+  /**
+   * The longest a snooze may run.
+   *
+   * Two budget cycles. Anything beyond that is not "ask me again later", it is
+   * a different view of how long the thing will last -- which is the
+   * replacement date, and belongs on the asset form where it is visible.
+   */
+  const MAX_SNOOZE_MONTHS = 24;
+  const MAX_SNOOZE_DAYS = MAX_SNOOZE_MONTHS * 30;
+
+  // ---------------------------------------------------------------------------
+  // Snoozing an asset
+  //
+  // An RA confident a boiler has more life in it needs to clear it from the
+  // dashboard without falsifying the date. Snooze is what makes a warning
+  // system survive patchy data.
+  //
+  // Two things this is deliberately NOT:
+  //   - it is not a permanent correction. Editing replacementDueDate is that,
+  //     and this route never touches it. A snooze has an end date and returns.
+  //   - it is not a way to hide an asset. Only the dashboard acts on it; the
+  //     asset screen still shows it, and shows that it is snoozed.
+  //
+  // The reason is required, because the reason is the point -- it is what
+  // makes next year's budget conversation possible.
+  // ---------------------------------------------------------------------------
+
+  /** The asset, once, with the checks both snooze routes make. */
+  async function assetForSnooze(req: any, res: any, ctx: AuthContext) {
+    const asset = await storage.getAsset(req.params.id);
+    if (!asset) {
+      res.status(404).json({ message: "Asset not found" });
+      return undefined;
+    }
+    if (!requireRegion(res, ctx, asset.region)) return undefined;
+    return asset;
+  }
+
+  app.post('/api/assets/:id/snooze', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageAssets")) return;
+
+      const asset = await assetForSnooze(req, res, ctx);
+      if (!asset) return;
+
+      const body = z
+        .object({
+          // Required, so a snooze can never be permanent by omission -- and
+          // bounded, so it cannot be permanent by exaggeration either. "It
+          // returns" is the whole distinction from editing the replacement
+          // date, and an unbounded end date erases it.
+          until: z.coerce
+            .date()
+            .refine((date: Date) => date.getTime() > Date.now(), "Pick a date in the future")
+            .refine(
+              (date: Date) => date.getTime() <= Date.now() + MAX_SNOOZE_DAYS * 24 * 60 * 60 * 1000,
+              `A snooze can run at most ${MAX_SNOOZE_MONTHS} months. To park it for longer, correct the replacement date instead.`,
+            ),
+          // Required and non-blank: an unexplained snooze is just an asset
+          // quietly disappearing from the one place it would have been seen.
+          reason: z
+            .string()
+            .trim()
+            .min(1, "Say why this can wait — it is what next year's budget conversation runs on")
+            .max(500, "Keep the reason under 500 characters"),
+        })
+        .parse(req.body);
+
+      // Only the four snooze columns. The replacement date is untouched, which
+      // is what keeps a snooze from falsifying it.
+      const updated = await storage.updateAsset(req.params.id, {
+        snoozedUntil: body.until,
+        snoozeReason: body.reason,
+        snoozedByUserId: ctx.userId,
+        snoozedAt: new Date(),
+      });
+
+      res.json(updated);
+    } catch (error) {
+      sendError(res, error, "Failed to snooze this asset");
+    }
+  });
+
+  app.delete('/api/assets/:id/snooze', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageAssets")) return;
+
+      const asset = await assetForSnooze(req, res, ctx);
+      if (!asset) return;
+
+      // The reason stays. It is the record of why somebody parked this once,
+      // and that is worth keeping after the snooze itself has lapsed.
+      res.json(await storage.updateAsset(req.params.id, { snoozedUntil: null }));
+    } catch (error) {
+      sendError(res, error, "Failed to clear the snooze");
     }
   });
 
@@ -2727,6 +2954,613 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ---------------------------------------------------------------------------
+  // Deposit deductions
+  //
+  // SPO HOLDS a deposit per resident and records deductions against that
+  // person. The portal is a ledger and a reminder -- the money moves in
+  // QuickBooks and Ramp. Amounts, dates, descriptions and references only,
+  // never anything that could move money.
+  //
+  // Visibility is admins and the finance team ONLY. Residents never see
+  // deposits, deductions, balances or statements, and household leader and
+  // steward accounts see none of it either -- which is why every route here
+  // carries requireStaff on top of the finance flag.
+  // ---------------------------------------------------------------------------
+
+  /** The resident, once, with the checks every deduction route makes. */
+  async function residentForDeduction(res: any, ctx: AuthContext, residentId: string) {
+    const resident = await storage.getResident(residentId);
+    if (!resident) {
+      res.status(404).json({ message: "Resident not found" });
+      return undefined;
+    }
+    if (!requireRegion(res, ctx, resident.region)) return undefined;
+    return resident;
+  }
+
+  /** One line for the trail. Names the person and the amount, as money should. */
+  const deductionSummary = (
+    verb: string,
+    resident: { firstName: string; lastName: string },
+    description: string,
+    amount: string,
+  ) => `${verb} a ${amount} deposit deduction for ${resident.firstName} ${resident.lastName}: ${description}`;
+
+  app.get('/api/deposit-deductions', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canViewFinancials", "canManageFinancials")) return;
+
+      res.json(filterByRegion(ctx, await storage.getAllDepositDeductions()));
+    } catch (error) {
+      sendError(res, error, "Failed to fetch deposit deductions");
+    }
+  });
+
+  app.post('/api/deposit-deductions', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageFinancials")) return;
+
+      const body = insertDepositDeductionSchema.parse(req.body);
+
+      const resident = await residentForDeduction(res, ctx, body.residentId);
+      if (!resident) return;
+
+      // The region and the house come from the resident, and the actor from
+      // the session. None of the three is ever taken from the body.
+      const deduction = await storage.createDepositDeduction({
+        ...body,
+        propertyId: resident.propertyId,
+        region: resident.region,
+        buildingAddress: resident.buildingAddress,
+        recordedByUserId: ctx.userId,
+        recordedByEmail: ctx.user.email ?? null,
+      });
+
+      recordAuditEvent(ctx, {
+        action: AUDIT_ACTIONS.DEPOSIT_DEDUCTION_ADDED,
+        entityType: "deposit_deduction",
+        entityId: deduction.id,
+        summary: deductionSummary("Added", resident, body.description, body.amount),
+        details: { residentId: resident.id, amount: body.amount, region: resident.region },
+      });
+
+      res.json(deduction);
+    } catch (error) {
+      sendError(res, error, "Failed to record the deduction");
+    }
+  });
+
+  /**
+   * A common-area charge, divided across a house.
+   *
+   * A hole in a common room has to be split across the people living there.
+   * Two things about how this is stored decide whether the ledger stays
+   * trustworthy:
+   *
+   *   - **The result is individual per-person line items**, never a shared
+   *     charge with a divisor. A later edit must not silently re-divide
+   *     somebody's already-settled balance. `splitGroupId` is kept for
+   *     provenance and display, and nothing ever recomputes from it.
+   *   - **The whole split is written in one call.** A half-applied split
+   *     leaves some of a house charged and some not, and the shares no longer
+   *     adding up to the charge.
+   *
+   * The RA names who is on the hook, having seen and edited the split first --
+   * so the request is the truth about that, not the roster. Where damage is
+   * attributable to one person, they use the single-deduction route instead.
+   */
+  app.post('/api/deposit-deductions/split', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageFinancials")) return;
+
+      const body = z
+        .object({
+          propertyId: z.string().min(1),
+          description: z
+            .string()
+            .trim()
+            .min(1, "Say what the charge is for")
+            .max(300, "Keep the description under 300 characters"),
+          amount: z.coerce.number().finite().min(0, "Must be 0 or greater"),
+          chargeDate: z.coerce.date(),
+          residentIds: z.array(z.string().min(1)).min(1, "Choose at least one person to split this across"),
+        })
+        .parse(req.body);
+
+      const property = await storage.getProperty(body.propertyId);
+      if (!property) {
+        return res.status(404).json({ message: "Property not found" });
+      }
+      if (!requireRegion(res, ctx, property.region)) return;
+
+      // Everybody charged has to actually live here. Without this a split
+      // becomes a way to write a deduction against somebody in a region the
+      // caller cannot reach.
+      const roster = await storage.getResidentsByProperty(property.id);
+      const byId = new Map(roster.map((resident) => [resident.id, resident]));
+      const people = body.residentIds.map((id) => byId.get(id));
+      if (people.some((person) => !person)) {
+        return res.status(400).json({ message: "Everybody in a split has to live in that house" });
+      }
+
+      // Cents, not dollars: splitting in floating-point is how
+      // 33.333333333333336 ends up on a worksheet finance acts on.
+      const shares = splitEvenly(toCents(body.amount), people.length);
+      const splitGroupId = randomUUID();
+
+      const rows = people.map((person, index) => ({
+        residentId: person!.id,
+        propertyId: property.id,
+        description: body.description,
+        amount: fromCents(shares[index]),
+        chargeDate: body.chargeDate,
+        splitGroupId,
+        region: property.region,
+        buildingAddress: property.address,
+        recordedByUserId: ctx.userId,
+        recordedByEmail: ctx.user.email ?? null,
+      }));
+
+      const created = await storage.createDepositDeductions(rows);
+
+      // One event per person, because one person's balance changing is the
+      // thing somebody may later have to account for.
+      people.forEach((person, index) => {
+        recordAuditEvent(ctx, {
+          action: AUDIT_ACTIONS.DEPOSIT_DEDUCTION_ADDED,
+          entityType: "deposit_deduction",
+          entityId: created[index]?.id ?? null,
+          summary: deductionSummary("Added", person!, body.description, fromCents(shares[index])),
+          details: {
+            residentId: person!.id,
+            amount: fromCents(shares[index]),
+            splitGroupId,
+            splitAcross: people.length,
+            region: property.region,
+          },
+        });
+      });
+
+      res.json(created);
+    } catch (error) {
+      sendError(res, error, "Failed to split the charge");
+    }
+  });
+
+  app.patch('/api/deposit-deductions/:id', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageFinancials")) return;
+
+      const existing = await storage.getDepositDeduction(req.params.id);
+      if (!existing) {
+        return res.status(404).json({ message: "Deduction not found" });
+      }
+      if (!requireRegion(res, ctx, existing.region)) return;
+
+      // residentId is not editable: moving a deduction between people is two
+      // separate acts on two separate balances, and the trail should say so.
+      const body = insertDepositDeductionSchema.partial().omit({ residentId: true }).parse(req.body);
+
+      const updated = await storage.updateDepositDeduction(req.params.id, body);
+      const resident = await storage.getResident(existing.residentId);
+
+      recordAuditEvent(ctx, {
+        action: AUDIT_ACTIONS.DEPOSIT_DEDUCTION_UPDATED,
+        entityType: "deposit_deduction",
+        entityId: req.params.id,
+        summary: deductionSummary(
+          "Changed",
+          resident ?? { firstName: "a former", lastName: "resident" },
+          updated.description,
+          updated.amount,
+        ),
+        details: { fields: changedFields(existing as unknown as Record<string, unknown>, body as Record<string, unknown>), region: existing.region },
+      });
+
+      res.json(updated);
+    } catch (error) {
+      sendError(res, error, "Failed to update the deduction");
+    }
+  });
+
+  app.delete('/api/deposit-deductions/:id', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageFinancials")) return;
+
+      const existing = await storage.getDepositDeduction(req.params.id);
+      if (!existing) {
+        return res.status(404).json({ message: "Deduction not found" });
+      }
+      if (!requireRegion(res, ctx, existing.region)) return;
+
+      await storage.deleteDepositDeduction(req.params.id);
+      const resident = await storage.getResident(existing.residentId);
+
+      recordAuditEvent(ctx, {
+        action: AUDIT_ACTIONS.DEPOSIT_DEDUCTION_DELETED,
+        entityType: "deposit_deduction",
+        entityId: req.params.id,
+        summary: deductionSummary(
+          "Removed",
+          resident ?? { firstName: "a former", lastName: "resident" },
+          existing.description,
+          existing.amount,
+        ),
+        details: { residentId: existing.residentId, amount: existing.amount, region: existing.region },
+      });
+
+      res.json({ success: true });
+    } catch (error) {
+      sendError(res, error, "Failed to remove the deduction");
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // Resource hub, liability paperwork and startup budgets
+  //
+  // The hub is the one page a household leader or steward needs to go to, and
+  // it is the widest resident-facing surface in the portal. Two rules hold it:
+  //
+  //   - **A resident's scope is their HOUSE's region**, resolved from their
+  //     property, never from whatever a permissions row happens to say. A
+  //     resident-tier account has no region path anywhere else and acquires
+  //     none here.
+  //   - **Managing the links is admin-only.** A national link reaches every
+  //     region, exactly as the walkthrough template does, so it takes the same
+  //     grant -- a regional flag is a grant over your own houses.
+  //
+  // No financial information belongs on this page. A startup budget is an
+  // OPERATING figure -- what a house has to furnish and settle itself -- and
+  // is not deposit or rent data, which is why a leader may see their own.
+  // ---------------------------------------------------------------------------
+
+  /**
+   * The regions whose material this caller should see.
+   *
+   * Null entries mean "national", which everybody gets. A resident resolves to
+   * their own house's region and nothing else; a resident with no house claim
+   * falls back to the national material alone rather than to nothing -- a
+   * leader with a broken property link should still find the fire extinguisher
+   * guidance.
+   */
+  async function readableRegions(ctx: AuthContext): Promise<{ all: boolean; regions: string[] }> {
+    if (ctx.isAdmin) return { all: true, regions: [] };
+    if (ctx.isResident) {
+      const propertyId = ctx.user.propertyId;
+      if (!propertyId) return { all: false, regions: [] };
+      const property = await storage.getProperty(propertyId);
+      return { all: false, regions: property?.region ? [property.region] : [] };
+    }
+    return { all: false, regions: ctx.allowedRegions };
+  }
+
+  /**
+   * The signed-in resident's own house, and only the parts they should read.
+   *
+   * A resident cannot read `/api/properties` — that list is staff-only — but
+   * the resource hub needs their lease link and the house's name. So this is a
+   * deliberately narrow projection of one property: **it returns named fields
+   * rather than the row**, so a column added to `properties` later cannot
+   * silently start reaching a resident.
+   *
+   * Nothing financial is on it. The startup budget has its own route and its
+   * own reasoning; the deposit figure is not exposed here at all.
+   */
+  app.get('/api/my-property', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      // Staff have the full property list; this route exists for the tier that
+      // does not, and answers null rather than pretending otherwise.
+      if (!ctx.isResident) return res.json(null);
+      // The hub's own grant. A resident-tier capability is gated on a flag,
+      // exactly as walkthrough completion is.
+      if (!requirePermission(res, ctx, "canViewResourceHub")) return;
+      if (!ctx.user.propertyId) return res.json(null);
+
+      const property = await storage.getProperty(ctx.user.propertyId);
+      if (!property) return res.json(null);
+
+      res.json({
+        id: property.id,
+        name: property.name,
+        address: property.address,
+        leaseDocumentUrl: property.leaseDocumentUrl,
+      });
+    } catch (error) {
+      sendError(res, error, "Failed to fetch your house");
+    }
+  });
+
+  app.get('/api/resource-links', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      // The third layer, both tiers. A resident-tier capability is gated on
+      // its own flag -- `canViewResourceHub`, not `canCompleteWalkthroughs`,
+      // because those are different grants and honouring one for the other
+      // means a later change to either silently moves the other. Staff read it
+      // under the property permission, so they can see what their households
+      // are being told.
+      if (
+        !requirePermission(
+          res,
+          ctx,
+          ...(ctx.isResident
+            ? (["canViewResourceHub"] as const)
+            : (["canViewProperties", "canManageProperties"] as const)),
+        )
+      ) {
+        return;
+      }
+
+      const scope = await readableRegions(ctx);
+      const allowed = normalizeRegions(scope.regions);
+      const links = (await storage.getAllResourceLinks()).filter((link) => {
+        // A hidden link stays visible to an admin, who is the only person who
+        // can hide one -- otherwise hiding it would be indistinguishable from
+        // deleting it, with no way back.
+        if (!link.isActive) return ctx.isAdmin;
+        // Null region means national -- everybody, including a resident whose
+        // house link is missing.
+        if (!link.region) return true;
+        if (scope.all) return true;
+        if (allowed.includes("all")) return true;
+        return allowed.includes(normalizeRegion(link.region));
+      });
+
+      res.json(links);
+    } catch (error) {
+      sendError(res, error, "Failed to fetch the resource links");
+    }
+  });
+
+  app.post('/api/resource-links', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireAdmin(res, ctx)) return;
+
+      res.json(await storage.createResourceLink(insertResourceLinkSchema.parse(req.body)));
+    } catch (error) {
+      sendError(res, error, "Failed to add the link");
+    }
+  });
+
+  app.patch('/api/resource-links/:id', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireAdmin(res, ctx)) return;
+
+      const existing = await storage.getResourceLink(req.params.id);
+      if (!existing) {
+        return res.status(404).json({ message: "Link not found" });
+      }
+
+      res.json(
+        await storage.updateResourceLink(req.params.id, insertResourceLinkSchema.partial().parse(req.body)),
+      );
+    } catch (error) {
+      sendError(res, error, "Failed to update the link");
+    }
+  });
+
+  app.delete('/api/resource-links/:id', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireAdmin(res, ctx)) return;
+
+      const existing = await storage.getResourceLink(req.params.id);
+      if (!existing) {
+        return res.status(404).json({ message: "Link not found" });
+      }
+
+      await storage.deleteResourceLink(req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      sendError(res, error, "Failed to remove the link");
+    }
+  });
+
+  // ── Liability paperwork ───────────────────────────────────────────────────
+
+  app.get('/api/resident-documents', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canViewProperties", "canManageProperties")) return;
+
+      res.json(filterByRegion(ctx, await storage.getAllResidentDocuments()));
+    } catch (error) {
+      sendError(res, error, "Failed to fetch paperwork");
+    }
+  });
+
+  /**
+   * Records that a document was signed, and when.
+   *
+   * **This is not e-signature.** An RA records what happened on paper; the
+   * signing happens wherever SPO already does it. Staff-only for the same
+   * reason: a resident marking their own waiver signed would be the record
+   * certifying itself.
+   *
+   * Clearing the date is allowed, because correcting a mistake has to be
+   * possible — the row existing is not evidence, only a date is.
+   */
+  app.put('/api/residents/:residentId/documents/:documentKey', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageProperties")) return;
+
+      const resident = await storage.getResident(req.params.residentId);
+      if (!resident) {
+        return res.status(404).json({ message: "Resident not found" });
+      }
+      if (!requireRegion(res, ctx, resident.region)) return;
+
+      // The list is fixed in code, so an unknown key is a client error rather
+      // than a new row: accepting it would write something no summary reads.
+      if (!isKnownResidentDocument(req.params.documentKey)) {
+        return res.status(400).json({ message: "Unknown document" });
+      }
+
+      const body = insertResidentDocumentSchema.parse(req.body);
+
+      const record = await storage.setResidentDocument(resident.id, req.params.documentKey, {
+        signedOn: body.signedOn ?? null,
+        notes: body.notes ?? null,
+        region: resident.region,
+        recordedByUserId: ctx.userId,
+        recordedByEmail: ctx.user.email ?? null,
+      });
+
+      // This row is what gets cited in a dispute, and it is an upsert -- so
+      // without an event the only record of who set it previously is the row
+      // this one just overwrote.
+      const documentLabel =
+        RESIDENT_DOCUMENTS.find((document) => document.key === req.params.documentKey)?.label ??
+        req.params.documentKey;
+      recordAuditEvent(ctx, {
+        action: AUDIT_ACTIONS.RESIDENT_DOCUMENT_RECORDED,
+        entityType: "resident",
+        entityId: resident.id,
+        summary: body.signedOn
+          ? `Recorded ${resident.firstName} ${resident.lastName}'s ${documentLabel} as signed`
+          : `Cleared the signed date on ${resident.firstName} ${resident.lastName}'s ${documentLabel}`,
+        details: { documentKey: req.params.documentKey, signed: !!body.signedOn, region: resident.region },
+      });
+
+      res.json(record);
+    } catch (error) {
+      sendError(res, error, "Failed to record the paperwork");
+    }
+  });
+
+  // ── Startup budgets ───────────────────────────────────────────────────────
+
+  app.get('/api/property-budgets', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      // The third layer, both tiers. The startup budget is shown on the hub,
+      // so a resident reaches it under the hub's grant; staff under the
+      // property permission.
+      if (
+        !requirePermission(
+          res,
+          ctx,
+          ...(ctx.isResident
+            ? (["canViewResourceHub"] as const)
+            : (["canViewProperties", "canManageProperties"] as const)),
+        )
+      ) {
+        return;
+      }
+
+      // A leader sees their own house's figure and nobody else's -- narrowed
+      // by PROPERTY, not by region, so being in the same region as another
+      // house grants nothing. Checked before the read, so a resident with no
+      // house claim costs no query.
+      if (ctx.isResident) {
+        const propertyId = ctx.user.propertyId;
+        if (!propertyId) return res.json([]);
+        const budgets = await storage.getAllPropertyBudgets();
+        return res.json(budgets.filter((budget) => budget.propertyId === propertyId));
+      }
+
+      res.json(filterByRegion(ctx, await storage.getAllPropertyBudgets()));
+    } catch (error) {
+      sendError(res, error, "Failed to fetch startup budgets");
+    }
+  });
+
+  app.put('/api/properties/:propertyId/budget', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageProperties")) return;
+
+      const property = await propertyForSetup(req, res, ctx);
+      if (!property) return;
+
+      const body = insertPropertyBudgetSchema.omit({ propertyId: true }).parse(req.body);
+
+      const budget = await storage.upsertPropertyBudget({
+        ...body,
+        propertyId: property.id,
+        region: property.region,
+      });
+
+      // An operating figure rather than deposit or rent data, but still an
+      // amount somebody is expected to spend -- and this is an upsert, so the
+      // previous figure is gone without a record of who changed it.
+      recordAuditEvent(ctx, {
+        action: AUDIT_ACTIONS.PROPERTY_BUDGET_SET,
+        entityType: "property",
+        entityId: property.id,
+        summary: `Set the ${body.year} startup budget for ${property.name} to ${body.amount}`,
+        details: { year: body.year, amount: body.amount, region: property.region },
+      });
+
+      res.json(budget);
+    } catch (error) {
+      sendError(res, error, "Failed to save the startup budget");
+    }
+  });
+
+  // ── Aggregates: what keeps going wrong, and who keeps being called back ───
+
+  /**
+   * Rollups over the maintenance history the caller can already see.
+   *
+   * The Phase 5 filters answer "what happened here?"; these answer "what keeps
+   * happening here?", which is the question that settles an argument about
+   * whether to keep renting a house or keep using a contractor.
+   *
+   * Both are computed over the caller's own visible requests, so a rollup can
+   * never widen what somebody can see.
+   */
+  app.get('/api/maintenance-aggregates', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canViewMaintenance", "canManageMaintenance")) return;
+
+      const requests = filterByRegion(ctx, await storage.getAllMaintenanceRequests());
+      const links = await storage.getAllRequestContactLinks();
+
+      res.json({
+        recurringIssues: recurringIssues(requests),
+        contractorLoad: contractorLoad(links, requests),
+      });
+    } catch (error) {
+      sendError(res, error, "Failed to build the rollups");
+    }
+  });
+
   // Action items + Tasks Routes
   //
   // "Action items" are the dashboard's derived list -- unpaid rent, deposits to
@@ -2743,13 +3577,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!requireStaff(res, ctx)) return;
       const seesFinance = hasPermission(ctx, "canViewFinancials", "canManageFinancials");
 
-      const [schedules, rentPayments, deposits, residents, allTasks, properties] = await Promise.all([
+      const [schedules, rentPayments, deposits, residents, allTasks, properties, setupItems, assets] = await Promise.all([
         storage.getAllMaintenanceSchedules(),
         seesFinance ? storage.getAllRentPayments() : [],
         seesFinance ? storage.getAllSecurityDeposits() : [],
         storage.getAllResidents(),
         storage.getAllTasks(),
         storage.getAllProperties(),
+        storage.getAllPropertySetupItems(),
+        storage.getAllAssets(),
       ]);
 
       const items = buildActionItems({
@@ -2762,6 +3598,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         residents,
         tasks: allTasks.filter((t) => canSeeTask(ctx, t)),
         properties: filterByRegion(ctx, properties),
+        // Not filtered: the checklist rows are only ever read against the
+        // already-filtered property list above, so a row whose house is out of
+        // region has nothing to attach to.
+        setupItems,
+        assets: filterByRegion(ctx, assets),
       });
       res.json(items);
     } catch (error) {
@@ -3000,6 +3841,116 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Invoices Routes
+  // ---------------------------------------------------------------------------
+  // Contractor history
+  //
+  // Mostly a read over data that already exists: request_contacts has linked
+  // vendors to requests all along, and invoices already carry a contactId --
+  // there was simply nowhere to read it. The concern this answers is real
+  // though: what an RA learned working with a vendor currently dies at
+  // handover.
+  //
+  // There is deliberately NO RATING. A star score on a vendor SPO may have to
+  // keep using invites arguments about the number, and tells an incoming RA
+  // far less than a paragraph does.
+  // ---------------------------------------------------------------------------
+
+  /** The contact, once, with the checks every contractor-history route makes. */
+  async function contactForHistory(req: any, res: any, ctx: AuthContext) {
+    const contact = await storage.getMaintenanceContact(req.params.id);
+    if (!contact) {
+      res.status(404).json({ message: "Contact not found" });
+      return undefined;
+    }
+    if (!requireRegion(res, ctx, contact.region)) return undefined;
+    return contact;
+  }
+
+  app.get('/api/contacts/:id/requests', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canViewContacts", "canManageContacts")) return;
+
+      const contact = await contactForHistory(req, res, ctx);
+      if (!contact) return;
+
+      // Filtered again by the REQUEST's own region, not the contact's: a
+      // vendor can work across regions, and reading their page must not become
+      // a way to see requests the caller could not otherwise open.
+      res.json(filterByRegion(ctx, await storage.getRequestsForContact(contact.id)));
+    } catch (error) {
+      sendError(res, error, "Failed to fetch this contractor's requests");
+    }
+  });
+
+  app.get('/api/contacts/:id/notes', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canViewContacts", "canManageContacts")) return;
+
+      const contact = await contactForHistory(req, res, ctx);
+      if (!contact) return;
+
+      res.json(await storage.getContactNotes(contact.id));
+    } catch (error) {
+      sendError(res, error, "Failed to fetch notes on this contractor");
+    }
+  });
+
+  app.post('/api/contacts/:id/notes', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageContacts")) return;
+
+      const contact = await contactForHistory(req, res, ctx);
+      if (!contact) return;
+
+      // Only `body` survives the parse. Everything that says whose note this
+      // is comes from the session, and the region from the contact -- a note
+      // whose author the client chose would be worth nothing. Anything else
+      // sent (a rating, say) is dropped rather than stored.
+      const { body } = insertContactNoteSchema.parse(req.body);
+
+      const note = await storage.createContactNote({
+        body,
+        contactId: contact.id,
+        authorUserId: ctx.userId,
+        authorEmail: ctx.user.email ?? null,
+        region: contact.region,
+      });
+
+      res.json(note);
+    } catch (error) {
+      sendError(res, error, "Failed to save the note");
+    }
+  });
+
+  app.delete('/api/contact-notes/:id', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageContacts")) return;
+
+      const note = await storage.getContactNote(req.params.id);
+      if (!note) {
+        return res.status(404).json({ message: "Note not found" });
+      }
+      if (!requireRegion(res, ctx, note.region)) return;
+
+      await storage.deleteContactNote(req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      sendError(res, error, "Failed to delete the note");
+    }
+  });
+
   app.get('/api/invoices', isAuthenticated, async (req: any, res) => {
     try {
       const ctx = await requireActiveUser(req, res);
@@ -3261,6 +4212,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Compute full address from components
       const address = `${validatedData.streetAddress}, ${validatedData.city}, ${validatedData.state} ${validatedData.zipCode}`;
       const property = await storage.createProperty({ ...validatedData, address });
+
+      // Seed the setup checklist for the new house. Deliberately best-effort:
+      // a house that exists without a checklist is recoverable (the PUT below
+      // upserts), whereas a create that half-succeeded and then reported
+      // failure would leave the RA re-entering an address that now conflicts.
+      // Existing houses are never backfilled -- see summarizeSetup.
+      try {
+        await storage.createPropertySetupItems(
+          setupItemsFor(property.ownership).map((item) => ({
+            propertyId: property.id,
+            itemKey: item.key,
+            status: "open" as const,
+            region: property.region,
+          })),
+        );
+      } catch (error) {
+        logError("Failed to seed the property setup checklist", error);
+      }
+
       res.json(property);
     } catch (error) {
       // Validation failures are turned into a 400 by sendError. The raw error
@@ -3297,6 +4267,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       const property = await storage.updateProperty(req.params.id, updateData);
+
+      // Properties now carry document references -- the lease link and the
+      // front-of-house photo -- and CLAUDE.md's standing rule is that anything
+      // changing documents is recorded. Only these three fields, so an
+      // ordinary edit to a bedroom count does not fill the trail with noise.
+      const DOCUMENT_FIELDS = ["leaseDocumentUrl", "maintenancePortalUrl", "photoUrl"];
+      const documentFields = changedFields(
+        existingProperty as unknown as Record<string, unknown>,
+        updateData as Record<string, unknown>,
+      ).filter((field) => DOCUMENT_FIELDS.includes(field));
+      if (documentFields.length > 0) {
+        recordAuditEvent(ctx, {
+          action: AUDIT_ACTIONS.PROPERTY_DOCUMENTS_CHANGED,
+          entityType: "property",
+          entityId: property.id,
+          summary: `Changed ${documentFields.join(", ")} on ${property.name} (${property.address})`,
+          details: { fields: documentFields, region: property.region },
+        });
+      }
+
       res.json(property);
     } catch (error) {
       sendError(res, error, "Failed to update property");
@@ -3321,6 +4311,172 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ success: true });
     } catch (error) {
       sendError(res, error, "Failed to delete property");
+    }
+  });
+
+  /**
+   * A message to everybody currently living in a house.
+   *
+   * Active residents only, and one message per person rather than one
+   * addressed to the whole list -- a mail-out to people who moved out last
+   * spring is the kind of mistake that gets a tool abandoned, and nobody's
+   * address should be disclosed to the rest of the house.
+   *
+   * A send failure never fails this request. `sendEmail` returns a result
+   * rather than throwing, and email being unconfigured is a normal state, so
+   * the response reports how many people it *addressed* and the trail records
+   * that the house was emailed.
+   */
+  app.post('/api/properties/:propertyId/email', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageProperties")) return;
+
+      const property = await propertyForSetup(req, res, ctx);
+      if (!property) return;
+
+      const body = z
+        .object({
+          subject: z.string().trim().min(1, "Give the message a subject").max(200),
+          body: z.string().trim().min(1, "Write a message").max(5000),
+        })
+        .parse(req.body);
+
+      const residents = await storage.getResidentsByProperty(property.id);
+      const messages = householdEmail(residents, property.name, body.subject, body.body);
+
+      // Fired without awaiting each one: this is a courtesy attached to
+      // something the RA has already decided to do, and eight round trips to
+      // a mail provider should not hold the response open.
+      for (const message of messages) {
+        void sendEmail(message);
+      }
+
+      recordAuditEvent(ctx, {
+        action: AUDIT_ACTIONS.PROPERTY_HOUSEHOLD_EMAILED,
+        entityType: "property",
+        entityId: property.id,
+        // The subject and the count, never the body: a summary is bounded and
+        // a house mail-out can run to pages.
+        summary: `Emailed ${messages.length} resident${messages.length === 1 ? "" : "s"} at ${property.name}: ${body.subject}`,
+        details: { recipients: messages.length, region: property.region },
+      });
+
+      res.json({ recipients: messages.length });
+    } catch (error) {
+      sendError(res, error, "Failed to email the household");
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // Per-property setup checklist
+  //
+  // What has to happen when SPO takes on a house, and where each of those
+  // things stands. A dedicated table rather than a `tasks` row -- the reasoning
+  // is in shared/propertySetup.ts, which also owns the item list and the
+  // counts, so a screen never computes its own.
+  //
+  // Staff only. A household leader is told what is set up by their RA, not by
+  // a screen that would also let them change it.
+  // ---------------------------------------------------------------------------
+
+  /** The property, once, with the checks a setup route always makes. */
+  async function propertyForSetup(req: any, res: any, ctx: AuthContext) {
+    const property = await storage.getProperty(req.params.propertyId);
+    if (!property) {
+      res.status(404).json({ message: "Property not found" });
+      return undefined;
+    }
+    if (!requireRegion(res, ctx, property.region)) return undefined;
+    return property;
+  }
+
+  /**
+   * Every checklist row the caller can see, in one request.
+   *
+   * The badge on each property list row needs a house's counts before anybody
+   * opens it, and one request per row would be a query per house on a page
+   * that already lists them all.
+   */
+  app.get('/api/property-setup-items', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canViewProperties", "canManageProperties", "canManagePropertySetup")) return;
+
+      res.json(filterByRegion(ctx, await storage.getAllPropertySetupItems()));
+    } catch (error) {
+      sendError(res, error, "Failed to fetch the setup checklists");
+    }
+  });
+
+  app.get('/api/properties/:propertyId/setup', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canViewProperties", "canManageProperties", "canManagePropertySetup")) return;
+
+      const property = await propertyForSetup(req, res, ctx);
+      if (!property) return;
+
+      res.json(await storage.getPropertySetupItems(property.id));
+    } catch (error) {
+      sendError(res, error, "Failed to fetch the setup checklist");
+    }
+  });
+
+  /**
+   * Sets one checklist item.
+   *
+   * A PUT on (property, item) rather than a POST of a row: the pair is unique
+   * and the request is idempotent, and the storage method upserts so a house
+   * created before the checklist existed can still be filled in.
+   *
+   * Three things come from the server and never from the body -- who set it,
+   * when, and the region -- because "who said the gas was on" is exactly the
+   * question this record exists to answer, and an answer the client supplied
+   * would be worth nothing.
+   */
+  app.put('/api/properties/:propertyId/setup/:itemKey', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManagePropertySetup", "canManageProperties")) return;
+
+      const property = await propertyForSetup(req, res, ctx);
+      if (!property) return;
+
+      // The item list is fixed in code, so an unknown key is a client error
+      // rather than a new row: accepting it would write something no summary
+      // ever reads. An item belonging to the other kind of house is refused
+      // for the same reason.
+      const allowed = setupItemsFor(property.ownership);
+      if (!allowed.some((item) => item.key === req.params.itemKey)) {
+        return res.status(400).json({
+          message: SETUP_ITEMS.some((item) => item.key === req.params.itemKey)
+            ? "That item does not apply to this kind of property"
+            : "Unknown checklist item",
+        });
+      }
+
+      const body = setPropertySetupItemSchema.parse(req.body);
+
+      const item = await storage.setPropertySetupItem(property.id, req.params.itemKey, {
+        status: body.status ?? "open",
+        note: body.note ?? null,
+        region: property.region,
+        setByUserId: ctx.userId,
+        setAt: new Date(),
+      });
+
+      res.json(item);
+    } catch (error) {
+      sendError(res, error, "Failed to update the setup checklist");
     }
   });
 

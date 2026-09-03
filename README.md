@@ -17,9 +17,9 @@ The portal serves three kinds of user, and each sees a completely different set 
 |---|---|
 | **Admin** | Full access to everything, including user management and permissions. Bypasses per-feature permission checks. |
 | **Regional administrator** | Manages properties, maintenance, walkthroughs, assets, contacts and invoices — but only for the regions they have been granted. |
-| **Resident** | Submits maintenance requests and follows them. Sees the requests they filed *and* every request filed for the house their account is linked to — housemates share one repair history. Granted "Complete Walkthroughs", a household leader or steward also fills in their own house's current walkthrough and reads earlier ones read-only. Never sees another house, and never sees anything by region. |
+| **Resident** | Submits maintenance requests and follows them. Reads the resource hub — SPO's general guidance plus their own house's walkthrough, requests and startup budget. Sees the requests they filed *and* every request filed for the house their account is linked to — housemates share one repair history. Granted "Complete Walkthroughs", a household leader or steward also fills in their own house's current walkthrough and reads earlier ones read-only. Never sees another house, and never sees anything by region. |
 
-On top of the role, each user has a row of fine-grained permissions — seventeen view/manage flags, including two that gate the finance screens on their own and one held in reserve for a surface not built yet — and a list of allowed regions. Admins ignore both.
+On top of the role, each user has a row of fine-grained permissions — eighteen view/manage flags, including two that gate the finance screens on their own, one for the per-property setup checklist and one for the resident resource hub — and a list of allowed regions. Admins ignore both.
 
 ---
 
@@ -96,6 +96,12 @@ npm run dev
 
 The app serves the API and the frontend together on a single port (5000 by default).
 
+`npm run dev` reads your `.env` itself, through Node's own `--env-file-if-exists`
+— there is no `dotenv` package and nothing to source by hand. A checkout without
+a `.env` still starts and fails with the configuration report instead. Anything
+already set in your shell wins over the file, and `npm run start` does not read
+`.env` at all: production takes real environment variables.
+
 > **First user:** whoever signs in first is created as a `resident`. Promote them to `admin` directly in the database (`users.role`) to unlock the admin pages.
 
 ---
@@ -104,7 +110,7 @@ The app serves the API and the frontend together on a single port (5000 by defau
 
 | Command | What it does |
 |---|---|
-| `npm run dev` | Start in development with hot reloading |
+| `npm run dev` | Start in development with hot reloading, reading `.env` |
 | `npm run build` | Build the frontend with Vite and bundle the server with esbuild into `dist/` |
 | `npm run start` | Run the production build |
 | `npm run lint` | ESLint over the server, the client and the shared code |
@@ -209,7 +215,8 @@ client/                 React frontend
   src/
     pages/              One file per screen, split by role
                         (Walkthroughs.tsx is the staff index, MyWalkthroughs.tsx
-                        the resident one; both open WalkthroughRun.tsx)
+                        the resident one; both open WalkthroughRun.tsx.
+                        FlaggedItems.tsx lists what came back poor or damaged)
     components/         Shared components
       ui/               shadcn/ui primitives (generated — avoid hand-editing)
     hooks/              useAuth and friends

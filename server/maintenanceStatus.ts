@@ -18,7 +18,7 @@
  * interesting cases are transitions and clock arithmetic, and both are far
  * easier to get right when they can be tested without a database.
  */
-import type { MaintenanceRequest } from "@shared/schema";
+import { isClosedMaintenanceStatus, type MaintenanceRequest } from "@shared/schema";
 
 type MaintenanceStatus = MaintenanceRequest["status"];
 
@@ -30,10 +30,14 @@ type MaintenanceStatus = MaintenanceRequest["status"];
  * `completedDate` because renaming it would orphan the history already under
  * that name, but "closed" is what it means.
  */
-export const CLOSED_MAINTENANCE_STATUSES = ["completed", "cancelled"] as const;
+// Defined beside the column it describes, in shared/schema.ts, because the
+// resident visibility window and the maintenance list's range filter decide
+// the same thing and must decide it identically. Re-exported so server code
+// still reads "closed" from the module that owns closing.
+export { CLOSED_MAINTENANCE_STATUSES } from "@shared/schema";
 
 export function isClosedStatus(status: MaintenanceStatus | null | undefined): boolean {
-  return status != null && (CLOSED_MAINTENANCE_STATUSES as readonly string[]).includes(status);
+  return isClosedMaintenanceStatus(status);
 }
 
 /**
