@@ -232,8 +232,13 @@ export function buildActionItems(inputs: ActionItemInputs, now: Date = new Date(
   const propertiesById = new Map(inputs.properties.map((p) => [p.id, p]));
   const depositHorizon = new Date(now.getTime() + DEPOSIT_LOOKAHEAD_DAYS * DAY_MS);
 
+  // "held" and "statement_sent" are the outstanding states. Returned, withheld
+  // and partially returned all mean somebody has dealt with it -- leaving a
+  // withheld deposit on the dashboard forever is a permanent false alarm.
+  const OUTSTANDING_DEPOSIT_STATUSES = new Set(["held", "statement_sent"]);
+
   for (const d of inputs.deposits) {
-    if (d.status === "returned") continue;
+    if (!OUTSTANDING_DEPOSIT_STATUSES.has(d.status)) continue;
 
     const resident = residentsById.get(d.residentId);
     const movingOut = resident?.moveOutDate
@@ -253,6 +258,14 @@ export function buildActionItems(inputs: ActionItemInputs, now: Date = new Date(
       propertiesById.get(d.propertyId)?.depositReturnDays,
     );
 
+    // No setting means no deadline -- but not "no urgency". Every house has
+    // depositReturnDays null the day this ships, and an undated item sorts
+    // BELOW every dated one, so a held deposit for somebody who has already
+    // left would quietly fall off the dashboard's top few. For a resident who
+    // has gone, the honest fallback is the one this had before deadlines
+    // existed: it is due now.
+    const dueDate = deadline ?? (hasLeft ? now : null);
+
     items.push({
       id: d.id,
       source: "deposit",
@@ -260,8 +273,8 @@ export function buildActionItems(inputs: ActionItemInputs, now: Date = new Date(
       title: leavingSoon && !hasLeft ? "Deposit to return soon" : "Deposit to return",
       subtitle: d.buildingAddress,
       amount: d.amountHeld,
-      dueDate: iso(deadline),
-      overdue: deadline !== null && deadline < now,
+      dueDate: iso(dueDate),
+      overdue: deadline !== null ? deadline < now : hasLeft,
       region: d.region,
     });
   }

@@ -23,6 +23,7 @@ import { formatCurrency, formatDate } from "@/lib/format";
 import { fromCents, runningBalance, toCents } from "@shared/depositLedger";
 import type {
   DepositDeduction,
+  FlaggedWalkthroughItem,
   MaintenanceRequest,
   Resident,
   SecurityDeposit,
@@ -44,6 +45,23 @@ import type {
 /** Today as "YYYY-MM-DD". */
 const today = () => new Date().toISOString().slice(0, 10);
 
+/**
+ * How each status reads on the card.
+ *
+ * "Statement sent" is progress, not completion -- the money is still held, and
+ * the dashboard keeps saying so until it goes back.
+ */
+const DEPOSIT_STATUS_BADGE: Record<
+  SecurityDeposit["status"],
+  { label: string; variant: "secondary" | "warning" | "outline" | "destructive" }
+> = {
+  held: { label: "Held", variant: "secondary" },
+  statement_sent: { label: "Statement sent", variant: "warning" },
+  returned: { label: "Returned", variant: "outline" },
+  partially_returned: { label: "Partially returned", variant: "outline" },
+  withheld: { label: "Withheld", variant: "destructive" },
+};
+
 /** The "not linked to anything" option; a Select cannot carry "". */
 const NO_LINK = "__none__";
 
@@ -51,10 +69,16 @@ export default function DepositLedger({
   resident,
   deposit,
   canManage,
+  onEdit,
+  onRemove,
 }: {
   resident: Resident;
   deposit: SecurityDeposit;
   canManage: boolean;
+  /** Opens the status / amount-returned / close-out form for this deposit. */
+  onEdit?: () => void;
+  /** Removes the whole deposit record, not a deduction. */
+  onRemove?: () => void;
 }) {
   const { toast } = useToast();
   const [isAddOpen, setIsAddOpen] = useState(false);
@@ -63,6 +87,7 @@ export default function DepositLedger({
   const [amount, setAmount] = useState("");
   const [chargeDate, setChargeDate] = useState(today);
   const [requestId, setRequestId] = useState<string>(NO_LINK);
+  const [walkthroughItemId, setWalkthroughItemId] = useState<string>(NO_LINK);
 
   const { data: allDeductions = [], isLoading } = useQuery<DepositDeduction[]>({
     queryKey: ["/api/deposit-deductions"],
@@ -72,6 +97,15 @@ export default function DepositLedger({
   // for. A real reference rather than a sentence retyped into the description.
   const { data: requests = [] } = useQuery<MaintenanceRequest[]>({
     queryKey: ["/api/maintenance-requests"],
+  });
+
+  // And the walkthrough items already recorded poor or damaged — which is
+  // usually where a deduction comes from in the first place. Linking to the
+  // item rather than retyping "hole in the wall" is what makes the charge
+  // traceable back to the inspection that found it.
+  const { data: flagged = [] } = useQuery<FlaggedWalkthroughItem[]>({
+    queryKey: ["/api/walkthrough-flagged-items"],
+    retry: false,
   });
 
   const deductions = useMemo(
@@ -84,6 +118,11 @@ export default function DepositLedger({
     [requests, resident.buildingAddress],
   );
 
+  const houseFlagged = useMemo(
+    () => flagged.filter((item) => item.buildingAddress === resident.buildingAddress),
+    [flagged, resident.buildingAddress],
+  );
+
   const balanceCents = runningBalance(deposit.amountHeld, deductions);
 
   const add = useMutation({
@@ -94,6 +133,7 @@ export default function DepositLedger({
         amount: Number(amount),
         chargeDate,
         maintenanceRequestId: requestId === NO_LINK ? null : requestId,
+        walkthroughItemId: walkthroughItemId === NO_LINK ? null : walkthroughItemId,
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/deposit-deductions"] });
@@ -101,6 +141,7 @@ export default function DepositLedger({
       setDescription("");
       setAmount("");
       setRequestId(NO_LINK);
+      setWalkthroughItemId(NO_LINK);
     },
     onError: () => {
       toast({
@@ -124,8 +165,13 @@ export default function DepositLedger({
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between gap-3 space-y-0">
-        <CardTitle>
-          Deposit — {resident.firstName} {resident.lastName}
+        <CardTitle className="flex flex-wrap items-center gap-2">
+          <span>
+            Deposit — {resident.firstName} {resident.lastName}
+          </span>
+          <Badge variant={DEPOSIT_STATUS_BADGE[deposit.status].variant}>
+            {DEPOSIT_STATUS_BADGE[deposit.status].label}
+          </Badge>
         </CardTitle>
         <div className="flex items-center gap-2">
           <Button
@@ -146,6 +192,22 @@ export default function DepositLedger({
             >
               <Plus className="h-4 w-4" />
               Deduction
+            </Button>
+          )}
+          {canManage && onEdit && (
+            <Button size="sm" variant="secondary" onClick={onEdit} data-testid={`button-edit-deposit-${deposit.id}`}>
+              Update
+            </Button>
+          )}
+          {canManage && onRemove && (
+            <Button
+              size="icon"
+              variant="ghost"
+              aria-label={`Remove ${resident.firstName} ${resident.lastName}'s deposit record`}
+              onClick={onRemove}
+              data-testid={`button-menu-deposit-${deposit.id}`}
+            >
+              <Trash2 className="h-4 w-4" />
             </Button>
           )}
         </div>
@@ -180,6 +242,24 @@ export default function DepositLedger({
               {formatCurrency(fromCents(balanceCents))}
             </p>
           </div>
+          {deposit.amountReturned && (
+            <div>
+              <p className="text-xs text-muted-foreground">Returned</p>
+              <p className="text-lg font-semibold tabular-nums">
+                {formatCurrency(deposit.amountReturned)}
+                {deposit.returnedDate && (
+                  <span className="ml-1 text-xs font-normal text-muted-foreground">
+                    {formatDate(deposit.returnedDate)}
+                  </span>
+                )}
+              </p>
+            </div>
+          )}
+          {deposit.closeoutReference && (
+            <Badge variant="outline" data-testid={`badge-closeout-${resident.id}`}>
+              Ref {deposit.closeoutReference}
+            </Badge>
+          )}
           {deposit.statementProvidedOn && (
             <Badge variant="secondary" data-testid={`badge-statement-provided-${resident.id}`}>
               Statement provided {formatDate(deposit.statementProvidedOn)}
@@ -321,6 +401,28 @@ export default function DepositLedger({
                 A real link rather than a retyped sentence, so the charge can be traced later.
               </p>
             </div>
+
+            {houseFlagged.length > 0 && (
+              <div className="space-y-2">
+                <Label htmlFor="deduction-walkthrough">The walkthrough item it came from (optional)</Label>
+                <Select value={walkthroughItemId} onValueChange={setWalkthroughItemId}>
+                  <SelectTrigger id="deduction-walkthrough" data-testid="select-deduction-walkthrough">
+                    <SelectValue placeholder="Not linked" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={NO_LINK}>Not linked</SelectItem>
+                    {houseFlagged.map((item) => (
+                      <SelectItem key={item.itemId} value={item.itemId}>
+                        {item.roomName} — {item.label} ({item.condition})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Only items an inspection already recorded as poor or damaged.
+                </p>
+              </div>
+            )}
           </div>
 
           <DialogFooter>

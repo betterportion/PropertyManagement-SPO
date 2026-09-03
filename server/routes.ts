@@ -83,6 +83,8 @@ import { SETUP_ITEMS, setupItemsFor } from "@shared/propertySetup";
 import { buildRegionSummaries, type RegionStaff } from "./regionSummary";
 import { fromCents, splitEvenly, toCents } from "@shared/depositLedger";
 import { randomUUID } from "crypto";
+import { sendEmail } from "./email";
+import { householdEmail, maintenanceReceivedEmail, maintenanceStatusEmail } from "./notifications";
 import { normalizeRegions } from "./migrateRegions";
 import { REGIONS } from "@shared/regions";
 
@@ -525,6 +527,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  /**
+   * Fires an outbound email without letting it touch the request.
+   *
+   * `sendEmail` never throws and email being unconfigured is a normal state,
+   * so the only thing left to get wrong is awaiting it: eight round trips to a
+   * mail provider should not hold a response open, and an acknowledgement is a
+   * courtesy attached to something that has already happened.
+   */
+  function notify(message: { to: string; subject: string; text: string } | null) {
+    if (message) void sendEmail(message);
+  }
+
   // Maintenance Requests Routes
   app.get('/api/maintenance-requests', isAuthenticated, async (req: any, res) => {
     try {
@@ -669,6 +683,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           ...closedDateChange(undefined, validatedData.status, new Date()),
         });
         await attachRequestPhotos(ctx, request.id, req.body?.photoUrls);
+        // One of the things JotForm used to do that the portal should do
+        // natively: without it, filing a request feels like putting a note in
+        // a drawer.
+        notify(maintenanceReceivedEmail(request));
         return res.json(request);
       }
 
@@ -685,6 +703,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ...closedDateChange(undefined, validatedData.status, new Date()),
       });
       await attachRequestPhotos(ctx, request.id, req.body?.photoUrls);
+      // Staff filing on somebody's behalf: the acknowledgement still goes to
+      // whoever submittedBy names, which for a staff-filed request is the
+      // staff member themselves.
+      notify(maintenanceReceivedEmail(request));
       res.json(request);
     } catch (error) {
       sendError(res, error, "Failed to create maintenance request");
@@ -772,6 +794,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           summary: `Moved "${existingRequest.title}" from ${existingRequest.status} to ${validatedData.status}`,
           details: { from: existingRequest.status, to: validatedData.status },
         });
+
+        // Same condition as the audit event, deliberately: an edit to a
+        // description must not email anybody about nothing.
+        notify(maintenanceStatusEmail(request, existingRequest.status));
       }
 
       res.json(request);
@@ -3930,6 +3956,62 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ success: true });
     } catch (error) {
       sendError(res, error, "Failed to delete property");
+    }
+  });
+
+  /**
+   * A message to everybody currently living in a house.
+   *
+   * Active residents only, and one message per person rather than one
+   * addressed to the whole list -- a mail-out to people who moved out last
+   * spring is the kind of mistake that gets a tool abandoned, and nobody's
+   * address should be disclosed to the rest of the house.
+   *
+   * A send failure never fails this request. `sendEmail` returns a result
+   * rather than throwing, and email being unconfigured is a normal state, so
+   * the response reports how many people it *addressed* and the trail records
+   * that the house was emailed.
+   */
+  app.post('/api/properties/:propertyId/email', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageProperties")) return;
+
+      const property = await propertyForSetup(req, res, ctx);
+      if (!property) return;
+
+      const body = z
+        .object({
+          subject: z.string().trim().min(1, "Give the message a subject").max(200),
+          body: z.string().trim().min(1, "Write a message").max(5000),
+        })
+        .parse(req.body);
+
+      const residents = await storage.getResidentsByProperty(property.id);
+      const messages = householdEmail(residents, property.name, body.subject, body.body);
+
+      // Fired without awaiting each one: this is a courtesy attached to
+      // something the RA has already decided to do, and eight round trips to
+      // a mail provider should not hold the response open.
+      for (const message of messages) {
+        void sendEmail(message);
+      }
+
+      recordAuditEvent(ctx, {
+        action: AUDIT_ACTIONS.PROPERTY_HOUSEHOLD_EMAILED,
+        entityType: "property",
+        entityId: property.id,
+        // The subject and the count, never the body: a summary is bounded and
+        // a house mail-out can run to pages.
+        summary: `Emailed ${messages.length} resident${messages.length === 1 ? "" : "s"} at ${property.name}: ${body.subject}`,
+        details: { recipients: messages.length, region: property.region },
+      });
+
+      res.json({ recipients: messages.length });
+    } catch (error) {
+      sendError(res, error, "Failed to email the household");
     }
   });
 

@@ -3825,6 +3825,98 @@ describe("resident finances (regional leads only)", () => {
   });
 });
 
+describe("emailing a household", () => {
+  const WEST = { id: "prop-west", name: "Cleveland House", region: "West Central", address: "1 Main St" };
+  const EAST = { id: "prop-east", name: "Como House", region: "East Central", address: "9 Elm" };
+
+  const HOUSE = [
+    { id: "r1", firstName: "Alice", lastName: "Ng", email: "alice@example.com", isActive: true },
+    { id: "r2", firstName: "Bob", lastName: "Ola", email: "bob@example.com", isActive: true },
+    { id: "r3", firstName: "Carol", lastName: "Ek", email: "carol@example.com", isActive: false },
+  ];
+
+  const westLead = (permissions: Record<string, unknown> = { canManageProperties: true }) =>
+    actAs(STAFF, { ...permissions, allowedRegions: ["West Central"] });
+
+  beforeEach(() => {
+    storageMock.getProperty.mockImplementation(async (id: string) =>
+      id === "prop-west" ? WEST : id === "prop-east" ? EAST : undefined,
+    );
+    storageMock.getResidentsByProperty.mockResolvedValue(HOUSE);
+  });
+
+  const send = (propertyId: string, body: unknown) =>
+    request("POST", `/api/properties/${propertyId}/email`, { body });
+
+  const validEmail = { subject: "Boiler service", body: "The engineer comes Friday at 9am." };
+
+  it("refuses an anonymous caller", async () => {
+    expect((await send("prop-west", validEmail)).status).toBe(401);
+  });
+
+  it("refuses a resident, without reading the roster", async () => {
+    actAs(ALICE, ALL_MAINTENANCE);
+    expect((await send("prop-west", validEmail)).status).toBe(403);
+    expect(storageMock.getResidentsByProperty).not.toHaveBeenCalled();
+  });
+
+  it("refuses a house in another region, without reading its roster", async () => {
+    westLead();
+    expect((await send("prop-east", validEmail)).status).toBe(403);
+    expect(storageMock.getResidentsByProperty).not.toHaveBeenCalled();
+  });
+
+  it("refuses an empty subject or body", async () => {
+    westLead();
+    expect((await send("prop-west", { subject: "  ", body: "x" })).status).toBe(400);
+    expect((await send("prop-west", { subject: "x", body: "  " })).status).toBe(400);
+  });
+
+  // The positive control.
+  it("reports how many people it reached, counting active residents only", async () => {
+    // A mail-out to people who moved out last spring is the kind of mistake
+    // that gets a tool abandoned. Carol has moved out.
+    westLead();
+    const { status, body } = await send("prop-west", validEmail);
+    expect(status).toBe(200);
+    expect(body.recipients).toBe(2);
+  });
+
+  it("records the send in the audit trail, with the house and the count", async () => {
+    westLead();
+    await send("prop-west", validEmail);
+    expect(storageMock.createAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "property.household_emailed",
+        entityType: "property",
+        entityId: "prop-west",
+        summary: expect.stringContaining("Cleveland House"),
+      }),
+    );
+    const [event] = storageMock.createAuditEvent.mock.calls[0];
+    expect(event.summary).toContain("2");
+  });
+
+  it("does not put the message body in the audit summary", async () => {
+    // The trail records that a house was emailed and by whom, not the text --
+    // a summary is bounded, and a house mail-out can be long.
+    westLead();
+    await send("prop-west", { subject: "Boiler service", body: "SECRET-BODY-TEXT" });
+    const [event] = storageMock.createAuditEvent.mock.calls[0];
+    expect(JSON.stringify(event)).not.toContain("SECRET-BODY-TEXT");
+  });
+
+  it("succeeds and says nobody was reached when the house is empty", async () => {
+    // Email being unconfigured, or a house having nobody on the roster, is a
+    // normal state -- not a failure of the request that triggered it.
+    westLead();
+    storageMock.getResidentsByProperty.mockResolvedValue([]);
+    const { status, body } = await send("prop-west", validEmail);
+    expect(status).toBe(200);
+    expect(body.recipients).toBe(0);
+  });
+});
+
 describe("the deposit deduction ledger", () => {
   const WEST_PROPERTY = { id: "prop-west", name: "Cleveland House", region: "West Central", address: "1 Main St" };
   const ALICE_RESIDENT = { id: "res-a", firstName: "Alice", lastName: "Ng", propertyId: "prop-west", region: "West Central", buildingAddress: "1 Main St", isActive: true };
@@ -3968,6 +4060,80 @@ describe("the deposit deduction ledger", () => {
     expect(storageMock.createAuditEvent).toHaveBeenCalledWith(
       expect.objectContaining({ action: "deposit_deduction.deleted" }),
     );
+  });
+
+  // ── Editing one ──────────────────────────────────────────────────────────
+
+  it("refuses a resident the edit route, without writing", async () => {
+    actAs(ALICE, { ...ALL_MAINTENANCE, canManageFinancials: true });
+    storageMock.getDepositDeduction.mockResolvedValue({
+      id: "ded-1", residentId: "res-a", description: "x", amount: "10.00", region: "West Central",
+    });
+    const { status } = await request("PATCH", "/api/deposit-deductions/ded-1", { body: { amount: 5 } });
+    expect(status).toBe(403);
+    expect(storageMock.updateDepositDeduction).not.toHaveBeenCalled();
+  });
+
+  it("refuses staff holding only the view finance flag, without writing", async () => {
+    westLead({ canViewFinancials: true });
+    storageMock.getDepositDeduction.mockResolvedValue({
+      id: "ded-1", residentId: "res-a", description: "x", amount: "10.00", region: "West Central",
+    });
+    const { status } = await request("PATCH", "/api/deposit-deductions/ded-1", { body: { amount: 5 } });
+    expect(status).toBe(403);
+    expect(storageMock.updateDepositDeduction).not.toHaveBeenCalled();
+  });
+
+  it("refuses an edit to one in another region, without writing", async () => {
+    westLead();
+    storageMock.getDepositDeduction.mockResolvedValue({
+      id: "ded-9", residentId: "res-e", description: "x", amount: "10.00", region: "East Central",
+    });
+    const { status } = await request("PATCH", "/api/deposit-deductions/ded-9", { body: { amount: 5 } });
+    expect(status).toBe(403);
+    expect(storageMock.updateDepositDeduction).not.toHaveBeenCalled();
+  });
+
+  it("refuses to move a deduction onto a different resident", async () => {
+    // Moving a charge between people is two acts on two balances, and the
+    // trail should say so rather than showing one edit.
+    westLead();
+    storageMock.getDepositDeduction.mockResolvedValue({
+      id: "ded-1", residentId: "res-a", description: "x", amount: "10.00", region: "West Central",
+    });
+    storageMock.updateDepositDeduction.mockImplementation(async (_id, patch) => ({
+      id: "ded-1", residentId: "res-a", description: "x", amount: "10.00", ...patch,
+    }));
+    await request("PATCH", "/api/deposit-deductions/ded-1", { body: { residentId: "res-e", amount: 5 } });
+    const [, patch] = storageMock.updateDepositDeduction.mock.calls[0];
+    expect(patch).not.toHaveProperty("residentId");
+  });
+
+  // The positive control, and the audit event the spec asks for on an edit.
+  it("records an audit event when a deduction is changed", async () => {
+    westLead();
+    storageMock.getDepositDeduction.mockResolvedValue({
+      id: "ded-1", residentId: "res-a", description: "Hole in wall", amount: "75.00", region: "West Central",
+    });
+    storageMock.updateDepositDeduction.mockImplementation(async (_id, patch) => ({
+      id: "ded-1", residentId: "res-a", description: "Hole in wall", amount: "50.00", ...patch,
+    }));
+    const { status } = await request("PATCH", "/api/deposit-deductions/ded-1", { body: { amount: 50 } });
+    expect(status).toBe(200);
+    expect(storageMock.updateDepositDeduction).toHaveBeenCalled();
+    expect(storageMock.createAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "deposit_deduction.updated" }),
+    );
+  });
+
+  it("refuses a resident the delete route, without deleting", async () => {
+    actAs(ALICE, { ...ALL_MAINTENANCE, canManageFinancials: true });
+    storageMock.getDepositDeduction.mockResolvedValue({
+      id: "ded-1", residentId: "res-a", description: "x", amount: "10.00", region: "West Central",
+    });
+    const { status } = await request("DELETE", "/api/deposit-deductions/ded-1", {});
+    expect(status).toBe(403);
+    expect(storageMock.deleteDepositDeduction).not.toHaveBeenCalled();
   });
 
   it("refuses to delete one in another region, without deleting", async () => {

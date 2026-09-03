@@ -237,6 +237,17 @@ Region names are compared in one canonical form, so a stored legacy `west-centra
 - **The linked requests are filtered by the *request's* region, not the contact's.** A vendor can work across regions, and reading their page must not become a way to see requests the caller could not otherwise open.
 - **There is no rating field, and adding one would be a regression.** A star score on a vendor SPO may have to keep using invites arguments about the number and tells an incoming RA far less than a paragraph does. There is also no separate "project" entity: a project here always traces back to a request, and a second entity to keep in sync would decay.
 
+### Outbound email
+
+`server/notifications.ts` holds the message builders — pure, a record in and a message out — so the wording is testable without a mail provider and the content rule holds in one place: **names, dates, amounts and descriptions yes; a credential or a banking identifier never.** That is the audit log's rule, applied to email for the same reason: both leave the system and neither can be recalled.
+
+Every builder returns `null` (or an empty list) when there is nothing to send, so a caller never has to tell "no message" from "a message that failed". Sends are fired with `void sendEmail(...)` rather than awaited: `sendEmail` already never throws, and eight round trips to a mail provider should not hold a response open for a courtesy attached to something that has already happened.
+
+- **The acknowledgement is addressed off `submittedBy`, which is an email.** Reading it as a user id would send every acknowledgement to nowhere, silently.
+- **A status email fires on the same condition as the audit event** — an actual status change — so an edit to a description emails nobody about nothing.
+- **A household email goes to active residents only, one message per person.** A mail-out to people who moved out last spring is the kind of mistake that gets a tool abandoned, and one message per person means nobody's address is disclosed to the rest of the house. The recipients are listed on screen before sending. The audit summary records the house, the subject and the count — **never the body**, because a summary is bounded and a house mail-out can run to pages.
+- **The lease renewal reminder** is a seasonal task keyed on the house and the renewal date, raised `LEASE_RENEWAL_NOTICE_DAYS` (60) ahead — the same horizon the dashboard's lease item uses, so the two cannot tell an RA different things about one date. It clears when `renewalDecision` moves off `undecided`, either way.
+
 ### Deposits
 
 **SPO holds a deposit per resident and the portal is a ledger and a reminder — the money moves in QuickBooks and Ramp.** Amounts, dates, descriptions and references only; the financial-data rule applies here without exception.
@@ -251,6 +262,8 @@ Region names are compared in one canonical form, so a stored legacy `west-centra
 - **The legacy `deductionsNotes` is displayed as history and never parsed into rows.** It is free text written by people, and a migration that guessed would be wrong in ways nobody notices until a deposit is short.
 
 **Return deadlines are one admin-set integer per property, `depositReturnDays`, counted from the resident's move-out date** — when possession came back, not lease end; somebody can leave in April on a lease running to July. **Do not build a state-to-deadline lookup table.** The states SPO operates in have materially different rules (Arizona counts business days, Florida and Kansas are two-stage), and a table would bake legal advice into the repo and go stale silently. No setting means **no deadline** rather than a default standing in for one — an invented figure would be a legal determination the portal must not make — though the dashboard still raises the item, because a deposit held for somebody who has gone is worth surfacing either way. `DEPOSIT_LOOKAHEAD_DAYS` raises it 30 days before a move-out so the money is ready rather than chased.
+
+**No setting means no deadline, but not no urgency.** Every house has `depositReturnDays` null the day this ships, and an undated action item sorts *below* every dated one — so a deposit with no deadline falls back to "due now" for a resident who has already left, which is exactly what it said before deadlines existed. Without that fallback, adding deadlines would have quietly pushed every held deposit off the dashboard's top few. Only `held` and `statement_sent` are outstanding: `returned`, `withheld` and `partially_returned` all mean somebody has dealt with it, and leaving a withheld deposit up forever is a permanent false alarm.
 
 **The statement is an internal worksheet for finance, not a document the portal issues.** There is deliberately no send button: delivery happens outside the portal by product decision, not because email is unavailable. Since delivery happens elsewhere, `statementProvidedOn` is set by hand — there is no send action to infer it from. `statement_sent` is progress, not completion: the money is still held and the dashboard keeps saying so until it goes back.
 

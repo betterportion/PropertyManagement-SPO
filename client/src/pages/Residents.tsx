@@ -35,6 +35,9 @@ const residentFormSchema = z.object({
   phone: z.string().optional(),
   notes: z.string().optional(),
   moveInDate: z.string().optional(),
+  // Blank means the house's figure applies; the numeric column round-trips as
+  // a string, so the form carries one and the server coerces.
+  depositAmountOverride: z.string().nullable().optional(),
 });
 type ResidentForm = z.infer<typeof residentFormSchema>;
 
@@ -183,7 +186,7 @@ export default function Residents() {
 
   const addForm = useForm<ResidentForm>({
     resolver: zodResolver(residentFormSchema),
-    defaultValues: { propertyId: "", firstName: "", lastName: "", email: "", phone: "", notes: "", moveInDate: "" },
+    defaultValues: { propertyId: "", firstName: "", lastName: "", email: "", phone: "", notes: "", moveInDate: "", depositAmountOverride: null },
   });
 
   const propertyName = (id: string) => properties.find((p) => p.id === id)?.name ?? "Unknown house";
@@ -396,6 +399,27 @@ export default function Residents() {
                         <FormItem>
                           <FormLabel>Move-in date <span className="text-muted-foreground text-xs">(optional)</span></FormLabel>
                           <FormControl><Input type="date" {...field} data-testid="input-resident-movein" /></FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )} />
+                      <FormField control={addForm.control} name="depositAmountOverride" render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Deposit for this person <span className="text-muted-foreground text-xs">(optional)</span></FormLabel>
+                          <FormControl>
+                            <Input
+                              type="number"
+                              min={0}
+                              step="0.01"
+                              {...field}
+                              value={field.value ?? ""}
+                              onChange={(event) => field.onChange(event.target.value === "" ? null : event.target.value)}
+                              data-testid="input-resident-deposit-override"
+                            />
+                          </FormControl>
+                          {/* Blank means the house's figure applies. A
+                              scholarship or a partial term is a different
+                              number, not a different model. */}
+                          <p className="text-xs text-muted-foreground">Leave blank to use the house's usual amount.</p>
                           <FormMessage />
                         </FormItem>
                       )} />

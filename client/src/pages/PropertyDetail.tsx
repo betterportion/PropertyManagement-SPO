@@ -1,7 +1,7 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "wouter";
-import { ArrowLeft, Building2, ExternalLink, ListChecks, Package, UsersRound, Wrench } from "lucide-react";
+import { ArrowLeft, Building2, ExternalLink, ListChecks, Mail, Package, UsersRound, Wrench } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -11,6 +11,7 @@ import { DataTable } from "@/components/data-table";
 import { Container, PageHeader, PageStack, Section } from "@/components/layout/page";
 import { EmptyState, LoadingState } from "@/components/states";
 import PropertySetupChecklist from "@/components/PropertySetupChecklist";
+import EmailHouseholdDialog from "@/components/EmailHouseholdDialog";
 import { useAuth } from "@/hooks/useAuth";
 import { formatCurrency, formatDate, formatValue } from "@/lib/format";
 import type {
@@ -141,6 +142,7 @@ export default function PropertyDetail() {
   const contactsQuery = useQuery<MaintenanceContact[]>({ queryKey: ["/api/contacts"] });
 
   const { user } = useAuth();
+  const [isEmailOpen, setIsEmailOpen] = useState(false);
 
   const property = propertiesQuery.data?.find((p) => p.id === propertyId);
 
@@ -256,7 +258,29 @@ export default function PropertyDetail() {
         <PageStack>
           <BackLink />
 
-          <PageHeader title={property.name} description={property.address} />
+          <PageHeader
+            title={property.name}
+            description={property.address}
+            actions={
+              canManageSetup ? (
+                <Button
+                  variant="secondary"
+                  onClick={() => setIsEmailOpen(true)}
+                  data-testid="button-email-household"
+                >
+                  <Mail className="h-4 w-4" />
+                  Email the household
+                </Button>
+              ) : undefined
+            }
+          />
+
+          <EmailHouseholdDialog
+            property={property}
+            residents={residents}
+            open={isEmailOpen}
+            onOpenChange={setIsEmailOpen}
+          />
 
           <div className="flex flex-wrap items-center gap-2" data-testid="property-facts">
             <Badge variant="secondary">{property.region}</Badge>

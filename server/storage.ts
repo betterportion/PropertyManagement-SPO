@@ -285,25 +285,11 @@ export interface IStorage {
   getDepositDeduction(id: string): Promise<DepositDeduction | undefined>;
   getDepositDeductionsByResident(residentId: string): Promise<DepositDeduction[]>;
   createDepositDeduction(
-    deduction: InsertDepositDeduction & {
-      propertyId: string;
-      region: string;
-      buildingAddress: string;
-      splitGroupId?: string | null;
-      recordedByUserId: string | null;
-      recordedByEmail: string | null;
-    },
+    deduction: InsertDepositDeduction & DepositDeductionOwnedFields,
   ): Promise<DepositDeduction>;
   /** Writes a whole split at once, so a house is never half-charged. */
   createDepositDeductions(
-    deductions: (InsertDepositDeduction & {
-      propertyId: string;
-      region: string;
-      buildingAddress: string;
-      splitGroupId?: string | null;
-      recordedByUserId: string | null;
-      recordedByEmail: string | null;
-    })[],
+    deductions: (InsertDepositDeduction & DepositDeductionOwnedFields)[],
   ): Promise<DepositDeduction[]>;
   updateDepositDeduction(id: string, data: Partial<InsertDepositDeduction>): Promise<DepositDeduction>;
   deleteDepositDeduction(id: string): Promise<void>;
@@ -421,6 +407,24 @@ export interface AuditEventPage {
   events: AuditEvent[];
   /** How many rows the filters match in total, for the page count. */
   total: number;
+}
+
+/**
+ * The parts of a deduction the SERVER supplies rather than the caller.
+ *
+ * The property, region and house are copied from the resident the deduction is
+ * against, so a body cannot name a region it cannot reach; the actor comes
+ * from the session; the split group id is set by the split route alone. Named
+ * once because four signatures need it and four copies is four places to
+ * quietly drop one of them.
+ */
+export interface DepositDeductionOwnedFields {
+  propertyId: string;
+  region: string;
+  buildingAddress: string;
+  splitGroupId?: string | null;
+  recordedByUserId: string | null;
+  recordedByEmail: string | null;
 }
 
 export type UploadReference =
@@ -1443,14 +1447,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createDepositDeduction(
-    deduction: InsertDepositDeduction & {
-      propertyId: string;
-      region: string;
-      buildingAddress: string;
-      splitGroupId?: string | null;
-      recordedByUserId: string | null;
-      recordedByEmail: string | null;
-    },
+    deduction: InsertDepositDeduction & DepositDeductionOwnedFields,
   ): Promise<DepositDeduction> {
     const [row] = await db.insert(depositDeductions).values(deduction).returning();
     return row;
@@ -1464,14 +1461,7 @@ export class DatabaseStorage implements IStorage {
    * adding up to the charge.
    */
   async createDepositDeductions(
-    deductions: (InsertDepositDeduction & {
-      propertyId: string;
-      region: string;
-      buildingAddress: string;
-      splitGroupId?: string | null;
-      recordedByUserId: string | null;
-      recordedByEmail: string | null;
-    })[],
+    deductions: (InsertDepositDeduction & DepositDeductionOwnedFields)[],
   ): Promise<DepositDeduction[]> {
     if (deductions.length === 0) return [];
     return await db.insert(depositDeductions).values(deductions).returning();

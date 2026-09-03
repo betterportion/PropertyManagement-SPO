@@ -59,3 +59,67 @@ describe("dueSeasonalTasks", () => {
     expect(dueSeasonalTasks(inputs, utc(2026, 8, 18))).toHaveLength(0);
   });
 });
+
+describe("the lease renewal reminder", () => {
+  const NOW = new Date("2026-08-15T00:00:00Z");
+  const renewalOn = (iso: string, renewalDecision = "undecided") => ({
+    regions: [],
+    rentedLeases: [
+      {
+        propertyId: "p1",
+        name: "Cleveland House",
+        region: "West Central",
+        leaseEndDate: new Date("2027-06-30T00:00:00Z"),
+        leaseRenewalDate: new Date(iso),
+        renewalDecision,
+      },
+    ],
+  });
+
+  const renewalSpecs = (inputs: Parameters<typeof dueSeasonalTasks>[0]) =>
+    dueSeasonalTasks(inputs, NOW).filter((spec) => spec.sourceKey.startsWith("lease-renewal:"));
+
+  it("appears two months before the decision is due", () => {
+    // Off the Phase 3.3 date, alongside the lease-end utilities reminder.
+    const specs = renewalSpecs(renewalOn("2026-09-15T00:00:00Z"));
+    expect(specs).toHaveLength(1);
+    expect(specs[0].title).toContain("Cleveland House");
+    expect(specs[0].region).toBe("West Central");
+  });
+
+  it("stays quiet while the decision is still far off", () => {
+    expect(renewalSpecs(renewalOn("2027-06-01T00:00:00Z"))).toHaveLength(0);
+  });
+
+  it("clears once the decision has been recorded, either way", () => {
+    // properties.renewalDecision already exists, so the reminder can resolve
+    // rather than nagging about something somebody has already decided.
+    expect(renewalSpecs(renewalOn("2026-09-15T00:00:00Z", "renewing"))).toHaveLength(0);
+    expect(renewalSpecs(renewalOn("2026-09-15T00:00:00Z", "not_renewing"))).toHaveLength(0);
+  });
+
+  it("says nothing about a house with no renewal date", () => {
+    const specs = dueSeasonalTasks(
+      {
+        regions: [],
+        rentedLeases: [
+          {
+            propertyId: "p1",
+            name: "Cleveland House",
+            region: "West Central",
+            leaseEndDate: new Date("2027-06-30T00:00:00Z"),
+            leaseRenewalDate: null,
+            renewalDecision: "undecided",
+          },
+        ],
+      },
+      NOW,
+    ).filter((spec) => spec.sourceKey.startsWith("lease-renewal:"));
+    expect(specs).toHaveLength(0);
+  });
+
+  it("keys on the house and the date, so re-running never duplicates it", () => {
+    const specs = renewalSpecs(renewalOn("2026-09-15T00:00:00Z"));
+    expect(specs[0].sourceKey).toBe("lease-renewal:p1:2026-09-15");
+  });
+});

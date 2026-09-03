@@ -55,13 +55,6 @@ const RENT_STATUS: Record<RentPayment["status"], { label: string; variant: "outl
   failed: { label: "Payment failed", variant: "destructive" },
 };
 
-const DEPOSIT_STATUS: Record<SecurityDeposit["status"], { label: string; variant: "outline" | "secondary" | "destructive" | "warning" }> = {
-  held: { label: "Held", variant: "secondary" },
-  statement_sent: { label: "Statement sent", variant: "warning" },
-  returned: { label: "Returned", variant: "outline" },
-  partially_returned: { label: "Partially returned", variant: "outline" },
-  withheld: { label: "Withheld", variant: "destructive" },
-};
 
 export default function Finances() {
   const { user } = useAuth();
@@ -304,50 +297,13 @@ export default function Finances() {
           <div key={propertyId} className="space-y-3">
             <h3 className="font-semibold">{propertyName(propertyId)}</h3>
             <div className="space-y-3">
-              {list.map((d) => {
-                const status = DEPOSIT_STATUS[d.status];
-                return (
-                  <Card key={d.id} data-testid={`card-deposit-${d.id}`}>
-                    <CardContent className="flex items-start justify-between gap-4 p-4">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <p className="font-medium">{residentName(d.residentId)}</p>
-                          <Badge variant={status.variant}>{status.label}</Badge>
-                        </div>
-                        <p className="mt-1 text-sm text-muted-foreground">
-                          {formatCurrency(d.amountHeld)} held
-                          {d.amountReturned ? ` · ${formatCurrency(d.amountReturned)} returned` : ""}
-                          {d.returnedDate ? ` ${formatDate(d.returnedDate)}` : ""}
-                        </p>
-                      </div>
-                      {canManage && (
-                        <div className="flex shrink-0 items-center gap-2">
-                          <Button size="sm" variant="secondary" onClick={() => setEditingDeposit(d)} data-testid={`button-edit-deposit-${d.id}`}>
-                            Update
-                          </Button>
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button size="icon" variant="ghost" aria-label={`Actions for ${residentName(d.residentId)}'s deposit`} data-testid={`button-menu-deposit-${d.id}`}>
-                                <MoreVertical className="h-4 w-4" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                              <DropdownMenuItem onClick={() => setDeletingDeposit(d.id)} className="text-destructive">
-                                Remove
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-                );
-              })}
+              {/* One card per deposit: what is held, what has been taken off
+                  it, what is left, and the statement. It replaced a summary
+                  card that said a subset of the same things -- two renderings
+                  of one deposit is two places for them to disagree.
 
-              {/* The itemised ledger, one per resident: what is held, what has
-                  been taken off it, what is left, and the statement. The
-                  legacy free-text note is shown inside it as history and is
-                  never counted -- reading amounts out of a sentence somebody
+                  The legacy free-text note is shown inside as history and is
+                  never counted: reading amounts out of a sentence somebody
                   typed would be a guess, and a guess here is a deposit that
                   comes back short. */}
               {list.map((d) => {
@@ -359,6 +315,8 @@ export default function Finances() {
                     resident={resident}
                     deposit={d}
                     canManage={canManage}
+                    onEdit={() => setEditingDeposit(d)}
+                    onRemove={() => setDeletingDeposit(d.id)}
                   />
                 );
               })}
@@ -641,13 +599,34 @@ export default function Finances() {
                                 <FormMessage />
                               </FormItem>
                             )} />
-                            <FormField control={depositForm.control} name="amountHeld" render={({ field }) => (
-                              <FormItem>
-                                <FormLabel>Amount held ($)</FormLabel>
-                                <FormControl><Input type="number" min={0} step="0.01" {...field} data-testid="input-deposit-amount" /></FormControl>
-                                <FormMessage />
-                              </FormItem>
-                            )} />
+                            <FormField control={depositForm.control} name="amountHeld" render={({ field }) => {
+                              // The house's figure, with this person's override
+                              // if they have one. A deposit is the same number
+                              // eight times every August; typing it eight times
+                              // is what makes people abandon a system.
+                              const chosen = residents.find((r) => r.id === depositForm.watch("residentId"));
+                              const suggested = chosen?.depositAmountOverride
+                                ?? properties.find((p) => p.id === chosen?.propertyId)?.depositAmount
+                                ?? null;
+                              return (
+                                <FormItem>
+                                  <FormLabel>Amount held ($)</FormLabel>
+                                  <FormControl><Input type="number" min={0} step="0.01" {...field} data-testid="input-deposit-amount" /></FormControl>
+                                  {suggested !== null && Number(field.value) !== Number(suggested) && (
+                                    <button
+                                      type="button"
+                                      className="text-xs text-muted-foreground underline underline-offset-2"
+                                      onClick={() => field.onChange(String(suggested))}
+                                      data-testid="button-use-house-deposit"
+                                    >
+                                      Use {formatCurrency(suggested)}
+                                      {chosen?.depositAmountOverride ? " (this person's agreed amount)" : " (the usual for this house)"}
+                                    </button>
+                                  )}
+                                  <FormMessage />
+                                </FormItem>
+                              );
+                            }} />
                             <DialogFooter>
                               <Button type="button" variant="secondary" onClick={() => setIsDepositOpen(false)}>Cancel</Button>
                               <Button type="submit" disabled={depositCreateMutation.isPending} data-testid="button-submit-deposit">

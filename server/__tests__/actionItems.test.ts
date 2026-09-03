@@ -95,20 +95,71 @@ describe("when a deposit has to go back", () => {
     expect(items.filter((i) => i.source === "deposit")).toHaveLength(0);
   });
 
-  it("has no deadline when the house has no setting, but still raises the item", () => {
-    // The number is SPO's own reminder setting, not a legal determination.
-    // Without one there is nothing to count to -- but a deposit still held for
-    // somebody who has left is still worth surfacing.
+  it("invents no deadline when the house has no setting, and reads as due now", () => {
+    // The number is SPO's own reminder setting, not a legal determination, so
+    // nothing here counts forward from the move-out date by some default. What
+    // it does say is "this needs doing", which is what it said before
+    // deadlines existed -- see the ranking test below for why that matters.
+    const items = buildActionItems({
+      ...empty,
+      properties: [property({ id: "p1", ownership: "owned", leaseRenewalDate: null, depositReturnDays: null })],
+      deposits: [deposit({ propertyId: "p1" })],
+      residents: [leaving({ moveOutDate: days(-40) })],
+    }, NOW);
+    const item = items.find((i) => i.source === "deposit");
+    expect(item).toBeTruthy();
+    // Now, not "40 days ago plus a guessed number of days".
+    expect(item!.dueDate).toBe(NOW.toISOString());
+  });
+
+  it("still ranks a deposit with no deadline near the top, not last", () => {
+    // Every house has depositReturnDays null the day this ships. If "no
+    // setting" meant "no due date", every held deposit for a departed
+    // resident would sort BELOW every dated item and quietly fall off the
+    // dashboard's top few -- which is the opposite of what adding deadlines
+    // was for. No setting means the deposit is due now, as it was before.
     const items = buildActionItems({
       ...empty,
       properties: [property({ id: "p1", ownership: "owned", leaseRenewalDate: null, depositReturnDays: null })],
       deposits: [deposit({ propertyId: "p1" })],
       residents: [leaving()],
+      // A dated item that would otherwise outrank it.
+      schedules: [schedule({ id: "later", nextDueDate: days(20) })],
     }, NOW);
-    const item = items.find((i) => i.source === "deposit");
-    expect(item).toBeTruthy();
-    expect(item!.dueDate).toBeNull();
+
+    const depositIndex = items.findIndex((i) => i.source === "deposit");
+    const scheduleIndex = items.findIndex((i) => i.source === "schedule");
+    expect(depositIndex).toBeLessThan(scheduleIndex);
+    expect(items[depositIndex].overdue).toBe(true);
   });
+
+  it("does not treat somebody still living there as overdue for want of a setting", () => {
+    // The "due now" fallback is for a deposit that should already have gone
+    // back. Somebody leaving next month has not triggered anything yet.
+    const items = buildActionItems({
+      ...empty,
+      properties: [property({ id: "p1", ownership: "owned", leaseRenewalDate: null, depositReturnDays: null })],
+      deposits: [deposit({ propertyId: "p1" })],
+      residents: [resident({ id: "res-gone", propertyId: "p1", isActive: true, moveOutDate: days(20) })],
+    }, NOW);
+    expect(items.find((i) => i.source === "deposit")!.overdue).toBe(false);
+  });
+
+  it.each(["returned", "withheld", "partially_returned"] as const)(
+    "clears once the deposit is settled as %s",
+    (status) => {
+      // All three mean the deposit has been dealt with. Only "held" and
+      // "statement_sent" are still outstanding -- leaving a withheld deposit
+      // on the dashboard forever is a permanent false alarm.
+      const items = buildActionItems({
+        ...empty,
+        properties: [HOUSE],
+        deposits: [deposit({ propertyId: "p1", status })],
+        residents: [leaving()],
+      }, NOW);
+      expect(items.filter((i) => i.source === "deposit")).toHaveLength(0);
+    },
+  );
 
   it("clears the moment the deposit is marked returned", () => {
     const items = buildActionItems({
