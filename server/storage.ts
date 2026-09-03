@@ -208,7 +208,18 @@ export interface IStorage {
   createAsset(asset: InsertAsset): Promise<Asset>;
   getAsset(id: string): Promise<Asset | undefined>;
   getAllAssets(): Promise<Asset[]>;
-  updateAsset(id: string, data: Partial<InsertAsset>): Promise<Asset>;
+  // The snooze attribution is not part of the insert schema -- it is taken
+  // from the authenticated actor and the clock, never from a request body,
+  // exactly as completedDate is on a maintenance request. See the snooze
+  // routes in server/routes.ts.
+  updateAsset(
+    id: string,
+    data: Partial<InsertAsset> & {
+      snoozedByUserId?: string | null;
+      snoozedAt?: Date | null;
+      snoozedUntil?: Date | null;
+    },
+  ): Promise<Asset>;
   deleteAsset(id: string): Promise<void>;
 
   // Asset Photos
@@ -874,7 +885,14 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(assets);
   }
 
-  async updateAsset(id: string, data: Partial<InsertAsset>): Promise<Asset> {
+  async updateAsset(
+    id: string,
+    data: Partial<InsertAsset> & {
+      snoozedByUserId?: string | null;
+      snoozedAt?: Date | null;
+      snoozedUntil?: Date | null;
+    },
+  ): Promise<Asset> {
     const [asset] = await db
       .update(assets)
       .set({ ...filterUndefined(data), updatedAt: new Date() })

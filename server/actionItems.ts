@@ -23,8 +23,10 @@ import type {
   Task,
   Property,
   PropertySetupItem,
+  Asset,
 } from "@shared/schema";
 import { summarizeSetup, setupRowsByProperty } from "@shared/propertySetup";
+import { assetLifecycle } from "@shared/assetLifecycle";
 
 /** How far ahead a recurring schedule becomes an action item. */
 export const SCHEDULE_LOOKAHEAD_DAYS = 30;
@@ -34,7 +36,7 @@ export const LEASE_LOOKAHEAD_DAYS = 60;
 
 const DAY_MS = 24 * 60 * 60 * 1_000;
 
-export type ActionItemSource = "schedule" | "rent" | "deposit" | "task" | "lease" | "setup";
+export type ActionItemSource = "schedule" | "rent" | "deposit" | "task" | "lease" | "setup" | "asset";
 export type ActionItemCategory = "property" | "safety" | "finance" | "general";
 
 export interface ActionItem {
@@ -60,6 +62,7 @@ export interface ActionItemInputs {
   tasks: Task[];
   properties: Property[];
   setupItems: PropertySetupItem[];
+  assets: Asset[];
 }
 
 /** The last calendar day of a "YYYY-MM" period, as a UTC-midnight date. */
@@ -154,6 +157,33 @@ export function buildActionItems(inputs: ActionItemInputs, now: Date = new Date(
       dueDate: null,
       overdue: false,
       region: p.region,
+    });
+  }
+
+  // Property — an asset coming up for replacement.
+  //
+  // Three rules, all from assetLifecycle:
+  //   - an UNRATED asset (nothing to reason from) says nothing at all. A guess
+  //     here would be indistinguishable from a real warning, and people would
+  //     stop reading both;
+  //   - only the warning window and worse reach the dashboard. "Not due yet"
+  //     is not something anybody needs to be told today;
+  //   - a SNOOZED asset is hidden HERE ONLY. It stays visible, and visibly
+  //     snoozed, on the asset screen -- hiding it everywhere is how a boiler
+  //     gets forgotten for three years.
+  for (const a of inputs.assets) {
+    const lifecycle = assetLifecycle(a, now);
+    if (lifecycle.status === "unrated" || lifecycle.status === "ok") continue;
+    if (lifecycle.snoozed) continue;
+    items.push({
+      id: a.id,
+      source: "asset",
+      category: "property",
+      title: `${lifecycle.label} — ${a.name}`,
+      subtitle: a.buildingAddress,
+      dueDate: iso(lifecycle.dueDate),
+      overdue: lifecycle.status === "overdue",
+      region: a.region,
     });
   }
 

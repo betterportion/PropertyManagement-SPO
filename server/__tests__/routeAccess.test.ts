@@ -2816,6 +2816,114 @@ describe("paging and filtering the activity log", () => {
 // caller name someone else as the author of a photo.
 // ---------------------------------------------------------------------------
 
+describe("snoozing an asset an RA is confident about", () => {
+  const WEST_ASSET = { id: "asset-west", name: "Rheem water heater", region: "West Central", buildingAddress: "1 Main St" };
+  const EAST_ASSET = { id: "asset-east", name: "Carrier furnace", region: "East Central", buildingAddress: "9 Elm" };
+
+  const MANAGE = { canViewAssets: true, canManageAssets: true };
+  const westLead = (permissions: Record<string, unknown> = MANAGE) =>
+    actAs(STAFF, { ...permissions, allowedRegions: ["West Central"] });
+
+  const NEXT_YEAR = "2027-08-01T00:00:00.000Z";
+
+  beforeEach(() => {
+    storageMock.getAsset.mockImplementation(async (id: string) =>
+      id === "asset-west" ? WEST_ASSET : id === "asset-east" ? EAST_ASSET : undefined,
+    );
+    storageMock.updateAsset.mockImplementation(async (id, patch) => ({ ...WEST_ASSET, id, ...patch }));
+  });
+
+  const snooze = (id: string, body: unknown) => request("POST", `/api/assets/${id}/snooze`, { body });
+
+  // ── The three layers ─────────────────────────────────────────────────────
+
+  it("refuses an anonymous caller", async () => {
+    expect((await snooze("asset-west", { until: NEXT_YEAR, reason: "Serviced last month" })).status).toBe(401);
+  });
+
+  it("refuses a resident, without writing", async () => {
+    actAs(ALICE, ALL_MAINTENANCE);
+    expect((await snooze("asset-west", { until: NEXT_YEAR, reason: "x" })).status).toBe(403);
+    expect(storageMock.updateAsset).not.toHaveBeenCalled();
+  });
+
+  it("refuses staff holding only the view permission, without writing", async () => {
+    westLead({ canViewAssets: true });
+    expect((await snooze("asset-west", { until: NEXT_YEAR, reason: "x" })).status).toBe(403);
+    expect(storageMock.updateAsset).not.toHaveBeenCalled();
+  });
+
+  it("refuses an asset in another region, without writing", async () => {
+    westLead();
+    expect((await snooze("asset-east", { until: NEXT_YEAR, reason: "x" })).status).toBe(403);
+    expect(storageMock.updateAsset).not.toHaveBeenCalled();
+  });
+
+  it("answers 404 for an asset that does not exist, without writing", async () => {
+    westLead();
+    expect((await snooze("asset-nowhere", { until: NEXT_YEAR, reason: "x" })).status).toBe(404);
+    expect(storageMock.updateAsset).not.toHaveBeenCalled();
+  });
+
+  // ── The reason is the point ──────────────────────────────────────────────
+
+  it("refuses a snooze with no reason", async () => {
+    // The reason is what makes next year's budget conversation possible. A
+    // snooze without one is just a boiler quietly disappearing.
+    westLead();
+    const { status } = await snooze("asset-west", { until: NEXT_YEAR });
+    expect(status).toBe(400);
+    expect(storageMock.updateAsset).not.toHaveBeenCalled();
+  });
+
+  it("refuses a blank reason too", async () => {
+    westLead();
+    expect((await snooze("asset-west", { until: NEXT_YEAR, reason: "   " })).status).toBe(400);
+    expect(storageMock.updateAsset).not.toHaveBeenCalled();
+  });
+
+  it("refuses a snooze with no end date, so it can never be permanent", async () => {
+    // Snooze returns. Editing the replacement date is the permanent
+    // correction; conflating the two would let a date be falsified silently.
+    westLead();
+    expect((await snooze("asset-west", { reason: "Serviced last month" })).status).toBe(400);
+    expect(storageMock.updateAsset).not.toHaveBeenCalled();
+  });
+
+  // The positive control.
+  it("records who snoozed it and when, from the session rather than the body", async () => {
+    westLead();
+    const { status } = await snooze("asset-west", {
+      until: NEXT_YEAR,
+      reason: "Serviced last month, has years left",
+      snoozedByUserId: "u-somebody-else",
+      snoozedAt: "1999-01-01T00:00:00.000Z",
+    });
+    expect(status).toBe(200);
+    const [, patch] = storageMock.updateAsset.mock.calls[0];
+    expect(patch.snoozedByUserId).toBe(STAFF.id);
+    expect(patch.snoozeReason).toBe("Serviced last month, has years left");
+    expect(patch.snoozedAt.getTime()).toBeGreaterThan(new Date("2020-01-01").getTime());
+  });
+
+  it("never touches the replacement date, so a snooze cannot falsify it", async () => {
+    westLead();
+    await snooze("asset-west", { until: NEXT_YEAR, reason: "Serviced last month" });
+    const [, patch] = storageMock.updateAsset.mock.calls[0];
+    expect(patch).not.toHaveProperty("replacementDueDate");
+    expect(patch).not.toHaveProperty("acquisitionDate");
+  });
+
+  it("clears a snooze, keeping the reason as the record of why it was parked", async () => {
+    westLead();
+    const { status } = await request("DELETE", "/api/assets/asset-west/snooze", {});
+    expect(status).toBe(200);
+    const [, patch] = storageMock.updateAsset.mock.calls[0];
+    expect(patch.snoozedUntil).toBeNull();
+    expect(patch).not.toHaveProperty("snoozeReason");
+  });
+});
+
 describe("asset creation input validation", () => {
   const baseAsset = {
     name: "Fridge",
@@ -3761,6 +3869,7 @@ describe("tasks & action items (regional leads only)", () => {
     storageMock.getAllTasks.mockResolvedValue([]);
     storageMock.getAllProperties.mockResolvedValue([]);
     storageMock.getAllPropertySetupItems.mockResolvedValue([]);
+    storageMock.getAllAssets.mockResolvedValue([]);
     const { status, body } = await get("/api/action-items");
     expect(status).toBe(200);
     // The East-Central rent is filtered out by region.
@@ -3778,6 +3887,7 @@ describe("tasks & action items (regional leads only)", () => {
     storageMock.getAllTasks.mockResolvedValue([]);
     storageMock.getAllProperties.mockResolvedValue([]);
     storageMock.getAllPropertySetupItems.mockResolvedValue([]);
+    storageMock.getAllAssets.mockResolvedValue([]);
     const { status, body } = await get("/api/action-items");
     expect(status).toBe(200);
     expect(body).toEqual([]);
@@ -3796,6 +3906,7 @@ describe("tasks & action items (regional leads only)", () => {
       { id: "prop-e", name: "Buckeye House", address: "9 Elm", region: "East Central", ownership: "rented", leaseRenewalDate: soon, renewalDecision: "undecided" },
     ]);
     storageMock.getAllPropertySetupItems.mockResolvedValue([]);
+    storageMock.getAllAssets.mockResolvedValue([]);
     const { status, body } = await get("/api/action-items");
     expect(status).toBe(200);
     expect(body.map((i: { id: string; source: string }) => i.id)).toEqual(["prop-w"]);

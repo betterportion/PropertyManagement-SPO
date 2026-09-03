@@ -110,7 +110,7 @@ Defined in `shared/schema.ts` using Drizzle, with Zod insert schemas generated b
 | `walkthrough_items` | One line of a room's checklist — the sink, the smoke detector. **Condition and notes live here**, not on a photo, so an item nobody photographed can still be assessed | `roomId` → `walkthrough_rooms`, cascades |
 | `walkthrough_rooms` | The rooms of one walkthrough, ordered by `displayOrder`. `requiredQuestions` is legacy — the backfill turned each entry into a `walkthrough_items` row and kept the array | `walkthroughId` → `walkthroughs` cascades; `propertyId` → `properties` (loose, no FK) |
 | `walkthrough_photos` | Photos attached to a room. `condition` is **legacy and nullable**: that vocabulary records *change* since the last visit, not *state*, so it is never read as a condition | `roomId` → `walkthrough_rooms`, cascades |
-| `assets` | Fixed and movable assets, with age, serial, purchase price, asset tag | `propertyId` → `properties` (loose, no FK) |
+| `assets` | Fixed and movable assets. Beyond age, serial, purchase price and tag: an `acquisitionDate` (nullable — no date means *unrated*, never a guess), a per-asset `expectedLifespanYears` override, an explicit `replacementDueDate`, the four snooze columns, `currentValue`+`valuedOn` **alongside** `purchasePrice`, the three assignment columns plus `expectedReturnDate`, and `acquisitionNotes`+`supplierContactId` | `propertyId` → `properties` (loose, no FK); `snoozedByUserId`/`assignedUserId` → `users` set-null; `assignedResidentId` → `residents` set-null; `supplierContactId` → `maintenance_contacts` set-null |
 | `asset_photos` | Photos attached to an asset | `assetId` → `assets`, cascades |
 | `maintenance_contacts` | Vendors | Referenced by invoices and request links |
 | `invoices` | Invoice records with amount, status, due/paid dates | `contactId` and `maintenanceRequestId`, both set-null on delete |
@@ -223,6 +223,22 @@ Non-admins only see records in their `allowedRegions`.
 - `requireRegionMove(res, ctx, existingRegion, incomingRegion)` — on update, checks *both*, so a record cannot be moved into a region the user cannot reach.
 
 Region names are compared in one canonical form, so a stored legacy `west-central` still matches `West Central`.
+
+### Asset lifecycle and snooze
+
+`shared/assetLifecycle.ts` owns the category list, the default lifespans, the two thresholds and `assetLifecycle` — pure, an asset plus `now` in, a status out. Everything about it follows from SPO's tracking being admittedly patchy, because a warning system that guesses is worse than one that stays quiet:
+
+- **The category carries the default, the asset carries the correction.** Per-asset entry alone would be mostly blank. Precedence is explicit `replacementDueDate` → acquisition + per-asset lifespan → acquisition + category default.
+- **No date means `unrated`.** Never a warning, never a guess, and the badge says *why* rather than leaving a blank somebody reads as "fine". A category deliberately absent from `DEFAULT_LIFESPAN_YEARS` (artwork, instruments) has no default and its assets stay unrated — they do not wear out on a schedule.
+- **The lifespan figures are provisional.** Ordinary industry service lives, not figures SPO has confirmed; confirming them is an open item. The per-asset override is the escape hatch, which is why they are ordinary constants rather than a lookup nobody can correct.
+- **Amber at `LIFECYCLE_WARN_YEARS` (3), red at `LIFECYCLE_URGENT_YEARS` (1).** The red threshold is not arbitrary: at twelve months a replacement has to enter that year's budget. **Status is never colour alone** — every badge carries its word.
+- **A malformed date is `unrated`, not epoch zero.** Parsing one as 1970 would report the whole portfolio decades overdue.
+
+**Snooze suppresses an asset on the dashboard only.** It stays on the asset screen and says it is snoozed; hiding it everywhere is how a boiler gets forgotten for three years. `POST /api/assets/:id/snooze` **requires a reason** — an unexplained snooze is just an asset quietly disappearing, and the reason is what makes next year's budget conversation possible — and requires an end date, so a snooze can never be permanent by omission. It writes only the four snooze columns and **never touches `replacementDueDate`**: editing that date is the permanent correction, and conflating the two would let a date be falsified silently. `DELETE` clears the snooze and keeps the reason. Who snoozed it and when come from the session, which is why `updateAsset`'s signature widens past `InsertAsset` exactly as `updateMaintenanceRequest` does for `completedDate`.
+
+`currentValue` sits **alongside** `purchasePrice`, never replacing it: used equipment can be worth more than it cost, insurance cares about value rather than purchase price, and the purchase price is history nothing can rebuild once dropped.
+
+Assignment prefers a real reference — `assignedResidentId` or `assignedUserId` — with `assignedToName` only as the fallback for somebody who is neither. `/assets/assigned` groups by person rather than by thing, because the situation it is for is a staff departure: collect the iPad, the guitar and the laptop before he leaves.
 
 ### The property setup checklist
 

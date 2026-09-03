@@ -1633,6 +1633,91 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ---------------------------------------------------------------------------
+  // Snoozing an asset
+  //
+  // An RA confident a boiler has more life in it needs to clear it from the
+  // dashboard without falsifying the date. Snooze is what makes a warning
+  // system survive patchy data.
+  //
+  // Two things this is deliberately NOT:
+  //   - it is not a permanent correction. Editing replacementDueDate is that,
+  //     and this route never touches it. A snooze has an end date and returns.
+  //   - it is not a way to hide an asset. Only the dashboard acts on it; the
+  //     asset screen still shows it, and shows that it is snoozed.
+  //
+  // The reason is required, because the reason is the point -- it is what
+  // makes next year's budget conversation possible.
+  // ---------------------------------------------------------------------------
+
+  /** The asset, once, with the checks both snooze routes make. */
+  async function assetForSnooze(req: any, res: any, ctx: AuthContext) {
+    const asset = await storage.getAsset(req.params.id);
+    if (!asset) {
+      res.status(404).json({ message: "Asset not found" });
+      return undefined;
+    }
+    if (!requireRegion(res, ctx, asset.region)) return undefined;
+    return asset;
+  }
+
+  app.post('/api/assets/:id/snooze', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageAssets")) return;
+
+      const asset = await assetForSnooze(req, res, ctx);
+      if (!asset) return;
+
+      const body = z
+        .object({
+          // Required, so a snooze can never be permanent by omission.
+          until: z.coerce.date(),
+          // Required and non-blank: an unexplained snooze is just an asset
+          // quietly disappearing from the one place it would have been seen.
+          reason: z
+            .string()
+            .trim()
+            .min(1, "Say why this can wait — it is what next year's budget conversation runs on")
+            .max(500, "Keep the reason under 500 characters"),
+        })
+        .parse(req.body);
+
+      // Only the four snooze columns. The replacement date is untouched, which
+      // is what keeps a snooze from falsifying it.
+      const updated = await storage.updateAsset(req.params.id, {
+        snoozedUntil: body.until,
+        snoozeReason: body.reason,
+        snoozedByUserId: ctx.userId,
+        snoozedAt: new Date(),
+      });
+
+      res.json(updated);
+    } catch (error) {
+      sendError(res, error, "Failed to snooze this asset");
+    }
+  });
+
+  app.delete('/api/assets/:id/snooze', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageAssets")) return;
+
+      const asset = await assetForSnooze(req, res, ctx);
+      if (!asset) return;
+
+      // The reason stays. It is the record of why somebody parked this once,
+      // and that is worth keeping after the snooze itself has lapsed.
+      res.json(await storage.updateAsset(req.params.id, { snoozedUntil: null }));
+    } catch (error) {
+      sendError(res, error, "Failed to clear the snooze");
+    }
+  });
+
   app.patch('/api/assets/:id', isAuthenticated, async (req: any, res) => {
     try {
       const ctx = await requireActiveUser(req, res);
@@ -2777,7 +2862,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!requireStaff(res, ctx)) return;
       const seesFinance = hasPermission(ctx, "canViewFinancials", "canManageFinancials");
 
-      const [schedules, rentPayments, deposits, residents, allTasks, properties, setupItems] = await Promise.all([
+      const [schedules, rentPayments, deposits, residents, allTasks, properties, setupItems, assets] = await Promise.all([
         storage.getAllMaintenanceSchedules(),
         seesFinance ? storage.getAllRentPayments() : [],
         seesFinance ? storage.getAllSecurityDeposits() : [],
@@ -2785,6 +2870,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         storage.getAllTasks(),
         storage.getAllProperties(),
         storage.getAllPropertySetupItems(),
+        storage.getAllAssets(),
       ]);
 
       const items = buildActionItems({
@@ -2801,6 +2887,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // already-filtered property list above, so a row whose house is out of
         // region has nothing to attach to.
         setupItems,
+        assets: filterByRegion(ctx, assets),
       });
       res.json(items);
     } catch (error) {

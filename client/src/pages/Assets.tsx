@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/useAuth";
@@ -20,47 +21,45 @@ import { insertAssetSchema, type Asset, type Property, type AssetPhoto } from "@
 import { z } from "zod";
 import { Section, Container, PageHeader, PageStack } from "@/components/layout/page";
 import { LoadingState } from "@/components/states";
+import SnoozeDialog from "@/components/asset/SnoozeDialog";
+import AssetLifecycleFields from "@/components/asset/AssetLifecycleFields";
+import { FIXED_CATEGORIES, MOVABLE_CATEGORIES } from "@shared/assetLifecycle";
 
-const FIXED_CATEGORIES = [
-  "Appliances - Large",
-  "HVAC",
-  "Roof",
-  "Security System",
-  "Water Heater",
-];
-
-const ASSET_CATEGORIES = [
-  "Appliances - Large",
-  "Appliances - Small",
-  "Artwork",
-  "A/V Equipment",
-  "Computer - Accessories",
-  "Computer - Desktop",
-  "Computer - Laptop",
-  "Computer - Monitor",
-  "Furniture - Household",
-  "Furniture - Office",
-  "HVAC",
-  "Internet Equipment",
-  "Musical Instruments",
-  "Office Equipment",
-  "Office Supplies",
-  "Outdoor Equipment",
-  "Printers",
-  "Roof",
-  "Security System",
-  "Tablets",
-  "Tools",
-  "Water Heater",
-];
-
-const MOVABLE_CATEGORIES = ASSET_CATEGORIES.filter(c => !FIXED_CATEGORIES.includes(c));
+// The category lists live in shared/assetLifecycle.ts, beside the table of
+// default lifespans that is keyed on them: two lists in two files is how a
+// category ends up with no lifespan and nobody notices.
 
 const assetFormSchema = insertAssetSchema.extend({
   ageInYears: z.coerce.number().min(0, "Age must be 0 or greater"),
   purchasePrice: z.coerce.number({ required_error: "Purchase price is required", invalid_type_error: "Enter a valid amount" }).min(0, "Must be 0 or greater"),
   assetTagId: z.string().optional(),
+  // `<input type="date">` deals in "YYYY-MM-DD" strings; the server coerces
+  // them, exactly as the property form does with its lease dates.
+  // Numeric columns round-trip as strings, but a number input yields a number,
+  // exactly as purchasePrice above. The server coerces on submit.
+  currentValue: z.coerce.number().min(0, "Must be 0 or greater").nullable().optional(),
+  acquisitionDate: z.string().optional().nullable(),
+  replacementDueDate: z.string().optional().nullable(),
+  expectedReturnDate: z.string().optional().nullable(),
+  valuedOn: z.string().optional().nullable(),
 });
+
+/** Empty date and number inputs come through as "" — send null so the server
+ *  reads them as unset rather than as an invalid date or amount. */
+function normalizeAsset<T extends Record<string, unknown>>(data: T) {
+  const blankToNull = (value: unknown) => (value === "" || value === undefined ? null : value);
+  return {
+    ...data,
+    acquisitionDate: blankToNull(data.acquisitionDate),
+    replacementDueDate: blankToNull(data.replacementDueDate),
+    expectedReturnDate: blankToNull(data.expectedReturnDate),
+    valuedOn: blankToNull(data.valuedOn),
+    currentValue: blankToNull(data.currentValue),
+    expectedLifespanYears: blankToNull(data.expectedLifespanYears),
+    assignedToName: blankToNull(data.assignedToName),
+    acquisitionNotes: blankToNull(data.acquisitionNotes),
+  };
+}
 
 export default function Assets() {
   const [selectedRegion, setSelectedRegion] = useState("all");
@@ -77,6 +76,8 @@ export default function Assets() {
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isPhotosDialogOpen, setIsPhotosDialogOpen] = useState(false);
+  const [snoozingAsset, setSnoozingAsset] = useState<Asset | null>(null);
+  const [isSnoozeOpen, setIsSnoozeOpen] = useState(false);
   const [selectedAssetForPhotos, setSelectedAssetForPhotos] = useState<Asset | null>(null);
   const [addPhotoUrl, setAddPhotoUrl] = useState<string | null>(null);
   const { toast } = useToast();
@@ -121,7 +122,7 @@ export default function Assets() {
 
   const createAssetMutation = useMutation({
     mutationFn: async (data: z.infer<typeof assetFormSchema>) => {
-      const response = await apiRequest("POST", "/api/assets", data);
+      const response = await apiRequest("POST", "/api/assets", normalizeAsset(data));
       return response.json() as Promise<Asset>;
     },
   });
@@ -134,7 +135,7 @@ export default function Assets() {
 
   const updateAssetMutation = useMutation({
     mutationFn: async ({ id, data }: { id: string; data: Partial<z.infer<typeof assetFormSchema>> }) => {
-      return await apiRequest("PATCH", `/api/assets/${id}`, data);
+      return await apiRequest("PATCH", `/api/assets/${id}`, normalizeAsset(data));
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/assets"] });
@@ -214,6 +215,17 @@ export default function Assets() {
       serialNumber: "",
       purchasePrice: undefined,
       assetTagId: "",
+      acquisitionDate: "",
+      replacementDueDate: "",
+      expectedLifespanYears: null,
+      currentValue: null,
+      valuedOn: "",
+      assignedResidentId: null,
+      assignedUserId: null,
+      assignedToName: "",
+      expectedReturnDate: "",
+      supplierContactId: null,
+      acquisitionNotes: "",
     },
   });
 
@@ -242,6 +254,10 @@ export default function Assets() {
     }
   };
 
+  /** A stored timestamp for a date input needs to be "YYYY-MM-DD". */
+  const asDateInput = (value: Date | string | null | undefined) =>
+    value ? new Date(value).toISOString().slice(0, 10) : "";
+
   const getPropertyForAsset = (asset: Asset) => {
     if (asset.propertyId) return properties.find(p => p.id === asset.propertyId) || null;
     return properties.find(p => p.address === asset.buildingAddress) || null;
@@ -265,6 +281,17 @@ export default function Assets() {
         lastServiced: asset.lastServiced ? asset.lastServiced : undefined,
         purchasePrice: asset.purchasePrice ? Number(asset.purchasePrice) : undefined,
         assetTagId: asset.assetTagId || "",
+        acquisitionDate: asDateInput(asset.acquisitionDate),
+        replacementDueDate: asDateInput(asset.replacementDueDate),
+        expectedLifespanYears: asset.expectedLifespanYears,
+        currentValue: asset.currentValue ? Number(asset.currentValue) : null,
+        valuedOn: asDateInput(asset.valuedOn),
+        assignedResidentId: asset.assignedResidentId,
+        assignedUserId: asset.assignedUserId,
+        assignedToName: asset.assignedToName || "",
+        expectedReturnDate: asDateInput(asset.expectedReturnDate),
+        supplierContactId: asset.supplierContactId,
+        acquisitionNotes: asset.acquisitionNotes || "",
       });
       setIsEditDialogOpen(true);
     }
@@ -582,6 +609,8 @@ export default function Assets() {
                   />
                 </FormItem>
 
+                <AssetLifecycleFields form={addForm} isMovable={addAssetType === "movable"} />
+
                 <DialogFooter>
                   <Button type="button" variant="secondary" onClick={() => setIsAddDialogOpen(false)}>
                     Cancel
@@ -594,6 +623,12 @@ export default function Assets() {
             </Form>
           </DialogContent>
         </Dialog>
+      </div>
+
+      <div className="mb-4">
+        <Button variant="secondary" size="sm" asChild data-testid="button-who-has-what">
+          <Link href="/assets/assigned">Who has what</Link>
+        </Button>
       </div>
 
       {isLoading ? (
@@ -610,6 +645,10 @@ export default function Assets() {
             const asset = assetsData?.find(a => a.id === id);
             if (asset) { setSelectedAssetForPhotos(asset); setIsPhotosDialogOpen(true); }
           }}
+          onSnooze={canManage ? (id) => {
+            const asset = assetsData?.find(a => a.id === id);
+            if (asset) { setSnoozingAsset(asset); setIsSnoozeOpen(true); }
+          } : undefined}
         />
       )}
 
@@ -807,6 +846,8 @@ export default function Assets() {
                 )}
               />
 
+              <AssetLifecycleFields form={editForm} isMovable={editAssetType === "movable"} />
+
               <DialogFooter>
                 <Button type="button" variant="secondary" onClick={() => setIsEditDialogOpen(false)}>Cancel</Button>
                 <Button type="submit" disabled={updateAssetMutation.isPending}>
@@ -819,6 +860,8 @@ export default function Assets() {
       </Dialog>
 
       {/* Delete Confirmation */}
+      <SnoozeDialog asset={snoozingAsset} open={isSnoozeOpen} onOpenChange={setIsSnoozeOpen} />
+
       <AlertDialog open={!!deletingAssetId} onOpenChange={() => setDeletingAssetId(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { buildActionItems, type ActionItemInputs } from "../actionItems";
-import type { MaintenanceSchedule, RentPayment, SecurityDeposit, Resident, Task, Property, PropertySetupItem } from "@shared/schema";
+import type { MaintenanceSchedule, RentPayment, SecurityDeposit, Resident, Task, Property, PropertySetupItem, Asset } from "@shared/schema";
 
 // buildActionItems only reads a handful of fields off each record, so the
 // factories fill just those and cast; a full row would be noise.
@@ -29,11 +29,87 @@ function property(over: Partial<Property>): Property {
   } as Property;
 }
 
-const empty: ActionItemInputs = { schedules: [], rentPayments: [], deposits: [], residents: [], tasks: [], properties: [], setupItems: [] };
+const empty: ActionItemInputs = { schedules: [], rentPayments: [], deposits: [], residents: [], tasks: [], properties: [], setupItems: [], assets: [] };
+
+function asset(over: Partial<Asset>): Asset {
+  return {
+    id: "a1", name: "Water heater", category: "Water Heater", buildingAddress: "1 Main St",
+    region: "West Central", acquisitionDate: null, expectedLifespanYears: null,
+    replacementDueDate: null, snoozedUntil: null, ...over,
+  } as Asset;
+}
 
 function setupItem(over: Partial<PropertySetupItem>): PropertySetupItem {
   return { id: "si1", propertyId: "p1", itemKey: "electric", status: "open", region: "West Central", ...over } as PropertySetupItem;
 }
+
+describe("assets coming up for replacement on the dashboard", () => {
+  it("raises an asset whose replacement is inside the warning window", () => {
+    const items = buildActionItems({
+      ...empty,
+      assets: [asset({ id: "boiler", replacementDueDate: days(200) })],
+    }, NOW);
+    const assetItems = items.filter((i) => i.source === "asset");
+    expect(assetItems).toHaveLength(1);
+    expect(assetItems[0].id).toBe("boiler");
+  });
+
+  it("says nothing about an asset that is years away", () => {
+    const items = buildActionItems({
+      ...empty,
+      assets: [asset({ id: "roof", replacementDueDate: days(365 * 10) })],
+    }, NOW);
+    expect(items.filter((i) => i.source === "asset")).toHaveLength(0);
+  });
+
+  it("says nothing about an unrated asset, and never guesses at one", () => {
+    // SPO's tracking is patchy on purpose-of-record. An asset with no date is
+    // unrated, and a guess here would be indistinguishable from a real warning.
+    const items = buildActionItems({
+      ...empty,
+      assets: [asset({ id: "mystery", acquisitionDate: null, replacementDueDate: null })],
+    }, NOW);
+    expect(items.filter((i) => i.source === "asset")).toHaveLength(0);
+  });
+
+  it("hides a snoozed asset from the dashboard", () => {
+    // Only the dashboard. The asset screen still shows it, and shows that it
+    // is snoozed -- hiding it everywhere is how a boiler gets forgotten.
+    const items = buildActionItems({
+      ...empty,
+      assets: [asset({ id: "boiler", replacementDueDate: days(-30), snoozedUntil: days(300) })],
+    }, NOW);
+    expect(items.filter((i) => i.source === "asset")).toHaveLength(0);
+  });
+
+  it("brings a snoozed asset back once the snooze runs out", () => {
+    const items = buildActionItems({
+      ...empty,
+      assets: [asset({ id: "boiler", replacementDueDate: days(-30), snoozedUntil: days(-1) })],
+    }, NOW);
+    expect(items.filter((i) => i.source === "asset")).toHaveLength(1);
+  });
+
+  it("marks an asset past its date as overdue and carries its region", () => {
+    const items = buildActionItems({
+      ...empty,
+      assets: [asset({ id: "boiler", replacementDueDate: days(-30) })],
+    }, NOW);
+    const item = items.find((i) => i.source === "asset")!;
+    expect(item.overdue).toBe(true);
+    expect(item.region).toBe("West Central");
+  });
+
+  it("names the asset and the house, so the row is actionable without opening it", () => {
+    const items = buildActionItems({
+      ...empty,
+      assets: [asset({ id: "boiler", name: "Rheem water heater", replacementDueDate: days(100) })],
+    }, NOW);
+    const item = items.find((i) => i.source === "asset")!;
+    expect(item.title).toContain("Rheem water heater");
+    expect(item.subtitle).toContain("1 Main St");
+  });
+});
 
 describe("the setup checklist on the dashboard", () => {
   const owned = property({ id: "p1", ownership: "owned", leaseRenewalDate: null });

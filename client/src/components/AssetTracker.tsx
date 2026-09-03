@@ -2,7 +2,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Wind, Tv, Sofa, Refrigerator, Droplet, MoreVertical, Camera, Building2, MapPin } from "lucide-react";
+import { Link } from "wouter";
+import { AlarmClock, Wind, Tv, Sofa, Refrigerator, Droplet, MoreVertical, Camera, Building2, MapPin } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -12,6 +13,7 @@ import {
 import type { Asset, Property } from "@shared/schema";
 import { EmptyState } from "@/components/states";
 import { formatDate, formatCurrency } from "@/lib/format";
+import LifecycleBadge from "@/components/asset/LifecycleBadge";
 
 interface AssetTrackerProps {
   assets: Asset[];
@@ -19,6 +21,8 @@ interface AssetTrackerProps {
   onEdit?: (id: string) => void;
   onDelete?: (id: string) => void;
   onPhotos?: (id: string) => void;
+  /** Opens the snooze dialog. Omitted for a caller who cannot manage assets. */
+  onSnooze?: (id: string) => void;
   /** "list" (default) or the photo-first "gallery" grid. */
   view?: "list" | "gallery";
   /** assetId → cover photo URL, used by the gallery view. */
@@ -46,6 +50,7 @@ interface AssetListProps {
   onEdit?: (id: string) => void;
   onDelete?: (id: string) => void;
   onPhotos?: (id: string) => void;
+  onSnooze?: (id: string) => void;
 }
 
 /**
@@ -56,7 +61,7 @@ interface AssetListProps {
  * scratch. In practice that closed any open row menu and dropped scroll
  * position whenever the parent re-rendered.
  */
-function AssetList({ items, properties, onEdit, onDelete, onPhotos }: AssetListProps) {
+function AssetList({ items, properties, onEdit, onDelete, onPhotos, onSnooze }: AssetListProps) {
   return (
     <div className="space-y-4">
       {items.length === 0 ? (
@@ -73,8 +78,14 @@ function AssetList({ items, properties, onEdit, onDelete, onPhotos }: AssetListP
                     <Icon className="h-5 w-5" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <h4 className="font-medium text-sm" data-testid={`text-asset-name-${asset.id}`}>
-                      {asset.name}
+                    <h4 className="font-medium text-sm">
+                      <Link
+                        href={`/assets/${asset.id}`}
+                        className="rounded-sm hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        data-testid={`text-asset-name-${asset.id}`}
+                      >
+                        {asset.name}
+                      </Link>
                     </h4>
                     {property ? (
                       <>
@@ -109,6 +120,10 @@ function AssetList({ items, properties, onEdit, onDelete, onPhotos }: AssetListP
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
+                  {/* A snoozed asset still appears here, and says it is
+                      snoozed. Only the dashboard hides one -- hiding it
+                      everywhere is how a boiler gets forgotten. */}
+                  <LifecycleBadge asset={asset} />
                   <Badge variant="secondary" data-testid={`badge-age-${asset.id}`}>
                     {asset.type === "fixed" ? `${asset.ageInYears} ${asset.ageInYears === 1 ? "year" : "years"}` : formatCurrency(asset.purchasePrice)}
                   </Badge>
@@ -126,6 +141,12 @@ function AssetList({ items, properties, onEdit, onDelete, onPhotos }: AssetListP
                       <DropdownMenuItem onClick={() => onEdit?.(asset.id)}>
                         Edit
                       </DropdownMenuItem>
+                      {onSnooze && (
+                        <DropdownMenuItem onClick={() => onSnooze(asset.id)}>
+                          <AlarmClock className="h-4 w-4 mr-2" />
+                          Snooze
+                        </DropdownMenuItem>
+                      )}
                       <DropdownMenuItem onClick={() => onDelete?.(asset.id)} className="text-destructive">
                         Delete
                       </DropdownMenuItem>
@@ -206,12 +227,13 @@ export default function AssetTracker({
   onEdit,
   onDelete,
   onPhotos,
+  onSnooze,
   view = "list",
   coverPhotos = {},
 }: AssetTrackerProps) {
   const fixedAssets = assets.filter((a) => a.type === "fixed");
   const movableAssets = assets.filter((a) => a.type === "movable");
-  const listProps = { properties, onEdit, onDelete, onPhotos };
+  const listProps = { properties, onEdit, onDelete, onPhotos, onSnooze };
 
   const renderItems = (items: Asset[]) =>
     view === "gallery" ? (
