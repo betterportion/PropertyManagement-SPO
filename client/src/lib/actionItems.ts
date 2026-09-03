@@ -8,8 +8,11 @@
  * single click.
  */
 
-export type ActionItemSource = "schedule" | "rent" | "deposit" | "task" | "lease";
-export type ActionItemCategory = "property" | "safety" | "finance" | "general";
+// One definition, shared with the server. Keeping a second copy here is what
+// let the `setup` and `asset` sources reach this switch without a case.
+import type { ActionItemCategory, ActionItemSource } from "@shared/actionItems";
+
+export type { ActionItemCategory, ActionItemSource };
 
 export interface ActionItem {
   id: string;
@@ -93,12 +96,27 @@ export function resolveRequest(item: ActionItem): ResolveRequest {
       // A renewal needs dates and a decision, so send the RA to the property to
       // record it in the edit dialog rather than resolving in one click.
       return { actionLabel: "Review lease", href: "/properties" };
+    case "setup":
+      // Seven checks cannot be ticked by one button, and the id on a setup
+      // item is the property's -- so this opens the house.
+      return { actionLabel: "Open the checklist", href: `/properties/${item.id}` };
+    case "asset":
+      // Replacing something is a decision, not a click: the asset page is
+      // where the date is corrected or the warning snoozed with a reason.
+      return { actionLabel: "Open the asset", href: `/assets/${item.id}` };
+    default:
+      // A newer server can send a kind this client has never heard of. The
+      // row degrades to a link rather than white-screening the page, which is
+      // what an unguarded `undefined` from this switch used to do.
+      return { actionLabel: "Open", href: "/" };
   }
 }
 
 /** A short human label for the item's category, for the row badge. */
 export function categoryLabel(item: ActionItem): string {
   if (item.source === "lease") return "Lease";
+  if (item.source === "setup") return "Setup";
+  if (item.source === "asset") return "Asset";
   if (item.category === "safety") return "Safety";
   if (item.source === "task") return "Task";
   if (item.category === "finance") return "Finance";

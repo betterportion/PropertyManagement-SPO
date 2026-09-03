@@ -29,8 +29,13 @@ const buttonVariants = cva(
         outline:
           // Compatibility alias for `default` — the outlined CTA.
           "border-2 border-primary bg-background text-primary-strong tracking-wide hover:bg-primary hover:text-primary-foreground hover:border-primary active:bg-primary/90",
+        // The solid CTA. Its background is --primary-STRONG, not --primary:
+        // white on --primary is 3.61:1, which fails WCAG AA's 4.5:1 for normal
+        // text, and e2e/a11y.spec.ts enforces "no serious violations".
+        // --primary-strong is the palette's own darker shade of the same hue
+        // and gives 5.95:1, so this stays the brand colour and passes.
         primary:
-          "border-2 border-primary bg-primary text-primary-foreground tracking-wide hover:bg-primary/90 hover:border-primary/90 active:bg-primary",
+          "border-2 border-primary-strong bg-primary-strong text-primary-foreground tracking-wide hover:bg-primary hover:border-primary active:bg-primary-strong",
         secondary:
           "border border-border bg-secondary text-secondary-foreground hover:bg-secondary/70 active:bg-secondary",
         // Transparent border so toggling a border on later doesn't shift layout.

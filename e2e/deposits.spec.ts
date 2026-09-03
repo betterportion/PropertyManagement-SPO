@@ -96,7 +96,10 @@ test.describe("what a resident can see of a deposit", () => {
     // Residents never see deposits, deductions, balances or statements, and
     // household leaders see none of it either.
     await page.goto("/finances");
-    // The resident switch has no /finances route, so this falls through.
-    await expect(page.getByTestId("text-deposit-balance")).toHaveCount(0);
+    // The resident switch has no /finances route, so this falls through. The
+    // locator is a PREFIX: the real ids carry a resident id, so an exact match
+    // would have passed whatever the page showed.
+    await expect(page.locator('[data-testid^="text-deposit-balance-"]')).toHaveCount(0);
+    await expect(page.locator('[data-testid^="row-deduction-"]')).toHaveCount(0);
   });
 });

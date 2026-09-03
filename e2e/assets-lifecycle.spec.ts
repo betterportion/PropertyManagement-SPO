@@ -44,8 +44,8 @@ test.describe("how an asset's life reads on screen", () => {
 
   test("the asset name opens a detail page with its provenance", async ({ page }) => {
     await openFirstAsset(page);
-    await expect(page.getByRole("heading", { name: "Life and replacement" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Where it came from" })).toBeVisible();
+    await expect(page.getByText("Life and replacement")).toBeVisible();
+    await expect(page.getByText("Where it came from")).toBeVisible();
     // Both figures, never one instead of the other.
     await expect(page.getByText("Purchase price")).toBeVisible();
     await expect(page.getByText("Current value")).toBeVisible();

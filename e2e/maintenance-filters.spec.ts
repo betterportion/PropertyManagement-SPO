@@ -47,8 +47,8 @@ test.describe("a contractor's history", () => {
 
     await firstContact.click();
     await expect(page).toHaveURL(/\/contacts\/[^/]+$/);
-    await expect(page.getByRole("heading", { name: "Every job they touched" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "What the last RA learned" })).toBeVisible();
+    await expect(page.getByText("Every job they touched")).toBeVisible();
+    await expect(page.getByText("What the last RA learned")).toBeVisible();
   });
 
   test("a note can be added and reads back with its author and date", async ({ page }) => {

@@ -61,7 +61,7 @@ test.describe("the property setup checklist", () => {
     await openFirstProperty(page);
     await page.getByTestId("tab-setup").click();
 
-    await page.getByTestId("button-setup-water-note").click();
+    await page.getByTestId("button-setup-note-water").click();
     await page.getByTestId("input-setup-note-water").fill("City bills the owner here");
     await page.getByTestId("input-setup-note-water").press("Enter");
 

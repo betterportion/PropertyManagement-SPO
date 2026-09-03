@@ -28,6 +28,7 @@ import type {
 import { summarizeSetup, setupRowsByProperty } from "@shared/propertySetup";
 import { assetLifecycle } from "@shared/assetLifecycle";
 import { depositReturnDeadline } from "@shared/depositLedger";
+import type { ActionItemCategory, ActionItemSource } from "@shared/actionItems";
 
 /** How far ahead a recurring schedule becomes an action item. */
 export const SCHEDULE_LOOKAHEAD_DAYS = 30;
@@ -45,8 +46,8 @@ export const DEPOSIT_LOOKAHEAD_DAYS = 30;
 
 const DAY_MS = 24 * 60 * 60 * 1_000;
 
-export type ActionItemSource = "schedule" | "rent" | "deposit" | "task" | "lease" | "setup" | "asset";
-export type ActionItemCategory = "property" | "safety" | "finance" | "general";
+// One definition, shared with the client -- see shared/actionItems.ts for why.
+export type { ActionItemSource, ActionItemCategory } from "@shared/actionItems";
 
 export interface ActionItem {
   /** The underlying record's id — what the client resolves against. */
