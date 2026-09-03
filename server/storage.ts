@@ -20,6 +20,7 @@ import {
   residents,
   rentPayments,
   securityDeposits,
+  depositDeductions,
   maintenanceSchedules,
   tasks,
   requestContacts,
@@ -69,6 +70,8 @@ import {
   type InsertRentPayment,
   type SecurityDeposit,
   type InsertSecurityDeposit,
+  type DepositDeduction,
+  type InsertDepositDeduction,
   type Task,
   type InsertTask,
   uploads,
@@ -218,9 +221,10 @@ export interface IStorage {
   updateAsset(
     id: string,
     data: Partial<InsertAsset> & {
+      snoozedUntil?: Date | null;
+      snoozeReason?: string | null;
       snoozedByUserId?: string | null;
       snoozedAt?: Date | null;
-      snoozedUntil?: Date | null;
     },
   ): Promise<Asset>;
   deleteAsset(id: string): Promise<void>;
@@ -275,6 +279,20 @@ export interface IStorage {
   getSecurityDepositByResident(residentId: string): Promise<SecurityDeposit | undefined>;
   updateSecurityDeposit(id: string, data: Partial<InsertSecurityDeposit>): Promise<SecurityDeposit>;
   deleteSecurityDeposit(id: string): Promise<void>;
+
+  // Deposit deductions
+  getAllDepositDeductions(): Promise<DepositDeduction[]>;
+  getDepositDeduction(id: string): Promise<DepositDeduction | undefined>;
+  getDepositDeductionsByResident(residentId: string): Promise<DepositDeduction[]>;
+  createDepositDeduction(
+    deduction: InsertDepositDeduction & { recordedByUserId: string | null; recordedByEmail: string | null },
+  ): Promise<DepositDeduction>;
+  /** Writes a whole split at once, so a house is never half-charged. */
+  createDepositDeductions(
+    deductions: (InsertDepositDeduction & { recordedByUserId: string | null; recordedByEmail: string | null })[],
+  ): Promise<DepositDeduction[]>;
+  updateDepositDeduction(id: string, data: Partial<InsertDepositDeduction>): Promise<DepositDeduction>;
+  deleteDepositDeduction(id: string): Promise<void>;
 
   // Tasks
   createTask(task: InsertTask & { createdBy: string | null; sourceKey?: string | null }): Promise<Task>;
@@ -901,9 +919,10 @@ export class DatabaseStorage implements IStorage {
   async updateAsset(
     id: string,
     data: Partial<InsertAsset> & {
+      snoozedUntil?: Date | null;
+      snoozeReason?: string | null;
       snoozedByUserId?: string | null;
       snoozedAt?: Date | null;
-      snoozedUntil?: Date | null;
     },
   ): Promise<Asset> {
     const [asset] = await db
@@ -1389,6 +1408,58 @@ export class DatabaseStorage implements IStorage {
   async getUploadByStorageKey(storageKey: string): Promise<Upload | undefined> {
     const [found] = await db.select().from(uploads).where(eq(uploads.storageKey, storageKey));
     return found;
+  }
+
+  // Deposit deductions Implementation
+  async getAllDepositDeductions(): Promise<DepositDeduction[]> {
+    return await db.select().from(depositDeductions).orderBy(desc(depositDeductions.chargeDate));
+  }
+
+  async getDepositDeduction(id: string): Promise<DepositDeduction | undefined> {
+    const [row] = await db.select().from(depositDeductions).where(eq(depositDeductions.id, id));
+    return row;
+  }
+
+  async getDepositDeductionsByResident(residentId: string): Promise<DepositDeduction[]> {
+    return await db
+      .select()
+      .from(depositDeductions)
+      .where(eq(depositDeductions.residentId, residentId))
+      .orderBy(desc(depositDeductions.chargeDate));
+  }
+
+  async createDepositDeduction(
+    deduction: InsertDepositDeduction & { recordedByUserId: string | null; recordedByEmail: string | null },
+  ): Promise<DepositDeduction> {
+    const [row] = await db.insert(depositDeductions).values(deduction).returning();
+    return row;
+  }
+
+  /**
+   * Writes a whole split at once.
+   *
+   * One statement rather than a loop: a common-area charge that half-applied
+   * would leave some of a house charged and some not, and the shares no longer
+   * adding up to the charge.
+   */
+  async createDepositDeductions(
+    deductions: (InsertDepositDeduction & { recordedByUserId: string | null; recordedByEmail: string | null })[],
+  ): Promise<DepositDeduction[]> {
+    if (deductions.length === 0) return [];
+    return await db.insert(depositDeductions).values(deductions).returning();
+  }
+
+  async updateDepositDeduction(id: string, data: Partial<InsertDepositDeduction>): Promise<DepositDeduction> {
+    const [row] = await db
+      .update(depositDeductions)
+      .set({ ...filterUndefined(data), updatedAt: new Date() })
+      .where(eq(depositDeductions.id, id))
+      .returning();
+    return row;
+  }
+
+  async deleteDepositDeduction(id: string): Promise<void> {
+    await db.delete(depositDeductions).where(eq(depositDeductions.id, id));
   }
 
   // Contractor history Implementation

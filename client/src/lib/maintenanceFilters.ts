@@ -5,7 +5,7 @@
  * the status tabs and the per-house view all narrow the same way and can be
  * tested without rendering anything.
  */
-import type { MaintenanceRequest } from "@shared/schema";
+import { isClosedMaintenanceStatus, type MaintenanceRequest } from "@shared/schema";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -24,12 +24,13 @@ export const CLOSED_RANGES: readonly { value: ClosedRange; label: string }[] = [
 /**
  * Whether a request is finished.
  *
- * Cancelled counts. `completedDate` is the *close* date and is stamped for a
- * cancelled request as well as a completed one, so a cancelled request is
- * finished work rather than open work.
+ * Delegates to the shared predicate rather than repeating the two statuses.
+ * The resident visibility window in server/authz.ts asks the same question,
+ * and a fifth status with two copies of the answer would silently widen or
+ * narrow what a household leader can read.
  */
 export function isClosed(request: Pick<MaintenanceRequest, "status">): boolean {
-  return request.status === "completed" || request.status === "cancelled";
+  return isClosedMaintenanceStatus(request.status);
 }
 
 /**

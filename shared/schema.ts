@@ -161,6 +161,26 @@ export const maintenanceRequests = pgTable("maintenance_requests", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+/**
+ * The statuses that mean a request is finished.
+ *
+ * Beside the table whose column it describes, and shared, because three
+ * separate places decide what "closed" means: the close-date stamping in
+ * server/maintenanceStatus.ts, the resident visibility window in
+ * server/authz.ts, and the range filter on the maintenance list. Adding a
+ * fifth status with three copies of this list would silently widen or narrow
+ * what a household leader can read, which is the quietest possible way to get
+ * an authorization rule wrong.
+ *
+ * `cancelled` counts. `completedDate` is the *close* date and is stamped for a
+ * cancelled request too, so a cancelled request is finished work.
+ */
+export const CLOSED_MAINTENANCE_STATUSES = ["completed", "cancelled"] as const;
+
+export function isClosedMaintenanceStatus(status: string | null | undefined): boolean {
+  return status != null && (CLOSED_MAINTENANCE_STATUSES as readonly string[]).includes(status);
+}
+
 export const insertMaintenanceRequestSchema = createInsertSchema(maintenanceRequests).omit({
   id: true,
   submittedDate: true,
@@ -471,9 +491,17 @@ export const insertAssetSchema = createInsertSchema(assets)
     updatedAt: true,
   })
   .omit({
-    // Server-owned: the snooze records who parked the asset and when, taken
-    // from the authenticated actor and the clock. A client-supplied answer to
-    // "who said this boiler was fine" would be worth nothing.
+    // The WHOLE snooze is server-owned, not just its attribution.
+    //
+    // Omitting only the actor and the timestamp left the ordinary asset PATCH
+    // able to set `snoozedUntil` directly -- and since `assetLifecycle` reads
+    // the snooze off that column alone, an asset could be cleared from the
+    // dashboard with no reason, no actor and no date recorded, which is
+    // exactly what the dedicated route exists to prevent. Every guarantee that
+    // route makes is only worth as much as the sibling paths that cannot make
+    // it. The snooze routes are the only writers.
+    snoozedUntil: true,
+    snoozeReason: true,
     snoozedByUserId: true,
     snoozedAt: true,
   })
@@ -486,7 +514,6 @@ export const insertAssetSchema = createInsertSchema(assets)
     replacementDueDate: dateFromClient.nullish(),
     expectedReturnDate: dateFromClient.nullish(),
     valuedOn: dateFromClient.nullish(),
-    snoozedUntil: dateFromClient.nullish(),
     expectedLifespanYears: nonNegativeInt.nullish(),
   });
 
@@ -735,6 +762,20 @@ export const properties = pgTable("properties", {
   // properties at all.
   photoUrl: varchar("photo_url"),
   notes: text("notes"),
+  // ── Deposits ─────────────────────────────────────────────────────────────
+  // The deposit this house takes, with a per-person override on each
+  // resident's own record. A house figure with an override beats asking an RA
+  // to retype the same number eight times every August.
+  depositAmount: numeric("deposit_amount", { precision: 12, scale: 2 }),
+  // How many days after a resident moves out SPO means to have their deposit
+  // back. An ADMIN-SET NUMBER PER PROPERTY, never a lookup: the states SPO
+  // operates in have materially different rules -- Arizona counts business
+  // days, Florida and Kansas are two-stage -- and a state-to-deadline table
+  // would bake legal advice into the repo and go stale silently. SPO's admin
+  // and finance teams are responsible for compliance; the portal reminds.
+  depositReturnDays: integer("deposit_return_days"),
+  /** What that number is based on, in SPO's own words. */
+  depositNotes: text("deposit_notes"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -762,6 +803,8 @@ export const insertPropertySchema = createInsertSchema(properties)
     leaseStartDate: dateFromClient.nullish(),
     leaseEndDate: dateFromClient.nullish(),
     leaseRenewalDate: dateFromClient.nullish(),
+    depositAmount: nonNegativeAmount.nullish(),
+    depositReturnDays: nonNegativeInt.nullish(),
   });
 
 /**
@@ -864,6 +907,10 @@ export const residents = pgTable("residents", {
   // RA reads, not a channel the app uses.
   phone: varchar("phone"),
   notes: text("notes"),
+  /** Overrides the house's `depositAmount` for this person. Null means the
+   *  house figure applies -- a scholarship or a partial term is a different
+   *  number, not a different model. */
+  depositAmountOverride: numeric("deposit_amount_override", { precision: 12, scale: 2 }),
   moveInDate: timestamp("move_in_date"),
   moveOutDate: timestamp("move_out_date"),
   isActive: boolean("is_active").notNull().default(true),
@@ -881,6 +928,7 @@ export const insertResidentSchema = createInsertSchema(residents)
   })
   .extend({
     email: z.string().email("Enter a valid email address"),
+    depositAmountOverride: nonNegativeAmount.nullish(),
     moveInDate: dateFromClient.nullish(),
     moveOutDate: dateFromClient.nullish(),
   });
@@ -955,9 +1003,27 @@ export const securityDeposits = pgTable(
     residentId: varchar("resident_id").notNull().references(() => residents.id, { onDelete: "cascade" }),
     propertyId: varchar("property_id").notNull(),
     amountHeld: numeric("amount_held", { precision: 12, scale: 2 }).notNull(),
-    status: varchar("status", { enum: ["held", "returned", "partially_returned", "withheld"] }).notNull().default("held"),
+    // "statement_sent" is added rather than replacing the vocabulary: existing
+    // rows already carry the other four, and renaming a stored status leaves
+    // history behind under the old word.
+    status: varchar("status", { enum: ["held", "statement_sent", "returned", "partially_returned", "withheld"] }).notNull().default("held"),
     amountReturned: numeric("amount_returned", { precision: 12, scale: 2 }),
     returnedDate: timestamp("returned_date"),
+    /** The date the RA says they handed the statement over. Delivery happens
+     *  outside the portal, so the date somebody recorded is the one worth
+     *  keeping -- there is no send action to infer it from. */
+    statementProvidedOn: timestamp("statement_provided_on"),
+    /**
+     * The QuickBooks or Ramp reference for the transaction that returned the
+     * money. A REFERENCE ONLY -- never an account number, a routing number or
+     * anything that could move money. This is what makes reconciliation
+     * possible later without the portal holding a banking credential.
+     */
+    closeoutReference: varchar("closeout_reference"),
+    /** Legacy free text from before deductions were itemised. Displayed as
+     *  history and deliberately never parsed into rows: it is written by
+     *  people, and a migration that guesses will be wrong in ways nobody
+     *  notices until a deposit is short. */
     deductionsNotes: text("deductions_notes"),
     region: varchar("region").notNull(),
     buildingAddress: varchar("building_address").notNull(),
@@ -977,7 +1043,75 @@ export const insertSecurityDepositSchema = createInsertSchema(securityDeposits)
     amountHeld: nonNegativeAmount,
     amountReturned: nonNegativeAmount.nullish(),
     returnedDate: dateFromClient.nullish(),
+    statementProvidedOn: dateFromClient.nullish(),
   });
+
+/**
+ * One deduction against one resident's deposit.
+ *
+ * This reverses an earlier decision, deliberately: `security_deposits` used to
+ * hold deductions "as a note rather than an itemised ledger". An itemised
+ * record is what any deposit statement has to be built from, so the note stays
+ * as legacy history and is **never parsed into rows** — it is free text
+ * written by people, and a migration that guesses would be wrong in ways
+ * nobody notices until a deposit comes back short.
+ *
+ * A common-area charge divided across a house is stored as individual
+ * per-person rows, never as a shared charge with a divisor. `splitGroupId` is
+ * kept for provenance and display only: **recomputing a split later would
+ * silently re-divide somebody's settled balance.**
+ *
+ * Finance data, and the standing rule applies without exception: descriptions,
+ * amounts, dates and references only. Never an account or card number.
+ */
+export const depositDeductions = pgTable("deposit_deductions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  residentId: varchar("resident_id").notNull().references(() => residents.id, { onDelete: "cascade" }),
+  propertyId: varchar("property_id").notNull(),
+  description: varchar("description").notNull(),
+  amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),
+  /** When the damage or charge happened, which is not when it was recorded. */
+  chargeDate: timestamp("charge_date").notNull(),
+  // Who recorded it. The email is kept alongside the id so a deduction still
+  // says who entered it after that account is gone -- this is money, and the
+  // question gets asked.
+  recordedByUserId: varchar("recorded_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  recordedByEmail: varchar("recorded_by_email"),
+  // Where the charge came from, where there is something to point at. Loose
+  // references rather than hard FKs, matching how rooms and assets point at
+  // properties: a deduction must survive the walkthrough item being edited or
+  // the request being deleted, because the money has already moved.
+  walkthroughItemId: varchar("walkthrough_item_id"),
+  maintenanceRequestId: varchar("maintenance_request_id"),
+  /** Provenance for a split, never a basis for recomputing one. */
+  splitGroupId: varchar("split_group_id"),
+  region: varchar("region").notNull(),
+  buildingAddress: varchar("building_address").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertDepositDeductionSchema = createInsertSchema(depositDeductions)
+  .omit({
+    id: true,
+    // Server-owned: taken from the authenticated actor, never a request body.
+    recordedByUserId: true,
+    recordedByEmail: true,
+    createdAt: true,
+    updatedAt: true,
+  })
+  .extend({
+    description: z
+      .string()
+      .trim()
+      .min(1, "Say what the deduction is for")
+      .max(300, "Keep the description under 300 characters"),
+    amount: nonNegativeAmount,
+    chargeDate: dateFromClient,
+  });
+
+export type DepositDeduction = typeof depositDeductions.$inferSelect;
+export type InsertDepositDeduction = z.infer<typeof insertDepositDeductionSchema>;
 
 export type SecurityDeposit = typeof securityDeposits.$inferSelect;
 export type InsertSecurityDeposit = z.infer<typeof insertSecurityDepositSchema>;

@@ -3116,6 +3116,57 @@ describe("snoozing an asset an RA is confident about", () => {
     expect(patch).not.toHaveProperty("acquisitionDate");
   });
 
+  // ── The snooze routes are the ONLY writers ───────────────────────────────
+
+  it("refuses to set a snooze through the ordinary asset PATCH", async () => {
+    // Otherwise every guarantee the snooze route makes -- a required reason,
+    // a recorded actor, an end date -- is optional in practice, and an asset
+    // vanishes from the dashboard with no who, when or why.
+    westLead();
+    const { status } = await request("PATCH", "/api/assets/asset-west", {
+      body: { snoozedUntil: NEXT_YEAR, snoozeReason: "because" },
+    });
+    expect(status).toBe(200);
+    const [, patch] = storageMock.updateAsset.mock.calls[0];
+    expect(patch).not.toHaveProperty("snoozedUntil");
+    expect(patch).not.toHaveProperty("snoozeReason");
+  });
+
+  it("still lets the ordinary PATCH edit the replacement date", async () => {
+    // The positive control, and the distinction that matters: editing the date
+    // is the permanent correction and belongs on the asset form. Snoozing is
+    // the temporary one and belongs on its own route.
+    westLead();
+    const { status } = await request("PATCH", "/api/assets/asset-west", {
+      body: { replacementDueDate: NEXT_YEAR },
+    });
+    expect(status).toBe(200);
+    const [, patch] = storageMock.updateAsset.mock.calls[0];
+    expect(patch.replacementDueDate).toBeInstanceOf(Date);
+  });
+
+  it("refuses a snooze so far out it is permanent in all but name", async () => {
+    // "It returns" is the whole distinction from editing the date. An
+    // unbounded end date is the permanent correction wearing a temporary hat.
+    westLead();
+    const { status } = await snooze("asset-west", {
+      until: "3000-01-01T00:00:00.000Z",
+      reason: "Definitely fine",
+    });
+    expect(status).toBe(400);
+    expect(storageMock.updateAsset).not.toHaveBeenCalled();
+  });
+
+  it("refuses a snooze that has already ended", async () => {
+    westLead();
+    const { status } = await snooze("asset-west", {
+      until: "2020-01-01T00:00:00.000Z",
+      reason: "Serviced",
+    });
+    expect(status).toBe(400);
+    expect(storageMock.updateAsset).not.toHaveBeenCalled();
+  });
+
   it("clears a snooze, keeping the reason as the record of why it was parked", async () => {
     westLead();
     const { status } = await request("DELETE", "/api/assets/asset-west/snooze", {});

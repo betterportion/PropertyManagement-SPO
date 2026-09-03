@@ -27,7 +27,7 @@ import type { Request, Response } from "express";
 import { storage, type UploadReference } from "./storage";
 import { getUserId } from "./auth";
 import { normalizeRegion, normalizeRegions } from "./migrateRegions";
-import type { Upload, User, UserPermissions } from "@shared/schema";
+import { isClosedMaintenanceStatus, type Upload, type User, type UserPermissions } from "@shared/schema";
 
 /** Names of the boolean permission columns on the user_permissions table. */
 export type PermissionName =
@@ -318,11 +318,6 @@ export const RESIDENT_CLOSED_REQUEST_DAYS = 120;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-/** Whether a request is finished, by the status vocabulary's own words. */
-function isClosedRequest(status: string | null | undefined): boolean {
-  return status === "completed" || status === "cancelled";
-}
-
 /**
  * Whether a closed request is still inside the resident's window.
  *
@@ -383,7 +378,7 @@ export function canReadMaintenanceRequest(
     if (ownsRecord(ctx, request.submittedBy)) return true;
     // A housemate's, only while it is open or recently closed.
     if (!isOwnHouse(residentHouse, request.buildingAddress)) return false;
-    if (!isClosedRequest(request.status)) return true;
+    if (!isClosedMaintenanceStatus(request.status)) return true;
     return withinResidentWindow(request.completedDate, now);
   }
   return canAccessRegion(ctx, request.region);

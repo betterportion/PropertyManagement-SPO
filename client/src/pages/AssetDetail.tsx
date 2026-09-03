@@ -268,7 +268,7 @@ export default function AssetDetail() {
                   value={
                     supplier ? (
                       <Link
-                        href="/contacts"
+                        href={`/contacts/${supplier.id}`}
                         className="inline-flex items-center gap-1 underline underline-offset-2"
                         data-testid="link-asset-supplier"
                       >

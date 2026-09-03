@@ -115,6 +115,7 @@ const DEPOSIT_STATUS: Record<
   { label: string; variant: "info" | "success" | "warning" | "destructive" }
 > = {
   held: { label: "Held", variant: "info" },
+  statement_sent: { label: "Statement sent", variant: "warning" },
   returned: { label: "Returned", variant: "success" },
   partially_returned: { label: "Partly returned", variant: "warning" },
   withheld: { label: "Withheld", variant: "destructive" },

@@ -53,8 +53,9 @@ const RENT_STATUS: Record<RentPayment["status"], { label: string; variant: "outl
   failed: { label: "Payment failed", variant: "destructive" },
 };
 
-const DEPOSIT_STATUS: Record<SecurityDeposit["status"], { label: string; variant: "outline" | "secondary" | "destructive" }> = {
+const DEPOSIT_STATUS: Record<SecurityDeposit["status"], { label: string; variant: "outline" | "secondary" | "destructive" | "warning" }> = {
   held: { label: "Held", variant: "secondary" },
+  statement_sent: { label: "Statement sent", variant: "warning" },
   returned: { label: "Returned", variant: "outline" },
   partially_returned: { label: "Partially returned", variant: "outline" },
   withheld: { label: "Withheld", variant: "destructive" },
@@ -646,7 +647,7 @@ export default function Finances() {
 }
 
 const depositEditSchema = z.object({
-  status: z.enum(["held", "returned", "partially_returned", "withheld"]),
+  status: z.enum(["held", "statement_sent", "returned", "partially_returned", "withheld"]),
   amountReturned: z.string().optional(),
   returnedDate: z.string().optional(),
   deductionsNotes: z.string().optional(),
@@ -700,6 +701,7 @@ function DepositEditDialog({
                   <FormControl><SelectTrigger data-testid="select-deposit-status"><SelectValue /></SelectTrigger></FormControl>
                   <SelectContent>
                     <SelectItem value="held">Held</SelectItem>
+                    <SelectItem value="statement_sent">Statement sent</SelectItem>
                     <SelectItem value="returned">Returned</SelectItem>
                     <SelectItem value="partially_returned">Partially returned</SelectItem>
                     <SelectItem value="withheld">Withheld</SelectItem>

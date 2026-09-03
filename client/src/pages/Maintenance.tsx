@@ -87,12 +87,22 @@ export default function Maintenance() {
 
   const uniqueBuildings = properties.map(p => ({ id: p.address!, address: p.address! }));
 
-  const handleLocationChange = (propertyAddress: string, field: { onChange: (val: string) => void }) => {
+  /**
+   * Picking the house.
+   *
+   * This used to write the address into `location`, which meant `location`
+   * held a room for a resident-filed request and an address for a staff-filed
+   * one -- and grouping "these blinds have broken every year" cannot work
+   * across two different meanings of one column. The house now lands in
+   * `buildingAddress` where it belongs, and `location` is the room below.
+   */
+  const handlePropertyChange = (propertyAddress: string, field: { onChange: (val: string) => void }) => {
     field.onChange(propertyAddress);
     const property = properties.find(p => p.address === propertyAddress);
     if (property) {
       createForm.setValue("region", property.region);
-      createForm.setValue("buildingAddress", property.address!);
+      // A room name carried over from the last house means nothing in this one.
+      createForm.setValue("location", "");
     }
   };
 
@@ -143,6 +153,23 @@ export default function Maintenance() {
       submittedBy: typedUser?.email || "",
       photoUrl: null,
     },
+  });
+
+  // The rooms of the house picked in the create dialog. Keyed on the address
+  // so switching house re-reads; disabled until one is chosen, because there
+  // is no house to ask about yet.
+  const creatingForAddress = createForm.watch("buildingAddress");
+  const creatingForProperty = properties.find((p) => p.address === creatingForAddress);
+  const { data: staffLocationSuggestions = [] } = useQuery<string[]>({
+    queryKey: ["/api/maintenance-locations", creatingForProperty?.id],
+    queryFn: async () => {
+      const response = await fetch(`/api/maintenance-locations?propertyId=${creatingForProperty!.id}`, {
+        credentials: "include",
+      });
+      if (!response.ok) return [];
+      return await response.json();
+    },
+    enabled: !!creatingForProperty,
   });
 
   const createMutation = useMutation({
@@ -267,11 +294,11 @@ export default function Maintenance() {
                 />
                 <FormField
                   control={createForm.control}
-                  name="location"
+                  name="buildingAddress"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Location (Property)</FormLabel>
-                      <Select onValueChange={(val) => handleLocationChange(val, field)} value={field.value}>
+                      <FormLabel>Property</FormLabel>
+                      <Select onValueChange={(val) => handlePropertyChange(val, field)} value={field.value}>
                         <FormControl>
                           <SelectTrigger data-testid="select-location">
                             <SelectValue placeholder="Select property" />
@@ -285,6 +312,33 @@ export default function Maintenance() {
                           ))}
                         </SelectContent>
                       </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={createForm.control}
+                  name="location"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Where in the house</FormLabel>
+                      <FormControl>
+                        {/* Suggests from the house's own walkthrough rooms
+                            without restricting: free text alone will not group
+                            "living room" and "Living Rm", and grouping is the
+                            point -- it is what lets somebody notice that these
+                            blinds have broken every year. */}
+                        <Input
+                          list="staff-request-location-suggestions"
+                          placeholder="e.g. Kitchen, Upstairs bathroom"
+                          {...field}
+                          value={field.value ?? ""}
+                          data-testid="input-staff-request-location"
+                        />
+                      </FormControl>
+                      <datalist id="staff-request-location-suggestions">
+                        {staffLocationSuggestions.map((name) => <option key={name} value={name} />)}
+                      </datalist>
                       <FormMessage />
                     </FormItem>
                   )}

@@ -1688,6 +1688,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  /**
+   * The longest a snooze may run.
+   *
+   * Two budget cycles. Anything beyond that is not "ask me again later", it is
+   * a different view of how long the thing will last -- which is the
+   * replacement date, and belongs on the asset form where it is visible.
+   */
+  const MAX_SNOOZE_MONTHS = 24;
+  const MAX_SNOOZE_DAYS = MAX_SNOOZE_MONTHS * 30;
+
   // ---------------------------------------------------------------------------
   // Snoozing an asset
   //
@@ -1728,8 +1738,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const body = z
         .object({
-          // Required, so a snooze can never be permanent by omission.
-          until: z.coerce.date(),
+          // Required, so a snooze can never be permanent by omission -- and
+          // bounded, so it cannot be permanent by exaggeration either. "It
+          // returns" is the whole distinction from editing the replacement
+          // date, and an unbounded end date erases it.
+          until: z.coerce
+            .date()
+            .refine((date: Date) => date.getTime() > Date.now(), "Pick a date in the future")
+            .refine(
+              (date: Date) => date.getTime() <= Date.now() + MAX_SNOOZE_DAYS * 24 * 60 * 60 * 1000,
+              `A snooze can run at most ${MAX_SNOOZE_MONTHS} months. To park it for longer, correct the replacement date instead.`,
+            ),
           // Required and non-blank: an unexplained snooze is just an asset
           // quietly disappearing from the one place it would have been seen.
           reason: z
