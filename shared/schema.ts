@@ -119,6 +119,13 @@ export const userPermissions = pgTable("user_permissions", {
   // starts from nobody, not from everybody; admins bypass it as they bypass
   // every flag.
   canManagePropertySetup: boolean("can_manage_property_setup").notNull().default(false),
+  // The resource hub -- the one page a household leader or steward goes to.
+  // A separate flag rather than reading canCompleteWalkthroughs, for the same
+  // reason that flag is separate from canManageWalkthroughs: they are
+  // different grants, and honouring one for the other means a later change to
+  // either silently moves the other. Granted by hand per account; no role gets
+  // it by default.
+  canViewResourceHub: boolean("can_view_resource_hub").notNull().default(false),
   allowedRegions: text("allowed_regions").array().default([]),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),

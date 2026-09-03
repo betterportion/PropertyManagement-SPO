@@ -124,12 +124,13 @@ function computeDefaultPermissions(userId: string, role: "admin" | "regional_adm
     // by revoking a grant, not by rewriting guards.
     canViewFinancials: role !== "resident",
     canManageFinancials: role !== "resident",
-    // Both new-surface flags start false for every role, including staff. They
-    // gate features that do not exist yet, and the plan they come from asks for
-    // them to land ahead of the features rather than alongside them -- so the
-    // safe starting state is nobody, and turning one on is a data change.
+    // The new-surface flags start false for every role, including staff, and
+    // turning one on is a data change rather than a code change. The resource
+    // hub is the one a household leader needs: nobody has it until an admin
+    // grants it, which is the same shape as walkthrough completion.
     canCompleteWalkthroughs: false,
     canManagePropertySetup: false,
+    canViewResourceHub: false,
     allowedRegions: role === "admin" ? [...REGIONS] : [],
   };
 }

@@ -169,6 +169,13 @@
       "when": 1788396961412,
       "tag": "0023_resource_hub_documents_and_budgets",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1788398640831,
+      "tag": "0024_add_resource_hub_permission",
+      "breakpoints": true
     }
   ]
 }

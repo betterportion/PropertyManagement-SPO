@@ -3845,10 +3845,19 @@ describe("the resource hub", () => {
     expect((await get("/api/resource-links")).status).toBe(401);
   });
 
+  it("refuses a resident who has not been granted the hub, without reading", async () => {
+    // Leaders and stewards get their capabilities gated on a flag, exactly as
+    // walkthrough completion is. Holding the walkthrough flag is not the same
+    // grant and buys nothing here.
+    actAs({ ...ALICE, propertyId: "prop-west" } as typeof ALICE, { canCompleteWalkthroughs: true });
+    expect((await get("/api/resource-links")).status).toBe(403);
+    expect(storageMock.getAllResourceLinks).not.toHaveBeenCalled();
+  });
+
   it("gives a household leader the national links and their own region's", async () => {
     // For many students this is one of their few interactions with SPO as an
-    // organisation, so a leader reaches it -- but only what applies to them.
-    actAs({ ...ALICE, propertyId: "prop-west" } as typeof ALICE, { canCompleteWalkthroughs: true });
+    // organisation, so a granted leader reaches it -- but only what applies.
+    actAs({ ...ALICE, propertyId: "prop-west" } as typeof ALICE, { canViewResourceHub: true });
     const { status, body } = await get("/api/resource-links");
     expect(status).toBe(200);
     expect(body.map((link: { id: string }) => link.id).sort()).toEqual(["l-national", "l-west"]);
@@ -3858,7 +3867,7 @@ describe("the resource hub", () => {
     // Their permissions row names a region deliberately: a resident's scope is
     // their HOUSE's region, never whatever a permissions row happens to say.
     actAs({ ...ALICE, propertyId: "prop-west" } as typeof ALICE, {
-      canCompleteWalkthroughs: true,
+      canViewResourceHub: true,
       allowedRegions: ["East Central"],
     });
     const { body } = await get("/api/resource-links");
@@ -3867,9 +3876,9 @@ describe("the resource hub", () => {
 
   it("gives a resident with no linked house the national links only", async () => {
     // Fails closed to the widest thing that is safe for everybody, rather than
-    // to nothing -- a leader with a broken link should still find the fire
-    // extinguisher guidance.
-    actAs(ALICE, { canCompleteWalkthroughs: true });
+    // to nothing -- a granted leader with a broken link should still find the
+    // fire extinguisher guidance.
+    actAs(ALICE, { canViewResourceHub: true });
     const { body } = await get("/api/resource-links");
     expect(body.map((link: { id: string }) => link.id)).toEqual(["l-national"]);
   });
@@ -3879,7 +3888,7 @@ describe("the resource hub", () => {
     const { body } = await get("/api/resource-links");
     expect(body.map((link: { id: string }) => link.id)).not.toContain("l-off");
 
-    actAs({ ...ALICE, propertyId: "prop-west" } as typeof ALICE, { canCompleteWalkthroughs: true });
+    actAs({ ...ALICE, propertyId: "prop-west" } as typeof ALICE, { canViewResourceHub: true });
     const resident = await get("/api/resource-links");
     expect(resident.body.map((link: { id: string }) => link.id)).not.toContain("l-off");
   });
@@ -3918,8 +3927,9 @@ describe("the resource hub", () => {
     expect(storageMock.createResourceLink).not.toHaveBeenCalled();
   });
 
-  it("refuses a resident the write routes, without writing", async () => {
-    actAs(ALICE, { canCompleteWalkthroughs: true });
+  it("refuses a resident the write routes, even one granted the hub", async () => {
+    // Reading the hub is not editing what everybody sees.
+    actAs(ALICE, { canViewResourceHub: true });
     const { status } = await request("POST", "/api/resource-links", {
       body: { title: "x", url: "https://example.com", category: "General" },
     });
@@ -3967,10 +3977,16 @@ describe("a resident reading their own house", () => {
     expect((await get("/api/my-property")).status).toBe(401);
   });
 
-  it("gives a resident their lease link and nothing financial", async () => {
+  it("refuses a resident who has not been granted the hub, without a lookup", async () => {
+    actAs({ ...ALICE, propertyId: "prop-west" } as typeof ALICE, { canCompleteWalkthroughs: true });
+    expect((await get("/api/my-property")).status).toBe(403);
+    expect(storageMock.getProperty).not.toHaveBeenCalled();
+  });
+
+  it("gives a granted resident their lease link and nothing financial", async () => {
     // A projection of named fields, not the row: a column added to properties
     // later must not silently start reaching a resident.
-    actAs({ ...ALICE, propertyId: "prop-west" } as typeof ALICE, { canCompleteWalkthroughs: true });
+    actAs({ ...ALICE, propertyId: "prop-west" } as typeof ALICE, { canViewResourceHub: true });
     const { status, body } = await get("/api/my-property");
     expect(status).toBe(200);
     expect(body.leaseDocumentUrl).toBe("https://drive.google.com/lease");
@@ -3979,8 +3995,8 @@ describe("a resident reading their own house", () => {
     expect(body).not.toHaveProperty("depositReturnDays");
   });
 
-  it("answers null for a resident linked to no house, without a lookup", async () => {
-    actAs(ALICE, { canCompleteWalkthroughs: true });
+  it("answers null for a granted resident linked to no house, without a lookup", async () => {
+    actAs(ALICE, { canViewResourceHub: true });
     const { status, body } = await get("/api/my-property");
     expect(status).toBe(200);
     expect(body).toBeNull();
@@ -4172,15 +4188,21 @@ describe("startup budgets", () => {
   it("gives a household leader their own house's figure and nobody else's", async () => {
     // A startup budget is an OPERATING figure, not deposit or rent data, so a
     // leader may see their own -- and only their own.
-    actAs({ ...ALICE, propertyId: "prop-west" } as typeof ALICE, { canCompleteWalkthroughs: true });
+    actAs({ ...ALICE, propertyId: "prop-west" } as typeof ALICE, { canViewResourceHub: true });
     const { status, body } = await get("/api/property-budgets");
     expect(status).toBe(200);
     expect(body.map((b: { id: string }) => b.id)).toEqual(["b-west"]);
   });
 
   it("gives a resident with no linked house nothing", async () => {
-    actAs(ALICE, { canCompleteWalkthroughs: true });
+    actAs(ALICE, { canViewResourceHub: true });
     expect((await get("/api/property-budgets")).body).toEqual([]);
+  });
+
+  it("refuses a resident who has not been granted the hub, without reading", async () => {
+    actAs({ ...ALICE, propertyId: "prop-west" } as typeof ALICE, { canCompleteWalkthroughs: true });
+    expect((await get("/api/property-budgets")).status).toBe(403);
+    expect(storageMock.getAllPropertyBudgets).not.toHaveBeenCalled();
   });
 
   it("gives a regional lead their regions' figures", async () => {
@@ -4195,8 +4217,8 @@ describe("startup budgets", () => {
     expect(storageMock.getAllPropertyBudgets).not.toHaveBeenCalled();
   });
 
-  it("refuses a resident the write route, without writing", async () => {
-    actAs({ ...ALICE, propertyId: "prop-west" } as typeof ALICE, { canCompleteWalkthroughs: true });
+  it("refuses a resident the write route, even one granted the hub", async () => {
+    actAs({ ...ALICE, propertyId: "prop-west" } as typeof ALICE, { canViewResourceHub: true });
     const { status } = await request("PUT", "/api/properties/prop-west/budget", {
       body: { year: 2026, amount: 2500 },
     });

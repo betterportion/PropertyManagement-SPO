@@ -20,6 +20,11 @@ interface AppSidebarProps {
   role: "admin" | "regional_administrator" | "resident";
   currentPath: string;
   /**
+   * Whether this account reaches the resource hub. Only changes the resident
+   * menu; staff have it from the property permission on their own menu.
+   */
+  canViewResourceHub?: boolean;
+  /**
    * Whether this account may fill in a walkthrough. Only changes the resident
    * menu -- staff reach walkthroughs whether or not they hold the grant, and
    * the page tells them what they may do once they are there.
@@ -48,22 +53,31 @@ const residentMenuItems: NavItem[] = [
   { title: "Dashboard", url: "/", icon: Home },
   { title: "Submit Request", url: "/submit-request", icon: Wrench },
   { title: "My Requests", url: "/my-requests", icon: Wrench },
-  // Open to every resident account, not just a household leader: nothing on
-  // the hub is scoped narrower than their own house.
-  { title: "Resources", url: "/resources", icon: BookOpen },
 ];
 
-export function AppSidebar({ role, currentPath, canCompleteWalkthroughs = false }: AppSidebarProps) {
+/** Granted per account, like walkthrough completion. */
+const RESOURCE_HUB_ITEM: NavItem = { title: "Resources", url: "/resources", icon: BookOpen };
+
+export function AppSidebar({
+  role,
+  currentPath,
+  canCompleteWalkthroughs = false,
+  canViewResourceHub = false,
+}: AppSidebarProps) {
   const { isMobile, setOpenMobile } = useSidebar();
   const isStaff = role === "admin" || role === "regional_administrator";
 
-  // A household leader granted canCompleteWalkthroughs gets the one extra
-  // entry, and nothing else on the staff menu comes with it.
+  // A household leader gets the extra entries their own grants unlock, one
+  // flag at a time, and nothing else on the staff menu comes with either.
   const menuItems = isStaff
     ? adminMenuItems
-    : canCompleteWalkthroughs
-      ? [...residentMenuItems, { title: "Walkthroughs", url: "/walkthroughs", icon: Camera }]
-      : residentMenuItems;
+    : [
+        ...residentMenuItems,
+        ...(canCompleteWalkthroughs
+          ? [{ title: "Walkthroughs", url: "/walkthroughs", icon: Camera }]
+          : []),
+        ...(canViewResourceHub ? [RESOURCE_HUB_ITEM] : []),
+      ];
 
   // Bottom-pinned utility group. Regional administrators cannot access Settings.
   const utilityItems: NavItem[] = [];

@@ -47,7 +47,8 @@ export type PermissionName =
   | "canViewFinancials"
   | "canManageFinancials"
   | "canCompleteWalkthroughs"
-  | "canManagePropertySetup";
+  | "canManagePropertySetup"
+  | "canViewResourceHub";
 
 /**
  * Everything a route handler needs to make an authorization decision, resolved

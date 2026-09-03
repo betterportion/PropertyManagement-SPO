@@ -47,6 +47,7 @@ const FEATURE_PERMISSIONS = [
   { key: "canViewProperties", label: "View Properties", section: "Properties" },
   { key: "canManageProperties", label: "Manage Properties", section: "Properties" },
   { key: "canManagePropertySetup", label: "Manage Property Setup Checklist", section: "Properties" },
+  { key: "canViewResourceHub", label: "See the Resources page (resident accounts)", section: "Properties" },
   { key: "canViewBilling", label: "View Invoices", section: "Maint Contacts & Invoices" },
   { key: "canManageBilling", label: "Manage Invoices", section: "Maint Contacts & Invoices" },
   { key: "canViewContacts", label: "View Contacts", section: "Maint Contacts & Invoices" },

@@ -9,7 +9,7 @@ import ThemeToggle from "@/components/ThemeToggle";
 import UserMenu from "@/components/UserMenu";
 import { ThemeProvider } from "@/providers/ThemeProvider";
 import { useAuth } from "@/hooks/useAuth";
-import { canFillInWalkthroughs, type WalkthroughUser } from "@/lib/walkthrough";
+import { canFillInWalkthroughs, canSeeResourceHub, type WalkthroughUser } from "@/lib/walkthrough";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import NotFound from "@/pages/not-found";
 import Landing from "@/pages/Landing";
@@ -74,6 +74,8 @@ function Router() {
         <Route path="/safety" component={Safety} />
         <Route path="/contacts" component={Contacts} />
         <Route path="/contacts/:id" component={ContactDetail} />
+        {/* Staff read it too, under the property permission, so they can see
+            what their households are being told. */}
         <Route path="/resources" component={ResourceHub} />
         <Route path="/settings" component={AdminSettings} />
         {/* Internal design reference — staff only; residents fall through to Not Found. */}
@@ -88,16 +90,18 @@ function Router() {
   // the server binds them to their own house -- this only decides whether the
   // pages are reachable from the app at all.
   const canCompleteWalkthroughs = canFillInWalkthroughs(user as WalkthroughUser | null);
+  const canUseResourceHub = canSeeResourceHub(user as WalkthroughUser | null);
 
   return (
     <Switch>
       <Route path="/" component={ResidentDashboard} />
       <Route path="/submit-request" component={SubmitRequest} />
       <Route path="/my-requests" component={MyRequests} />
-      {/* The one page a household leader or steward needs to go to. Open to
-          every resident account: nothing on it is scoped narrower than their
-          own house, and the server decides what that is. */}
-      <Route path="/resources" component={ResourceHub} />
+      {/* Behind its own flag, like the walkthrough screens above: a
+          resident-tier capability is granted per account. Registered only when
+          granted -- the server refuses either way, so this decides whether the
+          page is reachable from the app at all. */}
+      {canUseResourceHub && <Route path="/resources" component={ResourceHub} />}
       {canCompleteWalkthroughs && <Route path="/walkthroughs" component={MyWalkthroughs} />}
       {canCompleteWalkthroughs && <Route path="/walkthroughs/:id" component={WalkthroughRun} />}
       <Route component={NotFound} />
@@ -138,6 +142,7 @@ function AppContent() {
           role={role}
           currentPath={location}
           canCompleteWalkthroughs={canCompleteWalkthroughs}
+          canViewResourceHub={canSeeResourceHub(user as WalkthroughUser | null)}
         />
         <div className="flex flex-1 flex-col overflow-hidden">
           <header className="flex h-16 shrink-0 items-center justify-between border-b border-border bg-background px-4 lg:px-6">

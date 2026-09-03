@@ -3266,10 +3266,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const ctx = await requireActiveUser(req, res);
       if (!ctx) return;
-
       // Staff have the full property list; this route exists for the tier that
       // does not, and answers null rather than pretending otherwise.
-      if (!ctx.isResident || !ctx.user.propertyId) return res.json(null);
+      if (!ctx.isResident) return res.json(null);
+      // The hub's own grant. A resident-tier capability is gated on a flag,
+      // exactly as walkthrough completion is.
+      if (!requirePermission(res, ctx, "canViewResourceHub")) return;
+      if (!ctx.user.propertyId) return res.json(null);
 
       const property = await storage.getProperty(ctx.user.propertyId);
       if (!property) return res.json(null);
@@ -3289,11 +3292,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const ctx = await requireActiveUser(req, res);
       if (!ctx) return;
-      // The third layer, for staff. A resident's grant is their tier plus
-      // their house -- there is no resource-hub flag and adding one would
-      // hide the page from everybody until somebody granted it -- but a staff
-      // account still needs a reason to be reading other houses' material.
-      if (!ctx.isResident && !requirePermission(res, ctx, "canViewProperties", "canManageProperties")) return;
+      // The third layer, both tiers. A resident-tier capability is gated on
+      // its own flag -- `canViewResourceHub`, not `canCompleteWalkthroughs`,
+      // because those are different grants and honouring one for the other
+      // means a later change to either silently moves the other. Staff read it
+      // under the property permission, so they can see what their households
+      // are being told.
+      if (
+        !requirePermission(
+          res,
+          ctx,
+          ...(ctx.isResident
+            ? (["canViewResourceHub"] as const)
+            : (["canViewProperties", "canManageProperties"] as const)),
+        )
+      ) {
+        return;
+      }
 
       const scope = await readableRegions(ctx);
       const allowed = normalizeRegions(scope.regions);
@@ -3448,8 +3463,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const ctx = await requireActiveUser(req, res);
       if (!ctx) return;
-      // The third layer, for staff -- a resident's grant is their own house.
-      if (!ctx.isResident && !requirePermission(res, ctx, "canViewProperties", "canManageProperties")) return;
+      // The third layer, both tiers. The startup budget is shown on the hub,
+      // so a resident reaches it under the hub's grant; staff under the
+      // property permission.
+      if (
+        !requirePermission(
+          res,
+          ctx,
+          ...(ctx.isResident
+            ? (["canViewResourceHub"] as const)
+            : (["canViewProperties", "canManageProperties"] as const)),
+        )
+      ) {
+        return;
+      }
 
       // A leader sees their own house's figure and nobody else's -- narrowed
       // by PROPERTY, not by region, so being in the same region as another

@@ -5,6 +5,7 @@ import {
   WALKTHROUGH_STATUS_BADGE,
   WALKTHROUGH_TYPE_LABEL,
   canFillInWalkthroughs,
+  canSeeResourceHub,
   canSeeWalkthroughPhotos,
   canWriteWalkthrough,
   conditionTone,
@@ -268,5 +269,60 @@ describe("isCurrentWalkthrough and canWriteWalkthrough", () => {
   it("lets a tie through, so a same-day move-in and move-out both work", () => {
     const sameDay = dated("2026-09-01T00:00:00.000Z");
     expect(canWriteWalkthrough(leader, sameDay, [THIS_YEAR, sameDay])).toBe(true);
+  });
+});
+
+describe("who reaches the resource hub", () => {
+  it("lets in a resident granted the hub", () => {
+    expect(
+      canSeeResourceHub({ role: "resident", permissions: { canViewResourceHub: true } }),
+    ).toBe(true);
+  });
+
+  it("keeps out a resident who has not been granted it", () => {
+    expect(canSeeResourceHub({ role: "resident", permissions: {} })).toBe(false);
+    expect(canSeeResourceHub({ role: "resident", permissions: null })).toBe(false);
+  });
+
+  it("does not let the walkthrough grant stand in for it", () => {
+    // Filling in a walkthrough and being given the hub are two grants. Reading
+    // one for the other means a later change to either silently moves the
+    // other -- the same reason canCompleteWalkthroughs is separate from
+    // canManageWalkthroughs in the first place.
+    expect(
+      canSeeResourceHub({ role: "resident", permissions: { canCompleteWalkthroughs: true } }),
+    ).toBe(false);
+  });
+
+  it("does not let a staff flag on a resident account stand in either", () => {
+    expect(
+      canSeeResourceHub({ role: "resident", permissions: { canViewProperties: true } }),
+    ).toBe(false);
+  });
+
+  it("lets staff in on the property permission, so they see what households are told", () => {
+    expect(
+      canSeeResourceHub({ role: "regional_administrator", permissions: { canViewProperties: true } }),
+    ).toBe(true);
+    expect(
+      canSeeResourceHub({ role: "regional_administrator", permissions: { canManageProperties: true } }),
+    ).toBe(true);
+  });
+
+  it("keeps out staff holding neither property permission", () => {
+    expect(
+      canSeeResourceHub({ role: "regional_administrator", permissions: { canViewMaintenance: true } as never }),
+    ).toBe(false);
+  });
+
+  it("lets an admin in with no permissions row at all", () => {
+    // The admin bypass. Most admins have no row, and a check reading only the
+    // flag would hide the page from the people who administer it.
+    expect(canSeeResourceHub({ role: "admin" })).toBe(true);
+  });
+
+  it("keeps out nobody signed in", () => {
+    expect(canSeeResourceHub(null)).toBe(false);
+    expect(canSeeResourceHub(undefined)).toBe(false);
   });
 });
