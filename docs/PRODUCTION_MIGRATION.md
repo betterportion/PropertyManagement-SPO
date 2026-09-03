@@ -63,7 +63,7 @@ select table_name from information_schema.tables
 where table_schema = 'public' order by table_name;
 ```
 
-You should see twenty-five tables — `asset_photos`, `assets`, `audit_log`, `billing_records`, `invoices`, `maintenance_contacts`, `maintenance_request_photos`, `maintenance_requests`, `maintenance_schedules`, `properties`, `rent_payments`, `request_contacts`, `residents`, `security_deposits`, `sessions`, `tasks`, `uploads`, `user_permissions`, `users`, `walkthrough_items`, `walkthrough_photos`, `walkthrough_rooms`, `walkthrough_template_items`, `walkthrough_template_rooms`, `walkthroughs` — plus `__drizzle_migrations`.
+You should see thirty-one tables — `asset_photos`, `assets`, `audit_log`, `billing_records`, `contact_notes`, `deposit_deductions`, `invoices`, `maintenance_contacts`, `maintenance_request_photos`, `maintenance_requests`, `maintenance_schedules`, `properties`, `property_budgets`, `property_setup_items`, `rent_payments`, `request_contacts`, `resident_documents`, `residents`, `resource_links`, `security_deposits`, `sessions`, `tasks`, `uploads`, `user_permissions`, `users`, `walkthrough_items`, `walkthrough_photos`, `walkthrough_rooms`, `walkthrough_template_items`, `walkthrough_template_rooms`, `walkthroughs` — plus `__drizzle_migrations`.
 
 > **`sessions` must be in that list.** The app does not create it at startup — the session store is deliberately configured not to — so if the migrations did not run, logging in fails rather than silently starting a fresh store.
 
@@ -92,7 +92,7 @@ npm run db:baseline -- <tag>     # then npm run db:migrate
 | The app as it runs today, before the audit log | `npm run db:baseline -- 0002_drop_monday_item_id` |
 | Only the original schema, no `uploads` table | `npm run db:baseline` |
 
-The middle row was the old Replit database: it had the `uploads` table (`0001`) and no longer had `monday_item_id` (`0002`), so it baselined through `0002_drop_monday_item_id` and then migrated. Yours will name a different tag — there are nineteen migrations now, through `0018_walkthrough_template`.
+The middle row was the old Replit database: it had the `uploads` table (`0001`) and no longer had `monday_item_id` (`0002`), so it baselined through `0002_drop_monday_item_id` and then migrated. Yours will name a different tag — there are twenty-five migrations now, through `0024_add_resource_hub_permission`.
 
 You do not have to get this right by inspection. Before recording anything, the command compares the database against the migrations in both directions — a missing table or column, a column a later migration should already have dropped, or a table that only a later migration creates — and refuses if anything disagrees. It then works out which tag the database *does* match and tells you:
 
