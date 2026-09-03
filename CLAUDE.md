@@ -62,6 +62,7 @@ Three conventions in that suite, all of which exist because of a real miss:
 | `maintenanceStatus.ts` | When a maintenance request closed. `closedDateChange` is a pure function over the previous status, the next status and `now`, returning the patch to `completedDate`. Closing stamps it, reopening clears it, and an edit that does not change the status writes nothing. |
 | `actionItems.ts` | What the dashboard says needs attention, from schedules coming due, unpaid rent and deposits still held, plus the manual `tasks`. `buildActionItems` is pure — records plus `now` — so it tests without a database or a clock. |
 | `regionSummary.ts` | The per-region rollup a national admin reads. Also pure. "Health" is operational load only; unpaid rent is reported beside it, never inside it. |
+| `aggregates.ts` | Rollups over maintenance history — recurring issues and contractor callbacks. Computed over the caller's own visible requests, so a rollup can never widen what somebody can see. |
 | `schedules.ts` | Preventive and safety schedules, and the daily job that turns a due one into an ordinary maintenance request. Idempotent via `lastGeneratedForDue`, so an overdue task does not spawn a request a day. |
 | `seasonalTasks.ts` | Calendar-driven reminders (walkthrough season, summer utilities, lease-end utilities) generated as ordinary `tasks`. Idempotent via each task's unique `sourceKey`. |
 | `migrateRegions.ts` | Two idempotent startup fix-ups: legacy region spellings in `allowedRegions` to their canonical form, and a billing-region backfill. Runs on every boot; already-correct rows are untouched. |
@@ -71,6 +72,7 @@ Three conventions in that suite, all of which exist because of a real miss:
 | `db.ts` | Drizzle over the standard `pg` pool, plus `pingDatabase` and `closeDatabase`. Throws at import time if `DATABASE_URL` is missing. |
 | `objectStorage/` | File storage behind a `FileStore` interface: `local.ts` for development, `supabase.ts` for production. The only code that talks to a bucket. |
 | `uploadLimits.ts` | Per-file size limits and the in-flight memory ceiling. |
+| `notifications.ts` | The message builders — pure, a record in and a message out. Every builder returns `null` when there is nothing to send, so a caller never has to tell "no message" from a failed one. |
 | `email.ts` | The only code that talks to the email provider (Resend). `sendEmail` never throws — unconfigured and failed sends return a result — and email is off until `RESEND_API_KEY` + `EMAIL_FROM` are both set. |
 | `logger.ts` | `log()`. Separate from `vite.ts` so the production bundle never imports Vite. |
 | `static.ts` | Serves the built client in production. |

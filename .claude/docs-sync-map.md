@@ -22,6 +22,7 @@ about *this* repo. When a change lands on a path with no row here, add the row i
 | Surface changed | Claims that can go false | How to check |
 |---|---|---|
 | `shared/schema.ts` | CLAUDE.md data-model table (one row per table), the table count written above it, and any status vocabulary quoted in prose (roles, rent status, ownership, deposit status) | `grep -c 'pgTable(' shared/schema.ts` against the written count; every added, renamed or dropped table has a row, and appears in the `\dt` list in `docs/PRODUCTION_MIGRATION.md` |
+| `shared/` outside `schema.ts` | README "Project layout" tree; CLAUDE.md wherever it names a shared module as owning a rule (`depositLedger.ts`, `assetLifecycle.ts`, `propertySetup.ts`, `residentDocuments.ts`) | `ls shared/` against the README tree; the named module still exports what the doc says it owns |
 | `package.json` scripts | CLAUDE.md Commands table; README "Commands" and "Checks before you push" | `node -e "console.log(Object.keys(require('./package.json').scripts).join('\n'))"` — every script appears in both docs |
 | `package.json` deps or `overrides` | README "Tech stack"; the `overrides` note in CLAUDE.md Conventions | read the hunk |
 | `server/` file added, deleted or renamed | CLAUDE.md backend file table; README "Project layout" tree | `ls server/*.ts server/*/` against both lists |

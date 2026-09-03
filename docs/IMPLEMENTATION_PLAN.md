@@ -3,7 +3,7 @@
 Plan for the backlog derived from the SPO planning meeting, first reconciled
 against the code 2026-08-26 and last updated **2026-08-27, after Phases 1–4
 merged to main** (PRs #65, #67, #68, #69, #70, #71). The backlog was written
-against a fifteen-table CLAUDE.md; the schema now has twenty-five tables, and
+against a fifteen-table CLAUDE.md; the schema now has thirty-one tables, and
 several backlog tasks were already built before this plan existed. The phase
 sections below keep their full reasoning as a record; the ✅ marks and this
 summary say what is actually left.

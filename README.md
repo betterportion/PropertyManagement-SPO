@@ -232,9 +232,11 @@ server/                 Express backend
   walkthroughTemplate.ts What a new walkthrough starts out containing (pure)
   residentImport.ts     Roster CSV parsing, validation and duplicates (pure)
   regionSummary.ts      The per-region rollup for a national admin (pure)
+  aggregates.ts         Recurring issues and contractor callbacks (pure)
   schedules.ts          Preventive/safety schedules and their daily generator
   seasonalTasks.ts      Calendar reminders (walkthroughs, utilities) as tasks
   migrateRegions.ts     Idempotent startup fix-ups for legacy region spellings
+  notifications.ts      Builds the message text for each kind of email (pure)
   email.ts              The only code that talks to Resend; off until configured
   errors.ts             Error classification and the final error middleware
   storage.ts            All database access, behind one interface
@@ -249,6 +251,13 @@ server/                 Express backend
   __tests__/            Vitest suites
 shared/
   schema.ts             Drizzle tables and Zod types — the source of truth
+  regions.ts            Region names and the one canonical comparison
+  audit.ts              The audit action vocabulary
+  actionItems.ts        Types the dashboard and the server both read
+  assetLifecycle.ts     Lifespans, thresholds and the replacement status
+  depositLedger.ts      Deposit arithmetic and splits, in whole cents
+  propertySetup.ts      The per-property setup checklist and its states
+  residentDocuments.ts  The fixed list of documents a resident signs
 migrations/             Committed SQL migrations, applied with db:migrate
 scripts/                One-off maintenance scripts
 docs/                   Additional documentation
