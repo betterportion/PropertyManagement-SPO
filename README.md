@@ -96,6 +96,12 @@ npm run dev
 
 The app serves the API and the frontend together on a single port (5000 by default).
 
+`npm run dev` reads your `.env` itself, through Node's own `--env-file-if-exists`
+— there is no `dotenv` package and nothing to source by hand. A checkout without
+a `.env` still starts and fails with the configuration report instead. Anything
+already set in your shell wins over the file, and `npm run start` does not read
+`.env` at all: production takes real environment variables.
+
 > **First user:** whoever signs in first is created as a `resident`. Promote them to `admin` directly in the database (`users.role`) to unlock the admin pages.
 
 ---
@@ -104,7 +110,7 @@ The app serves the API and the frontend together on a single port (5000 by defau
 
 | Command | What it does |
 |---|---|
-| `npm run dev` | Start in development with hot reloading |
+| `npm run dev` | Start in development with hot reloading, reading `.env` |
 | `npm run build` | Build the frontend with Vite and bundle the server with esbuild into `dist/` |
 | `npm run start` | Run the production build |
 | `npm run lint` | ESLint over the server, the client and the shared code |

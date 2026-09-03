@@ -18,7 +18,7 @@ It is a single Express server that serves both the REST API and the React fronte
 
 | Command | Purpose |
 |---|---|
-| `npm run dev` | Development server with hot reload |
+| `npm run dev` | Development server with hot reload. Loads `.env` via Node's `--env-file-if-exists`, so no `dotenv` package and no sourcing by hand; a clone without a `.env` still starts. **Development only** — `npm run start` reads real environment variables, and a variable already in the environment always beats the file |
 | `npm run build` | Vite builds the client, esbuild bundles the server into `dist/` |
 | `npm run start` | Run the production build |
 | `npm run lint` | ESLint. **Must stay at zero errors**; warnings are allowed |
