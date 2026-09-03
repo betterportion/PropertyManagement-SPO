@@ -413,7 +413,7 @@ A property's front-of-house photo is authorized through `findUploadReferences` l
 
 ## Audit log
 
-`server/audit.ts` records the actions somebody may need to account for later: **user, permission and house-link changes, maintenance status changes, invoice and billing changes, rent charge and security-deposit changes, property document-link changes, and document uploads and downloads.** `AUDIT_ACTIONS` is the full vocabulary.
+`server/audit.ts` records the actions somebody may need to account for later: **user, permission and house-link changes, maintenance status changes, invoice and billing changes, rent charge and security-deposit changes, property document-link changes, and document uploads and downloads.** `AUDIT_ACTIONS` is the full vocabulary; it lives in `shared/audit.ts` (the activity trail on the client needs the labels too) and `server/audit.ts` re-exports it.
 
 Admins read it in the app: the activity trail in Settings, backed by `GET /api/audit-log` and `client/src/components/ActivityLog.tsx`. Reporting beyond that is a separate piece of work. It can also be read with SQL:
 
@@ -505,3 +505,19 @@ That data belongs with a qualified processor. SPO uses **QuickBooks and Ramp**; 
 - Apply the admin bypass in any new permission check.
 - Use `getUserId(req)` rather than reading provider claims.
 - Record an audit event for anything that changes access, money, or documents.
+
+---
+
+## Agent skills
+
+### Issue tracker
+
+GitHub Issues on `betterportion/PropertyManagement-SPO`, via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five default labels, unchanged: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: one `CONTEXT.md` at the repo root plus `docs/adr/`. See `docs/agents/domain.md`.
