@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
-import { BookOpen, ClipboardList, ExternalLink, Home, Wrench } from "lucide-react";
+import { BookOpen, ClipboardList, ExternalLink, FileText, Home, Wrench } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -52,6 +52,14 @@ export default function ResourceHub() {
   // no filtering to get wrong here.
   const { data: budgets = [] } = useQuery<PropertyBudget[]>({
     queryKey: ["/api/property-budgets"],
+  });
+
+  // Their own house, for the lease link. A resident cannot read /api/properties
+  // at all, so this comes from the one endpoint scoped to their house -- and an
+  // account with no house link simply gets nothing rather than an error.
+  const { data: house } = useQuery<{ leaseDocumentUrl: string | null; name: string } | null>({
+    queryKey: ["/api/my-property"],
+    retry: false,
   });
 
   const typedUser = user as (WalkthroughUser & { firstName?: string | null }) | null;
@@ -129,6 +137,21 @@ export default function ResourceHub() {
                   Report something broken
                 </Link>
               </Button>
+
+              {house?.leaseDocumentUrl && (
+                <Button variant="secondary" className="justify-start" asChild>
+                  <a
+                    href={house.leaseDocumentUrl}
+                    target="_blank"
+                    rel="noreferrer noopener"
+                    data-testid="link-hub-lease"
+                  >
+                    <FileText className="h-4 w-4" />
+                    Your lease
+                    <ExternalLink className="h-3 w-3" />
+                  </a>
+                </Button>
+              )}
 
               {budget && (
                 <div

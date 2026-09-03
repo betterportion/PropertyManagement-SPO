@@ -376,7 +376,6 @@ export interface IStorage {
 
   // Liability paperwork
   getAllResidentDocuments(): Promise<ResidentDocument[]>;
-  getResidentDocuments(residentId: string): Promise<ResidentDocument[]>;
   /** Sets one document's state, creating the row the first time. */
   setResidentDocument(
     residentId: string,
@@ -392,10 +391,8 @@ export interface IStorage {
 
   // Startup budgets
   getAllPropertyBudgets(): Promise<PropertyBudget[]>;
-  getPropertyBudget(id: string): Promise<PropertyBudget | undefined>;
   /** Creates or replaces the figure for one house and year. */
   upsertPropertyBudget(budget: InsertPropertyBudget & { region: string }): Promise<PropertyBudget>;
-  deletePropertyBudget(id: string): Promise<void>;
 
   // Audit log
   createAuditEvent(event: InsertAuditEvent): Promise<AuditEvent>;
@@ -1510,13 +1507,6 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(residentDocuments);
   }
 
-  async getResidentDocuments(residentId: string): Promise<ResidentDocument[]> {
-    return await db
-      .select()
-      .from(residentDocuments)
-      .where(eq(residentDocuments.residentId, residentId));
-  }
-
   /**
    * An upsert rather than an update: nobody's paperwork rows exist until
    * somebody first records something, so an RA ticking the first box is
@@ -1564,11 +1554,6 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(propertyBudgets).orderBy(desc(propertyBudgets.year));
   }
 
-  async getPropertyBudget(id: string): Promise<PropertyBudget | undefined> {
-    const [row] = await db.select().from(propertyBudgets).where(eq(propertyBudgets.id, id));
-    return row;
-  }
-
   async upsertPropertyBudget(budget: InsertPropertyBudget & { region: string }): Promise<PropertyBudget> {
     const [row] = await db
       .insert(propertyBudgets)
@@ -1579,10 +1564,6 @@ export class DatabaseStorage implements IStorage {
       })
       .returning();
     return row;
-  }
-
-  async deletePropertyBudget(id: string): Promise<void> {
-    await db.delete(propertyBudgets).where(eq(propertyBudgets.id, id));
   }
 
   // Deposit deductions Implementation

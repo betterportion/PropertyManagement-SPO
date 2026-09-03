@@ -71,6 +71,14 @@ export default function ResourceLinksSettings() {
     },
   });
 
+  /** Turning a link off without losing it — a memo replaced next term. */
+  const setActive = useMutation({
+    mutationFn: async (vars: { id: string; isActive: boolean }) =>
+      await apiRequest("PATCH", `/api/resource-links/${vars.id}`, { isActive: vars.isActive }),
+    onSuccess: invalidate,
+    onError: () => toast({ title: "That link was not changed", variant: "destructive" }),
+  });
+
   const remove = useMutation({
     mutationFn: async (id: string) => await apiRequest("DELETE", `/api/resource-links/${id}`),
     onSuccess: invalidate,
@@ -199,6 +207,14 @@ export default function ResourceLinksSettings() {
                 <Badge variant={link.region ? "outline" : "secondary"} className="shrink-0">
                   {link.region ?? "Every region"}
                 </Badge>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setActive.mutate({ id: link.id, isActive: !link.isActive })}
+                  data-testid={`button-toggle-resource-${link.id}`}
+                >
+                  {link.isActive ? "Hide" : "Show"}
+                </Button>
                 <Button
                   size="icon"
                   variant="ghost"

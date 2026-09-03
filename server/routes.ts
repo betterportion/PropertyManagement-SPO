@@ -83,7 +83,7 @@ import { closedDateChange } from "./maintenanceStatus";
 import { planFromTemplate, planFromPreviousWalkthrough, templateRoomItems } from "./walkthroughTemplate";
 import { parseResidentCsv, buildImportPreview } from "./residentImport";
 import { SETUP_ITEMS, setupItemsFor } from "@shared/propertySetup";
-import { isKnownResidentDocument } from "@shared/residentDocuments";
+import { RESIDENT_DOCUMENTS, isKnownResidentDocument } from "@shared/residentDocuments";
 import { buildRegionSummaries, type RegionStaff } from "./regionSummary";
 import { fromCents, splitEvenly, toCents } from "@shared/depositLedger";
 import { randomUUID } from "crypto";
@@ -3250,15 +3250,58 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return { all: false, regions: ctx.allowedRegions };
   }
 
-  app.get('/api/resource-links', isAuthenticated, async (req: any, res) => {
+  /**
+   * The signed-in resident's own house, and only the parts they should read.
+   *
+   * A resident cannot read `/api/properties` — that list is staff-only — but
+   * the resource hub needs their lease link and the house's name. So this is a
+   * deliberately narrow projection of one property: **it returns named fields
+   * rather than the row**, so a column added to `properties` later cannot
+   * silently start reaching a resident.
+   *
+   * Nothing financial is on it. The startup budget has its own route and its
+   * own reasoning; the deposit figure is not exposed here at all.
+   */
+  app.get('/api/my-property', isAuthenticated, async (req: any, res) => {
     try {
       const ctx = await requireActiveUser(req, res);
       if (!ctx) return;
 
+      // Staff have the full property list; this route exists for the tier that
+      // does not, and answers null rather than pretending otherwise.
+      if (!ctx.isResident || !ctx.user.propertyId) return res.json(null);
+
+      const property = await storage.getProperty(ctx.user.propertyId);
+      if (!property) return res.json(null);
+
+      res.json({
+        id: property.id,
+        name: property.name,
+        address: property.address,
+        leaseDocumentUrl: property.leaseDocumentUrl,
+      });
+    } catch (error) {
+      sendError(res, error, "Failed to fetch your house");
+    }
+  });
+
+  app.get('/api/resource-links', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      // The third layer, for staff. A resident's grant is their tier plus
+      // their house -- there is no resource-hub flag and adding one would
+      // hide the page from everybody until somebody granted it -- but a staff
+      // account still needs a reason to be reading other houses' material.
+      if (!ctx.isResident && !requirePermission(res, ctx, "canViewProperties", "canManageProperties")) return;
+
       const scope = await readableRegions(ctx);
       const allowed = normalizeRegions(scope.regions);
       const links = (await storage.getAllResourceLinks()).filter((link) => {
-        if (!link.isActive) return false;
+        // A hidden link stays visible to an admin, who is the only person who
+        // can hide one -- otherwise hiding it would be indistinguishable from
+        // deleting it, with no way back.
+        if (!link.isActive) return ctx.isAdmin;
         // Null region means national -- everybody, including a resident whose
         // house link is missing.
         if (!link.region) return true;
@@ -3369,15 +3412,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const body = insertResidentDocumentSchema.parse(req.body);
 
-      res.json(
-        await storage.setResidentDocument(resident.id, req.params.documentKey, {
-          signedOn: body.signedOn ?? null,
-          notes: body.notes ?? null,
-          region: resident.region,
-          recordedByUserId: ctx.userId,
-          recordedByEmail: ctx.user.email ?? null,
-        }),
-      );
+      const record = await storage.setResidentDocument(resident.id, req.params.documentKey, {
+        signedOn: body.signedOn ?? null,
+        notes: body.notes ?? null,
+        region: resident.region,
+        recordedByUserId: ctx.userId,
+        recordedByEmail: ctx.user.email ?? null,
+      });
+
+      // This row is what gets cited in a dispute, and it is an upsert -- so
+      // without an event the only record of who set it previously is the row
+      // this one just overwrote.
+      const documentLabel =
+        RESIDENT_DOCUMENTS.find((document) => document.key === req.params.documentKey)?.label ??
+        req.params.documentKey;
+      recordAuditEvent(ctx, {
+        action: AUDIT_ACTIONS.RESIDENT_DOCUMENT_RECORDED,
+        entityType: "resident",
+        entityId: resident.id,
+        summary: body.signedOn
+          ? `Recorded ${resident.firstName} ${resident.lastName}'s ${documentLabel} as signed`
+          : `Cleared the signed date on ${resident.firstName} ${resident.lastName}'s ${documentLabel}`,
+        details: { documentKey: req.params.documentKey, signed: !!body.signedOn, region: resident.region },
+      });
+
+      res.json(record);
     } catch (error) {
       sendError(res, error, "Failed to record the paperwork");
     }
@@ -3389,19 +3448,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const ctx = await requireActiveUser(req, res);
       if (!ctx) return;
-
-      const budgets = await storage.getAllPropertyBudgets();
+      // The third layer, for staff -- a resident's grant is their own house.
+      if (!ctx.isResident && !requirePermission(res, ctx, "canViewProperties", "canManageProperties")) return;
 
       // A leader sees their own house's figure and nobody else's -- narrowed
       // by PROPERTY, not by region, so being in the same region as another
-      // house grants nothing.
+      // house grants nothing. Checked before the read, so a resident with no
+      // house claim costs no query.
       if (ctx.isResident) {
         const propertyId = ctx.user.propertyId;
         if (!propertyId) return res.json([]);
+        const budgets = await storage.getAllPropertyBudgets();
         return res.json(budgets.filter((budget) => budget.propertyId === propertyId));
       }
 
-      res.json(filterByRegion(ctx, budgets));
+      res.json(filterByRegion(ctx, await storage.getAllPropertyBudgets()));
     } catch (error) {
       sendError(res, error, "Failed to fetch startup budgets");
     }
@@ -3419,13 +3480,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const body = insertPropertyBudgetSchema.omit({ propertyId: true }).parse(req.body);
 
-      res.json(
-        await storage.upsertPropertyBudget({
-          ...body,
-          propertyId: property.id,
-          region: property.region,
-        }),
-      );
+      const budget = await storage.upsertPropertyBudget({
+        ...body,
+        propertyId: property.id,
+        region: property.region,
+      });
+
+      // An operating figure rather than deposit or rent data, but still an
+      // amount somebody is expected to spend -- and this is an upsert, so the
+      // previous figure is gone without a record of who changed it.
+      recordAuditEvent(ctx, {
+        action: AUDIT_ACTIONS.PROPERTY_BUDGET_SET,
+        entityType: "property",
+        entityId: property.id,
+        summary: `Set the ${body.year} startup budget for ${property.name} to ${body.amount}`,
+        details: { year: body.year, amount: body.amount, region: property.region },
+      });
+
+      res.json(budget);
     } catch (error) {
       sendError(res, error, "Failed to save the startup budget");
     }

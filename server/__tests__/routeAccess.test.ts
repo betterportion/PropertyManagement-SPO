@@ -3874,16 +3874,35 @@ describe("the resource hub", () => {
     expect(body.map((link: { id: string }) => link.id)).toEqual(["l-national"]);
   });
 
-  it("hides a retired link from everybody", async () => {
-    actAs(ADMIN);
+  it("hides a retired link from the people who read the hub", async () => {
+    actAs(STAFF, { canViewProperties: true, allowedRegions: ["West Central"] });
     const { body } = await get("/api/resource-links");
     expect(body.map((link: { id: string }) => link.id)).not.toContain("l-off");
+
+    actAs({ ...ALICE, propertyId: "prop-west" } as typeof ALICE, { canCompleteWalkthroughs: true });
+    const resident = await get("/api/resource-links");
+    expect(resident.body.map((link: { id: string }) => link.id)).not.toContain("l-off");
+  });
+
+  it("still shows a retired link to an admin, so it can be brought back", async () => {
+    // An admin is the only person who can hide one. If hiding it also hid it
+    // from them, hiding would be indistinguishable from deleting.
+    actAs(ADMIN);
+    const { body } = await get("/api/resource-links");
+    expect(body.map((link: { id: string }) => link.id)).toContain("l-off");
   });
 
   it("gives staff their regions' links plus the national ones", async () => {
     actAs(STAFF, { canViewProperties: true, allowedRegions: ["West Central"] });
     const { body } = await get("/api/resource-links");
     expect(body.map((link: { id: string }) => link.id).sort()).toEqual(["l-national", "l-west"]);
+  });
+
+  it("refuses a staff account holding no property permission", async () => {
+    // The third layer. Without it an active staff account with an empty
+    // permissions row reads every regional link while holding no flag at all.
+    actAs(STAFF, { canViewMaintenance: true, allowedRegions: ["West Central"] });
+    expect((await get("/api/resource-links")).status).toBe(403);
   });
 
   // ── Managing them is national, so it is admin-only ───────────────────────
@@ -3926,6 +3945,51 @@ describe("the resource hub", () => {
     });
     expect(status).toBe(200);
     expect(storageMock.createResourceLink).toHaveBeenCalled();
+  });
+});
+
+describe("a resident reading their own house", () => {
+  const WEST = {
+    id: "prop-west",
+    name: "Cleveland House",
+    region: "West Central",
+    address: "1 Main St",
+    leaseDocumentUrl: "https://drive.google.com/lease",
+    depositAmount: "500.00",
+    notes: "Staff-only notes",
+  };
+
+  beforeEach(() => {
+    storageMock.getProperty.mockResolvedValue(WEST);
+  });
+
+  it("refuses an anonymous caller", async () => {
+    expect((await get("/api/my-property")).status).toBe(401);
+  });
+
+  it("gives a resident their lease link and nothing financial", async () => {
+    // A projection of named fields, not the row: a column added to properties
+    // later must not silently start reaching a resident.
+    actAs({ ...ALICE, propertyId: "prop-west" } as typeof ALICE, { canCompleteWalkthroughs: true });
+    const { status, body } = await get("/api/my-property");
+    expect(status).toBe(200);
+    expect(body.leaseDocumentUrl).toBe("https://drive.google.com/lease");
+    expect(body).not.toHaveProperty("depositAmount");
+    expect(body).not.toHaveProperty("notes");
+    expect(body).not.toHaveProperty("depositReturnDays");
+  });
+
+  it("answers null for a resident linked to no house, without a lookup", async () => {
+    actAs(ALICE, { canCompleteWalkthroughs: true });
+    const { status, body } = await get("/api/my-property");
+    expect(status).toBe(200);
+    expect(body).toBeNull();
+    expect(storageMock.getProperty).not.toHaveBeenCalled();
+  });
+
+  it("answers null for staff, who have the full property list already", async () => {
+    actAs(STAFF, { canViewProperties: true, allowedRegions: ["West Central"] });
+    expect((await get("/api/my-property")).body).toBeNull();
   });
 });
 
@@ -3985,6 +4049,21 @@ describe("liability paperwork", () => {
     expect(patch.region).toBe("West Central");
   });
 
+  it("records an audit event naming the resident and the document", async () => {
+    // That row is what gets cited in a dispute, and without an event the only
+    // record of who set it is the row it overwrites.
+    westLead();
+    await setDoc("res-a", "liability_waiver", { signedOn: "2026-08-01" });
+    expect(storageMock.createAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "resident.document_recorded",
+        entityType: "resident",
+        entityId: "res-a",
+        summary: expect.stringContaining("Alice"),
+      }),
+    );
+  });
+
   it("can record that something is not signed, by clearing the date", async () => {
     // Correcting a mistake has to be possible; the row existing is not itself
     // evidence, only a date is.
@@ -3993,6 +4072,85 @@ describe("liability paperwork", () => {
     expect(status).toBe(200);
     const [, , patch] = storageMock.setResidentDocument.mock.calls[0];
     expect(patch.signedOn).toBeNull();
+  });
+});
+
+describe("reading paperwork across a region", () => {
+  beforeEach(() => {
+    storageMock.getAllResidentDocuments.mockResolvedValue([
+      { id: "d-west", residentId: "res-a", documentKey: "liability_waiver", region: "West Central" },
+      { id: "d-east", residentId: "res-e", documentKey: "liability_waiver", region: "East Central" },
+    ]);
+  });
+
+  it("refuses an anonymous caller", async () => {
+    expect((await get("/api/resident-documents")).status).toBe(401);
+  });
+
+  it("refuses a resident, without reading it", async () => {
+    // Somebody's signed waiver is not theirs to browse, and certainly not
+    // their housemates'.
+    actAs(ALICE, { canCompleteWalkthroughs: true });
+    expect((await get("/api/resident-documents")).status).toBe(403);
+    expect(storageMock.getAllResidentDocuments).not.toHaveBeenCalled();
+  });
+
+  it("refuses staff holding no property permission", async () => {
+    actAs(STAFF, { canViewMaintenance: true, allowedRegions: ["West Central"] });
+    expect((await get("/api/resident-documents")).status).toBe(403);
+  });
+
+  it("gives a regional lead their own regions' rows only", async () => {
+    actAs(STAFF, { canViewProperties: true, allowedRegions: ["West Central"] });
+    const { status, body } = await get("/api/resident-documents");
+    expect(status).toBe(200);
+    expect(body.map((row: { id: string }) => row.id)).toEqual(["d-west"]);
+  });
+});
+
+describe("the maintenance rollups", () => {
+  beforeEach(() => {
+    storageMock.getAllMaintenanceRequests.mockResolvedValue([
+      { id: "req-west", location: "Kitchen", category: "Plumbing", buildingAddress: "1 Main St", region: "West Central", status: "completed" },
+      { id: "req-west-2", location: "Kitchen", category: "Plumbing", buildingAddress: "1 Main St", region: "West Central", status: "completed" },
+      { id: "req-east", location: "Kitchen", category: "Plumbing", buildingAddress: "9 Elm", region: "East Central", status: "completed" },
+      { id: "req-east-2", location: "Kitchen", category: "Plumbing", buildingAddress: "9 Elm", region: "East Central", status: "completed" },
+    ]);
+    storageMock.getAllRequestContactLinks.mockResolvedValue([
+      { contactId: "c1", requestId: "req-west" },
+      { contactId: "c2", requestId: "req-east" },
+    ]);
+  });
+
+  it("refuses an anonymous caller", async () => {
+    expect((await get("/api/maintenance-aggregates")).status).toBe(401);
+  });
+
+  it("refuses a resident, without reading anything", async () => {
+    actAs(ALICE, { canCompleteWalkthroughs: true });
+    expect((await get("/api/maintenance-aggregates")).status).toBe(403);
+    expect(storageMock.getAllMaintenanceRequests).not.toHaveBeenCalled();
+  });
+
+  it("refuses staff holding no maintenance permission", async () => {
+    actAs(STAFF, { canViewProperties: true, allowedRegions: ["West Central"] });
+    expect((await get("/api/maintenance-aggregates")).status).toBe(403);
+  });
+
+  it("rolls up only the caller's own regions", async () => {
+    // A rollup must never widen what somebody can see -- the East Central
+    // house repeats too, and must not appear.
+    actAs(STAFF, { canViewMaintenance: true, allowedRegions: ["West Central"] });
+    const { status, body } = await get("/api/maintenance-aggregates");
+    expect(status).toBe(200);
+    expect(body.recurringIssues).toHaveLength(1);
+    expect(body.recurringIssues[0].buildingAddress).toBe("1 Main St");
+  });
+
+  it("drops a contractor link whose request the caller cannot see", async () => {
+    actAs(STAFF, { canViewMaintenance: true, allowedRegions: ["West Central"] });
+    const { body } = await get("/api/maintenance-aggregates");
+    expect(body.contractorLoad.map((row: { contactId: string }) => row.contactId)).toEqual(["c1"]);
   });
 });
 
@@ -4031,6 +4189,12 @@ describe("startup budgets", () => {
     expect(body.map((b: { id: string }) => b.id)).toEqual(["b-west"]);
   });
 
+  it("refuses a staff account holding no property permission, without reading", async () => {
+    actAs(STAFF, { canViewMaintenance: true, allowedRegions: ["West Central"] });
+    expect((await get("/api/property-budgets")).status).toBe(403);
+    expect(storageMock.getAllPropertyBudgets).not.toHaveBeenCalled();
+  });
+
   it("refuses a resident the write route, without writing", async () => {
     actAs({ ...ALICE, propertyId: "prop-west" } as typeof ALICE, { canCompleteWalkthroughs: true });
     const { status } = await request("PUT", "/api/properties/prop-west/budget", {
@@ -4047,6 +4211,19 @@ describe("startup budgets", () => {
     });
     expect(status).toBe(403);
     expect(storageMock.upsertPropertyBudget).not.toHaveBeenCalled();
+  });
+
+  it("records an audit event for a budget, naming the house and the amount", async () => {
+    actAs(STAFF, { canManageProperties: true, allowedRegions: ["West Central"] });
+    await request("PUT", "/api/properties/prop-west/budget", { body: { year: 2026, amount: 2500 } });
+    expect(storageMock.createAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "property.budget_set",
+        entityType: "property",
+        entityId: "prop-west",
+        summary: expect.stringContaining("Cleveland House"),
+      }),
+    );
   });
 
   it("takes the region from the house, never the body", async () => {

@@ -116,17 +116,21 @@ export function dueSeasonalTasks(inputs: SeasonalInputs, now: Date): SeasonalTas
   // exists, so the reminder can stop rather than nag about something somebody
   // has already settled.
   for (const lease of inputs.rentedLeases) {
-    if (!lease.leaseRenewalDate) continue;
     if (lease.renewalDecision !== "undecided") continue;
-    const appear = daysBefore(lease.leaseRenewalDate, LEASE_RENEWAL_NOTICE_DAYS);
+    // The renewal date when there is one, and the lease END otherwise: a house
+    // that never had a decision date still has a lease that runs out, and that
+    // is the date the decision is actually against.
+    const decisionBy = lease.leaseRenewalDate ?? lease.leaseEndDate;
+    if (!decisionBy) continue;
+    const appear = daysBefore(decisionBy, LEASE_RENEWAL_NOTICE_DAYS);
     if (inCreateWindow(appear, now)) {
       specs.push({
-        sourceKey: `lease-renewal:${lease.propertyId}:${isoDay(lease.leaseRenewalDate)}`,
+        sourceKey: `lease-renewal:${lease.propertyId}:${isoDay(decisionBy)}`,
         title: `Renew or leave? — ${lease.name}`,
         notes:
           "This house's lease renewal decision is due. Record the decision on the property so this reminder clears.",
         region: lease.region,
-        dueDate: lease.leaseRenewalDate,
+        dueDate: decisionBy,
       });
     }
   }

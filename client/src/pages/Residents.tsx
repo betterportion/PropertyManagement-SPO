@@ -1,3 +1,4 @@
+import { Link } from "wouter";
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -268,7 +269,17 @@ export default function Residents() {
                 <Card key={r.id} data-testid={`card-resident-${r.id}`}>
                   <CardContent className="flex items-start justify-between gap-4 p-4">
                     <div className="min-w-0">
-                      <p className="font-medium">{r.firstName} {r.lastName}</p>
+                      <p className="font-medium">
+                        {/* Their name opens everything about them: paperwork,
+                            deposit, and what they have of SPO's. */}
+                        <Link
+                          href={`/residents/${r.id}`}
+                          className="rounded-sm hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          data-testid={`text-resident-name-${r.id}`}
+                        >
+                          {r.firstName} {r.lastName}
+                        </Link>
+                      </p>
                       <p className="mt-1 text-sm text-muted-foreground break-words">{r.email}</p>
                       <p className="mt-1 text-sm text-muted-foreground">
                         {r.moveInDate ? `Moved in ${formatDate(r.moveInDate)}` : "Move-in date not recorded"}

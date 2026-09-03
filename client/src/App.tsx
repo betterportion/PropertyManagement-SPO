@@ -23,6 +23,7 @@ import AssetDetail from "@/pages/AssetDetail";
 import AssignedAssets from "@/pages/AssignedAssets";
 import Safety from "@/pages/Safety";
 import Residents from "@/pages/Residents";
+import ResidentDetail from "@/pages/ResidentDetail";
 import Finances from "@/pages/Finances";
 import Tasks from "@/pages/Tasks";
 import Contacts from "@/pages/Contacts";
@@ -59,6 +60,7 @@ function Router() {
         <Route path="/properties" component={Properties} />
         <Route path="/properties/:id" component={PropertyDetail} />
         <Route path="/residents" component={Residents} />
+        <Route path="/residents/:id" component={ResidentDetail} />
         <Route path="/finances" component={Finances} />
         <Route path="/maintenance" component={Maintenance} />
         <Route path="/walkthroughs" component={Walkthroughs} />
