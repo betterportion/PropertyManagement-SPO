@@ -1234,6 +1234,129 @@ export const insertTaskSchema = createInsertSchema(tasks)
 export type Task = typeof tasks.$inferSelect;
 export type InsertTask = z.infer<typeof insertTaskSchema>;
 
+// Resource hub
+//
+// The one page a household leader or steward needs to go to. The framing
+// matters: for many students this is one of their few interactions with SPO as
+// an organisation, so it should feel professional and relational.
+//
+// Most of the content lives on Drive. **This table stores links, never
+// documents** -- duplicating a deep-clean checklist into the portal means two
+// copies that disagree within a term.
+export const resourceLinks = pgTable("resource_links", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  title: varchar("title").notNull(),
+  url: varchar("url").notNull(),
+  description: text("description"),
+  // Grouping on the page. Free text rather than an enum: SPO adds categories
+  // faster than anybody would ship a migration for one.
+  category: varchar("category").notNull().default("General"),
+  /**
+   * Who sees it. Null means national -- everybody. A region name limits it to
+   * the houses in that region, which is what lets one region publish its own
+   * guidance without it reaching the rest.
+   */
+  region: varchar("region"),
+  displayOrder: integer("display_order").notNull().default(0),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertResourceLinkSchema = createInsertSchema(resourceLinks)
+  .omit({ id: true, createdAt: true, updatedAt: true })
+  .extend({
+    title: z.string().trim().min(1, "Give the link a name").max(200),
+    // Rendered into an href on a page residents read, so the scheme is checked
+    // here -- see httpUrlFromClient.
+    url: httpUrlFromClient.refine((value: string | null) => value !== null, "A link needs an address"),
+    description: z.string().trim().max(500).nullish(),
+    // The column has a default, so a caller adding a link need not order it --
+    // the page groups by category and falls back to the title.
+    displayOrder: nonNegativeInt.optional(),
+  });
+
+export type ResourceLink = typeof resourceLinks.$inferSelect;
+export type InsertResourceLink = z.infer<typeof insertResourceLinkSchema>;
+
+// Liability paperwork
+//
+// Per resident, per document: signed or not, and when. **Set by an RA, not
+// e-signed** -- e-signature is a vendor integration and a separate decision,
+// and pretending a checkbox is one would be worse than not having it.
+export const residentDocuments = pgTable(
+  "resident_documents",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    residentId: varchar("resident_id").notNull().references(() => residents.id, { onDelete: "cascade" }),
+    /** Matches a key in RESIDENT_DOCUMENTS. Not an enum column: the list is
+     *  code, and a database enum would need a migration for every addition. */
+    documentKey: varchar("document_key").notNull(),
+    /** When it was signed. Null means it has not been. */
+    signedOn: timestamp("signed_on"),
+    notes: text("notes"),
+    recordedByUserId: varchar("recorded_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    recordedByEmail: varchar("recorded_by_email"),
+    region: varchar("region").notNull(),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [uniqueIndex("IDX_resident_document").on(table.residentId, table.documentKey)],
+);
+
+export const insertResidentDocumentSchema = createInsertSchema(residentDocuments)
+  .omit({
+    id: true,
+    // Server-owned: the actor comes from the session and the region from the
+    // resident. "Who said this was signed" is worthless if the client says.
+    recordedByUserId: true,
+    recordedByEmail: true,
+    region: true,
+    residentId: true,
+    documentKey: true,
+    createdAt: true,
+    updatedAt: true,
+  })
+  .extend({
+    signedOn: dateFromClient.nullish(),
+    notes: z.string().trim().max(500).nullish(),
+  });
+
+export type ResidentDocument = typeof residentDocuments.$inferSelect;
+export type InsertResidentDocument = z.infer<typeof insertResidentDocumentSchema>;
+
+// Startup budget
+//
+// One amount per property per year, plus notes. An OPERATING figure -- what
+// the house has to furnish and settle itself -- and therefore not deposit or
+// rent data, which is why a household leader may see their own house's without
+// the finance rule being bent.
+export const propertyBudgets = pgTable(
+  "property_budgets",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    propertyId: varchar("property_id").notNull().references(() => properties.id, { onDelete: "cascade" }),
+    year: integer("year").notNull(),
+    amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),
+    notes: text("notes"),
+    region: varchar("region").notNull(),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [uniqueIndex("IDX_property_budget_year").on(table.propertyId, table.year)],
+);
+
+export const insertPropertyBudgetSchema = createInsertSchema(propertyBudgets)
+  .omit({ id: true, region: true, createdAt: true, updatedAt: true })
+  .extend({
+    year: z.coerce.number().int().min(2000, "Use a four-digit year").max(2100),
+    amount: nonNegativeAmount,
+    notes: z.string().trim().max(1000).nullish(),
+  });
+
+export type PropertyBudget = typeof propertyBudgets.$inferSelect;
+export type InsertPropertyBudget = z.infer<typeof insertPropertyBudgetSchema>;
+
 // Uploaded Files
 //
 // One row per stored object. The stored key is random, so this is where the

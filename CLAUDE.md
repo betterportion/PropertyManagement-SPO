@@ -125,6 +125,9 @@ Defined in `shared/schema.ts` using Drizzle, with Zod insert schemas generated b
 | `tasks` | Staff to-dos: title, category, open/done, due date, optional region and assignee. Reminders generated on a calendar carry a unique `sourceKey` so the daily job never duplicates one; hand-created tasks leave it null | `assignedToUserId`, `createdBy` and `completedBy` → `users`, all set-null so a task outlives its author |
 | `request_contacts` | Join table linking contacts to maintenance requests | Both sides cascade |
 | `uploads` | One row per stored file: random storage key, original name, content type, size, uploader | `uploadedBy` is a user ID; no FK, so the row outlives the account |
+| `resource_links` | What SPO publishes to household leaders and stewards: title, URL, description, category. A null `region` means national; a region name limits it to that region's houses. **Links, never documents** | referenced by nothing |
+| `resident_documents` | Per resident, per document: `signedOn` (null means not signed), notes, who recorded it. The list of documents is fixed in `shared/residentDocuments.ts`, so the row stores a `documentKey` | `residentId` → `residents` cascades; `recordedByUserId` → `users` set-null; unique on (resident, document) |
+| `property_budgets` | One startup-budget figure per house per year, plus notes. An **operating** figure, not deposit or rent data | `propertyId` → `properties` cascades; unique on (property, year) |
 | `audit_log` | Append-only record of access, money and document events | Actor stored as plain columns, deliberately no FK |
 
 ### Rules for schema changes
@@ -236,6 +239,26 @@ Region names are compared in one canonical form, so a stored legacy `west-centra
 
 - **The linked requests are filtered by the *request's* region, not the contact's.** A vendor can work across regions, and reading their page must not become a way to see requests the caller could not otherwise open.
 - **There is no rating field, and adding one would be a regression.** A star score on a vendor SPO may have to keep using invites arguments about the number and tells an incoming RA far less than a paragraph does. There is also no separate "project" entity: a project here always traces back to a request, and a second entity to keep in sync would decay.
+
+### The resource hub
+
+`/resources` is the one page a household leader or steward needs, and it is the widest resident-facing surface in the portal. The framing shapes the layout: for many students this is one of their few interactions with SPO as an organisation, so their own house comes first and the general material below it.
+
+- **A resident's scope is their HOUSE's region**, resolved from their property by `readableRegions` — never from whatever their permissions row happens to say. A resident-tier account has no region path anywhere else and acquires none here. There is a test asserting a leader whose permissions row names another region still cannot see that region's links.
+- **A resident with no house claim gets the national links only**, not nothing. This is the one place the fail-closed default is "the widest thing that is safe for everybody" rather than "empty" — a leader with a broken property link should still find the fire extinguisher guidance.
+- **Managing the links is `requireAdmin`, not a regional flag** — exactly like the walkthrough template, and for the same reason: a national link reaches every region, so editing one is not a grant over your own houses.
+- **Links, never documents.** Most content lives on Drive; duplicating a deep-clean checklist into the portal means two copies that disagree within a term. The URL is scheme-checked by `httpUrlFromClient` because every viewer of this page clicks these, residents included.
+
+**A startup budget is an operating figure**, not deposit or rent data — what the house has to furnish and settle itself. That distinction is what lets a leader see their own on the hub without the "residents never see financial data" rule being bent, and the budget list is narrowed for a resident **by property, not by region**, so being in the same region as another house grants nothing.
+
+**Liability paperwork is recorded, not signed.** `shared/residentDocuments.ts` holds the fixed list; an RA records that a document was signed and when. **This is not e-signature** — that is a vendor integration and a separate decision, and a checkbox pretending to be one would be worse than nothing, because it would read as evidence in a dispute and be nothing of the sort. The copy on screen says so. Only a **date** counts as signed: a row existing means somebody looked, which is why clearing the date is always available.
+
+### Rollups over maintenance history
+
+`server/aggregates.ts` answers "what keeps happening?", where the Phase 5 filters answer "what happened?". Both are computed over the caller's **own visible requests**, so a rollup can never widen what somebody can see — a link to a request they cannot read contributes nothing, not even a count.
+
+- **A recurring issue is one house, one room, one category, more than once.** The house is part of the key and always will be: "these blinds have broken every year" is a claim about *these* blinds. Room names are folded for case and whitespace as a backstop for what was typed before the location field started suggesting from the walkthrough vocabulary.
+- **A callback is a repeat visit to the same problem**, which is a different claim from "did a lot of jobs" and the one that belongs in a conversation about whether to keep using somebody.
 
 ### Outbound email
 

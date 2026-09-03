@@ -71,6 +71,9 @@ import {
   insertSecurityDepositSchema,
   insertDepositDeductionSchema,
   insertTaskSchema,
+  insertResourceLinkSchema,
+  insertResidentDocumentSchema,
+  insertPropertyBudgetSchema,
   setPropertySetupItemSchema,
   type InsertPropertyWithAddress,
 } from "@shared/schema";
@@ -80,12 +83,14 @@ import { closedDateChange } from "./maintenanceStatus";
 import { planFromTemplate, planFromPreviousWalkthrough, templateRoomItems } from "./walkthroughTemplate";
 import { parseResidentCsv, buildImportPreview } from "./residentImport";
 import { SETUP_ITEMS, setupItemsFor } from "@shared/propertySetup";
+import { isKnownResidentDocument } from "@shared/residentDocuments";
 import { buildRegionSummaries, type RegionStaff } from "./regionSummary";
 import { fromCents, splitEvenly, toCents } from "@shared/depositLedger";
 import { randomUUID } from "crypto";
+import { contractorLoad, recurringIssues } from "./aggregates";
 import { sendEmail } from "./email";
 import { householdEmail, maintenanceReceivedEmail, maintenanceStatusEmail } from "./notifications";
-import { normalizeRegions } from "./migrateRegions";
+import { normalizeRegion, normalizeRegions } from "./migrateRegions";
 import { REGIONS } from "@shared/regions";
 
 // Uploads are buffered in memory only long enough to be written to App Storage.
@@ -3203,6 +3208,257 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ success: true });
     } catch (error) {
       sendError(res, error, "Failed to remove the deduction");
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // Resource hub, liability paperwork and startup budgets
+  //
+  // The hub is the one page a household leader or steward needs to go to, and
+  // it is the widest resident-facing surface in the portal. Two rules hold it:
+  //
+  //   - **A resident's scope is their HOUSE's region**, resolved from their
+  //     property, never from whatever a permissions row happens to say. A
+  //     resident-tier account has no region path anywhere else and acquires
+  //     none here.
+  //   - **Managing the links is admin-only.** A national link reaches every
+  //     region, exactly as the walkthrough template does, so it takes the same
+  //     grant -- a regional flag is a grant over your own houses.
+  //
+  // No financial information belongs on this page. A startup budget is an
+  // OPERATING figure -- what a house has to furnish and settle itself -- and
+  // is not deposit or rent data, which is why a leader may see their own.
+  // ---------------------------------------------------------------------------
+
+  /**
+   * The regions whose material this caller should see.
+   *
+   * Null entries mean "national", which everybody gets. A resident resolves to
+   * their own house's region and nothing else; a resident with no house claim
+   * falls back to the national material alone rather than to nothing -- a
+   * leader with a broken property link should still find the fire extinguisher
+   * guidance.
+   */
+  async function readableRegions(ctx: AuthContext): Promise<{ all: boolean; regions: string[] }> {
+    if (ctx.isAdmin) return { all: true, regions: [] };
+    if (ctx.isResident) {
+      const propertyId = ctx.user.propertyId;
+      if (!propertyId) return { all: false, regions: [] };
+      const property = await storage.getProperty(propertyId);
+      return { all: false, regions: property?.region ? [property.region] : [] };
+    }
+    return { all: false, regions: ctx.allowedRegions };
+  }
+
+  app.get('/api/resource-links', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+
+      const scope = await readableRegions(ctx);
+      const allowed = normalizeRegions(scope.regions);
+      const links = (await storage.getAllResourceLinks()).filter((link) => {
+        if (!link.isActive) return false;
+        // Null region means national -- everybody, including a resident whose
+        // house link is missing.
+        if (!link.region) return true;
+        if (scope.all) return true;
+        if (allowed.includes("all")) return true;
+        return allowed.includes(normalizeRegion(link.region));
+      });
+
+      res.json(links);
+    } catch (error) {
+      sendError(res, error, "Failed to fetch the resource links");
+    }
+  });
+
+  app.post('/api/resource-links', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireAdmin(res, ctx)) return;
+
+      res.json(await storage.createResourceLink(insertResourceLinkSchema.parse(req.body)));
+    } catch (error) {
+      sendError(res, error, "Failed to add the link");
+    }
+  });
+
+  app.patch('/api/resource-links/:id', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireAdmin(res, ctx)) return;
+
+      const existing = await storage.getResourceLink(req.params.id);
+      if (!existing) {
+        return res.status(404).json({ message: "Link not found" });
+      }
+
+      res.json(
+        await storage.updateResourceLink(req.params.id, insertResourceLinkSchema.partial().parse(req.body)),
+      );
+    } catch (error) {
+      sendError(res, error, "Failed to update the link");
+    }
+  });
+
+  app.delete('/api/resource-links/:id', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireAdmin(res, ctx)) return;
+
+      const existing = await storage.getResourceLink(req.params.id);
+      if (!existing) {
+        return res.status(404).json({ message: "Link not found" });
+      }
+
+      await storage.deleteResourceLink(req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      sendError(res, error, "Failed to remove the link");
+    }
+  });
+
+  // ── Liability paperwork ───────────────────────────────────────────────────
+
+  app.get('/api/resident-documents', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canViewProperties", "canManageProperties")) return;
+
+      res.json(filterByRegion(ctx, await storage.getAllResidentDocuments()));
+    } catch (error) {
+      sendError(res, error, "Failed to fetch paperwork");
+    }
+  });
+
+  /**
+   * Records that a document was signed, and when.
+   *
+   * **This is not e-signature.** An RA records what happened on paper; the
+   * signing happens wherever SPO already does it. Staff-only for the same
+   * reason: a resident marking their own waiver signed would be the record
+   * certifying itself.
+   *
+   * Clearing the date is allowed, because correcting a mistake has to be
+   * possible — the row existing is not evidence, only a date is.
+   */
+  app.put('/api/residents/:residentId/documents/:documentKey', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageProperties")) return;
+
+      const resident = await storage.getResident(req.params.residentId);
+      if (!resident) {
+        return res.status(404).json({ message: "Resident not found" });
+      }
+      if (!requireRegion(res, ctx, resident.region)) return;
+
+      // The list is fixed in code, so an unknown key is a client error rather
+      // than a new row: accepting it would write something no summary reads.
+      if (!isKnownResidentDocument(req.params.documentKey)) {
+        return res.status(400).json({ message: "Unknown document" });
+      }
+
+      const body = insertResidentDocumentSchema.parse(req.body);
+
+      res.json(
+        await storage.setResidentDocument(resident.id, req.params.documentKey, {
+          signedOn: body.signedOn ?? null,
+          notes: body.notes ?? null,
+          region: resident.region,
+          recordedByUserId: ctx.userId,
+          recordedByEmail: ctx.user.email ?? null,
+        }),
+      );
+    } catch (error) {
+      sendError(res, error, "Failed to record the paperwork");
+    }
+  });
+
+  // ── Startup budgets ───────────────────────────────────────────────────────
+
+  app.get('/api/property-budgets', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+
+      const budgets = await storage.getAllPropertyBudgets();
+
+      // A leader sees their own house's figure and nobody else's -- narrowed
+      // by PROPERTY, not by region, so being in the same region as another
+      // house grants nothing.
+      if (ctx.isResident) {
+        const propertyId = ctx.user.propertyId;
+        if (!propertyId) return res.json([]);
+        return res.json(budgets.filter((budget) => budget.propertyId === propertyId));
+      }
+
+      res.json(filterByRegion(ctx, budgets));
+    } catch (error) {
+      sendError(res, error, "Failed to fetch startup budgets");
+    }
+  });
+
+  app.put('/api/properties/:propertyId/budget', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageProperties")) return;
+
+      const property = await propertyForSetup(req, res, ctx);
+      if (!property) return;
+
+      const body = insertPropertyBudgetSchema.omit({ propertyId: true }).parse(req.body);
+
+      res.json(
+        await storage.upsertPropertyBudget({
+          ...body,
+          propertyId: property.id,
+          region: property.region,
+        }),
+      );
+    } catch (error) {
+      sendError(res, error, "Failed to save the startup budget");
+    }
+  });
+
+  // ── Aggregates: what keeps going wrong, and who keeps being called back ───
+
+  /**
+   * Rollups over the maintenance history the caller can already see.
+   *
+   * The Phase 5 filters answer "what happened here?"; these answer "what keeps
+   * happening here?", which is the question that settles an argument about
+   * whether to keep renting a house or keep using a contractor.
+   *
+   * Both are computed over the caller's own visible requests, so a rollup can
+   * never widen what somebody can see.
+   */
+  app.get('/api/maintenance-aggregates', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canViewMaintenance", "canManageMaintenance")) return;
+
+      const requests = filterByRegion(ctx, await storage.getAllMaintenanceRequests());
+      const links = await storage.getAllRequestContactLinks();
+
+      res.json({
+        recurringIssues: recurringIssues(requests),
+        contractorLoad: contractorLoad(links, requests),
+      });
+    } catch (error) {
+      sendError(res, error, "Failed to build the rollups");
     }
   });
 

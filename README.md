@@ -17,7 +17,7 @@ The portal serves three kinds of user, and each sees a completely different set 
 |---|---|
 | **Admin** | Full access to everything, including user management and permissions. Bypasses per-feature permission checks. |
 | **Regional administrator** | Manages properties, maintenance, walkthroughs, assets, contacts and invoices — but only for the regions they have been granted. |
-| **Resident** | Submits maintenance requests and follows them. Sees the requests they filed *and* every request filed for the house their account is linked to — housemates share one repair history. Granted "Complete Walkthroughs", a household leader or steward also fills in their own house's current walkthrough and reads earlier ones read-only. Never sees another house, and never sees anything by region. |
+| **Resident** | Submits maintenance requests and follows them. Reads the resource hub — SPO's general guidance plus their own house's walkthrough, requests and startup budget. Sees the requests they filed *and* every request filed for the house their account is linked to — housemates share one repair history. Granted "Complete Walkthroughs", a household leader or steward also fills in their own house's current walkthrough and reads earlier ones read-only. Never sees another house, and never sees anything by region. |
 
 On top of the role, each user has a row of fine-grained permissions — seventeen view/manage flags, including two that gate the finance screens on their own and one held in reserve for a surface not built yet — and a list of allowed regions. Admins ignore both.
 

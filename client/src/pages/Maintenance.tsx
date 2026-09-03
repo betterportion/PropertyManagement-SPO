@@ -25,6 +25,7 @@ import { Section, Container, PageHeader, PageStack } from "@/components/layout/p
 import { EmptyState, ErrorState, LoadingState } from "@/components/states";
 import { useUrlState } from "@/hooks/use-url-state";
 import { CLOSED_RANGES, closedWithinRange, locationOptions, type ClosedRange } from "@/lib/maintenanceFilters";
+import MaintenanceAggregates from "@/components/MaintenanceAggregates";
 import { ClipboardList, SlidersHorizontal } from "lucide-react";
 
 const createRequestSchema = insertMaintenanceRequestSchema.extend({
@@ -458,6 +459,9 @@ export default function Maintenance() {
             <TabsTrigger value="completed" data-testid="tab-completed-requests">
               Completed ({completedRequests.length})
             </TabsTrigger>
+            <TabsTrigger value="patterns" data-testid="tab-patterns">
+              Patterns
+            </TabsTrigger>
           </TabsList>
         </div>
 
@@ -508,6 +512,13 @@ export default function Maintenance() {
           ))}
           {completedRequests.length === 0 && <EmptyState icon={ClipboardList} title="Completed work will collect here" description="Resolved requests remain available for your records." />}
         </TabsContent>
+        <TabsContent value="patterns" className="mt-6">
+          {/* Aggregates rather than filters: what KEEPS happening, which is
+              the question that settles an argument about whether to keep
+              renting a house or keep using a contractor. */}
+          <MaintenanceAggregates />
+        </TabsContent>
+
       </Tabs>
 
       {selectedRequest && (

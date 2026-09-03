@@ -1,4 +1,4 @@
-import { Home, Wrench, Camera, Package, Users, UsersRound, Banknote, Settings, Building2, Palette, ShieldCheck, ListChecks } from "lucide-react";
+import { Home, Wrench, Camera, Package, Users, UsersRound, Banknote, Settings, Building2, Palette, ShieldCheck, ListChecks, BookOpen } from "lucide-react";
 import { Link } from "wouter";
 import {
   Sidebar,
@@ -40,12 +40,17 @@ const adminMenuItems: NavItem[] = [
   { title: "Maint Contacts & Invoices", url: "/contacts", icon: Users },
   { title: "Walkthroughs", url: "/walkthroughs", icon: Camera },
   { title: "Assets", url: "/assets", icon: Package },
+  // Staff read it too, so they can see what their households are being told.
+  { title: "Resources", url: "/resources", icon: BookOpen },
 ];
 
 const residentMenuItems: NavItem[] = [
   { title: "Dashboard", url: "/", icon: Home },
   { title: "Submit Request", url: "/submit-request", icon: Wrench },
   { title: "My Requests", url: "/my-requests", icon: Wrench },
+  // Open to every resident account, not just a household leader: nothing on
+  // the hub is scoped narrower than their own house.
+  { title: "Resources", url: "/resources", icon: BookOpen },
 ];
 
 export function AppSidebar({ role, currentPath, canCompleteWalkthroughs = false }: AppSidebarProps) {

@@ -31,6 +31,7 @@ import Properties from "@/pages/Properties";
 import PropertyDetail from "@/pages/PropertyDetail";
 import MyWalkthroughs from "@/pages/MyWalkthroughs";
 import ResidentDashboard from "@/pages/ResidentDashboard";
+import ResourceHub from "@/pages/ResourceHub";
 import SubmitRequest from "@/pages/SubmitRequest";
 import MyRequests from "@/pages/MyRequests";
 import AdminSettings from "@/pages/Settings";
@@ -71,6 +72,7 @@ function Router() {
         <Route path="/safety" component={Safety} />
         <Route path="/contacts" component={Contacts} />
         <Route path="/contacts/:id" component={ContactDetail} />
+        <Route path="/resources" component={ResourceHub} />
         <Route path="/settings" component={AdminSettings} />
         {/* Internal design reference — staff only; residents fall through to Not Found. */}
         <Route path="/styleguide" component={Styleguide} />
@@ -90,6 +92,10 @@ function Router() {
       <Route path="/" component={ResidentDashboard} />
       <Route path="/submit-request" component={SubmitRequest} />
       <Route path="/my-requests" component={MyRequests} />
+      {/* The one page a household leader or steward needs to go to. Open to
+          every resident account: nothing on it is scoped narrower than their
+          own house, and the server decides what that is. */}
+      <Route path="/resources" component={ResourceHub} />
       {canCompleteWalkthroughs && <Route path="/walkthroughs" component={MyWalkthroughs} />}
       {canCompleteWalkthroughs && <Route path="/walkthroughs/:id" component={WalkthroughRun} />}
       <Route component={NotFound} />

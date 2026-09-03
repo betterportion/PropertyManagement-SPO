@@ -17,6 +17,9 @@ import {
   billingRecords,
   properties,
   propertySetupItems,
+  resourceLinks,
+  residentDocuments,
+  propertyBudgets,
   residents,
   rentPayments,
   securityDeposits,
@@ -62,6 +65,11 @@ import {
   type InsertPropertyWithAddress,
   type PropertySetupItem,
   type InsertPropertySetupItem,
+  type ResourceLink,
+  type InsertResourceLink,
+  type ResidentDocument,
+  type PropertyBudget,
+  type InsertPropertyBudget,
   type MaintenanceSchedule,
   type InsertMaintenanceSchedule,
   type Resident,
@@ -352,10 +360,42 @@ export interface IStorage {
 
   // Request Contacts (linking)
   getRequestContacts(requestId: string): Promise<MaintenanceContact[]>;
+  /** Every vendor-to-request link, for the contractor rollup. */
+  getAllRequestContactLinks(): Promise<{ contactId: string; requestId: string }[]>;
   linkContactToRequest(requestId: string, contactId: string): Promise<void>;
   unlinkContactFromRequest(requestId: string, contactId: string): Promise<void>;
   updateProperty(id: string, data: Partial<InsertPropertyWithAddress>): Promise<Property>;
   deleteProperty(id: string): Promise<void>;
+
+  // Resource hub
+  getAllResourceLinks(): Promise<ResourceLink[]>;
+  getResourceLink(id: string): Promise<ResourceLink | undefined>;
+  createResourceLink(link: InsertResourceLink): Promise<ResourceLink>;
+  updateResourceLink(id: string, data: Partial<InsertResourceLink>): Promise<ResourceLink>;
+  deleteResourceLink(id: string): Promise<void>;
+
+  // Liability paperwork
+  getAllResidentDocuments(): Promise<ResidentDocument[]>;
+  getResidentDocuments(residentId: string): Promise<ResidentDocument[]>;
+  /** Sets one document's state, creating the row the first time. */
+  setResidentDocument(
+    residentId: string,
+    documentKey: string,
+    patch: {
+      signedOn: Date | null;
+      notes?: string | null;
+      region: string;
+      recordedByUserId: string | null;
+      recordedByEmail: string | null;
+    },
+  ): Promise<ResidentDocument>;
+
+  // Startup budgets
+  getAllPropertyBudgets(): Promise<PropertyBudget[]>;
+  getPropertyBudget(id: string): Promise<PropertyBudget | undefined>;
+  /** Creates or replaces the figure for one house and year. */
+  upsertPropertyBudget(budget: InsertPropertyBudget & { region: string }): Promise<PropertyBudget>;
+  deletePropertyBudget(id: string): Promise<void>;
 
   // Audit log
   createAuditEvent(event: InsertAuditEvent): Promise<AuditEvent>;
@@ -1426,6 +1466,123 @@ export class DatabaseStorage implements IStorage {
   async getUploadByStorageKey(storageKey: string): Promise<Upload | undefined> {
     const [found] = await db.select().from(uploads).where(eq(uploads.storageKey, storageKey));
     return found;
+  }
+
+  async getAllRequestContactLinks(): Promise<{ contactId: string; requestId: string }[]> {
+    return await db
+      .select({ contactId: requestContacts.contactId, requestId: requestContacts.requestId })
+      .from(requestContacts);
+  }
+
+  // Resource hub Implementation
+  async getAllResourceLinks(): Promise<ResourceLink[]> {
+    return await db
+      .select()
+      .from(resourceLinks)
+      .orderBy(resourceLinks.category, resourceLinks.displayOrder, resourceLinks.title);
+  }
+
+  async getResourceLink(id: string): Promise<ResourceLink | undefined> {
+    const [row] = await db.select().from(resourceLinks).where(eq(resourceLinks.id, id));
+    return row;
+  }
+
+  async createResourceLink(link: InsertResourceLink): Promise<ResourceLink> {
+    const [row] = await db.insert(resourceLinks).values(link).returning();
+    return row;
+  }
+
+  async updateResourceLink(id: string, data: Partial<InsertResourceLink>): Promise<ResourceLink> {
+    const [row] = await db
+      .update(resourceLinks)
+      .set({ ...filterUndefined(data), updatedAt: new Date() })
+      .where(eq(resourceLinks.id, id))
+      .returning();
+    return row;
+  }
+
+  async deleteResourceLink(id: string): Promise<void> {
+    await db.delete(resourceLinks).where(eq(resourceLinks.id, id));
+  }
+
+  // Liability paperwork Implementation
+  async getAllResidentDocuments(): Promise<ResidentDocument[]> {
+    return await db.select().from(residentDocuments);
+  }
+
+  async getResidentDocuments(residentId: string): Promise<ResidentDocument[]> {
+    return await db
+      .select()
+      .from(residentDocuments)
+      .where(eq(residentDocuments.residentId, residentId));
+  }
+
+  /**
+   * An upsert rather than an update: nobody's paperwork rows exist until
+   * somebody first records something, so an RA ticking the first box is
+   * creating the row.
+   */
+  async setResidentDocument(
+    residentId: string,
+    documentKey: string,
+    patch: {
+      signedOn: Date | null;
+      notes?: string | null;
+      region: string;
+      recordedByUserId: string | null;
+      recordedByEmail: string | null;
+    },
+  ): Promise<ResidentDocument> {
+    const [row] = await db
+      .insert(residentDocuments)
+      .values({
+        residentId,
+        documentKey,
+        signedOn: patch.signedOn,
+        notes: patch.notes ?? null,
+        region: patch.region,
+        recordedByUserId: patch.recordedByUserId,
+        recordedByEmail: patch.recordedByEmail,
+      })
+      .onConflictDoUpdate({
+        target: [residentDocuments.residentId, residentDocuments.documentKey],
+        set: {
+          signedOn: patch.signedOn,
+          notes: patch.notes ?? null,
+          region: patch.region,
+          recordedByUserId: patch.recordedByUserId,
+          recordedByEmail: patch.recordedByEmail,
+          updatedAt: new Date(),
+        },
+      })
+      .returning();
+    return row;
+  }
+
+  // Startup budgets Implementation
+  async getAllPropertyBudgets(): Promise<PropertyBudget[]> {
+    return await db.select().from(propertyBudgets).orderBy(desc(propertyBudgets.year));
+  }
+
+  async getPropertyBudget(id: string): Promise<PropertyBudget | undefined> {
+    const [row] = await db.select().from(propertyBudgets).where(eq(propertyBudgets.id, id));
+    return row;
+  }
+
+  async upsertPropertyBudget(budget: InsertPropertyBudget & { region: string }): Promise<PropertyBudget> {
+    const [row] = await db
+      .insert(propertyBudgets)
+      .values(budget)
+      .onConflictDoUpdate({
+        target: [propertyBudgets.propertyId, propertyBudgets.year],
+        set: { amount: budget.amount, notes: budget.notes ?? null, region: budget.region, updatedAt: new Date() },
+      })
+      .returning();
+    return row;
+  }
+
+  async deletePropertyBudget(id: string): Promise<void> {
+    await db.delete(propertyBudgets).where(eq(propertyBudgets.id, id));
   }
 
   // Deposit deductions Implementation

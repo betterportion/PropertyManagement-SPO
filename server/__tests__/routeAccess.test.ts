@@ -3825,6 +3825,242 @@ describe("resident finances (regional leads only)", () => {
   });
 });
 
+describe("the resource hub", () => {
+  const WEST = { id: "prop-west", name: "Cleveland House", region: "West Central", address: "1 Main St" };
+
+  const LINKS = [
+    { id: "l-national", title: "Deep clean checklist", url: "https://drive.google.com/a", region: null, category: "Housekeeping", isActive: true, displayOrder: 0 },
+    { id: "l-west", title: "West Central contacts", url: "https://drive.google.com/b", region: "West Central", category: "General", isActive: true, displayOrder: 0 },
+    { id: "l-east", title: "East Central contacts", url: "https://drive.google.com/c", region: "East Central", category: "General", isActive: true, displayOrder: 0 },
+    { id: "l-off", title: "Retired memo", url: "https://drive.google.com/d", region: null, category: "General", isActive: false, displayOrder: 0 },
+  ];
+
+  beforeEach(() => {
+    storageMock.getAllResourceLinks.mockResolvedValue(LINKS);
+    storageMock.getProperty.mockResolvedValue(WEST);
+    storageMock.createResourceLink.mockImplementation(async (link) => ({ id: "l-new", ...link }));
+  });
+
+  it("refuses an anonymous caller", async () => {
+    expect((await get("/api/resource-links")).status).toBe(401);
+  });
+
+  it("gives a household leader the national links and their own region's", async () => {
+    // For many students this is one of their few interactions with SPO as an
+    // organisation, so a leader reaches it -- but only what applies to them.
+    actAs({ ...ALICE, propertyId: "prop-west" } as typeof ALICE, { canCompleteWalkthroughs: true });
+    const { status, body } = await get("/api/resource-links");
+    expect(status).toBe(200);
+    expect(body.map((link: { id: string }) => link.id).sort()).toEqual(["l-national", "l-west"]);
+  });
+
+  it("never gives a resident another region's links", async () => {
+    // Their permissions row names a region deliberately: a resident's scope is
+    // their HOUSE's region, never whatever a permissions row happens to say.
+    actAs({ ...ALICE, propertyId: "prop-west" } as typeof ALICE, {
+      canCompleteWalkthroughs: true,
+      allowedRegions: ["East Central"],
+    });
+    const { body } = await get("/api/resource-links");
+    expect(body.map((link: { id: string }) => link.id)).not.toContain("l-east");
+  });
+
+  it("gives a resident with no linked house the national links only", async () => {
+    // Fails closed to the widest thing that is safe for everybody, rather than
+    // to nothing -- a leader with a broken link should still find the fire
+    // extinguisher guidance.
+    actAs(ALICE, { canCompleteWalkthroughs: true });
+    const { body } = await get("/api/resource-links");
+    expect(body.map((link: { id: string }) => link.id)).toEqual(["l-national"]);
+  });
+
+  it("hides a retired link from everybody", async () => {
+    actAs(ADMIN);
+    const { body } = await get("/api/resource-links");
+    expect(body.map((link: { id: string }) => link.id)).not.toContain("l-off");
+  });
+
+  it("gives staff their regions' links plus the national ones", async () => {
+    actAs(STAFF, { canViewProperties: true, allowedRegions: ["West Central"] });
+    const { body } = await get("/api/resource-links");
+    expect(body.map((link: { id: string }) => link.id).sort()).toEqual(["l-national", "l-west"]);
+  });
+
+  // ── Managing them is national, so it is admin-only ───────────────────────
+
+  it("refuses a regional lead the write routes, without writing", async () => {
+    // A national link reaches every region, exactly as the walkthrough
+    // template does -- so it takes the same grant.
+    actAs(STAFF, { canManageProperties: true, allowedRegions: ["West Central"] });
+    const { status } = await request("POST", "/api/resource-links", {
+      body: { title: "x", url: "https://example.com", category: "General" },
+    });
+    expect(status).toBe(403);
+    expect(storageMock.createResourceLink).not.toHaveBeenCalled();
+  });
+
+  it("refuses a resident the write routes, without writing", async () => {
+    actAs(ALICE, { canCompleteWalkthroughs: true });
+    const { status } = await request("POST", "/api/resource-links", {
+      body: { title: "x", url: "https://example.com", category: "General" },
+    });
+    expect(status).toBe(403);
+    expect(storageMock.createResourceLink).not.toHaveBeenCalled();
+  });
+
+  it("refuses a javascript: URL, without storing it", async () => {
+    // Every viewer of this page clicks these, residents included.
+    actAs(ADMIN);
+    const { status } = await request("POST", "/api/resource-links", {
+      body: { title: "x", url: "javascript:alert(1)", category: "General" },
+    });
+    expect(status).toBe(400);
+    expect(storageMock.createResourceLink).not.toHaveBeenCalled();
+  });
+
+  // The positive control.
+  it("lets an admin add one", async () => {
+    actAs(ADMIN);
+    const { status } = await request("POST", "/api/resource-links", {
+      body: { title: "Deep clean checklist", url: "https://drive.google.com/a", category: "Housekeeping" },
+    });
+    expect(status).toBe(200);
+    expect(storageMock.createResourceLink).toHaveBeenCalled();
+  });
+});
+
+describe("liability paperwork", () => {
+  const WEST_RESIDENT = { id: "res-a", firstName: "Alice", lastName: "Ng", propertyId: "prop-west", region: "West Central", buildingAddress: "1 Main St", isActive: true };
+  const EAST_RESIDENT = { id: "res-e", firstName: "Eve", lastName: "Ito", propertyId: "prop-east", region: "East Central", buildingAddress: "9 Elm", isActive: true };
+
+  const westLead = (permissions: Record<string, unknown> = { canManageProperties: true }) =>
+    actAs(STAFF, { ...permissions, allowedRegions: ["West Central"] });
+
+  beforeEach(() => {
+    storageMock.getResident.mockImplementation(async (id: string) =>
+      id === "res-a" ? WEST_RESIDENT : id === "res-e" ? EAST_RESIDENT : undefined,
+    );
+    storageMock.getAllResidentDocuments.mockResolvedValue([]);
+    storageMock.setResidentDocument.mockImplementation(async (residentId, documentKey, patch) => ({
+      id: "doc-1", residentId, documentKey, ...patch,
+    }));
+  });
+
+  const setDoc = (residentId: string, key: string, body: unknown) =>
+    request("PUT", `/api/residents/${residentId}/documents/${key}`, { body });
+
+  it("refuses a resident, without writing", async () => {
+    // Paperwork status is staff-recorded. A resident marking their own waiver
+    // signed would be the record certifying itself.
+    actAs(ALICE, { canCompleteWalkthroughs: true });
+    const { status } = await setDoc("res-a", "liability_waiver", { signedOn: "2026-08-01" });
+    expect(status).toBe(403);
+    expect(storageMock.setResidentDocument).not.toHaveBeenCalled();
+  });
+
+  it("refuses a resident in another region, without writing", async () => {
+    westLead();
+    const { status } = await setDoc("res-e", "liability_waiver", { signedOn: "2026-08-01" });
+    expect(status).toBe(403);
+    expect(storageMock.setResidentDocument).not.toHaveBeenCalled();
+  });
+
+  it("refuses a document key SPO does not ask for", async () => {
+    westLead();
+    const { status } = await setDoc("res-a", "blood_oath", { signedOn: "2026-08-01" });
+    expect(status).toBe(400);
+    expect(storageMock.setResidentDocument).not.toHaveBeenCalled();
+  });
+
+  it("records who said so and when, from the session", async () => {
+    westLead();
+    const { status } = await setDoc("res-a", "liability_waiver", {
+      signedOn: "2026-08-01",
+      recordedByEmail: "someone@else.com",
+    });
+    expect(status).toBe(200);
+    const [, , patch] = storageMock.setResidentDocument.mock.calls[0];
+    expect(patch.recordedByUserId).toBe(STAFF.id);
+    expect(patch.recordedByEmail).toBe(STAFF.email);
+    expect(patch.region).toBe("West Central");
+  });
+
+  it("can record that something is not signed, by clearing the date", async () => {
+    // Correcting a mistake has to be possible; the row existing is not itself
+    // evidence, only a date is.
+    westLead();
+    const { status } = await setDoc("res-a", "liability_waiver", { signedOn: null });
+    expect(status).toBe(200);
+    const [, , patch] = storageMock.setResidentDocument.mock.calls[0];
+    expect(patch.signedOn).toBeNull();
+  });
+});
+
+describe("startup budgets", () => {
+  const WEST = { id: "prop-west", name: "Cleveland House", region: "West Central", address: "1 Main St" };
+  const EAST = { id: "prop-east", name: "Como House", region: "East Central", address: "9 Elm" };
+
+  beforeEach(() => {
+    storageMock.getProperty.mockImplementation(async (id: string) =>
+      id === "prop-west" ? WEST : id === "prop-east" ? EAST : undefined,
+    );
+    storageMock.getAllPropertyBudgets.mockResolvedValue([
+      { id: "b-west", propertyId: "prop-west", year: 2026, amount: "2500.00", region: "West Central" },
+      { id: "b-east", propertyId: "prop-east", year: 2026, amount: "3000.00", region: "East Central" },
+    ]);
+    storageMock.upsertPropertyBudget.mockImplementation(async (budget) => ({ id: "b-new", ...budget }));
+  });
+
+  it("gives a household leader their own house's figure and nobody else's", async () => {
+    // A startup budget is an OPERATING figure, not deposit or rent data, so a
+    // leader may see their own -- and only their own.
+    actAs({ ...ALICE, propertyId: "prop-west" } as typeof ALICE, { canCompleteWalkthroughs: true });
+    const { status, body } = await get("/api/property-budgets");
+    expect(status).toBe(200);
+    expect(body.map((b: { id: string }) => b.id)).toEqual(["b-west"]);
+  });
+
+  it("gives a resident with no linked house nothing", async () => {
+    actAs(ALICE, { canCompleteWalkthroughs: true });
+    expect((await get("/api/property-budgets")).body).toEqual([]);
+  });
+
+  it("gives a regional lead their regions' figures", async () => {
+    actAs(STAFF, { canViewProperties: true, allowedRegions: ["West Central"] });
+    const { body } = await get("/api/property-budgets");
+    expect(body.map((b: { id: string }) => b.id)).toEqual(["b-west"]);
+  });
+
+  it("refuses a resident the write route, without writing", async () => {
+    actAs({ ...ALICE, propertyId: "prop-west" } as typeof ALICE, { canCompleteWalkthroughs: true });
+    const { status } = await request("PUT", "/api/properties/prop-west/budget", {
+      body: { year: 2026, amount: 2500 },
+    });
+    expect(status).toBe(403);
+    expect(storageMock.upsertPropertyBudget).not.toHaveBeenCalled();
+  });
+
+  it("refuses a house in another region, without writing", async () => {
+    actAs(STAFF, { canManageProperties: true, allowedRegions: ["West Central"] });
+    const { status } = await request("PUT", "/api/properties/prop-east/budget", {
+      body: { year: 2026, amount: 3000 },
+    });
+    expect(status).toBe(403);
+    expect(storageMock.upsertPropertyBudget).not.toHaveBeenCalled();
+  });
+
+  it("takes the region from the house, never the body", async () => {
+    actAs(STAFF, { canManageProperties: true, allowedRegions: ["West Central"] });
+    const { status } = await request("PUT", "/api/properties/prop-west/budget", {
+      body: { year: 2026, amount: 2500, region: "East Central" },
+    });
+    expect(status).toBe(200);
+    const [budget] = storageMock.upsertPropertyBudget.mock.calls[0];
+    expect(budget.region).toBe("West Central");
+    expect(budget.propertyId).toBe("prop-west");
+  });
+});
+
 describe("emailing a household", () => {
   const WEST = { id: "prop-west", name: "Cleveland House", region: "West Central", address: "1 Main St" };
   const EAST = { id: "prop-east", name: "Como House", region: "East Central", address: "9 Elm" };

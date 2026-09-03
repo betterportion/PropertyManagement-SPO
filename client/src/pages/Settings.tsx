@@ -28,6 +28,7 @@ import { insertUserSchema, type User, type UserPermissions, type Property } from
 import { REGIONS } from "@shared/regions";
 import { z } from "zod";
 import { ActivityLog } from "@/components/ActivityLog";
+import ResourceLinksSettings from "@/components/ResourceLinksSettings";
 import { Section, Container, PageHeader, PageStack } from "@/components/layout/page";
 import { EmptyState } from "@/components/states";
 import { formatDate, formatValue } from "@/lib/format";
@@ -558,6 +559,8 @@ export default function Settings() {
 
       {/* Admin-only, like the rest of this page -- and enforced again by the
           server, which refuses the activity log to anyone else. */}
+      <ResourceLinksSettings />
+
       <ActivityLog />
 
       <Dialog open={isPermissionsDialogOpen} onOpenChange={(open) => {

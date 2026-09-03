@@ -11,6 +11,8 @@ import { DataTable } from "@/components/data-table";
 import { Container, PageHeader, PageStack, Section } from "@/components/layout/page";
 import { EmptyState, LoadingState } from "@/components/states";
 import PropertySetupChecklist from "@/components/PropertySetupChecklist";
+import ResidentPaperwork from "@/components/ResidentPaperwork";
+import PropertyBudgetCard from "@/components/PropertyBudgetCard";
 import EmailHouseholdDialog from "@/components/EmailHouseholdDialog";
 import { useAuth } from "@/hooks/useAuth";
 import { formatCurrency, formatDate, formatValue } from "@/lib/format";
@@ -687,6 +689,15 @@ export default function PropertyDetail() {
 
             <TabsContent value="setup" className="mt-4 space-y-6">
               <PropertySetupChecklist property={property} canManage={canManageSetup} />
+
+              {/* An OPERATING figure -- what the house has to furnish and
+                  settle itself. Not deposit or rent data, which is why the
+                  household's own leaders see it on their Resources page. */}
+              <PropertyBudgetCard property={property} canManage={canManageSetup} />
+
+              {residents.filter((resident) => resident.isActive).map((resident) => (
+                <ResidentPaperwork key={resident.id} resident={resident} canManage={canManageSetup} />
+              ))}
             </TabsContent>
           </Tabs>
         </PageStack>
