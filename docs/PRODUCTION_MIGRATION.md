@@ -63,7 +63,7 @@ select table_name from information_schema.tables
 where table_schema = 'public' order by table_name;
 ```
 
-You should see twenty-one tables — `asset_photos`, `assets`, `audit_log`, `billing_records`, `invoices`, `maintenance_contacts`, `maintenance_request_photos`, `maintenance_requests`, `maintenance_schedules`, `properties`, `rent_payments`, `request_contacts`, `residents`, `security_deposits`, `sessions`, `tasks`, `uploads`, `user_permissions`, `users`, `walkthrough_photos`, `walkthrough_rooms` — plus `__drizzle_migrations`.
+You should see twenty-five tables — `asset_photos`, `assets`, `audit_log`, `billing_records`, `invoices`, `maintenance_contacts`, `maintenance_request_photos`, `maintenance_requests`, `maintenance_schedules`, `properties`, `rent_payments`, `request_contacts`, `residents`, `security_deposits`, `sessions`, `tasks`, `uploads`, `user_permissions`, `users`, `walkthrough_items`, `walkthrough_photos`, `walkthrough_rooms`, `walkthrough_template_items`, `walkthrough_template_rooms`, `walkthroughs` — plus `__drizzle_migrations`.
 
 > **`sessions` must be in that list.** The app does not create it at startup — the session store is deliberately configured not to — so if the migrations did not run, logging in fails rather than silently starting a fresh store.
 

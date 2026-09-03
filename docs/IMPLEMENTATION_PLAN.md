@@ -3,7 +3,7 @@
 Plan for the backlog derived from the SPO planning meeting, first reconciled
 against the code 2026-08-26 and last updated **2026-08-27, after Phases 1–4
 merged to main** (PRs #65, #67, #68, #69, #70, #71). The backlog was written
-against a fifteen-table CLAUDE.md; the schema now has twenty-one tables, and
+against a fifteen-table CLAUDE.md; the schema now has twenty-five tables, and
 several backlog tasks were already built before this plan existed. The phase
 sections below keep their full reasoning as a record; the ✅ marks and this
 summary say what is actually left.
@@ -18,8 +18,9 @@ summary say what is actually left.
 - **Blocked on SPO decisions:** 4.1 Ramp/QuickBooks (AP/AR mapping, #33);
   4.3 maintenance budget view (per-property vs per-region, open item 4);
   deposit workflow wording (#60).
-- **Phase 5 (unscheduled):** spreadsheet import, in-app support request
-  (needs only #49 now), Sentry. Docs reconciliation (5.4) is done.
+- **Phase 5 (unscheduled):** in-app support request (needs only #49 now),
+  Sentry. Spreadsheet import (5.1) shipped in PR #76 and docs reconciliation
+  (5.4) is done.
 
 The issue tracker is GitHub issues on `betterportion/PropertyManagement-SPO`.
 Several backlog tasks already have issues — those are linked rather than
@@ -209,7 +210,7 @@ Status:
 
 ## Phase 5 — Later
 
-- **5.1** Spreadsheet import for residents (backlog 22): `guardedUpload()`, permission check ahead of multer, preview-and-confirm, duplicate rule = email within a property.
+- **5.1** ✅ (merged in PR #76) Spreadsheet import for residents (backlog 22): `guardedUpload()`, permission check ahead of multer, preview-and-confirm, duplicate rule = email within a property. `server/residentImport.ts` holds the parsing, validation and duplicate rules as pure functions; the routes are `POST /api/properties/:propertyId/residents/import/preview` and `…/import`, and the file is never stored.
 - **5.2** In-app support request (backlog 23) — 3.2 is merged, so this now waits only on #49.
 - **5.3** Sentry (backlog 24): CSP allowance in `server/security.ts`, `package-lock.json` `resolved` URL check, PII scrub.
 - **5.4** ✅ Docs reconciliation (backlog 25), done 2026-08-28. CLAUDE.md understated the schema by six tables and the server by five modules, and carried three claims that were false — which is exactly how this backlog over-scoped Phase 1.

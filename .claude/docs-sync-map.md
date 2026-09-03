@@ -21,12 +21,12 @@ about *this* repo. When a change lands on a path with no row here, add the row i
 
 | Surface changed | Claims that can go false | How to check |
 |---|---|---|
-| `shared/schema.ts` | CLAUDE.md data-model table (one row per table), its "Twenty-one tables" count, and any status vocabulary quoted in prose (roles, rent status, ownership, deposit status) | `grep -c 'pgTable(' shared/schema.ts` against the written count; every added, renamed or dropped table has a row |
+| `shared/schema.ts` | CLAUDE.md data-model table (one row per table), the table count written above it, and any status vocabulary quoted in prose (roles, rent status, ownership, deposit status) | `grep -c 'pgTable(' shared/schema.ts` against the written count; every added, renamed or dropped table has a row, and appears in the `\dt` list in `docs/PRODUCTION_MIGRATION.md` |
 | `package.json` scripts | CLAUDE.md Commands table; README "Commands" and "Checks before you push" | `node -e "console.log(Object.keys(require('./package.json').scripts).join('\n'))"` — every script appears in both docs |
 | `package.json` deps or `overrides` | README "Tech stack"; the `overrides` note in CLAUDE.md Conventions | read the hunk |
 | `server/` file added, deleted or renamed | CLAUDE.md backend file table; README "Project layout" tree | `ls server/*.ts server/*/` against both lists |
 | `server/config.ts` | README "Set the environment variables"; `.env.example`; the env tables in `docs/PRODUCTION_MIGRATION.md` | every var `config.ts` reads appears in all three, with the same required/optional status |
-| `server/routes.ts` | CLAUDE.md "~84 handlers"; the Authorization model section if guards moved | `grep -cE '^[[:space:]]*app\.(get\|post\|patch\|put\|delete)\(' server/routes.ts` |
+| `server/routes.ts` | the handler count in CLAUDE.md's backend file table; the Authorization model section if guards moved | `grep -cE '^[[:space:]]*app\.(get\|post\|patch\|put\|delete)\(' server/routes.ts` |
 | `server/authz.ts` | CLAUDE.md "Authorization model" in full — the three layers, the admin bypass, the region helpers, resident visibility | read the section beside the file |
 | `server/auth.ts` | CLAUDE.md "Login" — the claim-mapping rule, `upsertUser` re-linking, the hard-coded callback, refresh-token behaviour | read the section beside the file |
 | `server/audit.ts` | CLAUDE.md "Audit log" — the event vocabulary, two-year retention, the indefinitely-kept list | the doc's kept-forever list matches `AUDIT_ACTIONS_KEPT_INDEFINITELY` exactly |
@@ -38,6 +38,9 @@ about *this* repo. When a change lands on a path with no row here, add the row i
 | `migrations/` | CLAUDE.md "Rules for schema changes"; the migration count and latest tag quoted in `docs/PRODUCTION_MIGRATION.md` | `ls migrations/*.sql \| wc -l` and the newest tag against what the runbook names |
 | `client/src/pages/` added or deleted | README "Project layout"; the role-based routing note in CLAUDE.md if `App.tsx`'s switch changed | read the hunk |
 | `.github/workflows/` | CLAUDE.md "the gate" paragraph; README "Checks before you push" | every workflow file is named somewhere |
+| `scripts/` | the `npm run db:seed` and `npm run db:baseline` rows in CLAUDE.md's Commands table; README "Create the database tables" | read the hunk against both rows — the refuse-if-populated rule and `SEED_ADMIN_EMAIL` are both written down |
+| `e2e/` | CLAUDE.md's walkthrough-screen section names `e2e/mobile.spec.ts` as what proves the note-saving rule; README "Checks before you push" | a renamed or deleted spec file breaks a doc that points at it by name |
+| `client/src/lib/` | CLAUDE.md where it names a module as owning a rule (`walkthrough.ts`, `maintenanceFilters.ts`, `format.ts`) | the named module still exports what the doc says it owns |
 | a known issue fixed, or a new one accepted | CLAUDE.md "Known open issues"; README "Known issues" | the two lists say the same things |
 | a plan item shipped | `docs/IMPLEMENTATION_PLAN.md` phase marks | the phase the PR title names |
 
