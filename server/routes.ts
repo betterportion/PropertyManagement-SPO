@@ -69,6 +69,7 @@ import {
   insertResidentSchema,
   insertRentPaymentSchema,
   insertSecurityDepositSchema,
+  insertDepositDeductionSchema,
   insertTaskSchema,
   setPropertySetupItemSchema,
   type InsertPropertyWithAddress,
@@ -80,6 +81,8 @@ import { planFromTemplate, planFromPreviousWalkthrough, templateRoomItems } from
 import { parseResidentCsv, buildImportPreview } from "./residentImport";
 import { SETUP_ITEMS, setupItemsFor } from "@shared/propertySetup";
 import { buildRegionSummaries, type RegionStaff } from "./regionSummary";
+import { fromCents, splitEvenly, toCents } from "@shared/depositLedger";
+import { randomUUID } from "crypto";
 import { normalizeRegions } from "./migrateRegions";
 import { REGIONS } from "@shared/regions";
 
@@ -2917,6 +2920,263 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ success: true });
     } catch (error) {
       sendError(res, error, "Failed to delete security deposit");
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // Deposit deductions
+  //
+  // SPO HOLDS a deposit per resident and records deductions against that
+  // person. The portal is a ledger and a reminder -- the money moves in
+  // QuickBooks and Ramp. Amounts, dates, descriptions and references only,
+  // never anything that could move money.
+  //
+  // Visibility is admins and the finance team ONLY. Residents never see
+  // deposits, deductions, balances or statements, and household leader and
+  // steward accounts see none of it either -- which is why every route here
+  // carries requireStaff on top of the finance flag.
+  // ---------------------------------------------------------------------------
+
+  /** The resident, once, with the checks every deduction route makes. */
+  async function residentForDeduction(res: any, ctx: AuthContext, residentId: string) {
+    const resident = await storage.getResident(residentId);
+    if (!resident) {
+      res.status(404).json({ message: "Resident not found" });
+      return undefined;
+    }
+    if (!requireRegion(res, ctx, resident.region)) return undefined;
+    return resident;
+  }
+
+  /** One line for the trail. Names the person and the amount, as money should. */
+  const deductionSummary = (
+    verb: string,
+    resident: { firstName: string; lastName: string },
+    description: string,
+    amount: string,
+  ) => `${verb} a ${amount} deposit deduction for ${resident.firstName} ${resident.lastName}: ${description}`;
+
+  app.get('/api/deposit-deductions', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canViewFinancials", "canManageFinancials")) return;
+
+      res.json(filterByRegion(ctx, await storage.getAllDepositDeductions()));
+    } catch (error) {
+      sendError(res, error, "Failed to fetch deposit deductions");
+    }
+  });
+
+  app.post('/api/deposit-deductions', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageFinancials")) return;
+
+      const body = insertDepositDeductionSchema.parse(req.body);
+
+      const resident = await residentForDeduction(res, ctx, body.residentId);
+      if (!resident) return;
+
+      // The region and the house come from the resident, and the actor from
+      // the session. None of the three is ever taken from the body.
+      const deduction = await storage.createDepositDeduction({
+        ...body,
+        propertyId: resident.propertyId,
+        region: resident.region,
+        buildingAddress: resident.buildingAddress,
+        recordedByUserId: ctx.userId,
+        recordedByEmail: ctx.user.email ?? null,
+      });
+
+      recordAuditEvent(ctx, {
+        action: AUDIT_ACTIONS.DEPOSIT_DEDUCTION_ADDED,
+        entityType: "deposit_deduction",
+        entityId: deduction.id,
+        summary: deductionSummary("Added", resident, body.description, body.amount),
+        details: { residentId: resident.id, amount: body.amount, region: resident.region },
+      });
+
+      res.json(deduction);
+    } catch (error) {
+      sendError(res, error, "Failed to record the deduction");
+    }
+  });
+
+  /**
+   * A common-area charge, divided across a house.
+   *
+   * A hole in a common room has to be split across the people living there.
+   * Two things about how this is stored decide whether the ledger stays
+   * trustworthy:
+   *
+   *   - **The result is individual per-person line items**, never a shared
+   *     charge with a divisor. A later edit must not silently re-divide
+   *     somebody's already-settled balance. `splitGroupId` is kept for
+   *     provenance and display, and nothing ever recomputes from it.
+   *   - **The whole split is written in one call.** A half-applied split
+   *     leaves some of a house charged and some not, and the shares no longer
+   *     adding up to the charge.
+   *
+   * The RA names who is on the hook, having seen and edited the split first --
+   * so the request is the truth about that, not the roster. Where damage is
+   * attributable to one person, they use the single-deduction route instead.
+   */
+  app.post('/api/deposit-deductions/split', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageFinancials")) return;
+
+      const body = z
+        .object({
+          propertyId: z.string().min(1),
+          description: z
+            .string()
+            .trim()
+            .min(1, "Say what the charge is for")
+            .max(300, "Keep the description under 300 characters"),
+          amount: z.coerce.number().finite().min(0, "Must be 0 or greater"),
+          chargeDate: z.coerce.date(),
+          residentIds: z.array(z.string().min(1)).min(1, "Choose at least one person to split this across"),
+        })
+        .parse(req.body);
+
+      const property = await storage.getProperty(body.propertyId);
+      if (!property) {
+        return res.status(404).json({ message: "Property not found" });
+      }
+      if (!requireRegion(res, ctx, property.region)) return;
+
+      // Everybody charged has to actually live here. Without this a split
+      // becomes a way to write a deduction against somebody in a region the
+      // caller cannot reach.
+      const roster = await storage.getResidentsByProperty(property.id);
+      const byId = new Map(roster.map((resident) => [resident.id, resident]));
+      const people = body.residentIds.map((id) => byId.get(id));
+      if (people.some((person) => !person)) {
+        return res.status(400).json({ message: "Everybody in a split has to live in that house" });
+      }
+
+      // Cents, not dollars: splitting in floating-point is how
+      // 33.333333333333336 ends up on a worksheet finance acts on.
+      const shares = splitEvenly(toCents(body.amount), people.length);
+      const splitGroupId = randomUUID();
+
+      const rows = people.map((person, index) => ({
+        residentId: person!.id,
+        propertyId: property.id,
+        description: body.description,
+        amount: fromCents(shares[index]),
+        chargeDate: body.chargeDate,
+        splitGroupId,
+        region: property.region,
+        buildingAddress: property.address,
+        recordedByUserId: ctx.userId,
+        recordedByEmail: ctx.user.email ?? null,
+      }));
+
+      const created = await storage.createDepositDeductions(rows);
+
+      // One event per person, because one person's balance changing is the
+      // thing somebody may later have to account for.
+      people.forEach((person, index) => {
+        recordAuditEvent(ctx, {
+          action: AUDIT_ACTIONS.DEPOSIT_DEDUCTION_ADDED,
+          entityType: "deposit_deduction",
+          entityId: created[index]?.id ?? null,
+          summary: deductionSummary("Added", person!, body.description, fromCents(shares[index])),
+          details: {
+            residentId: person!.id,
+            amount: fromCents(shares[index]),
+            splitGroupId,
+            splitAcross: people.length,
+            region: property.region,
+          },
+        });
+      });
+
+      res.json(created);
+    } catch (error) {
+      sendError(res, error, "Failed to split the charge");
+    }
+  });
+
+  app.patch('/api/deposit-deductions/:id', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageFinancials")) return;
+
+      const existing = await storage.getDepositDeduction(req.params.id);
+      if (!existing) {
+        return res.status(404).json({ message: "Deduction not found" });
+      }
+      if (!requireRegion(res, ctx, existing.region)) return;
+
+      // residentId is not editable: moving a deduction between people is two
+      // separate acts on two separate balances, and the trail should say so.
+      const body = insertDepositDeductionSchema.partial().omit({ residentId: true }).parse(req.body);
+
+      const updated = await storage.updateDepositDeduction(req.params.id, body);
+      const resident = await storage.getResident(existing.residentId);
+
+      recordAuditEvent(ctx, {
+        action: AUDIT_ACTIONS.DEPOSIT_DEDUCTION_UPDATED,
+        entityType: "deposit_deduction",
+        entityId: req.params.id,
+        summary: deductionSummary(
+          "Changed",
+          resident ?? { firstName: "a former", lastName: "resident" },
+          updated.description,
+          updated.amount,
+        ),
+        details: { fields: changedFields(existing as unknown as Record<string, unknown>, body as Record<string, unknown>), region: existing.region },
+      });
+
+      res.json(updated);
+    } catch (error) {
+      sendError(res, error, "Failed to update the deduction");
+    }
+  });
+
+  app.delete('/api/deposit-deductions/:id', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageFinancials")) return;
+
+      const existing = await storage.getDepositDeduction(req.params.id);
+      if (!existing) {
+        return res.status(404).json({ message: "Deduction not found" });
+      }
+      if (!requireRegion(res, ctx, existing.region)) return;
+
+      await storage.deleteDepositDeduction(req.params.id);
+      const resident = await storage.getResident(existing.residentId);
+
+      recordAuditEvent(ctx, {
+        action: AUDIT_ACTIONS.DEPOSIT_DEDUCTION_DELETED,
+        entityType: "deposit_deduction",
+        entityId: req.params.id,
+        summary: deductionSummary(
+          "Removed",
+          resident ?? { firstName: "a former", lastName: "resident" },
+          existing.description,
+          existing.amount,
+        ),
+        details: { residentId: existing.residentId, amount: existing.amount, region: existing.region },
+      });
+
+      res.json({ success: true });
+    } catch (error) {
+      sendError(res, error, "Failed to remove the deduction");
     }
   });
 

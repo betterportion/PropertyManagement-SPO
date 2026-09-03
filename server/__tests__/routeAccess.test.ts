@@ -3825,6 +3825,273 @@ describe("resident finances (regional leads only)", () => {
   });
 });
 
+describe("the deposit deduction ledger", () => {
+  const WEST_PROPERTY = { id: "prop-west", name: "Cleveland House", region: "West Central", address: "1 Main St" };
+  const ALICE_RESIDENT = { id: "res-a", firstName: "Alice", lastName: "Ng", propertyId: "prop-west", region: "West Central", buildingAddress: "1 Main St", isActive: true };
+  const EAST_RESIDENT = { id: "res-e", firstName: "Eve", lastName: "Ito", propertyId: "prop-east", region: "East Central", buildingAddress: "9 Elm", isActive: true };
+
+  const FINANCE = { canViewFinancials: true, canManageFinancials: true };
+  const westLead = (permissions: Record<string, unknown> = FINANCE) =>
+    actAs(STAFF, { ...permissions, allowedRegions: ["West Central"] });
+
+  beforeEach(() => {
+    storageMock.getResident.mockImplementation(async (id: string) =>
+      id === "res-a" ? ALICE_RESIDENT : id === "res-e" ? EAST_RESIDENT : undefined,
+    );
+    storageMock.getProperty.mockResolvedValue(WEST_PROPERTY);
+    storageMock.getResidentsByProperty.mockResolvedValue([ALICE_RESIDENT]);
+    storageMock.getAllDepositDeductions.mockResolvedValue([]);
+    storageMock.createDepositDeduction.mockImplementation(async (d) => ({ id: "ded-1", ...d }));
+    storageMock.createDepositDeductions.mockImplementation(async (rows) =>
+      rows.map((row: Record<string, unknown>, index: number) => ({ id: `ded-${index}`, ...row })),
+    );
+  });
+
+  const deduct = (body: unknown) => request("POST", "/api/deposit-deductions", { body });
+
+  const validDeduction = {
+    residentId: "res-a",
+    description: "Hole in bedroom wall",
+    amount: 75,
+    chargeDate: "2026-06-01",
+  };
+
+  // ── Residents never see any of this ──────────────────────────────────────
+
+  it("refuses an anonymous caller on every route", async () => {
+    expect((await get("/api/deposit-deductions")).status).toBe(401);
+    expect((await deduct(validDeduction)).status).toBe(401);
+  });
+
+  it("refuses a resident outright, without reading or writing", async () => {
+    // Residents never see deposits, deductions, balances or statements. Not
+    // household leaders either.
+    actAs({ ...ALICE, propertyId: "prop-west" } as typeof ALICE, {
+      ...ALL_MAINTENANCE,
+      canCompleteWalkthroughs: true,
+      canViewFinancials: true,
+      canManageFinancials: true,
+    });
+    expect((await get("/api/deposit-deductions")).status).toBe(403);
+    expect((await deduct(validDeduction)).status).toBe(403);
+    expect(storageMock.getAllDepositDeductions).not.toHaveBeenCalled();
+    expect(storageMock.createDepositDeduction).not.toHaveBeenCalled();
+  });
+
+  it("refuses staff without the finance permission, without writing", async () => {
+    westLead({ canViewProperties: true });
+    expect((await deduct(validDeduction)).status).toBe(403);
+    expect(storageMock.createDepositDeduction).not.toHaveBeenCalled();
+  });
+
+  it("refuses staff holding only the view finance flag, without writing", async () => {
+    westLead({ canViewFinancials: true });
+    expect((await deduct(validDeduction)).status).toBe(403);
+    expect(storageMock.createDepositDeduction).not.toHaveBeenCalled();
+  });
+
+  it("refuses a deduction against a resident in another region, without writing", async () => {
+    westLead();
+    const { status } = await deduct({ ...validDeduction, residentId: "res-e" });
+    expect(status).toBe(403);
+    expect(storageMock.createDepositDeduction).not.toHaveBeenCalled();
+  });
+
+  // ── Server-owned fields ──────────────────────────────────────────────────
+
+  it("records who entered it, from the session rather than the body", async () => {
+    westLead();
+    const { status } = await deduct({
+      ...validDeduction,
+      recordedByUserId: "u-somebody-else",
+      recordedByEmail: "someone@else.com",
+    });
+    expect(status).toBe(200);
+    const [row] = storageMock.createDepositDeduction.mock.calls[0];
+    expect(row.recordedByUserId).toBe(STAFF.id);
+    expect(row.recordedByEmail).toBe(STAFF.email);
+  });
+
+  it("takes the region and house from the resident, never from the body", async () => {
+    westLead();
+    await deduct({ ...validDeduction, region: "East Central", buildingAddress: "somewhere else" });
+    const [row] = storageMock.createDepositDeduction.mock.calls[0];
+    expect(row.region).toBe("West Central");
+    expect(row.buildingAddress).toBe("1 Main St");
+  });
+
+  // ── Input validation ─────────────────────────────────────────────────────
+
+  it("refuses a deduction with no description", async () => {
+    westLead();
+    expect((await deduct({ ...validDeduction, description: "  " })).status).toBe(400);
+    expect(storageMock.createDepositDeduction).not.toHaveBeenCalled();
+  });
+
+  it("refuses a negative amount", async () => {
+    // A negative deduction is a refund, and refunds are not what this is.
+    westLead();
+    expect((await deduct({ ...validDeduction, amount: -50 })).status).toBe(400);
+    expect(storageMock.createDepositDeduction).not.toHaveBeenCalled();
+  });
+
+  it("accepts the number a form sends and stores it as the string the column takes", async () => {
+    westLead();
+    await deduct({ ...validDeduction, amount: 75.5 });
+    const [row] = storageMock.createDepositDeduction.mock.calls[0];
+    expect(row.amount).toBe("75.5");
+  });
+
+  // ── The audit trail ──────────────────────────────────────────────────────
+
+  it("records an audit event naming the resident and the amount", async () => {
+    westLead();
+    await deduct(validDeduction);
+    expect(storageMock.createAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "deposit_deduction.added",
+        entityType: "deposit_deduction",
+        summary: expect.stringContaining("Alice"),
+      }),
+    );
+    const [event] = storageMock.createAuditEvent.mock.calls[0];
+    expect(event.summary).toContain("75");
+  });
+
+  it("records one when a deduction is removed", async () => {
+    westLead();
+    storageMock.getDepositDeduction.mockResolvedValue({
+      id: "ded-1", residentId: "res-a", description: "Hole in wall", amount: "75.00", region: "West Central", buildingAddress: "1 Main St",
+    });
+    const { status } = await request("DELETE", "/api/deposit-deductions/ded-1", {});
+    expect(status).toBe(200);
+    expect(storageMock.createAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "deposit_deduction.deleted" }),
+    );
+  });
+
+  it("refuses to delete one in another region, without deleting", async () => {
+    westLead();
+    storageMock.getDepositDeduction.mockResolvedValue({
+      id: "ded-9", residentId: "res-e", region: "East Central", amount: "10.00", description: "x",
+    });
+    const { status } = await request("DELETE", "/api/deposit-deductions/ded-9", {});
+    expect(status).toBe(403);
+    expect(storageMock.deleteDepositDeduction).not.toHaveBeenCalled();
+  });
+});
+
+describe("splitting a common-area charge across a house", () => {
+  const WEST_PROPERTY = { id: "prop-west", name: "Cleveland House", region: "West Central", address: "1 Main St" };
+  const EAST_PROPERTY = { id: "prop-east", name: "Como House", region: "East Central", address: "9 Elm" };
+
+  const HOUSE = ["res-a", "res-b", "res-c"].map((id, index) => ({
+    id,
+    firstName: `Person${index}`,
+    lastName: "X",
+    propertyId: "prop-west",
+    region: "West Central",
+    buildingAddress: "1 Main St",
+    isActive: true,
+  }));
+
+  const FINANCE = { canViewFinancials: true, canManageFinancials: true };
+  const westLead = (permissions: Record<string, unknown> = FINANCE) =>
+    actAs(STAFF, { ...permissions, allowedRegions: ["West Central"] });
+
+  beforeEach(() => {
+    storageMock.getProperty.mockImplementation(async (id: string) =>
+      id === "prop-west" ? WEST_PROPERTY : id === "prop-east" ? EAST_PROPERTY : undefined,
+    );
+    storageMock.getResidentsByProperty.mockResolvedValue(HOUSE);
+    storageMock.createDepositDeductions.mockImplementation(async (rows) =>
+      rows.map((row: Record<string, unknown>, index: number) => ({ id: `ded-${index}`, ...row })),
+    );
+  });
+
+  const split = (body: unknown) => request("POST", "/api/deposit-deductions/split", { body });
+
+  const validSplit = {
+    propertyId: "prop-west",
+    description: "Hole in the common room wall",
+    amount: 100,
+    chargeDate: "2026-06-01",
+    residentIds: ["res-a", "res-b", "res-c"],
+  };
+
+  it("refuses a resident, without writing", async () => {
+    actAs(ALICE, { ...ALL_MAINTENANCE, canManageFinancials: true });
+    expect((await split(validSplit)).status).toBe(403);
+    expect(storageMock.createDepositDeductions).not.toHaveBeenCalled();
+  });
+
+  it("refuses a house in another region, without writing", async () => {
+    westLead();
+    expect((await split({ ...validSplit, propertyId: "prop-east" })).status).toBe(403);
+    expect(storageMock.createDepositDeductions).not.toHaveBeenCalled();
+  });
+
+  it("stores $100 across 3 as 33.34, 33.33, 33.33 — individual rows, not a divisor", async () => {
+    // The important part: a later edit must not silently re-divide somebody's
+    // settled balance, which is only true if the shares are stored per person.
+    westLead();
+    const { status } = await split(validSplit);
+    expect(status).toBe(200);
+
+    const [rows] = storageMock.createDepositDeductions.mock.calls[0];
+    expect(rows.map((r: { amount: string }) => r.amount)).toEqual(["33.34", "33.33", "33.33"]);
+    expect(rows).toHaveLength(3);
+  });
+
+  it("gives every row of a split the same group id, for provenance only", async () => {
+    westLead();
+    await split(validSplit);
+    const [rows] = storageMock.createDepositDeductions.mock.calls[0];
+    const groups = new Set(rows.map((r: { splitGroupId: string }) => r.splitGroupId));
+    expect(groups.size).toBe(1);
+    expect([...groups][0]).toBeTruthy();
+  });
+
+  it("writes the whole split in one call, so a house is never half-charged", async () => {
+    westLead();
+    await split(validSplit);
+    expect(storageMock.createDepositDeductions).toHaveBeenCalledTimes(1);
+    expect(storageMock.createDepositDeduction).not.toHaveBeenCalled();
+  });
+
+  it("charges only the people the RA named, not everybody in the house", async () => {
+    // The RA can add or remove people before saving; the request is the truth
+    // about who is on the hook, not the roster.
+    westLead();
+    await split({ ...validSplit, residentIds: ["res-a", "res-b"] });
+    const [rows] = storageMock.createDepositDeductions.mock.calls[0];
+    expect(rows.map((r: { residentId: string }) => r.residentId)).toEqual(["res-a", "res-b"]);
+    expect(rows.map((r: { amount: string }) => r.amount)).toEqual(["50.00", "50.00"]);
+  });
+
+  it("refuses somebody who does not live in that house", async () => {
+    westLead();
+    const { status } = await split({ ...validSplit, residentIds: ["res-a", "res-outsider"] });
+    expect(status).toBe(400);
+    expect(storageMock.createDepositDeductions).not.toHaveBeenCalled();
+  });
+
+  it("refuses a split across nobody", async () => {
+    westLead();
+    expect((await split({ ...validSplit, residentIds: [] })).status).toBe(400);
+    expect(storageMock.createDepositDeductions).not.toHaveBeenCalled();
+  });
+
+  it("records one audit event per person charged", async () => {
+    westLead();
+    await split(validSplit);
+    const added = storageMock.createAuditEvent.mock.calls.filter(
+      ([event]: [{ action: string }]) => event.action === "deposit_deduction.added",
+    );
+    expect(added).toHaveLength(3);
+  });
+});
+
 describe("resident finances require the finance permission", () => {
   // Finance moved from role-gated (every staff member) to flag-gated, so the
   // later finance/admin split is a grant rather than a guard rewrite. Staff

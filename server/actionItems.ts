@@ -27,12 +27,21 @@ import type {
 } from "@shared/schema";
 import { summarizeSetup, setupRowsByProperty } from "@shared/propertySetup";
 import { assetLifecycle } from "@shared/assetLifecycle";
+import { depositReturnDeadline } from "@shared/depositLedger";
 
 /** How far ahead a recurring schedule becomes an action item. */
 export const SCHEDULE_LOOKAHEAD_DAYS = 30;
 
 /** How far ahead a lease renewal becomes an action item — two months. */
 export const LEASE_LOOKAHEAD_DAYS = 60;
+
+/**
+ * How far ahead a coming move-out raises its deposit.
+ *
+ * Before somebody has even left, so the money is ready rather than being
+ * chased after the fact.
+ */
+export const DEPOSIT_LOOKAHEAD_DAYS = 30;
 
 const DAY_MS = 24 * 60 * 60 * 1_000;
 
@@ -206,23 +215,53 @@ export function buildActionItems(inputs: ActionItemInputs, now: Date = new Date(
     });
   }
 
-  // Finance — deposits still held for a resident who has moved out.
-  const movedOut = new Set(inputs.residents.filter((r) => !r.isActive).map((r) => r.id));
+  // Finance — deposits that have to go back.
+  //
+  // Raised for somebody who has already left, and for somebody leaving within
+  // DEPOSIT_LOOKAHEAD_DAYS so the money is ready rather than chased after the
+  // fact. It clears when the deposit is marked returned -- "statement sent" is
+  // progress, not completion, and the money is still held.
+  //
+  // The deadline comes from the resident's MOVE-OUT DATE and the house's
+  // admin-set depositReturnDays. No setting means no deadline rather than an
+  // invented one: the states SPO operates in have materially different rules,
+  // and a default standing in for a figure nobody chose would be the portal
+  // making a legal determination it must not make. The item is still raised --
+  // a deposit held for somebody who has gone is worth surfacing either way.
+  const residentsById = new Map(inputs.residents.map((r) => [r.id, r]));
+  const propertiesById = new Map(inputs.properties.map((p) => [p.id, p]));
+  const depositHorizon = new Date(now.getTime() + DEPOSIT_LOOKAHEAD_DAYS * DAY_MS);
+
   for (const d of inputs.deposits) {
-    if (d.status !== "held") continue;
-    if (!movedOut.has(d.residentId)) continue;
+    if (d.status === "returned") continue;
+
+    const resident = residentsById.get(d.residentId);
+    const movingOut = resident?.moveOutDate
+      ? resident.moveOutDate instanceof Date
+        ? resident.moveOutDate
+        : new Date(resident.moveOutDate)
+      : null;
+
+    // Somebody still living there with no departure planned needs nothing.
+    const hasLeft = resident ? !resident.isActive : false;
+    const leavingSoon =
+      movingOut !== null && !Number.isNaN(movingOut.getTime()) && movingOut <= depositHorizon;
+    if (!hasLeft && !leavingSoon) continue;
+
+    const deadline = depositReturnDeadline(
+      movingOut,
+      propertiesById.get(d.propertyId)?.depositReturnDays,
+    );
+
     items.push({
       id: d.id,
       source: "deposit",
       category: "finance",
-      title: "Deposit to return",
+      title: leavingSoon && !hasLeft ? "Deposit to return soon" : "Deposit to return",
       subtitle: d.buildingAddress,
       amount: d.amountHeld,
-      // A held deposit for someone who has left needs returning now; it has no
-      // stored deadline yet (that model is still being reconciled with SPO), so
-      // it always reads as due.
-      dueDate: iso(now),
-      overdue: true,
+      dueDate: iso(deadline),
+      overdue: deadline !== null && deadline < now,
       region: d.region,
     });
   }

@@ -43,6 +43,95 @@ function setupItem(over: Partial<PropertySetupItem>): PropertySetupItem {
   return { id: "si1", propertyId: "p1", itemKey: "electric", status: "open", region: "West Central", ...over } as PropertySetupItem;
 }
 
+describe("when a deposit has to go back", () => {
+  const HOUSE = property({ id: "p1", ownership: "owned", leaseRenewalDate: null, depositReturnDays: 21 });
+
+  const leaving = (over: Partial<Resident> = {}) =>
+    resident({ id: "res-gone", propertyId: "p1", isActive: false, moveOutDate: days(-1), ...over });
+
+  it("gives the item a deadline counted from the move-out date", () => {
+    // The clock starts when possession came back, not at lease end -- somebody
+    // can leave in April on a lease running to July.
+    const items = buildActionItems({
+      ...empty,
+      properties: [HOUSE],
+      deposits: [deposit({ propertyId: "p1" })],
+      residents: [leaving({ moveOutDate: days(-1) })],
+    }, NOW);
+
+    const item = items.find((i) => i.source === "deposit")!;
+    // Moved out yesterday, 21 days to return it.
+    expect(item.dueDate?.slice(0, 10)).toBe("2026-09-04");
+    expect(item.overdue).toBe(false);
+  });
+
+  it("reads as overdue once the window has closed", () => {
+    const items = buildActionItems({
+      ...empty,
+      properties: [HOUSE],
+      deposits: [deposit({ propertyId: "p1" })],
+      residents: [leaving({ moveOutDate: days(-60) })],
+    }, NOW);
+    expect(items.find((i) => i.source === "deposit")!.overdue).toBe(true);
+  });
+
+  it("warns before somebody has even left, so the money is ready", () => {
+    const items = buildActionItems({
+      ...empty,
+      properties: [HOUSE],
+      deposits: [deposit({ propertyId: "p1" })],
+      residents: [resident({ id: "res-gone", propertyId: "p1", isActive: true, moveOutDate: days(20) })],
+    }, NOW);
+    expect(items.filter((i) => i.source === "deposit")).toHaveLength(1);
+  });
+
+  it("stays quiet about a move-out further out than the warning window", () => {
+    const items = buildActionItems({
+      ...empty,
+      properties: [HOUSE],
+      deposits: [deposit({ propertyId: "p1" })],
+      residents: [resident({ id: "res-gone", propertyId: "p1", isActive: true, moveOutDate: days(120) })],
+    }, NOW);
+    expect(items.filter((i) => i.source === "deposit")).toHaveLength(0);
+  });
+
+  it("has no deadline when the house has no setting, but still raises the item", () => {
+    // The number is SPO's own reminder setting, not a legal determination.
+    // Without one there is nothing to count to -- but a deposit still held for
+    // somebody who has left is still worth surfacing.
+    const items = buildActionItems({
+      ...empty,
+      properties: [property({ id: "p1", ownership: "owned", leaseRenewalDate: null, depositReturnDays: null })],
+      deposits: [deposit({ propertyId: "p1" })],
+      residents: [leaving()],
+    }, NOW);
+    const item = items.find((i) => i.source === "deposit");
+    expect(item).toBeTruthy();
+    expect(item!.dueDate).toBeNull();
+  });
+
+  it("clears the moment the deposit is marked returned", () => {
+    const items = buildActionItems({
+      ...empty,
+      properties: [HOUSE],
+      deposits: [deposit({ propertyId: "p1", status: "returned" })],
+      residents: [leaving()],
+    }, NOW);
+    expect(items.filter((i) => i.source === "deposit")).toHaveLength(0);
+  });
+
+  it("stays raised while a statement has been sent but the money has not gone back", () => {
+    // "Statement sent" is progress, not completion. The deposit is still held.
+    const items = buildActionItems({
+      ...empty,
+      properties: [HOUSE],
+      deposits: [deposit({ propertyId: "p1", status: "statement_sent" })],
+      residents: [leaving()],
+    }, NOW);
+    expect(items.filter((i) => i.source === "deposit")).toHaveLength(1);
+  });
+});
+
 describe("assets coming up for replacement on the dashboard", () => {
   it("raises an asset whose replacement is inside the warning window", () => {
     const items = buildActionItems({

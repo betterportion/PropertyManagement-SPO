@@ -23,6 +23,9 @@ export const propertyFormSchema = insertPropertySchema.extend({
   // contact beside it -- never a stored login.
   leaseDocumentUrl: z.string().trim().url("Paste the full link, starting with https://").or(z.literal("")).nullish(),
   maintenancePortalUrl: z.string().trim().url("Paste the full link, starting with https://").or(z.literal("")).nullish(),
+  // The numeric column round-trips as a string; a number input yields a
+  // number. The server coerces on submit, as it does for every other amount.
+  depositAmount: z.coerce.number().min(0, "Must be 0 or greater").nullable().optional(),
 });
 export type PropertyForm = z.infer<typeof propertyFormSchema>;
 
@@ -232,6 +235,83 @@ export default function PropertyLeaseFields({ form }: { form: UseFormReturn<Prop
           />
         </>
       )}
+
+      {/* 6.3 — SPO's own reminder setting, per house. Deliberately NOT a
+          state-to-deadline lookup: the states SPO operates in have materially
+          different rules (Arizona counts business days, Florida and Kansas are
+          two-stage), and a table here would bake legal advice into the repo
+          and go stale silently. SPO's admin and finance teams are responsible
+          for compliance; the portal reminds. */}
+      <div className="grid grid-cols-2 gap-4">
+        <FormField
+          control={form.control}
+          name="depositAmount"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Deposit for this house ($)</FormLabel>
+              <FormControl>
+                <Input
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  {...field}
+                  value={field.value ?? ""}
+                  onChange={(event) => field.onChange(event.target.value ? Number(event.target.value) : null)}
+                  data-testid="input-property-deposit-amount"
+                />
+              </FormControl>
+              <p className="text-xs text-muted-foreground">
+                The usual figure. Any one resident can be given a different amount on their own record.
+              </p>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+
+        <FormField
+          control={form.control}
+          name="depositReturnDays"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Days to return a deposit</FormLabel>
+              <FormControl>
+                <Input
+                  type="number"
+                  min={0}
+                  {...field}
+                  value={field.value ?? ""}
+                  onChange={(event) => field.onChange(event.target.value ? Number(event.target.value) : null)}
+                  data-testid="input-property-deposit-return-days"
+                />
+              </FormControl>
+              <p className="text-xs text-muted-foreground">
+                SPO's own reminder setting, counted from the resident's move-out date. It is not a
+                legal determination — check the rule for this state and set it accordingly.
+              </p>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+      </div>
+
+      <FormField
+        control={form.control}
+        name="depositNotes"
+        render={({ field }) => (
+          <FormItem>
+            <FormLabel>What that setting is based on (Optional)</FormLabel>
+            <FormControl>
+              <Input
+                {...field}
+                value={field.value ?? ""}
+                placeholder="e.g. 21 days, per the state statute our counsel pointed us at"
+                data-testid="input-property-deposit-notes"
+              />
+            </FormControl>
+            <FormMessage />
+          </FormItem>
+        )}
+      />
 
       {!isRented &&
         contactField(

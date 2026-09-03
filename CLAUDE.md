@@ -120,7 +120,8 @@ Defined in `shared/schema.ts` using Drizzle, with Zod insert schemas generated b
 | `property_setup_items` | One row per checklist item per house: three states (open/done/not applicable), who set it, when, and an optional note. The item list itself is fixed in code (`shared/propertySetup.ts`), so the row stores an `itemKey` rather than a label | `propertyId` → `properties` cascades; `setByUserId` → `users` set-null; unique on (property, item) |
 | `residents` | People living in a house: name, email, optional phone and notes, move-in/move-out dates, `isActive`. Deliberately **not** `users` — a resident on the roster need not have a login | `propertyId` → `properties`, cascades; `region`/`buildingAddress` denormalised |
 | `rent_payments` | One row per resident per `YYYY-MM` period: amount, status (`unpaid`/`paid`/`waived`/`failed`), paid date, free-text `reference`. `failed` is a bounced payment and still counts as outstanding. The `reference` is a note like "check #1234" or a processor ID — **never** an account or card number | `residentId` → `residents` cascades; unique on (resident, period) |
-| `security_deposits` | One deposit per resident: amount held, status (`held`/`returned`/`partially_returned`/`withheld`), amount returned, and deductions as a note rather than an itemised ledger | `residentId` → `residents`, cascades, unique |
+| `security_deposits` | One deposit per resident: amount held, status (`held`/`statement_sent`/`returned`/`partially_returned`/`withheld`), amount returned, `statementProvidedOn`, and `closeoutReference` — the QuickBooks or Ramp reference for the transaction, **a reference only**. `deductionsNotes` is now legacy free text kept as history | `residentId` → `residents`, cascades, unique |
+| `deposit_deductions` | One line item against one resident's deposit: description, amount, charge date, who recorded it, and optional loose links to the walkthrough item or maintenance request it came from. A split charge is stored as individual per-person rows sharing a `splitGroupId` | `residentId` → `residents` cascades; `recordedByUserId` → `users` set-null, with `recordedByEmail` kept alongside |
 | `tasks` | Staff to-dos: title, category, open/done, due date, optional region and assignee. Reminders generated on a calendar carry a unique `sourceKey` so the daily job never duplicates one; hand-created tasks leave it null | `assignedToUserId`, `createdBy` and `completedBy` → `users`, all set-null so a task outlives its author |
 | `request_contacts` | Join table linking contacts to maintenance requests | Both sides cascade |
 | `uploads` | One row per stored file: random storage key, original name, content type, size, uploader | `uploadedBy` is a user ID; no FK, so the row outlives the account |
@@ -235,6 +236,25 @@ Region names are compared in one canonical form, so a stored legacy `west-centra
 
 - **The linked requests are filtered by the *request's* region, not the contact's.** A vendor can work across regions, and reading their page must not become a way to see requests the caller could not otherwise open.
 - **There is no rating field, and adding one would be a regression.** A star score on a vendor SPO may have to keep using invites arguments about the number and tells an incoming RA far less than a paragraph does. There is also no separate "project" entity: a project here always traces back to a request, and a second entity to keep in sync would decay.
+
+### Deposits
+
+**SPO holds a deposit per resident and the portal is a ledger and a reminder — the money moves in QuickBooks and Ramp.** Amounts, dates, descriptions and references only; the financial-data rule applies here without exception.
+
+**Visibility is admins and the finance team only.** Residents never see deposits, deductions, balances or statements, and a household leader or steward sees none of it either — every deduction route carries `requireStaff` on top of the finance flag, and there is a test asserting a leader holding both finance flags is still refused.
+
+`shared/depositLedger.ts` owns the arithmetic, in **cents as integers**: splitting in floating-point dollars is how 33.333333333333336 ends up on a worksheet finance acts on. It is in `shared/` because the split must be shown and edited *before* it is saved, so the browser and the server have to compute it identically.
+
+- **A split is stored as individual per-person line items, never a shared charge with a divisor.** This is the important part: a later edit must not silently re-divide somebody's already-settled balance. `splitGroupId` exists for provenance and display and **nothing ever recomputes from it**. The whole split is written in one `createDepositDeductions` call, so a house is never half-charged.
+- **The remainder is spread a cent at a time from the top**, so nobody pays more than a cent above anybody else. $100 across 3 is 33.34/33.33/33.33; $250 across 7 is three of 35.72 then four of 35.71. Those worked examples are in the tests as hand-computed literals, never recomputed the way the code does.
+- **A balance may go negative and says so.** Damage can exceed a deposit, and clamping to zero would hide the shortfall from the person who has to decide about it.
+- **The legacy `deductionsNotes` is displayed as history and never parsed into rows.** It is free text written by people, and a migration that guessed would be wrong in ways nobody notices until a deposit is short.
+
+**Return deadlines are one admin-set integer per property, `depositReturnDays`, counted from the resident's move-out date** — when possession came back, not lease end; somebody can leave in April on a lease running to July. **Do not build a state-to-deadline lookup table.** The states SPO operates in have materially different rules (Arizona counts business days, Florida and Kansas are two-stage), and a table would bake legal advice into the repo and go stale silently. No setting means **no deadline** rather than a default standing in for one — an invented figure would be a legal determination the portal must not make — though the dashboard still raises the item, because a deposit held for somebody who has gone is worth surfacing either way. `DEPOSIT_LOOKAHEAD_DAYS` raises it 30 days before a move-out so the money is ready rather than chased.
+
+**The statement is an internal worksheet for finance, not a document the portal issues.** There is deliberately no send button: delivery happens outside the portal by product decision, not because email is unavailable. Since delivery happens elsewhere, `statementProvidedOn` is set by hand — there is no send action to infer it from. `statement_sent` is progress, not completion: the money is still held and the dashboard keeps saying so until it goes back.
+
+Every deduction added, changed or removed records an audit event naming the resident and the amount — one per person on a split, because one person's balance changing is what somebody may later have to account for. Routine two-year retention: this is money, not access history.
 
 ### Asset lifecycle and snooze
 

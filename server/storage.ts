@@ -285,11 +285,25 @@ export interface IStorage {
   getDepositDeduction(id: string): Promise<DepositDeduction | undefined>;
   getDepositDeductionsByResident(residentId: string): Promise<DepositDeduction[]>;
   createDepositDeduction(
-    deduction: InsertDepositDeduction & { recordedByUserId: string | null; recordedByEmail: string | null },
+    deduction: InsertDepositDeduction & {
+      propertyId: string;
+      region: string;
+      buildingAddress: string;
+      splitGroupId?: string | null;
+      recordedByUserId: string | null;
+      recordedByEmail: string | null;
+    },
   ): Promise<DepositDeduction>;
   /** Writes a whole split at once, so a house is never half-charged. */
   createDepositDeductions(
-    deductions: (InsertDepositDeduction & { recordedByUserId: string | null; recordedByEmail: string | null })[],
+    deductions: (InsertDepositDeduction & {
+      propertyId: string;
+      region: string;
+      buildingAddress: string;
+      splitGroupId?: string | null;
+      recordedByUserId: string | null;
+      recordedByEmail: string | null;
+    })[],
   ): Promise<DepositDeduction[]>;
   updateDepositDeduction(id: string, data: Partial<InsertDepositDeduction>): Promise<DepositDeduction>;
   deleteDepositDeduction(id: string): Promise<void>;
@@ -1429,7 +1443,14 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createDepositDeduction(
-    deduction: InsertDepositDeduction & { recordedByUserId: string | null; recordedByEmail: string | null },
+    deduction: InsertDepositDeduction & {
+      propertyId: string;
+      region: string;
+      buildingAddress: string;
+      splitGroupId?: string | null;
+      recordedByUserId: string | null;
+      recordedByEmail: string | null;
+    },
   ): Promise<DepositDeduction> {
     const [row] = await db.insert(depositDeductions).values(deduction).returning();
     return row;
@@ -1443,7 +1464,14 @@ export class DatabaseStorage implements IStorage {
    * adding up to the charge.
    */
   async createDepositDeductions(
-    deductions: (InsertDepositDeduction & { recordedByUserId: string | null; recordedByEmail: string | null })[],
+    deductions: (InsertDepositDeduction & {
+      propertyId: string;
+      region: string;
+      buildingAddress: string;
+      splitGroupId?: string | null;
+      recordedByUserId: string | null;
+      recordedByEmail: string | null;
+    })[],
   ): Promise<DepositDeduction[]> {
     if (deductions.length === 0) return [];
     return await db.insert(depositDeductions).values(deductions).returning();

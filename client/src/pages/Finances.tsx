@@ -23,6 +23,8 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { type RentPayment, type SecurityDeposit, type Resident, type Property } from "@shared/schema";
 import { z } from "zod";
 import { Section, Container, PageHeader, PageStack } from "@/components/layout/page";
+import DepositLedger from "@/components/deposit/DepositLedger";
+import SplitChargeDialog from "@/components/deposit/SplitChargeDialog";
 import { LoadingState, EmptyState } from "@/components/states";
 import { formatCurrency, formatDate } from "@/lib/format";
 
@@ -276,6 +278,11 @@ export default function Finances() {
 
   const visibleDeposits = inRegion(deposits);
 
+  // Which house a common-area charge is being split across, if any.
+  const [splitPropertyId, setSplitPropertyId] = useState<string>("");
+  const [isSplitOpen, setIsSplitOpen] = useState(false);
+  const splitProperty = properties.find((property) => property.id === splitPropertyId) ?? null;
+
   const renderDeposits = () => {
     if (visibleDeposits.length === 0) {
       return (
@@ -312,7 +319,6 @@ export default function Finances() {
                           {d.amountReturned ? ` · ${formatCurrency(d.amountReturned)} returned` : ""}
                           {d.returnedDate ? ` ${formatDate(d.returnedDate)}` : ""}
                         </p>
-                        {d.deductionsNotes && <p className="mt-1 text-sm text-muted-foreground">{d.deductionsNotes}</p>}
                       </div>
                       {canManage && (
                         <div className="flex shrink-0 items-center gap-2">
@@ -335,6 +341,25 @@ export default function Finances() {
                       )}
                     </CardContent>
                   </Card>
+                );
+              })}
+
+              {/* The itemised ledger, one per resident: what is held, what has
+                  been taken off it, what is left, and the statement. The
+                  legacy free-text note is shown inside it as history and is
+                  never counted -- reading amounts out of a sentence somebody
+                  typed would be a guess, and a guess here is a deposit that
+                  comes back short. */}
+              {list.map((d) => {
+                const resident = residents.find((r) => r.id === d.residentId);
+                if (!resident) return null;
+                return (
+                  <DepositLedger
+                    key={`ledger-${d.id}`}
+                    resident={resident}
+                    deposit={d}
+                    canManage={canManage}
+                  />
                 );
               })}
             </div>
@@ -561,8 +586,35 @@ export default function Finances() {
               </TabsContent>
 
               <TabsContent value="deposits" className="mt-6 space-y-4">
+                {canManage && splitProperty && (
+                  <SplitChargeDialog
+                    property={splitProperty}
+                    residents={residents.filter((r) => r.propertyId === splitProperty.id)}
+                    open={isSplitOpen}
+                    onOpenChange={setIsSplitOpen}
+                  />
+                )}
                 {canManage && (
-                  <div className="flex justify-end">
+                  <div className="flex justify-end gap-2">
+                    {/* A hole in a common room has to be divided across the
+                        house. Where damage is attributable to one person, the
+                        per-resident deduction is the right tool instead. */}
+                    <Select
+                      value={splitProperty?.id ?? ""}
+                      onValueChange={(id) => {
+                        setSplitPropertyId(id);
+                        setIsSplitOpen(true);
+                      }}
+                    >
+                      <SelectTrigger className="w-64" data-testid="select-split-property" aria-label="Split a common-area charge">
+                        <SelectValue placeholder="Split a common-area charge" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {properties.map((property) => (
+                          <SelectItem key={property.id} value={property.id}>{property.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                     <Dialog open={isDepositOpen} onOpenChange={(o) => { setIsDepositOpen(o); if (!o) depositForm.reset(); }}>
                       <DialogTrigger asChild>
                         <Button data-testid="button-add-deposit"><Plus className="mr-2 h-4 w-4" /> Add deposit</Button>
@@ -650,6 +702,10 @@ const depositEditSchema = z.object({
   status: z.enum(["held", "statement_sent", "returned", "partially_returned", "withheld"]),
   amountReturned: z.string().optional(),
   returnedDate: z.string().optional(),
+  // The QuickBooks or Ramp reference for the transaction that returned the
+  // money. A reference ONLY -- never an account or routing number. One column,
+  // and it is what makes reconciliation possible later.
+  closeoutReference: z.string().optional(),
   deductionsNotes: z.string().optional(),
 });
 type DepositEditForm = z.infer<typeof depositEditSchema>;
@@ -671,6 +727,7 @@ function DepositEditDialog({
       status: deposit?.status ?? "held",
       amountReturned: deposit?.amountReturned ?? "",
       returnedDate: deposit?.returnedDate ? new Date(deposit.returnedDate).toISOString().slice(0, 10) : "",
+      closeoutReference: deposit?.closeoutReference ?? "",
       deductionsNotes: deposit?.deductionsNotes ?? "",
     },
   });
@@ -689,6 +746,7 @@ function DepositEditDialog({
                 status: data.status,
                 amountReturned: data.amountReturned === "" ? null : data.amountReturned,
                 returnedDate: data.returnedDate === "" ? null : data.returnedDate,
+                closeoutReference: data.closeoutReference === "" ? null : data.closeoutReference,
                 deductionsNotes: data.deductionsNotes === "" ? null : data.deductionsNotes,
               }),
             )}
@@ -726,9 +784,17 @@ function DepositEditDialog({
                 </FormItem>
               )} />
             </div>
+            <FormField control={form.control} name="closeoutReference" render={({ field }) => (
+              <FormItem>
+                <FormLabel>QuickBooks / Ramp reference <span className="text-muted-foreground text-xs">(optional)</span></FormLabel>
+                <FormControl><Input {...field} placeholder="e.g. QB bill 4471" data-testid="input-deposit-reference" /></FormControl>
+                <p className="text-xs text-muted-foreground">A reference the transaction can be found by. Never an account or card number.</p>
+                <FormMessage />
+              </FormItem>
+            )} />
             <FormField control={form.control} name="deductionsNotes" render={({ field }) => (
               <FormItem>
-                <FormLabel>Deductions / notes <span className="text-muted-foreground text-xs">(optional)</span></FormLabel>
+                <FormLabel>Earlier notes <span className="text-muted-foreground text-xs">(legacy — deductions are itemised now)</span></FormLabel>
                 <FormControl><Textarea {...field} rows={3} placeholder="e.g. $75 held back for wall repair in the kitchen." data-testid="input-deposit-notes" /></FormControl>
                 <FormMessage />
               </FormItem>

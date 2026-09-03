@@ -211,6 +211,9 @@ export default function Properties() {
       responsibleContactId: null,
       photoUrl: null,
       notes: "",
+      depositAmount: null,
+      depositReturnDays: null,
+      depositNotes: "",
     },
   });
 
@@ -247,6 +250,9 @@ export default function Properties() {
       responsibleContactId: property.responsibleContactId,
       photoUrl: property.photoUrl,
       notes: property.notes || "",
+      depositAmount: property.depositAmount ? Number(property.depositAmount) : null,
+      depositReturnDays: property.depositReturnDays,
+      depositNotes: property.depositNotes || "",
     });
     setIsEditDialogOpen(true);
   };

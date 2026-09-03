@@ -1097,6 +1097,15 @@ export const insertDepositDeductionSchema = createInsertSchema(depositDeductions
     // Server-owned: taken from the authenticated actor, never a request body.
     recordedByUserId: true,
     recordedByEmail: true,
+    // Derived from the resident the deduction is against, so that a caller
+    // cannot name a region they cannot reach and land a charge there. The
+    // route resolves the resident, checks the region, and copies all three.
+    propertyId: true,
+    region: true,
+    buildingAddress: true,
+    // Set by the split route, never by a caller: a group id the client chose
+    // could tie unrelated charges together in the display.
+    splitGroupId: true,
     createdAt: true,
     updatedAt: true,
   })
