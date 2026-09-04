@@ -259,6 +259,24 @@ export const insertMaintenanceRequestSchema = createInsertSchema(maintenanceRequ
 export type MaintenanceRequest = typeof maintenanceRequests.$inferSelect;
 export type InsertMaintenanceRequest = z.infer<typeof insertMaintenanceRequestSchema>;
 
+/**
+ * A name as typed, folded so two spellings of one thing compare equal.
+ *
+ * Trimmed, lower-cased, internal whitespace collapsed: "Living room",
+ * "living  ROOM " and "LIVING ROOM" are all one room. Nothing is stored in
+ * this form -- a label keeps its spelling -- it is only ever the key two
+ * records are matched on. Two readers depend on it: the recurring-issue
+ * rollups in server/aggregates.ts group a request's house, room and category
+ * by it, and the photo comparison in client/src/lib/walkthrough.ts matches a
+ * room across walkthroughs by it. One helper, so "the same room" cannot mean
+ * two different things on two screens.
+ *
+ * Nullish and blank both fold to "", which every caller treats as "no name".
+ */
+export function foldName(name: string | null | undefined): string {
+  return name?.trim().toLowerCase().replace(/\s+/g, " ") ?? "";
+}
+
 // Walkthrough Rooms (templates)
 export const walkthroughRooms = pgTable("walkthrough_rooms", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),

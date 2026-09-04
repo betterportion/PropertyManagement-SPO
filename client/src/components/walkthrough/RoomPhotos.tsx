@@ -1,9 +1,9 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { PhotoUpload } from "@/components/PhotoUpload";
+import PhotoThumbnail from "@/components/walkthrough/PhotoThumbnail";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { formatDate } from "@/lib/format";
 import type { Walkthrough, WalkthroughPhoto, WalkthroughRoom } from "@shared/schema";
 
 /**
@@ -63,17 +63,7 @@ export default function RoomPhotos({ walkthrough, room, canManage, uploaderEmail
       {photos.length > 0 && (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
           {photos.map((photo) => (
-            <figure key={photo.id} className="overflow-hidden rounded-md border border-border" data-testid={`photo-${photo.id}`}>
-              <img
-                src={photo.imageUrl}
-                alt={photo.notes || `${room.name} photo`}
-                className="aspect-square w-full object-cover"
-                loading="lazy"
-              />
-              <figcaption className="border-t border-border bg-background px-2 py-1 text-xs text-muted-foreground">
-                {formatDate(photo.uploadedDate)}
-              </figcaption>
-            </figure>
+            <PhotoThumbnail key={photo.id} photo={photo} alt={`${room.name} photo`} testId={`photo-${photo.id}`} />
           ))}
         </div>
       )}

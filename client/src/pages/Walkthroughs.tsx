@@ -19,6 +19,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Container, PageHeader, PageStack, Section } from "@/components/layout/page";
 import { EmptyState, LoadingState } from "@/components/states";
+import PhotoComparison from "@/components/walkthrough/PhotoComparison";
 import { useAuth } from "@/hooks/useAuth";
 import { today, useStartWalkthrough } from "@/hooks/useStartWalkthrough";
 import { formatDate } from "@/lib/format";
@@ -211,37 +212,41 @@ export default function Walkthroughs() {
               }
             />
           ) : (
-            <div className="space-y-3">
-              {propertyWalkthroughs.map((walkthrough) => {
-                const status = WALKTHROUGH_STATUS_BADGE[walkthrough.status];
-                return (
-                  <Card
-                    key={walkthrough.id}
-                    className="cursor-pointer hover-elevate active-elevate-2"
-                    onClick={() => navigate(`/walkthroughs/${walkthrough.id}`)}
-                    data-testid={`card-walkthrough-${walkthrough.id}`}
-                  >
-                    <CardContent className="flex items-center gap-3 p-4">
-                      <div className="flex-shrink-0 rounded-md bg-muted p-2">
-                        <CalendarDays className="h-5 w-5 text-muted-foreground" />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="font-semibold" data-testid={`text-walkthrough-date-${walkthrough.id}`}>
-                          {formatDate(walkthrough.walkthroughDate)}
-                        </p>
-                        <p className="truncate text-sm text-muted-foreground">
-                          {WALKTHROUGH_TYPE_LABEL[walkthrough.type]}
-                          {walkthrough.performedBy ? ` · ${walkthrough.performedBy}` : ""}
-                        </p>
-                      </div>
-                      <Badge variant={status.variant} data-testid={`badge-status-${walkthrough.id}`}>
-                        {status.label}
-                      </Badge>
-                      <ChevronRight className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
-                    </CardContent>
-                  </Card>
-                );
-              })}
+            <div className="space-y-8">
+              <div className="space-y-3">
+                {propertyWalkthroughs.map((walkthrough) => {
+                  const status = WALKTHROUGH_STATUS_BADGE[walkthrough.status];
+                  return (
+                    <Card
+                      key={walkthrough.id}
+                      className="cursor-pointer hover-elevate active-elevate-2"
+                      onClick={() => navigate(`/walkthroughs/${walkthrough.id}`)}
+                      data-testid={`card-walkthrough-${walkthrough.id}`}
+                    >
+                      <CardContent className="flex items-center gap-3 p-4">
+                        <div className="flex-shrink-0 rounded-md bg-muted p-2">
+                          <CalendarDays className="h-5 w-5 text-muted-foreground" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="font-semibold" data-testid={`text-walkthrough-date-${walkthrough.id}`}>
+                            {formatDate(walkthrough.walkthroughDate)}
+                          </p>
+                          <p className="truncate text-sm text-muted-foreground">
+                            {WALKTHROUGH_TYPE_LABEL[walkthrough.type]}
+                            {walkthrough.performedBy ? ` · ${walkthrough.performedBy}` : ""}
+                          </p>
+                        </div>
+                        <Badge variant={status.variant} data-testid={`badge-status-${walkthrough.id}`}>
+                          {status.label}
+                        </Badge>
+                        <ChevronRight className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+              </div>
+              {/* One visit compares with nothing; the section waits for a second. */}
+              {propertyWalkthroughs.length >= 2 && <PhotoComparison walkthroughs={propertyWalkthroughs} />}
             </div>
           )}
 

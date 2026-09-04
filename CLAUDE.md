@@ -216,6 +216,15 @@ Three things to preserve:
 - **One query, not N+1.** `storage.getFlaggedWalkthroughItems()` joins item → room → walkthrough and returns the flattened `FlaggedWalkthroughItem` read shape, carrying the house and room so a row reads without a follow-up request. The room's photo count is a correlated subquery, not a join, so a room with three photos still yields one row per item.
 - **No summarising and no scoring.** The server sends the items; the screen groups them by house and sorts damage first. AI summaries are deferred deliberately — this list is what that idea was actually for.
 
+### Photo comparison
+
+"Compare photos across years" on the staff walkthrough index (`client/src/components/walkthrough/PhotoComparison.tsx`) is the reason the photos are worth taking: pick a room on a house with two or more walkthroughs and see that room's photos from each dated visit side by side, oldest to newest. **A view over existing data, not a table** — `comparePhotosByRoom` in `client/src/lib/walkthrough.ts` is pure and reads the routes that already exist (`/api/walkthroughs/:id/rooms` per visit, and the staff photo list), so there is no new route and nothing to keep in sync.
+
+- **Rooms are matched across years by `foldName`** in `shared/schema.ts` — trimmed, lower-cased, whitespace collapsed — the same helper the recurring-issue rollups in `server/aggregates.ts` group a request's room by. One helper, so "the same room" cannot mean two different things on two screens. The label keeps the spelling from the oldest walkthrough.
+- **One column per dated walkthrough, and a gap is a gap.** A room absent from one year is an empty column in its place saying so, never a shifted column: the columns are the years.
+- **Staff only.** Walkthrough photos are staff-only in both directions, so the section sits on the staff index and the resident index is untouched; `routeAccess.test.ts` asserts a leader holding the completion grant for that very house gets nothing from the photo list, before the query runs.
+- **The copy on screen is part of the feature.** "This only answers 'has that crack grown' if somebody photographs the same wall each year." The feature is easy; the discipline is not, and no software fixes a photo taken from the other corner.
+
 ### Walkthrough conditions
 
 `WALKTHROUGH_CONDITIONS` in `shared/schema.ts` is the vocabulary. Two of its values look alike and are not:
