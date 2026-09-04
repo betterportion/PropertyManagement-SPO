@@ -21,10 +21,12 @@ import type { MaintenanceContact, MaintenanceRequestComment } from "@shared/sche
  *
  * What the server sends is what is shown: a household gets the shared half
  * because the list route filtered it, not because anything here hides the
- * rest. The composer is staff's -- a household reads for now (#120 adds
- * their composer) -- and it opens on Internal every time, because the
- * comment that goes wrong is "he quoted $4,200" pasted into a repair thread
- * with Shared left on from last time.
+ * rest. Two composers, one per tier. Staff's opens on Internal every time,
+ * because the comment that goes wrong is "he quoted $4,200" pasted into a
+ * repair thread with Shared left on from last time. The household's has no
+ * visibility control at all -- everything they post is shared, the server
+ * forces it whatever is sent, and the one line of copy says who will read
+ * it. Both go through the same mutation and the same invalidation.
  */
 
 interface RequestThreadProps {
@@ -35,7 +37,7 @@ interface RequestThreadProps {
    * reason the contractors query lives up there.
    */
   commentsQuery: UseQueryResult<MaintenanceRequestComment[]>;
-  /** Whether the reader is staff: the composer, the Internal badge and the relay controls are theirs. */
+  /** Whether the reader is staff: the visibility control, the Internal badge and the relay controls are theirs. */
   isStaff: boolean;
   isAdmin: boolean;
   currentUserId: string | null;
@@ -78,7 +80,9 @@ export default function RequestThread({ requestId, commentsQuery, isStaff, isAdm
     mutationFn: async () =>
       apiRequest("POST", `/api/maintenance-requests/${requestId}/comments`, {
         body,
-        isInternal,
+        // A household never posts internal. The server forces this too; the
+        // client says it so the request is honest rather than corrected.
+        isInternal: isStaff ? isInternal : false,
         relaySource: isRelayed ? relaySource : null,
         relayContactId: isRelayed && relayContactId !== NO_CONTACT ? relayContactId : null,
       }),
@@ -172,7 +176,7 @@ export default function RequestThread({ requestId, commentsQuery, isStaff, isAdm
           </ol>
         )}
 
-        {isStaff && (
+        {isStaff ? (
           <form
             className="space-y-4 border-t border-border pt-4"
             onSubmit={(event) => {
@@ -270,6 +274,39 @@ export default function RequestThread({ requestId, commentsQuery, isStaff, isAdm
             <div className="flex justify-end">
               <Button type="submit" variant="primary" disabled={!canPost} data-testid="button-post-comment">
                 {postComment.isPending ? "Posting..." : isInternal ? "Post internal comment" : "Share with the household"}
+              </Button>
+            </div>
+          </form>
+        ) : (
+          <form
+            className="space-y-4 border-t border-border pt-4"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (canPost) postComment.mutate();
+            }}
+            data-testid="form-comment"
+          >
+            {/* No visibility control and no relay controls: there is nothing
+                for a household to get wrong. The copy says who reads it. */}
+            <div className="space-y-2">
+              <Label htmlFor="comment-body">Comment</Label>
+              <Textarea
+                id="comment-body"
+                value={body}
+                onChange={(event) => setBody(event.target.value)}
+                rows={4}
+                maxLength={4000}
+                placeholder="Is it worse? Did somebody come? Tell the property team here."
+                data-testid="input-comment-body"
+              />
+              <p className="text-xs text-muted-foreground" data-testid="text-resident-composer-explainer">
+                The property team, and everybody else who can read this request, will see this.
+              </p>
+            </div>
+
+            <div className="flex justify-end">
+              <Button type="submit" variant="primary" disabled={!canPost} data-testid="button-post-comment">
+                {postComment.isPending ? "Posting..." : "Post"}
               </Button>
             </div>
           </form>

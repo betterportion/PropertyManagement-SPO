@@ -1400,6 +1400,26 @@ describe("canPostComment", () => {
     const recentlyClosed = { ...longClosed, completedDate: daysAgo(119) };
     expect(canPostComment(household, recentlyClosed, SHARED, HOUSE_A, NOW)).toBe(true);
   });
+
+  // The post rule is the read rule plus "shared only", so the repairs-only
+  // type rule (ADR-0001) reaches posting with nothing implemented twice: a
+  // household may not read a project on its own house, so it may not post
+  // on one either -- not even shared, not even as its submitter.
+  it("refuses a household account a project or capital project on its own house, shared or not", () => {
+    for (const type of ["project", "capex"]) {
+      expect(canPostComment(household, { ...housemateRequest, type }, SHARED, HOUSE_A)).toBe(false);
+      expect(canPostComment(household, { ...housemateRequest, type }, INTERNAL, HOUSE_A)).toBe(false);
+      expect(canPostComment(unlinked, { ...housemateRequest, type, submittedBy: "alice@example.com" }, SHARED, null)).toBe(false);
+    }
+    // Positive control: the same house, the same submitter, a repair.
+    expect(canPostComment(unlinked, { ...housemateRequest, submittedBy: "alice@example.com" }, SHARED, null)).toBe(true);
+  });
+
+  it("leaves staff posting on every type in their regions", () => {
+    for (const type of ["request", "project", "capex"]) {
+      expect(canPostComment(staff, { ...housemateRequest, type }, INTERNAL)).toBe(true);
+    }
+  });
 });
 
 describe("canDeleteComment", () => {
@@ -1424,5 +1444,16 @@ describe("canDeleteComment", () => {
     // caller can match a null, so only an admin may take it down.
     expect(canDeleteComment(context(), orphaned)).toBe(false);
     expect(canDeleteComment(context({ role: "admin" }), orphaned)).toBe(true);
+  });
+
+  // The rule is authorship, not tier: a resident is not a second bypass
+  // alongside the admin one. Nothing above exercises a resident context, so
+  // these are what would have caught a resident-wide bypass on their own.
+  it("lets a resident delete their own comment", () => {
+    expect(canDeleteComment(context({ role: "resident" }), authored)).toBe(true);
+  });
+
+  it("refuses a resident deleting somebody else's comment", () => {
+    expect(canDeleteComment(context({ role: "resident" }), somebodyElses)).toBe(false);
   });
 });
