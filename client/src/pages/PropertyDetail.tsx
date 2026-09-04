@@ -13,6 +13,7 @@ import { EmptyState, LoadingState } from "@/components/states";
 import PropertySetupChecklist from "@/components/PropertySetupChecklist";
 import ResidentPaperwork from "@/components/ResidentPaperwork";
 import PropertyBudgetCard from "@/components/PropertyBudgetCard";
+import HouseFactsCard from "@/components/HouseFactsCard";
 import EmailHouseholdDialog from "@/components/EmailHouseholdDialog";
 import { useAuth } from "@/hooks/useAuth";
 import { formatCurrency, formatDate, formatValue } from "@/lib/format";
@@ -147,6 +148,10 @@ export default function PropertyDetail() {
     typedUser?.role === "admin" ||
     typedUser?.permissions?.canManagePropertySetup === true ||
     typedUser?.permissions?.canManageProperties === true;
+  // The house facts are the property grant alone: the setup flag is a grant
+  // over a checklist, not over what the household is told.
+  const canManageFacts =
+    typedUser?.role === "admin" || typedUser?.permissions?.canManageProperties === true;
 
   // Whichever contact this kind of house names. Two columns rather than one
   // because a rental company and a responsible person are different things.
@@ -377,12 +382,21 @@ export default function PropertyDetail() {
               </dl>
 
               {property.notes && (
-                <p className="mt-4 whitespace-pre-line text-sm" data-testid="text-property-notes">
-                  {property.notes}
-                </p>
+                <div className="mt-4">
+                  {/* Labelled so it reads as a different thing from the
+                      household's card below it. These never leave staff. */}
+                  <p className="text-xs text-muted-foreground">Staff notes (never shown to the household)</p>
+                  <p className="mt-0.5 whitespace-pre-line text-sm" data-testid="text-property-notes">
+                    {property.notes}
+                  </p>
+                </div>
               )}
             </CardContent>
           </Card>
+
+          {/* Beside the staff notes and visibly separate from them: this card
+              is what the household reads on their Resources page. */}
+          <HouseFactsCard property={property} canManage={canManageFacts} />
 
           <Tabs defaultValue="residents">
             <TabsList>
