@@ -294,6 +294,12 @@ describe("requests with no session", () => {
     ["GET", "/api/maintenance-requests"],
     ["GET", "/api/maintenance-requests/req-west"],
     ["GET", "/api/maintenance-requests/req-west/contacts"],
+    ["GET", "/api/maintenance-requests/req-west/bids"],
+    ["POST", "/api/maintenance-requests/req-west/bids"],
+    ["POST", "/api/maintenance-requests/req-west/bid-documents"],
+    ["PATCH", "/api/maintenance-request-bids/bid-1"],
+    ["DELETE", "/api/maintenance-request-bids/bid-1"],
+    ["POST", "/api/maintenance-request-bids/bid-1/accept"],
     ["GET", "/api/walkthrough-rooms"],
     ["GET", "/api/assets"],
     ["GET", "/api/contacts"],
@@ -1793,6 +1799,542 @@ describe("a household leader and the requests that are not repairs", () => {
     storageMock.getMaintenanceRequest.mockResolvedValue(OWN_REPAIR);
     const { status } = await request("PATCH", "/api/maintenance-requests/req-own-repair", { body: { type: "wishlist" } });
     expect(status).toBe(400);
+    expect(storageMock.updateMaintenanceRequest).not.toHaveBeenCalled();
+  });
+});
+
+describe("project fields and bids", () => {
+  // The cost of ADR-0001 made concrete: bids and contract terms now sit in
+  // the table a household leader can already read, so every route here is
+  // staff-only, region-checked, and refuses a repair outright. A resident
+  // never reaches a bid because they never reach its parent -- asserted
+  // directly anyway, because "never reaches" is exactly the kind of claim
+  // that stops being true after a refactor nobody meant to make.
+  const HOUSE_A = "1 Main St";
+  const PROPERTY_A = { id: "prop-a", name: "Cleveland House", region: "West Central", address: HOUSE_A };
+  const westOnly = { ...ALL_MAINTENANCE, allowedRegions: ["West Central"] };
+  const viewOnly = { canViewMaintenance: true, allowedRegions: ["West Central"] };
+
+  const REPAIR = {
+    id: "req-repair",
+    title: "Blinds fell down",
+    region: "West Central",
+    buildingAddress: HOUSE_A,
+    submittedBy: BOB.email,
+    status: "pending",
+    type: "request",
+    contractUrl: null,
+    estimatedCost: null,
+    actualCost: null,
+    targetYear: null,
+    targetQuarter: null,
+  };
+  const PROJECT = { ...REPAIR, id: "req-project", title: "New back fence", type: "project" };
+  const CAPEX = { ...REPAIR, id: "req-capex", title: "Roof replacement", type: "capex", targetYear: 2027 };
+  const EAST_PROJECT = { ...PROJECT, id: "req-east-project", region: "East Central" };
+
+  const BID_A = {
+    id: "bid-a",
+    requestId: PROJECT.id,
+    contactId: null,
+    vendorName: "Dave's Fencing",
+    amount: "4200.00",
+    bidDate: null,
+    notes: null,
+    documentUrl: null,
+    documentName: null,
+    accepted: true,
+  };
+  const BID_B = { ...BID_A, id: "bid-b", vendorName: "Northside Fence Co", amount: "3900.00", accepted: false };
+  const EAST_BID = { ...BID_A, id: "bid-east", requestId: EAST_PROJECT.id };
+
+  const KEY = "0123456789abcdef0123456789abcdef.pdf";
+  const UPLOAD_URL = `/uploads/${KEY}`;
+  const uploadRow = (uploadedBy: string) => ({
+    id: "upload-1",
+    storageKey: KEY,
+    originalName: "quote.pdf",
+    contentType: "application/pdf",
+    sizeBytes: 1024,
+    uploadedBy,
+  });
+
+  const leaderOfHouseA = () => {
+    actAs({ ...ALICE, propertyId: "prop-a" } as typeof ALICE, ALL_MAINTENANCE);
+    storageMock.getProperty.mockResolvedValue(PROPERTY_A);
+  };
+
+  const BIDS = (id: string) => `/api/maintenance-requests/${id}/bids`;
+  const BID = (id: string) => `/api/maintenance-request-bids/${id}`;
+  const BID_DOCS = (id: string) => `/api/maintenance-requests/${id}/bid-documents`;
+  const post = (path: string, body: unknown) => request("POST", path, { body });
+  const patch = (path: string, body: unknown) => request("PATCH", path, { body });
+  const del = (path: string) => request("DELETE", path);
+
+  /** A real (if tiny) PDF: the magic-byte check is the same one the other upload routes apply. */
+  const aQuote = () => {
+    const form = new FormData();
+    form.append("file", new Blob([new TextEncoder().encode("%PDF-1.4\n%quote\n")], { type: "application/pdf" }), "quote.pdf");
+    return form;
+  };
+
+  async function postFile(path: string) {
+    const res = await fetch(`${baseUrl}${path}`, { method: "POST", body: aQuote() });
+    let body: any = null;
+    try {
+      body = await res.json();
+    } catch {
+      body = null;
+    }
+    return { status: res.status, body };
+  }
+
+  beforeEach(() => {
+    const requests = [REPAIR, PROJECT, CAPEX, EAST_PROJECT];
+    storageMock.getMaintenanceRequest.mockImplementation(async (id: string) => requests.find((r) => r.id === id));
+    const bids = [BID_A, BID_B, EAST_BID];
+    storageMock.getMaintenanceRequestBid.mockImplementation(async (id: string) => bids.find((b) => b.id === id));
+    storageMock.getMaintenanceRequestBids.mockResolvedValue([BID_A, BID_B]);
+    storageMock.createMaintenanceRequestBid.mockImplementation(async (b: object) => ({ id: "bid-new", accepted: false, ...b }));
+    storageMock.updateMaintenanceRequestBid.mockImplementation(async (id: string, p: object) => ({ ...BID_B, id, ...p }));
+    storageMock.acceptMaintenanceRequestBid.mockResolvedValue({ ...BID_B, accepted: true });
+    storageMock.getMaintenanceContact.mockResolvedValue(undefined);
+    storageMock.updateMaintenanceRequest.mockImplementation(async (id: string, p: object) => ({ ...PROJECT, id, ...p }));
+  });
+
+  // -- reading ------------------------------------------------------------------
+
+  it("refuses a household leader the bids on a project on their own house, before they are loaded", async () => {
+    // The house match is exactly what would otherwise let them through.
+    leaderOfHouseA();
+    const { status, body } = await get(BIDS("req-project"));
+    expect(status).toBe(403);
+    expect(storageMock.getMaintenanceRequestBids).not.toHaveBeenCalled();
+    expect(JSON.stringify(body)).not.toContain("4200");
+  });
+
+  it("refuses staff outside the request's region the bids, before they are loaded", async () => {
+    actAs(STAFF, westOnly);
+    expect((await get(BIDS("req-east-project"))).status).toBe(403);
+    expect(storageMock.getMaintenanceRequestBids).not.toHaveBeenCalled();
+  });
+
+  it("refuses a staff account holding no maintenance permission", async () => {
+    actAs(STAFF, { allowedRegions: ["West Central"] });
+    expect((await get(BIDS("req-project"))).status).toBe(403);
+    expect(storageMock.getMaintenanceRequestBids).not.toHaveBeenCalled();
+  });
+
+  it("answers 400 for a repair's bids -- a repair has none -- before they are loaded", async () => {
+    actAs(STAFF, westOnly);
+    const { status, body } = await get(BIDS("req-repair"));
+    expect(status).toBe(400);
+    expect(body.message).toMatch(/projects and capital projects/i);
+    expect(storageMock.getMaintenanceRequestBids).not.toHaveBeenCalled();
+  });
+
+  // Positive control for the refusals above: reading needs the view
+  // permission, not manage, so an RA who cannot edit still sees who bid.
+  it("lists a project's bids for staff in its region, on the view permission", async () => {
+    actAs(STAFF, viewOnly);
+    const { status, body } = await get(BIDS("req-project"));
+    expect(status).toBe(200);
+    expect(body.map((b: { id: string }) => b.id)).toEqual(["bid-a", "bid-b"]);
+    expect(storageMock.getMaintenanceRequestBids).toHaveBeenCalledWith("req-project");
+  });
+
+  // -- recording a bid ------------------------------------------------------------
+
+  it("records a bid on a project for staff in its region, against the request in the URL", async () => {
+    actAs(STAFF, westOnly);
+    const { status, body } = await post(BIDS("req-project"), {
+      vendorName: "Dave's Fencing",
+      amount: 4200,
+      bidDate: "2026-09-01",
+      notes: "Includes the gate.",
+      // Never taken from the body: the accept route is the only writer.
+      accepted: true,
+      requestId: "req-east-project",
+    });
+    expect(status).toBe(201);
+    expect(body.id).toBe("bid-new");
+    expect(storageMock.createMaintenanceRequestBid).toHaveBeenCalledTimes(1);
+    const written = storageMock.createMaintenanceRequestBid.mock.calls[0][0];
+    expect(written).toMatchObject({ requestId: "req-project", vendorName: "Dave's Fencing", amount: "4200", notes: "Includes the gate." });
+    expect(written).not.toHaveProperty("accepted");
+  });
+
+  it("refuses a bid on a repair as a 400, and writes nothing", async () => {
+    actAs(STAFF, westOnly);
+    const { status, body } = await post(BIDS("req-repair"), { vendorName: "Dave's Fencing", amount: 4200 });
+    expect(status).toBe(400);
+    expect(body.message).toMatch(/projects and capital projects/i);
+    expect(storageMock.createMaintenanceRequestBid).not.toHaveBeenCalled();
+  });
+
+  it("refuses a bid naming neither a contact record nor a vendor, and writes nothing", async () => {
+    actAs(STAFF, westOnly);
+    const { status, body } = await post(BIDS("req-project"), { amount: 4200 });
+    expect(status).toBe(400);
+    expect(body.message).toMatch(/contractor|vendor/i);
+    expect(storageMock.createMaintenanceRequestBid).not.toHaveBeenCalled();
+  });
+
+  it.each([-1, "not-a-number"])("refuses an amount of %s, and writes nothing", async (amount) => {
+    actAs(STAFF, westOnly);
+    expect((await post(BIDS("req-project"), { vendorName: "Dave's Fencing", amount })).status).toBe(400);
+    expect(storageMock.createMaintenanceRequestBid).not.toHaveBeenCalled();
+  });
+
+  it("refuses a household leader a bid on a project on their own house, and writes nothing", async () => {
+    leaderOfHouseA();
+    expect((await post(BIDS("req-project"), { vendorName: "Dave's Fencing", amount: 4200 })).status).toBe(403);
+    expect(storageMock.createMaintenanceRequestBid).not.toHaveBeenCalled();
+  });
+
+  it("refuses staff outside the region a bid, and writes nothing", async () => {
+    actAs(STAFF, westOnly);
+    expect((await post(BIDS("req-east-project"), { vendorName: "Dave's Fencing", amount: 4200 })).status).toBe(403);
+    expect(storageMock.createMaintenanceRequestBid).not.toHaveBeenCalled();
+  });
+
+  it("refuses a view-only staff account a bid, and writes nothing", async () => {
+    actAs(STAFF, viewOnly);
+    expect((await post(BIDS("req-project"), { vendorName: "Dave's Fencing", amount: 4200 })).status).toBe(403);
+    expect(storageMock.createMaintenanceRequestBid).not.toHaveBeenCalled();
+  });
+
+  it("links the bid to a contact record in the caller's region, and refuses one that does not exist", async () => {
+    actAs(STAFF, westOnly);
+    storageMock.getMaintenanceContact.mockResolvedValue({ id: "c-dave", name: "Dave", region: "West Central" });
+    const { status } = await post(BIDS("req-project"), { contactId: "c-dave", amount: 4200 });
+    expect(status).toBe(201);
+    expect(storageMock.createMaintenanceRequestBid).toHaveBeenCalledWith(expect.objectContaining({ contactId: "c-dave" }));
+
+    storageMock.createMaintenanceRequestBid.mockClear();
+    storageMock.getMaintenanceContact.mockResolvedValue(undefined);
+    expect((await post(BIDS("req-project"), { contactId: "c-nope", amount: 4200 })).status).toBe(400);
+    expect(storageMock.createMaintenanceRequestBid).not.toHaveBeenCalled();
+  });
+
+  it("refuses a contact record from a region the caller cannot reach, and writes nothing", async () => {
+    // Same rule as linking a contractor to a request: a bid must not become
+    // a way to attach a vendor the caller could not otherwise open.
+    actAs(STAFF, westOnly);
+    storageMock.getMaintenanceContact.mockResolvedValue({ id: "c-east", name: "East Co", region: "East Central" });
+    expect((await post(BIDS("req-project"), { contactId: "c-east", amount: 4200 })).status).toBe(403);
+    expect(storageMock.createMaintenanceRequestBid).not.toHaveBeenCalled();
+  });
+
+  // -- the quote document ---------------------------------------------------------
+
+  it("stores a bid document for staff in the region, under the session's account, and records the upload once", async () => {
+    // The positive control for every "not read" assertion below: the same
+    // route, the same file, and the parser does run, the file is written,
+    // and the upload layer records it without the route adding an event.
+    actAs(STAFF, westOnly);
+    const { status, body } = await postFile(BID_DOCS("req-project"));
+    expect(status).toBe(200);
+    expect(body.url).toMatch(/^\/uploads\/[0-9a-f]{32}\.pdf$/);
+    expect(body.name).toBe("quote.pdf");
+    expect(multerEntered).toHaveBeenCalledWith(BID_DOCS("req-project"));
+    expect(fileStoreMock.putUpload).toHaveBeenCalled();
+    expect(storageMock.createUpload).toHaveBeenCalledWith(expect.objectContaining({ uploadedBy: STAFF.id, originalName: "quote.pdf" }));
+    expect(storageMock.createAuditEvent).toHaveBeenCalledTimes(1);
+    expect(storageMock.createAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "document.uploaded", entityType: "upload", actorId: STAFF.id, summary: "Uploaded quote.pdf" }),
+    );
+  });
+
+  it("refuses a household leader a bid document before the parser reads a byte, and stores nothing", async () => {
+    leaderOfHouseA();
+    expect((await postFile(BID_DOCS("req-project"))).status).toBe(403);
+    expect(multerEntered).not.toHaveBeenCalled();
+    expect(fileStoreMock.putUpload).not.toHaveBeenCalled();
+    expect(storageMock.createUpload).not.toHaveBeenCalled();
+  });
+
+  it("refuses staff outside the region before the parser reads a byte, and stores nothing", async () => {
+    actAs(STAFF, westOnly);
+    expect((await postFile(BID_DOCS("req-east-project"))).status).toBe(403);
+    expect(multerEntered).not.toHaveBeenCalled();
+    expect(fileStoreMock.putUpload).not.toHaveBeenCalled();
+  });
+
+  it("refuses a view-only staff account before the parser reads a byte", async () => {
+    actAs(STAFF, viewOnly);
+    expect((await postFile(BID_DOCS("req-project"))).status).toBe(403);
+    expect(multerEntered).not.toHaveBeenCalled();
+    expect(fileStoreMock.putUpload).not.toHaveBeenCalled();
+  });
+
+  it("refuses a document for a repair before the parser reads a byte", async () => {
+    actAs(STAFF, westOnly);
+    expect((await postFile(BID_DOCS("req-repair"))).status).toBe(400);
+    expect(multerEntered).not.toHaveBeenCalled();
+    expect(fileStoreMock.putUpload).not.toHaveBeenCalled();
+  });
+
+  it("refuses an anonymous caller before the parser reads a byte", async () => {
+    expect((await postFile(BID_DOCS("req-project"))).status).toBe(401);
+    expect(multerEntered).not.toHaveBeenCalled();
+  });
+
+  it("attaches a document the caller uploaded, named as it was stored when the body gives no name", async () => {
+    actAs(STAFF, westOnly);
+    storageMock.getUploadByStorageKey.mockResolvedValue(uploadRow(STAFF.id));
+    const { status } = await post(BIDS("req-project"), { vendorName: "Dave's Fencing", amount: 4200, documentUrl: UPLOAD_URL });
+    expect(status).toBe(201);
+    expect(storageMock.getUploadByStorageKey).toHaveBeenCalledWith(KEY);
+    expect(storageMock.createMaintenanceRequestBid).toHaveBeenCalledWith(
+      expect.objectContaining({ documentUrl: UPLOAD_URL, documentName: "quote.pdf" }),
+    );
+  });
+
+  // A file inherits the visibility of every record that points at it, so a
+  // bid naming somebody else's upload would hand that file to everyone who
+  // can read the project.
+  it("refuses a document somebody else uploaded, and writes nothing", async () => {
+    actAs(STAFF, westOnly);
+    storageMock.getUploadByStorageKey.mockResolvedValue(uploadRow(ALICE.id));
+    expect((await post(BIDS("req-project"), { vendorName: "Dave's Fencing", amount: 4200, documentUrl: UPLOAD_URL })).status).toBe(400);
+    expect(storageMock.createMaintenanceRequestBid).not.toHaveBeenCalled();
+  });
+
+  it("refuses a document URL on another origin, and writes nothing", async () => {
+    actAs(STAFF, westOnly);
+    const { status } = await post(BIDS("req-project"), { vendorName: "Dave's Fencing", amount: 4200, documentUrl: "https://evil.example/x.pdf" });
+    expect(status).toBe(400);
+    expect(storageMock.getUploadByStorageKey).not.toHaveBeenCalled();
+    expect(storageMock.createMaintenanceRequestBid).not.toHaveBeenCalled();
+  });
+
+  // -- accepting ------------------------------------------------------------------
+
+  it("accepting a bid un-accepts the others on the request, in one storage call", async () => {
+    // One call, not a loop of updates: a house must never be left with two
+    // accepted bids because the second write failed.
+    actAs(STAFF, westOnly);
+    const { status, body } = await post(`${BID("bid-b")}/accept`, {});
+    expect(status).toBe(200);
+    expect(body.accepted).toBe(true);
+    expect(storageMock.acceptMaintenanceRequestBid).toHaveBeenCalledTimes(1);
+    expect(storageMock.acceptMaintenanceRequestBid).toHaveBeenCalledWith("req-project", "bid-b");
+    expect(storageMock.updateMaintenanceRequestBid).not.toHaveBeenCalled();
+  });
+
+  it("answers 404, not a made-up acceptance, when the bid vanished between the lookup and the write", async () => {
+    actAs(STAFF, westOnly);
+    storageMock.acceptMaintenanceRequestBid.mockResolvedValue(undefined);
+    const { status, body } = await post(`${BID("bid-b")}/accept`, {});
+    expect(status).toBe(404);
+    expect(body).not.toHaveProperty("accepted");
+  });
+
+  it("refuses staff outside the region an accept, and changes nothing", async () => {
+    actAs(STAFF, westOnly);
+    expect((await post(`${BID("bid-east")}/accept`, {})).status).toBe(403);
+    expect(storageMock.acceptMaintenanceRequestBid).not.toHaveBeenCalled();
+  });
+
+  it("refuses a household leader an accept, and changes nothing", async () => {
+    leaderOfHouseA();
+    expect((await post(`${BID("bid-b")}/accept`, {})).status).toBe(403);
+    expect(storageMock.acceptMaintenanceRequestBid).not.toHaveBeenCalled();
+  });
+
+  // -- editing ---------------------------------------------------------------------
+
+  it("updates a bid for staff in its region, and never its accepted flag", async () => {
+    actAs(STAFF, westOnly);
+    const { status } = await patch(BID("bid-b"), { amount: 3850, accepted: true });
+    expect(status).toBe(200);
+    expect(storageMock.updateMaintenanceRequestBid).toHaveBeenCalledTimes(1);
+    const [id, written] = storageMock.updateMaintenanceRequestBid.mock.calls[0];
+    expect(id).toBe("bid-b");
+    expect(written).toMatchObject({ amount: "3850" });
+    expect(written).not.toHaveProperty("accepted");
+  });
+
+  it("refuses clearing the vendor name on a bid with no contact record, and writes nothing", async () => {
+    actAs(STAFF, westOnly);
+    expect((await patch(BID("bid-b"), { vendorName: "" })).status).toBe(400);
+    expect(storageMock.updateMaintenanceRequestBid).not.toHaveBeenCalled();
+  });
+
+  it("refuses staff outside the region an edit, and writes nothing", async () => {
+    actAs(STAFF, westOnly);
+    expect((await patch(BID("bid-east"), { amount: 1 })).status).toBe(403);
+    expect(storageMock.updateMaintenanceRequestBid).not.toHaveBeenCalled();
+  });
+
+  it("refuses a household leader an edit, and writes nothing", async () => {
+    leaderOfHouseA();
+    expect((await patch(BID("bid-b"), { amount: 1 })).status).toBe(403);
+    expect(storageMock.updateMaintenanceRequestBid).not.toHaveBeenCalled();
+  });
+
+  // -- deleting --------------------------------------------------------------------
+
+  it("removes the bid and leaves its document in storage", async () => {
+    // Known issue 1, deliberately: the row goes, the object stays. The
+    // screen says so.
+    actAs(STAFF, westOnly);
+    storageMock.getMaintenanceRequestBid.mockResolvedValue({ ...BID_B, documentUrl: UPLOAD_URL, documentName: "quote.pdf" });
+    expect((await del(BID("bid-b"))).status).toBe(200);
+    expect(storageMock.deleteMaintenanceRequestBid).toHaveBeenCalledWith("bid-b");
+    expect(fileStoreMock.removeUpload).not.toHaveBeenCalled();
+  });
+
+  it("refuses a household leader a delete, and removes nothing", async () => {
+    leaderOfHouseA();
+    expect((await del(BID("bid-b"))).status).toBe(403);
+    expect(storageMock.deleteMaintenanceRequestBid).not.toHaveBeenCalled();
+  });
+
+  it("refuses staff outside the region a delete, and removes nothing", async () => {
+    actAs(STAFF, westOnly);
+    expect((await del(BID("bid-east"))).status).toBe(403);
+    expect(storageMock.deleteMaintenanceRequestBid).not.toHaveBeenCalled();
+  });
+
+  // -- the project fields on the request itself -------------------------------------
+
+  it("stores the contract link, costs and target period on a project", async () => {
+    actAs(STAFF, westOnly);
+    const { status } = await patch(`/api/maintenance-requests/req-project`, {
+      contractUrl: "https://drive.google.com/file/d/abc/view",
+      estimatedCost: 4200,
+      actualCost: "4350.50",
+      targetYear: 2027,
+      targetQuarter: 2,
+    });
+    expect(status).toBe(200);
+    expect(storageMock.updateMaintenanceRequest).toHaveBeenCalledWith(
+      "req-project",
+      expect.objectContaining({
+        contractUrl: "https://drive.google.com/file/d/abc/view",
+        estimatedCost: "4200",
+        actualCost: "4350.5",
+        targetYear: 2027,
+        targetQuarter: 2,
+      }),
+    );
+  });
+
+  it.each([
+    ["estimatedCost", 4200],
+    ["actualCost", 4350],
+    ["contractUrl", "https://drive.google.com/file/d/abc/view"],
+    ["targetYear", 2027],
+  ])("refuses %s on a repair as a 400, and writes nothing", async (field, value) => {
+    actAs(STAFF, westOnly);
+    const { status, body } = await patch(`/api/maintenance-requests/req-repair`, { [field]: value });
+    expect(status).toBe(400);
+    expect(body.message).toMatch(/only projects and capital projects/i);
+    expect(storageMock.updateMaintenanceRequest).not.toHaveBeenCalled();
+  });
+
+  it("refuses them in the same edit that turns a project back into a repair", async () => {
+    actAs(STAFF, westOnly);
+    expect((await patch(`/api/maintenance-requests/req-project`, { type: "request", estimatedCost: 4200 })).status).toBe(400);
+    expect(storageMock.updateMaintenanceRequest).not.toHaveBeenCalled();
+  });
+
+  it("clears them when a project is turned back into a repair, so a repair never carries a cost", async () => {
+    actAs(STAFF, westOnly);
+    const { status } = await patch(`/api/maintenance-requests/req-capex`, { type: "request" });
+    expect(status).toBe(200);
+    expect(storageMock.updateMaintenanceRequest).toHaveBeenCalledWith(
+      "req-capex",
+      expect.objectContaining({ type: "request", contractUrl: null, estimatedCost: null, actualCost: null, targetYear: null, targetQuarter: null }),
+    );
+  });
+
+  it("refuses a javascript: contract link, and writes nothing", async () => {
+    // The project card renders the contract link straight into an href.
+    actAs(STAFF, westOnly);
+    expect((await patch(`/api/maintenance-requests/req-project`, { contractUrl: "javascript:alert(1)" })).status).toBe(400);
+    expect(storageMock.updateMaintenanceRequest).not.toHaveBeenCalled();
+  });
+
+  it("reads an emptied contract link as cleared", async () => {
+    actAs(STAFF, westOnly);
+    expect((await patch(`/api/maintenance-requests/req-project`, { contractUrl: "" })).status).toBe(200);
+    expect(storageMock.updateMaintenanceRequest).toHaveBeenCalledWith("req-project", expect.objectContaining({ contractUrl: null }));
+  });
+
+  it("refuses a quarter without a year, and writes nothing", async () => {
+    actAs(STAFF, westOnly);
+    const { status, body } = await patch(`/api/maintenance-requests/req-project`, { targetQuarter: 2 });
+    expect(status).toBe(400);
+    expect(body.message).toMatch(/year/i);
+    expect(storageMock.updateMaintenanceRequest).not.toHaveBeenCalled();
+  });
+
+  it("takes the year from the row when only the quarter is sent", async () => {
+    // Positive control for the rule above: CAPEX already carries 2027.
+    actAs(STAFF, westOnly);
+    expect((await patch(`/api/maintenance-requests/req-capex`, { targetQuarter: 3 })).status).toBe(200);
+    expect(storageMock.updateMaintenanceRequest).toHaveBeenCalledWith("req-capex", expect.objectContaining({ targetQuarter: 3 }));
+  });
+
+  it("refuses clearing the year while a quarter stays, and writes nothing", async () => {
+    actAs(STAFF, westOnly);
+    storageMock.getMaintenanceRequest.mockResolvedValue({ ...CAPEX, targetQuarter: 2 });
+    expect((await patch(`/api/maintenance-requests/req-capex`, { targetYear: null })).status).toBe(400);
+    expect(storageMock.updateMaintenanceRequest).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["targetQuarter", 0],
+    ["targetQuarter", 5],
+    ["targetYear", 1999],
+    ["targetYear", 2101],
+    ["estimatedCost", -1],
+  ])("refuses %s = %s, and writes nothing", async (field, value) => {
+    actAs(STAFF, westOnly);
+    expect((await patch(`/api/maintenance-requests/req-capex`, { [field]: value })).status).toBe(400);
+    expect(storageMock.updateMaintenanceRequest).not.toHaveBeenCalled();
+  });
+
+  it("records the contract link changing, naming the request and never the link", async () => {
+    // A document link, like the lease link on a property -- but the URL is
+    // what somebody could follow, so the event says that it changed and not
+    // to what.
+    actAs(STAFF, westOnly);
+    const { status } = await patch(`/api/maintenance-requests/req-project`, { contractUrl: "https://drive.google.com/file/d/abc/view" });
+    expect(status).toBe(200);
+    expect(storageMock.createAuditEvent).toHaveBeenCalledTimes(1);
+    const event = storageMock.createAuditEvent.mock.calls[0][0];
+    expect(event).toMatchObject({
+      action: "maintenance_request.documents_changed",
+      entityType: "maintenance_request",
+      entityId: "req-project",
+      summary: expect.stringContaining("New back fence"),
+    });
+    expect(JSON.stringify(event)).not.toContain("drive.google.com");
+  });
+
+  it("stays quiet when a cost or the target period changes: an estimate is not money moving", async () => {
+    actAs(STAFF, westOnly);
+    await patch(`/api/maintenance-requests/req-project`, { estimatedCost: 4200, targetYear: 2027 });
+    expect(storageMock.createAuditEvent).not.toHaveBeenCalled();
+  });
+
+  it("stays quiet when the contract link is sent unchanged", async () => {
+    actAs(STAFF, westOnly);
+    storageMock.getMaintenanceRequest.mockResolvedValue({ ...PROJECT, contractUrl: "https://drive.google.com/file/d/abc/view" });
+    await patch(`/api/maintenance-requests/req-project`, { contractUrl: "https://drive.google.com/file/d/abc/view", estimatedCost: 1 });
+    expect(storageMock.createAuditEvent).not.toHaveBeenCalled();
+  });
+
+  // Residents cannot PATCH a request at all -- the route is requireStaff --
+  // so "a resident can never set a project field" is the existing refusal,
+  // with the write never reaching storage.
+  it("refuses a household leader the project fields: the PATCH is refused and nothing is written", async () => {
+    leaderOfHouseA();
+    expect((await patch(`/api/maintenance-requests/req-project`, { estimatedCost: 1 })).status).toBe(403);
     expect(storageMock.updateMaintenanceRequest).not.toHaveBeenCalled();
   });
 });

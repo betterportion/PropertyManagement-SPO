@@ -71,6 +71,10 @@ test.describe("request threads", () => {
     await expect(page.getByTestId("button-visibility-shared")).toHaveAttribute("aria-pressed", "false");
     // A file can go with the comment; the route tests pin who may store one.
     await expect(page.getByTestId("button-attach-file")).toBeVisible();
+    // A repair carries no project fields and no bids, so neither card is on
+    // the page -- for staff included, not only for the household.
+    await expect(page.getByTestId("request-project-card")).toHaveCount(0);
+    await expect(page.getByTestId("request-bids")).toHaveCount(0);
 
     await page.getByTestId("input-comment-body").fill(INTERNAL_BODY);
     await page.getByTestId("button-post-comment").click();

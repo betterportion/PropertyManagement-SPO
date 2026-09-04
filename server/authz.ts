@@ -463,6 +463,17 @@ export async function canReadUploadReference(
       return !!request && canReadComment(ctx, request, reference.record, await residentHouseAddress(ctx));
     }
 
+    case "maintenanceRequestBid": {
+      // A quote is readable by whoever can read the project, and by nobody
+      // else -- the request's region, for staff. A resident is refused by
+      // name rather than left to the request rule: that rule would let a
+      // household leader through if the project were later turned back into
+      // a repair, and the bids on it do not go anywhere when that happens.
+      if (ctx.isResident) return false;
+      const request = await storage.getMaintenanceRequest(reference.record.requestId);
+      return !!request && canReadMaintenanceRequest(ctx, request);
+    }
+
     case "walkthroughPhoto":
       return (
         !ctx.isResident &&

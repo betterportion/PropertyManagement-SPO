@@ -521,3 +521,96 @@ describe("canReadUpload, when several records share a file", () => {
     expect(await canReadUpload(ctx, KEY, undefined)).toBe(false);
   });
 });
+
+describe("canReadUpload, through a bid's document", () => {
+  // A quote on a project is readable by whoever can read the project, and by
+  // nobody else. The request's region decides that for staff. A resident is
+  // refused by name rather than left to the request rule: the request rule
+  // would let a leader through if the project were later turned back into a
+  // repair, and the bids on it -- and their documents -- do not go anywhere
+  // when that happens.
+  const HOUSE_A = "123 Main St, Saint Paul, MN 55101";
+
+  const bidReference = (requestId = "req-1"): UploadReference => ({
+    kind: "maintenanceRequestBid",
+    record: { id: "bid-1", requestId, documentUrl: URL } as never,
+  });
+
+  const houseAProject = (overrides: Record<string, unknown> = {}) => ({
+    id: "req-1",
+    region: "Chicago",
+    submittedBy: "someone.else@example.com",
+    buildingAddress: HOUSE_A,
+    status: "pending",
+    type: "project",
+    ...overrides,
+  });
+
+  const leaderOfHouseA = () => {
+    getProperty.mockResolvedValue({ id: "prop-a", address: HOUSE_A });
+    const ctx = context({ role: "resident", userId: "res-1" });
+    (ctx.user as { propertyId?: string }).propertyId = "prop-a";
+    return ctx;
+  };
+
+  beforeEach(() => {
+    findUploadReferences.mockResolvedValue([bidReference()]);
+    getMaintenanceRequest.mockResolvedValue(houseAProject());
+  });
+
+  it("lets staff covering the request's region fetch it", async () => {
+    const ctx = context({
+      permissions: permissions({ canViewMaintenance: true }),
+      allowedRegions: ["Chicago"],
+    });
+    expect(await canReadUpload(ctx, KEY, undefined)).toBe(true);
+  });
+
+  it("refuses staff covering another region", async () => {
+    const ctx = context({
+      permissions: permissions({ canViewMaintenance: true }),
+      allowedRegions: ["Twin Cities"],
+    });
+    expect(await canReadUpload(ctx, KEY, undefined)).toBe(false);
+  });
+
+  it("refuses a household leader of that very house", async () => {
+    expect(await canReadUpload(leaderOfHouseA(), KEY, undefined)).toBe(false);
+  });
+
+  it("refuses that leader even once the project has been turned back into a repair", async () => {
+    // The request rule alone would say yes here. The bid rule does not.
+    getMaintenanceRequest.mockResolvedValue(houseAProject({ type: "request" }));
+    expect(await canReadUpload(leaderOfHouseA(), KEY, undefined)).toBe(false);
+  });
+
+  it("still lets staff covering the region fetch it once the project has been turned back into a repair", async () => {
+    // The bid stays in its table across the demotion (a type change is not a
+    // delete), so the document staff already had reach to must not vanish
+    // out from under them the way it deliberately does for a resident.
+    getMaintenanceRequest.mockResolvedValue(houseAProject({ type: "request" }));
+    const ctx = context({
+      permissions: permissions({ canViewMaintenance: true }),
+      allowedRegions: ["Chicago"],
+    });
+    expect(await canReadUpload(ctx, KEY, undefined)).toBe(true);
+  });
+
+  it("refuses the resident who originally filed it, even after it became a project and was turned back into a repair", async () => {
+    // canReadMaintenanceRequest alone would say yes here: a repair, and this
+    // resident owns the submission. The explicit resident refusal on a bid
+    // is what still says no -- this is the case it exists for.
+    getMaintenanceRequest.mockResolvedValue(houseAProject({ type: "request", submittedBy: "staff@example.com" }));
+    const ctx = context({ role: "resident", userId: "res-2" });
+    expect(await canReadUpload(ctx, KEY, undefined)).toBe(false);
+  });
+
+  it("refuses when the bid's request no longer exists", async () => {
+    getMaintenanceRequest.mockResolvedValue(undefined);
+    const ctx = context({
+      permissions: permissions({ canViewMaintenance: true }),
+      allowedRegions: ["Chicago"],
+    });
+    expect(await canReadUpload(ctx, KEY, undefined)).toBe(false);
+  });
+});
