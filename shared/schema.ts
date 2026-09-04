@@ -628,10 +628,29 @@ export const maintenanceRequestComments = pgTable("maintenance_request_comments"
   authorName: varchar("author_name"),
   relaySource: varchar("relay_source"),
   relayContactId: varchar("relay_contact_id").references(() => maintenanceContacts.id, { onDelete: "set null" }),
+  // One file per comment -- a quote PDF, a photo of what the contractor found.
+  // `attachmentUrl` holds the "/uploads/<key>" URL the upload route returned,
+  // and `attachmentName` the name the file had when it was chosen, which is
+  // what the link on screen says. The file inherits the comment's visibility
+  // through findUploadReferences + canReadUploadReference, so one on an
+  // internal comment is never served to a resident. A second file is a
+  // second comment. Deleting the comment leaves the file in storage.
+  attachmentUrl: varchar("attachment_url"),
+  attachmentName: varchar("attachment_name"),
   createdAt: timestamp("created_at").defaultNow(),
 }, (table) => [
   index("maintenance_request_comments_request_idx").on(table.requestId),
 ]);
+
+/**
+ * The only shape an attachment URL may take: the "/uploads/<key>" the upload
+ * route returned, with a bare storage key after it. Anything else -- another
+ * origin, a path that climbs out of the uploads area -- is refused at the
+ * boundary rather than stored and rendered into an href later. No leading
+ * dot, for the same reason isSafeStorageKey has none: "." and ".." name
+ * directories.
+ */
+export const UPLOAD_URL_PATTERN = /^\/uploads\/[A-Za-z0-9_-][A-Za-z0-9._-]*$/;
 
 export const insertMaintenanceRequestCommentSchema = createInsertSchema(maintenanceRequestComments)
   .omit({
@@ -650,6 +669,10 @@ export const insertMaintenanceRequestCommentSchema = createInsertSchema(maintena
     body: z.string().trim().min(1, "Write something first"),
     relaySource: z.string().trim().max(120).nullish(),
     relayContactId: z.string().nullish(),
+    // Only ever the URL the attachment upload route returned; the create
+    // route then checks the file is one this caller stored.
+    attachmentUrl: z.string().regex(UPLOAD_URL_PATTERN, "That is not an uploaded file").nullish(),
+    attachmentName: z.string().trim().max(255).nullish(),
   });
 
 export type MaintenanceRequestComment = typeof maintenanceRequestComments.$inferSelect;

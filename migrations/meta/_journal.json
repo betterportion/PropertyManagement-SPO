@@ -204,6 +204,13 @@
       "when": 1788495184792,
       "tag": "0028_comment_emails_enabled",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1788499074722,
+      "tag": "0029_comment_attachments",
+      "breakpoints": true
     }
   ]
 }

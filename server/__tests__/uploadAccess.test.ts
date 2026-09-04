@@ -306,6 +306,107 @@ describe("canReadUpload, through a request photo row", () => {
   });
 });
 
+describe("canReadUpload, through a comment's attachment", () => {
+  // The file inherits the COMMENT's visibility, not only the request's: the
+  // request rule decides the house, the region and the 120-day window, and
+  // the comment's own visibility decides the tier on top. That second half is
+  // the whole point of this kind -- "he quoted $4,200" as a PDF on an internal
+  // comment must be as invisible to the household as the words would be.
+  const HOUSE_A = "123 Main St, Saint Paul, MN 55101";
+  const daysAgo = (n: number) => new Date(Date.now() - n * 24 * 60 * 60 * 1000);
+
+  const commentReference = (isInternal: boolean, requestId = "req-1"): UploadReference => ({
+    kind: "maintenanceRequestComment",
+    record: { id: "c-1", requestId, isInternal, attachmentUrl: URL } as never,
+  });
+
+  const houseARequest = (overrides: Record<string, unknown> = {}) => ({
+    id: "req-1",
+    region: "Chicago",
+    submittedBy: "someone.else@example.com",
+    buildingAddress: HOUSE_A,
+    status: "pending",
+    type: "request",
+    ...overrides,
+  });
+
+  const leaderOfHouseA = () => {
+    getProperty.mockResolvedValue({ id: "prop-a", address: HOUSE_A });
+    const ctx = context({ role: "resident", userId: "res-1" });
+    (ctx.user as { propertyId?: string }).propertyId = "prop-a";
+    return ctx;
+  };
+
+  it("lets a household leader fetch the file on a shared comment on their house's request", async () => {
+    findUploadReferences.mockResolvedValue([commentReference(false)]);
+    getMaintenanceRequest.mockResolvedValue(houseARequest());
+    expect(await canReadUpload(leaderOfHouseA(), KEY, undefined)).toBe(true);
+  });
+
+  it("refuses that same leader the file on an internal comment on the same request", async () => {
+    findUploadReferences.mockResolvedValue([commentReference(true)]);
+    getMaintenanceRequest.mockResolvedValue(houseARequest());
+    expect(await canReadUpload(leaderOfHouseA(), KEY, undefined)).toBe(false);
+  });
+
+  it("refuses a leader the file on a shared comment when the request is a project, even on their own house", async () => {
+    // ADR-0001: a project's bid amounts and contract terms are staff-only,
+    // whatever the comment's own visibility says. isRepair fails this before
+    // either resident path (ownership or house) is ever reached.
+    findUploadReferences.mockResolvedValue([commentReference(false)]);
+    getMaintenanceRequest.mockResolvedValue(houseARequest({ type: "project" }));
+    expect(await canReadUpload(leaderOfHouseA(), KEY, undefined)).toBe(false);
+  });
+
+  it("refuses a resident of another house the file on a shared comment", async () => {
+    findUploadReferences.mockResolvedValue([commentReference(false)]);
+    getMaintenanceRequest.mockResolvedValue(houseARequest());
+    getProperty.mockResolvedValue({ id: "prop-b", address: "456 Oak Ave, Saint Paul, MN 55104" });
+    const ctx = context({ role: "resident", userId: "res-2" });
+    (ctx.user as { propertyId?: string }).propertyId = "prop-b";
+    expect(await canReadUpload(ctx, KEY, undefined)).toBe(false);
+  });
+
+  it("refuses the leader once the request closed more than 120 days ago", async () => {
+    // The window reaches the file through the request rule, and a closed
+    // request with no close date fails closed exactly as it does on the page.
+    findUploadReferences.mockResolvedValue([commentReference(false)]);
+    getMaintenanceRequest.mockResolvedValue(houseARequest({ status: "completed", completedDate: daysAgo(121) }));
+    expect(await canReadUpload(leaderOfHouseA(), KEY, undefined)).toBe(false);
+
+    // Positive control for the window: closed inside it, the same file is served.
+    getMaintenanceRequest.mockResolvedValue(houseARequest({ status: "completed", completedDate: daysAgo(119) }));
+    expect(await canReadUpload(leaderOfHouseA(), KEY, undefined)).toBe(true);
+  });
+
+  it("lets staff covering the request's region fetch the file on either kind of comment", async () => {
+    getMaintenanceRequest.mockResolvedValue(houseARequest());
+    const ctx = context({
+      permissions: permissions({ canViewMaintenance: true }),
+      allowedRegions: ["Chicago"],
+    });
+    findUploadReferences.mockResolvedValue([commentReference(true)]);
+    expect(await canReadUpload(ctx, KEY, undefined)).toBe(true);
+    findUploadReferences.mockResolvedValue([commentReference(false)]);
+    expect(await canReadUpload(ctx, KEY, undefined)).toBe(true);
+  });
+
+  it("refuses staff covering another region", async () => {
+    findUploadReferences.mockResolvedValue([commentReference(false)]);
+    getMaintenanceRequest.mockResolvedValue(houseARequest());
+    const ctx = context({
+      permissions: permissions({ canViewMaintenance: true }),
+      allowedRegions: ["Twin Cities"],
+    });
+    expect(await canReadUpload(ctx, KEY, undefined)).toBe(false);
+  });
+
+  it("refuses when the comment's request no longer exists", async () => {
+    findUploadReferences.mockResolvedValue([commentReference(false, "req-gone")]);
+    expect(await canReadUpload(leaderOfHouseA(), KEY, undefined)).toBe(false);
+  });
+});
+
 describe("canReadUpload, through an asset photo", () => {
   const assetPhotoReference: UploadReference = {
     kind: "assetPhoto",

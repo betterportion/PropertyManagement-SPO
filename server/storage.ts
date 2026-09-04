@@ -505,6 +505,7 @@ export interface DepositDeductionOwnedFields {
 export type UploadReference =
   | { kind: "maintenanceRequest"; record: MaintenanceRequest }
   | { kind: "maintenanceRequestPhoto"; record: MaintenanceRequestPhoto }
+  | { kind: "maintenanceRequestComment"; record: MaintenanceRequestComment }
   | { kind: "walkthroughPhoto"; record: WalkthroughPhoto }
   | { kind: "assetPhoto"; record: AssetPhoto }
   | { kind: "billingRecord"; record: BillingRecord }
@@ -1831,9 +1832,10 @@ export class DatabaseStorage implements IStorage {
     // Each of these is the full set of columns in which the application stores
     // an uploaded file's URL. A new column holding one has to be added here, or
     // downloads of those files will be refused to everyone but the uploader.
-    const [requests, requestPhotos, walkthrough, asset, billing, property] = await Promise.all([
+    const [requests, requestPhotos, comments, walkthrough, asset, billing, property] = await Promise.all([
       db.select().from(maintenanceRequests).where(eq(maintenanceRequests.photoUrl, url)),
       db.select().from(maintenanceRequestPhotos).where(eq(maintenanceRequestPhotos.imageUrl, url)),
+      db.select().from(maintenanceRequestComments).where(eq(maintenanceRequestComments.attachmentUrl, url)),
       db.select().from(walkthroughPhotos).where(eq(walkthroughPhotos.imageUrl, url)),
       db.select().from(assetPhotos).where(eq(assetPhotos.imageUrl, url)),
       db
@@ -1852,6 +1854,7 @@ export class DatabaseStorage implements IStorage {
     return [
       ...requests.map((record) => ({ kind: "maintenanceRequest" as const, record })),
       ...requestPhotos.map((record) => ({ kind: "maintenanceRequestPhoto" as const, record })),
+      ...comments.map((record) => ({ kind: "maintenanceRequestComment" as const, record })),
       ...walkthrough.map((record) => ({ kind: "walkthroughPhoto" as const, record })),
       ...asset.map((record) => ({ kind: "assetPhoto" as const, record })),
       ...billing.map((record) => ({ kind: "billingRecord" as const, record })),

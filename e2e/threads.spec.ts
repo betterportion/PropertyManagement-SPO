@@ -69,6 +69,8 @@ test.describe("request threads", () => {
     // Internal is the default every time, readable at a glance.
     await expect(page.getByTestId("button-visibility-internal")).toHaveAttribute("aria-pressed", "true");
     await expect(page.getByTestId("button-visibility-shared")).toHaveAttribute("aria-pressed", "false");
+    // A file can go with the comment; the route tests pin who may store one.
+    await expect(page.getByTestId("button-attach-file")).toBeVisible();
 
     await page.getByTestId("input-comment-body").fill(INTERNAL_BODY);
     await page.getByTestId("button-post-comment").click();
@@ -112,6 +114,9 @@ test.describe("request threads", () => {
       await expect(residentPage.getByTestId("form-comment")).toBeVisible();
       await expect(residentPage.getByTestId("button-visibility-internal")).toHaveCount(0);
       await expect(residentPage.getByTestId("text-resident-composer-explainer")).toContainText("property team");
+      // A household may attach a photo to what it posts, through the
+      // request's own attachment route rather than the staff document one.
+      await expect(residentPage.getByTestId("button-attach-file")).toBeVisible();
 
       await residentPage.getByTestId("input-comment-body").fill(RESIDENT_BODY);
       await residentPage.getByTestId("button-post-comment").click();
