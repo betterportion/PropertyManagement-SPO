@@ -16,6 +16,8 @@ import { describe, it, expect, vi, beforeEach, beforeAll, afterAll } from "vites
 import express from "express";
 import { Readable } from "node:stream";
 import type { Server } from "node:http";
+import { getTableColumns } from "drizzle-orm";
+import { userPermissions } from "@shared/schema";
 
 // ---------------------------------------------------------------------------
 // Doubles for everything that would otherwise need a database or a bucket
@@ -6072,5 +6074,38 @@ describe("maintenance request photos", () => {
     // Only the first (own) delete went through — the denied one did not.
     expect(storageMock.deleteMaintenanceRequestPhoto).toHaveBeenCalledTimes(1);
     expect(storageMock.deleteMaintenanceRequestPhoto).toHaveBeenCalledWith("ph-west");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Every permission flag can actually be granted
+// ---------------------------------------------------------------------------
+
+/**
+ * The permissions PATCH parses its body with a zod object, and a zod object
+ * silently drops any key it does not list. Three flags added over three
+ * phases were never added to that list, so the Settings toggle for the
+ * resource hub saved nothing and nobody noticed until a Playwright spec tried
+ * to grant it. The column list is read off the table so the next flag cannot
+ * repeat this: a boolean column the route will not accept fails here.
+ */
+describe("granting every permission flag", () => {
+  const patch = (path: string, body: unknown) => request("PATCH", path, { body });
+  const FLAGS = Object.entries(getTableColumns(userPermissions))
+    .filter(([, column]) => column.dataType === "boolean")
+    .map(([name]) => name);
+
+  it("names at least the flags this suite already knows about", () => {
+    expect(FLAGS).toEqual(expect.arrayContaining(["canViewMaintenance", "canViewResourceHub", "canCompleteWalkthroughs", "canManagePropertySetup"]));
+  });
+
+  it.each(FLAGS)("stores %s when an admin sets it", async (flag) => {
+    actAs(ADMIN);
+    storageMock.getUserPermissions.mockResolvedValue(undefined);
+    storageMock.upsertUserPermissions.mockImplementation(async (p: unknown) => p);
+    const { status, body } = await patch("/api/users/u-alice/permissions", { [flag]: true });
+    expect(status).toBe(200);
+    expect(storageMock.upsertUserPermissions).toHaveBeenCalledWith(expect.objectContaining({ userId: "u-alice", [flag]: true }));
+    expect(body[flag]).toBe(true);
   });
 });

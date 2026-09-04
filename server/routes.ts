@@ -165,6 +165,9 @@ const permissionsUpdateSchema = z.object({
   canManageProperties: z.boolean().optional(),
   canViewFinancials: z.boolean().optional(),
   canManageFinancials: z.boolean().optional(),
+  canCompleteWalkthroughs: z.boolean().optional(),
+  canManagePropertySetup: z.boolean().optional(),
+  canViewResourceHub: z.boolean().optional(),
   allowedRegions: z.array(z.string()).optional(),
 });
 
