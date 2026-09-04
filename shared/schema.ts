@@ -958,6 +958,91 @@ export const setPropertySetupItemSchema = insertPropertySetupItemSchema.pick({
 export type PropertySetupItem = typeof propertySetupItems.$inferSelect;
 export type InsertPropertySetupItem = z.infer<typeof insertPropertySetupItemSchema>;
 
+/**
+ * House facts: what a household needs to know about their house, written by
+ * staff and read by the household on the resource hub. One row per property.
+ *
+ * A separate table from `properties.notes` on purpose. Staff notes are what
+ * staff write for each other; this block is what they write for the household,
+ * and keeping the two in different tables is what makes "a staff-only remark
+ * never reaches a resident" true by construction rather than by care.
+ *
+ * The three access codes are separate columns rather than lines in a text
+ * field (ADR-0002) so that two rules can see them: every change to one records
+ * an audit event naming the code and the house, never the value, and each
+ * carries the date it was last changed -- because the realistic failure is not
+ * a breach but a code nobody has rotated through three generations of
+ * household leaders. The `...UpdatedAt` columns are server-owned and move only
+ * when the value does.
+ *
+ * The rental company's contact and portal are NOT here: they live on the
+ * property already and are read from there, so they cannot drift.
+ */
+export const propertyFacts = pgTable("property_facts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  propertyId: varchar("property_id")
+    .notNull()
+    .unique()
+    .references(() => properties.id, { onDelete: "cascade" }),
+  doorCode: varchar("door_code"),
+  doorCodeUpdatedAt: timestamp("door_code_updated_at"),
+  gateCode: varchar("gate_code"),
+  gateCodeUpdatedAt: timestamp("gate_code_updated_at"),
+  alarmCode: varchar("alarm_code"),
+  alarmCodeUpdatedAt: timestamp("alarm_code_updated_at"),
+  /** Cameras, alarms, what to do when the alarm goes off. */
+  securityNotes: text("security_notes"),
+  /** Where to park, where not to, and who tows. */
+  parkingRules: text("parking_rules"),
+  /** Surfaces needing particular care: the hardwood, the stone counter. */
+  surfaceCare: text("surface_care"),
+  /** Things not to do in this house. */
+  doNots: text("do_nots"),
+  /** Free text -- "Tuesday, bins out Monday night" -- never a weekday enum. */
+  rubbishDay: varchar("rubbish_day"),
+  otherNotes: text("other_notes"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+/** A blank input is a cleared field, because an untouched input sends one. */
+const factsText = (max: number) =>
+  z
+    .string()
+    .trim()
+    .max(max, `Keep this under ${max} characters`)
+    .nullish()
+    .transform((value) => (value ? value : null));
+
+/** A code, not a paragraph. */
+export const ACCESS_CODE_MAX_LENGTH = 32;
+const FACTS_TEXT_MAX_LENGTH = 4000;
+
+/**
+ * What staff may send when saving the block: the nine content fields and
+ * nothing else. The three `...UpdatedAt` stamps are deliberately absent -- the
+ * server sets each one when, and only when, its code's value changes, and a
+ * client-supplied date would let a stale code be made to look freshly rotated.
+ */
+export const setPropertyFactsSchema = z.object({
+  doorCode: factsText(ACCESS_CODE_MAX_LENGTH),
+  gateCode: factsText(ACCESS_CODE_MAX_LENGTH),
+  alarmCode: factsText(ACCESS_CODE_MAX_LENGTH),
+  securityNotes: factsText(FACTS_TEXT_MAX_LENGTH),
+  parkingRules: factsText(FACTS_TEXT_MAX_LENGTH),
+  surfaceCare: factsText(FACTS_TEXT_MAX_LENGTH),
+  doNots: factsText(FACTS_TEXT_MAX_LENGTH),
+  rubbishDay: factsText(FACTS_TEXT_MAX_LENGTH),
+  otherNotes: factsText(FACTS_TEXT_MAX_LENGTH),
+});
+
+export type PropertyFacts = typeof propertyFacts.$inferSelect;
+/** The nine content fields, as the route receives them. */
+export type SetPropertyFacts = z.infer<typeof setPropertyFactsSchema>;
+/** The content plus the three server-computed stamps: what storage writes. */
+export type PropertyFactsWrite = SetPropertyFacts &
+  Pick<PropertyFacts, "doorCodeUpdatedAt" | "gateCodeUpdatedAt" | "alarmCodeUpdatedAt">;
+
 export type Property = typeof properties.$inferSelect;
 export type InsertProperty = z.infer<typeof insertPropertySchema>;
 // Type for creating/updating properties with computed address

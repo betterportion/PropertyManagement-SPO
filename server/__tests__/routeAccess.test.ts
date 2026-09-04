@@ -4594,6 +4594,366 @@ describe("a resident reading their own house", () => {
   });
 });
 
+/**
+ * House facts and access codes (ADR-0002).
+ *
+ * The portal refuses to hold credentials, and a door code looks like one. It
+ * holds these anyway, under three constraints this block proves over HTTP: a
+ * code reaches that house's household and staff and nobody else; a change
+ * records which code on which house and never the value; and the last-changed
+ * date moves only when the value does.
+ */
+describe("house facts and access codes", () => {
+  const WEST = {
+    id: "prop-west",
+    name: "Cleveland House",
+    region: "West Central",
+    address: "1 Main St",
+    ownership: "rented",
+    leaseDocumentUrl: null,
+    maintenancePortalUrl: "https://landlord.example.com/portal",
+    rentalCompanyContactId: "c-landlord",
+    notes: "Staff-only notes",
+  };
+  const EAST = { id: "prop-east", name: "Toledo House", region: "East Central", address: "2 Elm St", ownership: "owned", notes: "Staff-only notes" };
+
+  const LANDLORD = {
+    id: "c-landlord",
+    name: "Pat Landlord",
+    company: "Elm Rentals",
+    phone: "555-0100",
+    email: "pat@example.com",
+    region: "West Central",
+  };
+
+  const LAST_YEAR = new Date("2025-01-15T00:00:00.000Z");
+  const EXISTING = {
+    id: "facts-west",
+    propertyId: "prop-west",
+    doorCode: "4321",
+    doorCodeUpdatedAt: LAST_YEAR,
+    gateCode: null,
+    gateCodeUpdatedAt: null,
+    alarmCode: "9876",
+    alarmCodeUpdatedAt: LAST_YEAR,
+    securityNotes: "Camera over the back door",
+    parkingRules: "Driveway only",
+    surfaceCare: null,
+    doNots: null,
+    rubbishDay: "Tuesday",
+    otherNotes: null,
+  };
+
+  /** The full block, as the staff form always sends every field. */
+  const SAME_AS_EXISTING = {
+    doorCode: "4321",
+    gateCode: null,
+    alarmCode: "9876",
+    securityNotes: "Camera over the back door",
+    parkingRules: "Driveway only",
+    surfaceCare: null,
+    doNots: null,
+    rubbishDay: "Tuesday",
+    otherNotes: null,
+  };
+
+  const put = (path: string, body: unknown) => request("PUT", path, { body });
+
+  /** The row the route asked storage to write. */
+  function written() {
+    const calls = storageMock.upsertPropertyFacts.mock.calls;
+    expect(calls).toHaveLength(1);
+    return calls[0][1];
+  }
+
+  beforeEach(() => {
+    storageMock.getProperty.mockImplementation(async (id: string) =>
+      id === "prop-west" ? WEST : id === "prop-east" ? EAST : undefined,
+    );
+    storageMock.getMaintenanceContact.mockImplementation(async (id: string) =>
+      id === "c-landlord" ? LANDLORD : undefined,
+    );
+    storageMock.getPropertyFacts.mockImplementation(async (propertyId: string) =>
+      propertyId === "prop-west" ? EXISTING : undefined,
+    );
+    storageMock.upsertPropertyFacts.mockImplementation(async (propertyId: string, facts) => ({
+      id: "facts-west",
+      propertyId,
+      ...facts,
+    }));
+  });
+
+  // ── Who may read ─────────────────────────────────────────────────────────
+
+  it("refuses an anonymous caller", async () => {
+    expect((await get("/api/properties/prop-west/facts")).status).toBe(401);
+    expect((await put("/api/properties/prop-west/facts", SAME_AS_EXISTING)).status).toBe(401);
+  });
+
+  it("refuses a resident the staff read route, even for their own house", async () => {
+    // A household reads its facts through the hub projection and nothing
+    // else. The staff route is region-scoped, and a resident must not acquire
+    // a region path here any more than on walkthroughs.
+    actAs({ ...ALICE, propertyId: "prop-west" } as typeof ALICE, { canViewResourceHub: true });
+    const { status } = await get("/api/properties/prop-west/facts");
+    expect(status).toBe(403);
+    expect(storageMock.getPropertyFacts).not.toHaveBeenCalled();
+  });
+
+  it("gives a resident of another house nothing of this house's facts", async () => {
+    // Bob lives in the east house. His own-house projection is the only read
+    // he has, and it answers only for the house on his account -- so the
+    // west house's codes are never even looked up on his behalf.
+    actAs({ ...BOB, propertyId: "prop-east" } as typeof BOB, { canViewResourceHub: true });
+    const { status, body } = await get("/api/my-property");
+    expect(status).toBe(200);
+    expect(body.id).toBe("prop-east");
+    expect(body.facts).toBeNull();
+    expect(storageMock.getPropertyFacts).not.toHaveBeenCalledWith("prop-west");
+    expect(JSON.stringify(body)).not.toContain("4321");
+  });
+
+  it("gives a household leader their own house's facts, codes and dates included", async () => {
+    actAs({ ...ALICE, propertyId: "prop-west" } as typeof ALICE, { canViewResourceHub: true });
+    const { status, body } = await get("/api/my-property");
+    expect(status).toBe(200);
+    expect(body.facts).toEqual({
+      doorCode: "4321",
+      doorCodeUpdatedAt: LAST_YEAR.toISOString(),
+      gateCode: null,
+      gateCodeUpdatedAt: null,
+      alarmCode: "9876",
+      alarmCodeUpdatedAt: LAST_YEAR.toISOString(),
+      securityNotes: "Camera over the back door",
+      parkingRules: "Driveway only",
+      surfaceCare: null,
+      doNots: null,
+      rubbishDay: "Tuesday",
+      otherNotes: null,
+    });
+  });
+
+  it("carries who to call and the portal for a rented house, from the property's own fields", async () => {
+    // Read from the existing property columns, never retyped into the facts.
+    actAs({ ...ALICE, propertyId: "prop-west" } as typeof ALICE, { canViewResourceHub: true });
+    const { body } = await get("/api/my-property");
+    expect(body.rentalCompany).toEqual({ name: "Pat Landlord", company: "Elm Rentals", phone: "555-0100" });
+    expect(body.maintenancePortalUrl).toBe("https://landlord.example.com/portal");
+  });
+
+  it("never lets staff notes into the projection", async () => {
+    // Staff notes and house facts are visibly different fields precisely so a
+    // staff-only remark never reaches the household.
+    actAs({ ...ALICE, propertyId: "prop-west" } as typeof ALICE, { canViewResourceHub: true });
+    const { body } = await get("/api/my-property");
+    expect(body).not.toHaveProperty("notes");
+    expect(body.facts).not.toHaveProperty("notes");
+    expect(JSON.stringify(body)).not.toContain("Staff-only notes");
+  });
+
+  it("resolves the house from the account, never from a permissions row naming another region", async () => {
+    // Same rule as the resource links: a resident's scope is their HOUSE, and
+    // a permissions row that happens to name a region grants nothing here.
+    actAs({ ...ALICE, propertyId: "prop-west" } as typeof ALICE, {
+      canViewResourceHub: true,
+      allowedRegions: ["East Central"],
+    });
+    const { status, body } = await get("/api/my-property");
+    expect(status).toBe(200);
+    expect(body.id).toBe("prop-west");
+    expect(body.facts.doorCode).toBe("4321");
+    expect(storageMock.getPropertyFacts).toHaveBeenCalledWith("prop-west");
+    expect(storageMock.getPropertyFacts).not.toHaveBeenCalledWith("prop-east");
+  });
+
+  it("still keeps the facts behind the hub grant", async () => {
+    actAs({ ...ALICE, propertyId: "prop-west" } as typeof ALICE, { canCompleteWalkthroughs: true });
+    expect((await get("/api/my-property")).status).toBe(403);
+    expect(storageMock.getPropertyFacts).not.toHaveBeenCalled();
+  });
+
+  it("answers no facts for a house that has none recorded", async () => {
+    actAs({ ...BOB, propertyId: "prop-east" } as typeof BOB, { canViewResourceHub: true });
+    const { body } = await get("/api/my-property");
+    expect(body.facts).toBeNull();
+    expect(body.rentalCompany).toBeNull();
+  });
+
+  it("gives staff in the region the facts, and refuses staff outside it", async () => {
+    actAs(STAFF, { canViewProperties: true, allowedRegions: ["West Central"] });
+    const inRegion = await get("/api/properties/prop-west/facts");
+    expect(inRegion.status).toBe(200);
+    expect(inRegion.body.doorCode).toBe("4321");
+
+    actAs(STAFF, { canViewProperties: true, allowedRegions: ["East Central"] });
+    expect((await get("/api/properties/prop-west/facts")).status).toBe(403);
+  });
+
+  it("answers an empty block, not an error, for a house with no facts yet", async () => {
+    actAs(ADMIN);
+    const { status, body } = await get("/api/properties/prop-east/facts");
+    expect(status).toBe(200);
+    expect(body).toBeNull();
+  });
+
+  it("answers 404 for a house that does not exist", async () => {
+    actAs(ADMIN);
+    expect((await get("/api/properties/prop-nowhere/facts")).status).toBe(404);
+    expect((await put("/api/properties/prop-nowhere/facts", SAME_AS_EXISTING)).status).toBe(404);
+    expect(storageMock.upsertPropertyFacts).not.toHaveBeenCalled();
+  });
+
+  // ── Who may write ────────────────────────────────────────────────────────
+
+  it("refuses a resident the write, without writing", async () => {
+    actAs({ ...ALICE, propertyId: "prop-west" } as typeof ALICE, {
+      canViewResourceHub: true,
+      canCompleteWalkthroughs: true,
+    });
+    const { status } = await put("/api/properties/prop-west/facts", { ...SAME_AS_EXISTING, doorCode: "0000" });
+    expect(status).toBe(403);
+    expect(storageMock.upsertPropertyFacts).not.toHaveBeenCalled();
+    expect(storageMock.createAuditEvent).not.toHaveBeenCalled();
+  });
+
+  it("refuses staff outside the region the write, without writing", async () => {
+    actAs(STAFF, { canManageProperties: true, allowedRegions: ["East Central"] });
+    const { status } = await put("/api/properties/prop-west/facts", { ...SAME_AS_EXISTING, doorCode: "0000" });
+    expect(status).toBe(403);
+    expect(storageMock.upsertPropertyFacts).not.toHaveBeenCalled();
+    expect(storageMock.createAuditEvent).not.toHaveBeenCalled();
+  });
+
+  it("refuses staff holding only the view permission", async () => {
+    actAs(STAFF, { canViewProperties: true, allowedRegions: ["West Central"] });
+    const { status } = await put("/api/properties/prop-west/facts", SAME_AS_EXISTING);
+    expect(status).toBe(403);
+    expect(storageMock.upsertPropertyFacts).not.toHaveBeenCalled();
+  });
+
+  // The positive control.
+  it("lets staff in the region save the block", async () => {
+    actAs(STAFF, { canManageProperties: true, allowedRegions: ["West Central"] });
+    const { status, body } = await put("/api/properties/prop-west/facts", {
+      ...SAME_AS_EXISTING,
+      parkingRules: "Driveway only; the street is permit parking",
+    });
+    expect(status).toBe(200);
+    expect(body.parkingRules).toBe("Driveway only; the street is permit parking");
+    expect(storageMock.upsertPropertyFacts).toHaveBeenCalledWith("prop-west", expect.objectContaining({
+      parkingRules: "Driveway only; the street is permit parking",
+    }));
+  });
+
+  it("refuses a code longer than a code, without writing", async () => {
+    actAs(ADMIN);
+    const { status } = await put("/api/properties/prop-west/facts", { ...SAME_AS_EXISTING, doorCode: "x".repeat(33) });
+    expect(status).toBe(400);
+    expect(storageMock.upsertPropertyFacts).not.toHaveBeenCalled();
+  });
+
+  // ── The audit rule: which code, which house, never the value ─────────────
+
+  it("records a door code change naming the house and the code, never the value", async () => {
+    actAs(ADMIN);
+    await put("/api/properties/prop-west/facts", { ...SAME_AS_EXISTING, doorCode: "5555" });
+
+    expect(storageMock.createAuditEvent).toHaveBeenCalledTimes(1);
+    const event = storageMock.createAuditEvent.mock.calls[0][0];
+    expect(event).toMatchObject({
+      action: "property.access_code_changed",
+      entityType: "property",
+      entityId: "prop-west",
+      actorId: ADMIN.id,
+    });
+    expect(event.summary).toContain("Door code");
+    expect(event.summary).toContain("Cleveland House");
+    // Neither the new code nor the old one, anywhere in the row.
+    const recorded = JSON.stringify(event);
+    expect(recorded).not.toContain("5555");
+    expect(recorded).not.toContain("4321");
+  });
+
+  it("records one event per code that changed", async () => {
+    actAs(ADMIN);
+    await put("/api/properties/prop-west/facts", { ...SAME_AS_EXISTING, doorCode: "5555", alarmCode: "1111" });
+
+    const summaries = storageMock.createAuditEvent.mock.calls.map((call) => call[0].summary as string).sort();
+    expect(summaries).toHaveLength(2);
+    expect(summaries[0]).toContain("Alarm code");
+    expect(summaries[1]).toContain("Door code");
+    for (const call of storageMock.createAuditEvent.mock.calls) {
+      const recorded = JSON.stringify(call[0]);
+      expect(recorded).not.toContain("5555");
+      expect(recorded).not.toContain("1111");
+      expect(recorded).not.toContain("9876");
+    }
+  });
+
+  it("treats clearing a code as a change", async () => {
+    // A code that is gone is a code that changed; the household should see
+    // the date move and the trail should say so.
+    actAs(ADMIN);
+    await put("/api/properties/prop-west/facts", { ...SAME_AS_EXISTING, alarmCode: null });
+
+    expect(storageMock.createAuditEvent).toHaveBeenCalledTimes(1);
+    expect(storageMock.createAuditEvent.mock.calls[0][0].summary).toContain("Alarm code");
+    expect(written().alarmCode).toBeNull();
+    expect(written().alarmCodeUpdatedAt).not.toEqual(LAST_YEAR);
+  });
+
+  it("records nothing when only the rubbish day changed", async () => {
+    actAs(ADMIN);
+    const { status } = await put("/api/properties/prop-west/facts", { ...SAME_AS_EXISTING, rubbishDay: "Wednesday" });
+    expect(status).toBe(200);
+    expect(storageMock.createAuditEvent).not.toHaveBeenCalled();
+  });
+
+  it("records nothing when the same block is saved again", async () => {
+    actAs(ADMIN);
+    await put("/api/properties/prop-west/facts", SAME_AS_EXISTING);
+    expect(storageMock.createAuditEvent).not.toHaveBeenCalled();
+  });
+
+  // ── The last-changed date moves only with the value ──────────────────────
+
+  it("leaves a code's last-changed date alone when the same code is saved again", async () => {
+    actAs(ADMIN);
+    await put("/api/properties/prop-west/facts", { ...SAME_AS_EXISTING, rubbishDay: "Wednesday" });
+
+    expect(written().doorCodeUpdatedAt).toEqual(LAST_YEAR);
+    expect(written().alarmCodeUpdatedAt).toEqual(LAST_YEAR);
+    expect(written().gateCodeUpdatedAt).toBeNull();
+  });
+
+  it("stamps the last-changed date from the server when the code changes", async () => {
+    actAs(ADMIN);
+    const before = Date.now();
+    await put("/api/properties/prop-west/facts", {
+      ...SAME_AS_EXISTING,
+      doorCode: "5555",
+      // A client-supplied date is ignored outright, not merely overridden.
+      doorCodeUpdatedAt: "2001-01-01T00:00:00.000Z",
+    });
+
+    const stamped = written().doorCodeUpdatedAt as Date;
+    expect(stamped.getTime()).toBeGreaterThanOrEqual(before);
+    // The other codes did not change, so their dates did not either.
+    expect(written().alarmCodeUpdatedAt).toEqual(LAST_YEAR);
+  });
+
+  it("stamps a code set for the first time on a house with no facts yet", async () => {
+    actAs(ADMIN);
+    const before = Date.now();
+    await put("/api/properties/prop-east/facts", { ...SAME_AS_EXISTING, doorCode: "2468", alarmCode: null });
+
+    expect((written().doorCodeUpdatedAt as Date).getTime()).toBeGreaterThanOrEqual(before);
+    expect(written().alarmCodeUpdatedAt).toBeNull();
+    expect(storageMock.createAuditEvent).toHaveBeenCalledTimes(1);
+    expect(storageMock.createAuditEvent.mock.calls[0][0].summary).toContain("Toledo House");
+  });
+});
+
 describe("liability paperwork", () => {
   const WEST_RESIDENT = { id: "res-a", firstName: "Alice", lastName: "Ng", propertyId: "prop-west", region: "West Central", buildingAddress: "1 Main St", isActive: true };
   const EAST_RESIDENT = { id: "res-e", firstName: "Eve", lastName: "Ito", propertyId: "prop-east", region: "East Central", buildingAddress: "9 Elm", isActive: true };

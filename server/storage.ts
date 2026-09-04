@@ -21,6 +21,7 @@ import {
   resourceLinks,
   residentDocuments,
   propertyBudgets,
+  propertyFacts,
   residents,
   rentPayments,
   securityDeposits,
@@ -73,6 +74,8 @@ import {
   type ResidentDocument,
   type PropertyBudget,
   type InsertPropertyBudget,
+  type PropertyFacts,
+  type PropertyFactsWrite,
   type MaintenanceSchedule,
   type InsertMaintenanceSchedule,
   type Resident,
@@ -411,6 +414,15 @@ export interface IStorage {
   getAllPropertyBudgets(): Promise<PropertyBudget[]>;
   /** Creates or replaces the figure for one house and year. */
   upsertPropertyBudget(budget: InsertPropertyBudget & { region: string }): Promise<PropertyBudget>;
+
+  // House facts
+  getPropertyFacts(propertyId: string): Promise<PropertyFacts | undefined>;
+  /**
+   * Creates or replaces the house's block. The three `...UpdatedAt` stamps
+   * arrive already decided by the route (see server/houseFacts.ts); storage
+   * writes what it is given and decides nothing about them.
+   */
+  upsertPropertyFacts(propertyId: string, facts: PropertyFactsWrite): Promise<PropertyFacts>;
 
   // Audit log
   createAuditEvent(event: InsertAuditEvent): Promise<AuditEvent>;
@@ -1579,6 +1591,24 @@ export class DatabaseStorage implements IStorage {
       .onConflictDoUpdate({
         target: [propertyBudgets.propertyId, propertyBudgets.year],
         set: { amount: budget.amount, notes: budget.notes ?? null, region: budget.region, updatedAt: new Date() },
+      })
+      .returning();
+    return row;
+  }
+
+  // House facts Implementation
+  async getPropertyFacts(propertyId: string): Promise<PropertyFacts | undefined> {
+    const [row] = await db.select().from(propertyFacts).where(eq(propertyFacts.propertyId, propertyId));
+    return row;
+  }
+
+  async upsertPropertyFacts(propertyId: string, facts: PropertyFactsWrite): Promise<PropertyFacts> {
+    const [row] = await db
+      .insert(propertyFacts)
+      .values({ propertyId, ...facts })
+      .onConflictDoUpdate({
+        target: propertyFacts.propertyId,
+        set: { ...facts, updatedAt: new Date() },
       })
       .returning();
     return row;

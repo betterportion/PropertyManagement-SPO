@@ -78,10 +78,12 @@ import {
   insertResidentDocumentSchema,
   insertPropertyBudgetSchema,
   setPropertySetupItemSchema,
+  setPropertyFactsSchema,
   type InsertPropertyWithAddress,
   insertMaintenanceRequestCommentSchema,
 } from "@shared/schema";
 import { STANDARD_SCHEDULE_TEMPLATES, addMonths } from "./schedules";
+import { planHouseFacts } from "./houseFacts";
 import { buildActionItems } from "./actionItems";
 import { closedDateChange } from "./maintenanceStatus";
 import { commentBodyFromClient } from "./comments";
@@ -3393,11 +3395,42 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const property = await storage.getProperty(ctx.user.propertyId);
       if (!property) return res.json(null);
 
+      // The house facts (ADR-0002) reach the household through this projection
+      // and nothing else: named fields again, so `notes` -- the staff-only
+      // remarks -- can never ride along. Who to call and the portal come from
+      // the property's own columns, and only for a house SPO does not own.
+      const [facts, landlord] = await Promise.all([
+        storage.getPropertyFacts(property.id),
+        property.ownership === "rented" && property.rentalCompanyContactId
+          ? storage.getMaintenanceContact(property.rentalCompanyContactId)
+          : undefined,
+      ]);
+
       res.json({
         id: property.id,
         name: property.name,
         address: property.address,
         leaseDocumentUrl: property.leaseDocumentUrl,
+        maintenancePortalUrl: property.ownership === "rented" ? property.maintenancePortalUrl : null,
+        rentalCompany: landlord
+          ? { name: landlord.name, company: landlord.company, phone: landlord.phone }
+          : null,
+        facts: facts
+          ? {
+              doorCode: facts.doorCode,
+              doorCodeUpdatedAt: facts.doorCodeUpdatedAt,
+              gateCode: facts.gateCode,
+              gateCodeUpdatedAt: facts.gateCodeUpdatedAt,
+              alarmCode: facts.alarmCode,
+              alarmCodeUpdatedAt: facts.alarmCodeUpdatedAt,
+              securityNotes: facts.securityNotes,
+              parkingRules: facts.parkingRules,
+              surfaceCare: facts.surfaceCare,
+              doNots: facts.doNots,
+              rubbishDay: facts.rubbishDay,
+              otherNotes: facts.otherNotes,
+            }
+          : null,
       });
     } catch (error) {
       sendError(res, error, "Failed to fetch your house");
@@ -4593,6 +4626,72 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(item);
     } catch (error) {
       sendError(res, error, "Failed to update the setup checklist");
+    }
+  });
+
+  // ─── House facts ───────────────────────────────────────────────────────────
+  // What a household needs to know about their house (ADR-0002). Staff read
+  // and write it here, region-checked like the setup checklist; the household
+  // reads it through /api/my-property and never through these routes.
+
+  app.get('/api/properties/:propertyId/facts', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canViewProperties", "canManageProperties")) return;
+
+      const property = await propertyForSetup(req, res, ctx);
+      if (!property) return;
+
+      res.json((await storage.getPropertyFacts(property.id)) ?? null);
+    } catch (error) {
+      sendError(res, error, "Failed to fetch the house facts");
+    }
+  });
+
+  /**
+   * Saves the whole block.
+   *
+   * The body carries the nine content fields and nothing about dates: each
+   * code's last-changed stamp is decided here, from whether its value actually
+   * changed against the row already stored, so a re-save of the same code
+   * leaves the date alone and a client cannot make a stale code look rotated.
+   *
+   * Every code that changed records its own audit event naming the house and
+   * which code -- and never the value, which is why the details carry the
+   * column name and the summary is built from the label. Changing the parking
+   * rules or the rubbish day records nothing.
+   */
+  app.put('/api/properties/:propertyId/facts', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageProperties")) return;
+
+      const property = await propertyForSetup(req, res, ctx);
+      if (!property) return;
+
+      const incoming = setPropertyFactsSchema.parse(req.body);
+      const existing = await storage.getPropertyFacts(property.id);
+      const plan = planHouseFacts(existing, incoming, new Date());
+
+      const facts = await storage.upsertPropertyFacts(property.id, plan.write);
+
+      for (const code of plan.changedCodes) {
+        recordAuditEvent(ctx, {
+          action: AUDIT_ACTIONS.PROPERTY_ACCESS_CODE_CHANGED,
+          entityType: "property",
+          entityId: property.id,
+          summary: `${code.label} for ${property.name} (${property.address}) changed`,
+          details: { field: code.key, region: property.region },
+        });
+      }
+
+      res.json(facts);
+    } catch (error) {
+      sendError(res, error, "Failed to save the house facts");
     }
   });
 
