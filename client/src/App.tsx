@@ -15,6 +15,7 @@ import NotFound from "@/pages/not-found";
 import Landing from "@/pages/Landing";
 import AdminDashboard from "@/pages/AdminDashboard";
 import Maintenance from "@/pages/Maintenance";
+import RequestDetail from "@/pages/RequestDetail";
 import Walkthroughs from "@/pages/Walkthroughs";
 import FlaggedItems from "@/pages/FlaggedItems";
 import WalkthroughRun from "@/pages/WalkthroughRun";
@@ -63,6 +64,7 @@ function Router() {
         <Route path="/residents/:id" component={ResidentDetail} />
         <Route path="/finances" component={Finances} />
         <Route path="/maintenance" component={Maintenance} />
+        <Route path="/maintenance/:id" component={RequestDetail} />
         <Route path="/walkthroughs" component={Walkthroughs} />
         {/* Literal path first: wouter matches in order, so :id would swallow it. */}
         <Route path="/walkthroughs/flagged" component={FlaggedItems} />
@@ -97,6 +99,10 @@ function Router() {
       <Route path="/" component={ResidentDashboard} />
       <Route path="/submit-request" component={SubmitRequest} />
       <Route path="/my-requests" component={MyRequests} />
+      {/* The same path staff use, as with /walkthroughs/:id: the server
+          decides which request a household may open, so this only makes the
+          page reachable. */}
+      <Route path="/maintenance/:id" component={RequestDetail} />
       {/* Behind its own flag, like the walkthrough screens above: a
           resident-tier capability is granted per account. Registered only when
           granted -- the server refuses either way, so this decides whether the
