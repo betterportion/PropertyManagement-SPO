@@ -11,6 +11,9 @@ import { Button } from "@/components/ui/button";
  * called -- is held here until Post. Removing it before posting forgets the
  * pair; the file itself stays in storage, as it does after a delete (known
  * issue 1). A second file is a second comment, so there is one slot.
+ *
+ * A bid's quote is the same shape with a different route, so `endpoint` and
+ * `hint` can be overridden; the route decides who may upload either way.
  */
 
 export interface PendingAttachment {
@@ -30,9 +33,21 @@ interface CommentAttachmentFieldProps {
   onChange: (value: PendingAttachment | null) => void;
   onError: (message: string) => void;
   disabled?: boolean;
+  /** Where the file goes. Defaults to the request's comment attachment route. */
+  endpoint?: string;
+  /** The line beside the button. Defaults to the comment's. */
+  hint?: string;
 }
 
-export function CommentAttachmentField({ requestId, value, onChange, onError, disabled }: CommentAttachmentFieldProps) {
+export function CommentAttachmentField({
+  requestId,
+  value,
+  onChange,
+  onError,
+  disabled,
+  endpoint = `/api/maintenance-requests/${requestId}/attachments`,
+  hint = "One file per comment. PDF, Word or an image, up to 20MB.",
+}: CommentAttachmentFieldProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [isUploading, setIsUploading] = useState(false);
 
@@ -45,7 +60,7 @@ export function CommentAttachmentField({ requestId, value, onChange, onError, di
     try {
       const form = new FormData();
       form.append("file", file);
-      const response = await fetch(`/api/maintenance-requests/${requestId}/attachments`, {
+      const response = await fetch(endpoint, {
         method: "POST",
         body: form,
         credentials: "include",
@@ -113,7 +128,7 @@ export function CommentAttachmentField({ requestId, value, onChange, onError, di
             {isUploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Paperclip className="h-3.5 w-3.5" />}
             {isUploading ? "Uploading..." : "Attach a file"}
           </Button>
-          <span className="text-xs text-muted-foreground">One file per comment. PDF, Word or an image, up to 20MB.</span>
+          <span className="text-xs text-muted-foreground">{hint}</span>
         </>
       )}
     </div>

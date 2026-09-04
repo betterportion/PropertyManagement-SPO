@@ -14,7 +14,7 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import { MAINTENANCE_REQUEST_TYPES, type MaintenanceRequest, type MaintenanceContact, type Invoice, type Property } from "@shared/schema";
+import { MAINTENANCE_REQUEST_TYPES, isProjectType, type MaintenanceRequest, type MaintenanceContact, type Invoice, type Property } from "@shared/schema";
 import { REQUEST_TYPE } from "@/lib/requestLabels";
 import { DollarSign, Link2, FileText, Plus, Check, X, ImageIcon } from "lucide-react";
 import { PhotoUpload } from "@/components/PhotoUpload";
@@ -35,9 +35,35 @@ const editSchema = z.object({
   status: z.enum(["pending", "in_progress", "completed", "cancelled"]),
   location: z.string().min(1, "Location is required"),
   photoUrl: z.string().nullable().optional(),
+  // The project fields, held as the strings the inputs produce; onSubmit
+  // turns them into what the API takes, and sends them only for a project
+  // or a capital project -- the server refuses them on a repair.
+  contractUrl: z.string(),
+  estimatedCost: z.string(),
+  actualCost: z.string(),
+  targetYear: z.string(),
+  targetQuarter: z.string(),
 });
 
 type EditFormData = z.infer<typeof editSchema>;
+
+/** The quarter select cannot hold an empty value, so "none" stands for it. */
+const NO_QUARTER = "none";
+
+/** A number input's empty string is "not set", never zero. */
+const numberOrNull = (value: string) => (value.trim() === "" ? null : value.trim());
+
+/** What the update sends for the project fields: the values for a project, nothing for a repair. */
+function projectFieldsPayload(data: EditFormData): Record<string, unknown> {
+  if (!isProjectType(data.type)) return {};
+  return {
+    contractUrl: data.contractUrl.trim(),
+    estimatedCost: numberOrNull(data.estimatedCost),
+    actualCost: numberOrNull(data.actualCost),
+    targetYear: numberOrNull(data.targetYear),
+    targetQuarter: data.targetQuarter === NO_QUARTER ? null : data.targetQuarter,
+  };
+}
 
 export default function MaintenanceEditDialog({ request, open, onClose }: MaintenanceEditDialogProps) {
   const { toast } = useToast();
@@ -108,12 +134,18 @@ export default function MaintenanceEditDialog({ request, open, onClose }: Mainte
       status: request.status,
       location: request.location,
       photoUrl: request.photoUrl ?? null,
+      contractUrl: request.contractUrl ?? "",
+      estimatedCost: request.estimatedCost ?? "",
+      actualCost: request.actualCost ?? "",
+      targetYear: request.targetYear != null ? String(request.targetYear) : "",
+      targetQuarter: request.targetQuarter != null ? String(request.targetQuarter) : NO_QUARTER,
     },
   });
 
   const updateMutation = useMutation({
     mutationFn: async (data: EditFormData) => {
-      return await apiRequest('PATCH', `/api/maintenance-requests/${request.id}`, data);
+      const { contractUrl: _c, estimatedCost: _e, actualCost: _a, targetYear: _y, targetQuarter: _q, ...rest } = data;
+      return await apiRequest('PATCH', `/api/maintenance-requests/${request.id}`, { ...rest, ...projectFieldsPayload(data) });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/maintenance-requests'] });
@@ -303,6 +335,103 @@ export default function MaintenanceEditDialog({ request, open, onClose }: Mainte
                 )}
               />
             </div>
+
+            {/* Only for a project or a capital project: a repair's form
+                stays a repair's form, and the server refuses these on one. */}
+            {isProjectType(form.watch("type")) && (
+              <div className="space-y-3" data-testid="section-project-fields">
+                <h3 className="text-sm font-semibold flex items-center gap-2">
+                  <FileText className="h-4 w-4" />
+                  Project details
+                </h3>
+                <FormField
+                  control={form.control}
+                  name="contractUrl"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Signed contract (link)</FormLabel>
+                      <FormControl>
+                        <Input {...field} type="url" placeholder="https://drive.google.com/..." data-testid="input-contract-url" />
+                      </FormControl>
+                      <p className="text-xs text-muted-foreground">
+                        A link to where the signed agreement lives, on Drive or Adobe. The portal never holds a copy.
+                      </p>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <div className="grid grid-cols-2 gap-4">
+                  <FormField
+                    control={form.control}
+                    name="estimatedCost"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Estimated cost ($)</FormLabel>
+                        <FormControl>
+                          <Input {...field} type="number" min={0} step="0.01" data-testid="input-estimated-cost" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="actualCost"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Actual cost ($)</FormLabel>
+                        <FormControl>
+                          <Input {...field} type="number" min={0} step="0.01" data-testid="input-actual-cost" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="targetYear"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Target year</FormLabel>
+                        <FormControl>
+                          <Input {...field} type="number" min={2000} max={2100} step={1} placeholder="e.g. 2027" data-testid="input-target-year" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="targetQuarter"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Target quarter</FormLabel>
+                        <Select value={field.value} onValueChange={field.onChange}>
+                          <FormControl>
+                            <SelectTrigger data-testid="select-target-quarter">
+                              <SelectValue />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            <SelectItem value={NO_QUARTER}>Any time that year</SelectItem>
+                            {["1", "2", "3", "4"].map((quarter) => (
+                              <SelectItem key={quarter} value={quarter} data-testid={`option-target-quarter-${quarter}`}>
+                                Q{quarter}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Costs are amounts only; the money moves in QuickBooks and Ramp. A target period is a year or a quarter,
+                  never a date, because these slip by design.
+                </p>
+              </div>
+            )}
 
             <div className="space-y-2">
               <h3 className="text-sm font-semibold flex items-center gap-2">

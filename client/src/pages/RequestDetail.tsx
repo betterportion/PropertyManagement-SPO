@@ -9,6 +9,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Container, PageHeader, PageStack, Section } from "@/components/layout/page";
 import { AccessDeniedState, EmptyState, ErrorState, LoadingState } from "@/components/states";
 import MaintenanceEditDialog from "@/components/MaintenanceEditDialog";
+import { RequestBids } from "@/components/RequestBids";
+import { RequestProjectCard } from "@/components/RequestProjectCard";
 import RequestThread from "@/components/RequestThread";
 import { useAuth } from "@/hooks/useAuth";
 import { isForbiddenError } from "@/lib/authUtils";
@@ -16,6 +18,7 @@ import { formatDate, formatValue } from "@/lib/format";
 import { REQUEST_PRIORITY, REQUEST_STATUS, REQUEST_TYPE } from "@/lib/requestLabels";
 import {
   isClosedMaintenanceStatus,
+  isProjectType,
   type MaintenanceContact,
   type MaintenanceRequest,
   type MaintenanceRequestComment,
@@ -27,7 +30,9 @@ import {
  *
  * Until now a request was only ever a card in a list with an edit dialog, so a
  * thread, bids, a contract link and costs had nowhere to live. This is the
- * screen those land on; today it shows what already exists.
+ * screen those land on: the request, its photos, its contractors, the thread,
+ * and -- for staff, on a project or a capital project -- the project fields
+ * and the bids.
  *
  * It is registered in both role switches at the same path, the way the
  * walkthrough page is, and decides nothing about access itself: it fetches
@@ -312,6 +317,17 @@ export default function RequestDetail() {
             )}
           </CardContent>
         </Card>
+
+        {/* The project fields and the bids, on a project or a capital project
+            and for staff. A resident never gets here for one -- the server
+            answers 403 above -- so this gate is about the screen, and the
+            routes behind both cards refuse a resident and a repair anyway. */}
+        {isStaff && isProjectType(request.type) && (
+          <>
+            <RequestProjectCard request={request} canEdit={canEdit} onEdit={() => setIsEditOpen(true)} />
+            <RequestBids requestId={request.id} canEdit={canEdit} />
+          </>
+        )}
 
         <RequestThread
           requestId={request.id}

@@ -38,6 +38,9 @@ import {
   type MaintenanceRequestPhoto,
   type MaintenanceRequestComment,
   type InsertMaintenanceRequestComment,
+  maintenanceRequestBids,
+  type MaintenanceRequestBid,
+  type InsertMaintenanceRequestBid,
   type InsertMaintenanceRequestPhoto,
   type WalkthroughRoom,
   type Walkthrough,
@@ -356,6 +359,20 @@ export interface IStorage {
   ): Promise<MaintenanceRequestComment>;
   deleteMaintenanceRequestComment(id: string): Promise<void>;
 
+  // Bids on a project
+  /** Every bid on a request, oldest first, so the list reads in the order they came in. */
+  getMaintenanceRequestBids(requestId: string): Promise<MaintenanceRequestBid[]>;
+  getMaintenanceRequestBid(id: string): Promise<MaintenanceRequestBid | undefined>;
+  createMaintenanceRequestBid(bid: InsertMaintenanceRequestBid & { requestId: string }): Promise<MaintenanceRequestBid>;
+  updateMaintenanceRequestBid(id: string, data: Partial<InsertMaintenanceRequestBid>): Promise<MaintenanceRequestBid>;
+  deleteMaintenanceRequestBid(id: string): Promise<void>;
+  /**
+   * Marks one bid accepted and every other bid on the request not, in one
+   * transaction -- "at most one accepted bid" is enforced here, not by the
+   * caller remembering to clear the others.
+   */
+  acceptMaintenanceRequestBid(requestId: string, bidId: string): Promise<MaintenanceRequestBid | undefined>;
+
   // Invoices
   createInvoice(invoice: InsertInvoice): Promise<Invoice>;
   getInvoice(id: string): Promise<Invoice | undefined>;
@@ -506,6 +523,7 @@ export type UploadReference =
   | { kind: "maintenanceRequest"; record: MaintenanceRequest }
   | { kind: "maintenanceRequestPhoto"; record: MaintenanceRequestPhoto }
   | { kind: "maintenanceRequestComment"; record: MaintenanceRequestComment }
+  | { kind: "maintenanceRequestBid"; record: MaintenanceRequestBid }
   | { kind: "walkthroughPhoto"; record: WalkthroughPhoto }
   | { kind: "assetPhoto"; record: AssetPhoto }
   | { kind: "billingRecord"; record: BillingRecord }
@@ -1761,6 +1779,53 @@ export class DatabaseStorage implements IStorage {
     await db.delete(maintenanceRequestComments).where(eq(maintenanceRequestComments.id, id));
   }
 
+  // Bids Implementation
+  async getMaintenanceRequestBids(requestId: string): Promise<MaintenanceRequestBid[]> {
+    return await db
+      .select()
+      .from(maintenanceRequestBids)
+      .where(eq(maintenanceRequestBids.requestId, requestId))
+      .orderBy(asc(maintenanceRequestBids.createdAt));
+  }
+
+  async getMaintenanceRequestBid(id: string): Promise<MaintenanceRequestBid | undefined> {
+    const [row] = await db.select().from(maintenanceRequestBids).where(eq(maintenanceRequestBids.id, id));
+    return row;
+  }
+
+  async createMaintenanceRequestBid(bid: InsertMaintenanceRequestBid & { requestId: string }): Promise<MaintenanceRequestBid> {
+    const [row] = await db.insert(maintenanceRequestBids).values(bid).returning();
+    return row;
+  }
+
+  async updateMaintenanceRequestBid(id: string, data: Partial<InsertMaintenanceRequestBid>): Promise<MaintenanceRequestBid> {
+    const [row] = await db
+      .update(maintenanceRequestBids)
+      .set(filterUndefined(data))
+      .where(eq(maintenanceRequestBids.id, id))
+      .returning();
+    return row;
+  }
+
+  async deleteMaintenanceRequestBid(id: string): Promise<void> {
+    await db.delete(maintenanceRequestBids).where(eq(maintenanceRequestBids.id, id));
+  }
+
+  async acceptMaintenanceRequestBid(requestId: string, bidId: string): Promise<MaintenanceRequestBid | undefined> {
+    return await db.transaction(async (tx) => {
+      await tx
+        .update(maintenanceRequestBids)
+        .set({ accepted: false })
+        .where(eq(maintenanceRequestBids.requestId, requestId));
+      const [row] = await tx
+        .update(maintenanceRequestBids)
+        .set({ accepted: true })
+        .where(and(eq(maintenanceRequestBids.id, bidId), eq(maintenanceRequestBids.requestId, requestId)))
+        .returning();
+      return row;
+    });
+  }
+
   // Property setup checklist Implementation
   async getPropertySetupItems(propertyId: string): Promise<PropertySetupItem[]> {
     return await db
@@ -1832,10 +1897,11 @@ export class DatabaseStorage implements IStorage {
     // Each of these is the full set of columns in which the application stores
     // an uploaded file's URL. A new column holding one has to be added here, or
     // downloads of those files will be refused to everyone but the uploader.
-    const [requests, requestPhotos, comments, walkthrough, asset, billing, property] = await Promise.all([
+    const [requests, requestPhotos, comments, bids, walkthrough, asset, billing, property] = await Promise.all([
       db.select().from(maintenanceRequests).where(eq(maintenanceRequests.photoUrl, url)),
       db.select().from(maintenanceRequestPhotos).where(eq(maintenanceRequestPhotos.imageUrl, url)),
       db.select().from(maintenanceRequestComments).where(eq(maintenanceRequestComments.attachmentUrl, url)),
+      db.select().from(maintenanceRequestBids).where(eq(maintenanceRequestBids.documentUrl, url)),
       db.select().from(walkthroughPhotos).where(eq(walkthroughPhotos.imageUrl, url)),
       db.select().from(assetPhotos).where(eq(assetPhotos.imageUrl, url)),
       db
@@ -1855,6 +1921,7 @@ export class DatabaseStorage implements IStorage {
       ...requests.map((record) => ({ kind: "maintenanceRequest" as const, record })),
       ...requestPhotos.map((record) => ({ kind: "maintenanceRequestPhoto" as const, record })),
       ...comments.map((record) => ({ kind: "maintenanceRequestComment" as const, record })),
+      ...bids.map((record) => ({ kind: "maintenanceRequestBid" as const, record })),
       ...walkthrough.map((record) => ({ kind: "walkthroughPhoto" as const, record })),
       ...asset.map((record) => ({ kind: "assetPhoto" as const, record })),
       ...billing.map((record) => ({ kind: "billingRecord" as const, record })),

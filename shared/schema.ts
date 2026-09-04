@@ -174,6 +174,17 @@ export const maintenanceRequests = pgTable("maintenance_requests", {
   submittedDate: timestamp("submitted_date").defaultNow(),
   completedDate: timestamp("completed_date"),
   photoUrl: varchar("photo_url"),
+  // The project fields. Meaningful only on `project` and `capex`, null on a
+  // repair, and the update route refuses them on one. The contract is a LINK to where the
+  // signed agreement lives, never an upload: the authoritative copy belongs
+  // where the signature is. The two costs are amounts only; the money moves
+  // in QuickBooks and Ramp. The target period is a year, optionally narrowed
+  // to a quarter, and never a hard date, because these slip by design.
+  contractUrl: varchar("contract_url"),
+  estimatedCost: numeric("estimated_cost", { precision: 12, scale: 2 }),
+  actualCost: numeric("actual_cost", { precision: 12, scale: 2 }),
+  targetYear: integer("target_year"),
+  targetQuarter: integer("target_quarter"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -214,13 +225,36 @@ export function isClosedMaintenanceStatus(status: string | null | undefined): bo
  */
 export const MAINTENANCE_REQUEST_TYPES = ["request", "project", "capex"] as const;
 
-export const insertMaintenanceRequestSchema = createInsertSchema(maintenanceRequests).omit({
-  id: true,
-  submittedDate: true,
-  completedDate: true,
-  createdAt: true,
-  updatedAt: true,
-});
+/** Projects and capital projects carry bids and the project fields; a repair does not. */
+export function isProjectType(type: string | null | undefined): boolean {
+  return type === "project" || type === "capex";
+}
+
+/** A target period on screen: "Q2 2027", "2027", or null when none is set. */
+export function formatTargetPeriod(targetYear: number | null | undefined, targetQuarter: number | null | undefined): string | null {
+  if (targetYear == null) return null;
+  return targetQuarter == null ? String(targetYear) : `Q${targetQuarter} ${targetYear}`;
+}
+
+export const insertMaintenanceRequestSchema = createInsertSchema(maintenanceRequests)
+  .omit({
+    id: true,
+    submittedDate: true,
+    completedDate: true,
+    createdAt: true,
+    updatedAt: true,
+  })
+  .extend({
+    // The project card renders this straight into an href, so the scheme is
+    // checked here -- see httpUrlFromClient.
+    contractUrl: httpUrlFromClient.nullish(),
+    estimatedCost: nonNegativeAmount.nullish(),
+    actualCost: nonNegativeAmount.nullish(),
+    // The range keeps a typo from filing a project for the year 27. A quarter
+    // without a year is refused by the route, which can see the stored row.
+    targetYear: z.coerce.number().int("Must be a whole year").min(2000).max(2100).nullish(),
+    targetQuarter: z.coerce.number().int().min(1, "A quarter is 1 to 4").max(4, "A quarter is 1 to 4").nullish(),
+  });
 
 export type MaintenanceRequest = typeof maintenanceRequests.$inferSelect;
 export type InsertMaintenanceRequest = z.infer<typeof insertMaintenanceRequestSchema>;
@@ -677,6 +711,74 @@ export const insertMaintenanceRequestCommentSchema = createInsertSchema(maintena
 
 export type MaintenanceRequestComment = typeof maintenanceRequestComments.$inferSelect;
 export type InsertMaintenanceRequestComment = z.infer<typeof insertMaintenanceRequestCommentSchema>;
+
+/**
+ * One contractor's offer to do a project: who, how much, when, with the quote
+ * attached. A project holds many; at most one is accepted.
+ *
+ * The contractor is a contact record when the firm has one and a typed
+ * `vendorName` when it does not -- an RA should not have to create a vendor
+ * for a company SPO may never use. One of the two is required, checked by
+ * the route on the merged row because an edit may send only the field it
+ * changes. `accepted` is not in the insert schema: the accept route is its
+ * only writer, and it un-accepts every other bid on the request in the same
+ * statement, which is how "at most one" is enforced rather than hoped for.
+ *
+ * `documentUrl` is the "/uploads/<key>" the bid-document route returned and
+ * `documentName` what the file was called, which is what the link on screen
+ * says. The file is readable by whoever can read the project and nobody
+ * else -- findUploadReferences + canReadUploadReference, never a resident.
+ * Deleting the bid leaves the file in storage (known issue 1).
+ */
+export const maintenanceRequestBids = pgTable("maintenance_request_bids", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  requestId: varchar("request_id").notNull().references(() => maintenanceRequests.id, { onDelete: "cascade" }),
+  contactId: varchar("contact_id").references(() => maintenanceContacts.id, { onDelete: "set null" }),
+  vendorName: varchar("vendor_name"),
+  amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),
+  bidDate: timestamp("bid_date"),
+  notes: text("notes"),
+  documentUrl: varchar("document_url"),
+  documentName: varchar("document_name"),
+  accepted: boolean("accepted").notNull().default(false),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("maintenance_request_bids_request_idx").on(table.requestId),
+]);
+
+export const insertMaintenanceRequestBidSchema = createInsertSchema(maintenanceRequestBids)
+  .omit({
+    id: true,
+    // Server-owned: the request comes from the URL, and accepting is a
+    // separate route so that two bids can never both be marked accepted.
+    requestId: true,
+    accepted: true,
+    createdAt: true,
+  })
+  .extend({
+    contactId: z.string().nullish(),
+    // An emptied name is no name, so the vendor rule sees it as such.
+    vendorName: z.string().trim().max(200).transform((value: string) => (value === "" ? null : value)).nullish(),
+    amount: nonNegativeAmount,
+    bidDate: dateFromClient.nullish(),
+    notes: z.string().trim().max(4000).nullish(),
+    // Only ever the URL the bid-document route returned; the route then
+    // checks the file is one this caller stored.
+    documentUrl: z.string().regex(UPLOAD_URL_PATTERN, "That is not an uploaded file").nullish(),
+    documentName: z.string().trim().max(255).nullish(),
+  });
+
+/**
+ * Whether a bid says who made it. Checked by the routes on the merged row
+ * rather than as a schema refinement, because an edit sends only the fields
+ * it changes and a refinement could not see the stored half.
+ */
+export function bidNamesAVendor(bid: { contactId?: string | null; vendorName?: string | null }): boolean {
+  return !!bid.contactId || !!bid.vendorName;
+}
+
+export type MaintenanceRequestBid = typeof maintenanceRequestBids.$inferSelect;
+export type InsertMaintenanceRequestBid = z.infer<typeof insertMaintenanceRequestBidSchema>;
 
 // Maintenance Contacts
 export const maintenanceContacts = pgTable("maintenance_contacts", {

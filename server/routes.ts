@@ -81,6 +81,10 @@ import {
   setPropertyFactsSchema,
   type InsertPropertyWithAddress,
   insertMaintenanceRequestCommentSchema,
+  insertMaintenanceRequestBidSchema,
+  bidNamesAVendor,
+  isProjectType,
+  type InsertMaintenanceRequest,
   type MaintenanceRequest,
   type MaintenanceRequestComment,
 } from "@shared/schema";
@@ -274,6 +278,36 @@ async function resolveContactLink(
   if (!requireRegion(res, ctx, contact.region)) return false;
 
   return true;
+}
+
+/**
+ * Why a request write's project fields are wrong, or null when they are fine.
+ *
+ * Two rules. A repair carries none of them: a contract link, a cost or a
+ * target period on a `request`-type row is refused rather than stored and
+ * hidden, so "null on repairs" is true by construction. And a quarter needs
+ * a year -- checked over the stored row too, because an edit sends only the
+ * field it changes and the year may already be there.
+ */
+const PROJECT_FIELDS = ["contractUrl", "estimatedCost", "actualCost", "targetYear", "targetQuarter"] as const;
+
+/** What a repair holds in every project field. */
+const CLEARED_PROJECT_FIELDS = { contractUrl: null, estimatedCost: null, actualCost: null, targetYear: null, targetQuarter: null };
+
+function projectFieldsProblem(
+  nextType: string,
+  patch: Partial<InsertMaintenanceRequest>,
+  existing?: MaintenanceRequest,
+): string | null {
+  if (!isProjectType(nextType)) {
+    // A null is what a repair holds anyway; a value is the thing refused.
+    return PROJECT_FIELDS.some((field) => patch[field] != null)
+      ? "Only projects and capital projects carry a contract link, costs or a target period"
+      : null;
+  }
+  const targetYear = patch.targetYear !== undefined ? patch.targetYear : existing?.targetYear;
+  const targetQuarter = patch.targetQuarter !== undefined ? patch.targetQuarter : existing?.targetQuarter;
+  return targetQuarter != null && targetYear == null ? "A quarter needs a year to go with it" : null;
 }
 
 export async function registerRoutes(app: Express): Promise<Server> {
@@ -768,7 +802,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // whatever the browser sends. A project is staff's to open, and a
         // resident could not read one back anyway (the type rule in authz.ts).
         const validatedData = insertMaintenanceRequestSchema
-          .omit({ region: true, buildingAddress: true, submittedBy: true, type: true })
+          .omit({
+            region: true,
+            buildingAddress: true,
+            submittedBy: true,
+            type: true,
+            // A repair carries none of the project fields, and this is a repair.
+            contractUrl: true,
+            estimatedCost: true,
+            actualCost: true,
+            targetYear: true,
+            targetQuarter: true,
+          })
           .parse(req.body);
         const request = await storage.createMaintenanceRequest({
           ...validatedData,
@@ -790,6 +835,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // session, so it is omitted from the body here too.
       const validatedData = insertMaintenanceRequestSchema.omit({ submittedBy: true }).parse(req.body);
       if (!requireRegion(res, ctx, validatedData.region, "Forbidden - Cannot create in this region")) return;
+      const problem = projectFieldsProblem(validatedData.type ?? "request", validatedData);
+      if (problem) return res.status(400).json({ message: problem });
 
       const request = await storage.createMaintenanceRequest({
         ...validatedData,
@@ -872,13 +919,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       if (!requireRegionMove(res, ctx, existingRequest.region, validatedData.region)) return;
 
+      const nextType = validatedData.type ?? existingRequest.type;
+      const problem = projectFieldsProblem(nextType, validatedData, existingRequest);
+      if (problem) return res.status(400).json({ message: problem });
+
+      // A project turned back into a repair drops its project fields, so a
+      // repair never carries a cost. Its bids stay in their table, unreachable
+      // until it is a project again -- a type change is not a delete.
+      const demoted = !isProjectType(nextType) && isProjectType(existingRequest.type) ? CLEARED_PROJECT_FIELDS : {};
+      const writes = { ...validatedData, ...demoted };
+
       // Stamp or clear the close date from the transition. This is the only
       // thing that writes completedDate on an update -- it is never taken from
       // the request body, so a client cannot backdate a closure.
       const request = await storage.updateMaintenanceRequest(req.params.id, {
-        ...validatedData,
+        ...writes,
         ...closedDateChange(existingRequest.status, validatedData.status, new Date()),
       });
+
+      // The contract is a document link, like the lease link on a property,
+      // and CLAUDE.md's standing rule is that a document changing is recorded.
+      // The link itself is what somebody could follow, so the event says that
+      // it changed and never to what. Costs are estimates, not money moving,
+      // and are not recorded.
+      if (writes.contractUrl !== undefined && writes.contractUrl !== (existingRequest.contractUrl ?? null)) {
+        recordAuditEvent(ctx, {
+          action: AUDIT_ACTIONS.MAINTENANCE_DOCUMENTS_CHANGED,
+          entityType: "maintenance_request",
+          entityId: req.params.id,
+          summary: `Changed the contract link on "${existingRequest.title}" (${existingRequest.buildingAddress})`,
+          details: { field: "contractUrl", cleared: writes.contractUrl === null, region: existingRequest.region },
+        });
+      }
 
       // Only a status change is recorded. Every other edit is ordinary work,
       // and logging all of them would bury the ones that matter.
@@ -1010,28 +1082,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
   }
 
   /**
-   * The file a comment names, checked to be one this caller stored.
+   * The file a body names, checked to be one this caller stored.
    *
    * A file inherits the visibility of every record that points at it, and one
    * readable reference is enough to serve it -- so a body naming somebody
    * else's upload (a vendor's W-9, say) would hand that file to everyone who
-   * can read the comment. The schema checked the URL's shape; here the row
-   * has to exist and be theirs, the same check attachRequestPhotos makes. No
-   * URL means no attachment, whatever name the body gave; no name means the
-   * name the file was stored under.
+   * can read the comment or the bid. The schema checked the URL's shape;
+   * here the row has to exist and be theirs, the same check
+   * attachRequestPhotos makes. No URL means no file, whatever name the body
+   * gave; no name means the name the file was stored under.
    */
-  async function commentAttachmentFromClient(
+  async function ownUploadFromClient(
     ctx: AuthContext,
-    attachmentUrl: string | null | undefined,
-    attachmentName: string | null | undefined,
-  ): Promise<{ attachmentUrl: string | null; attachmentName: string | null }> {
-    if (!attachmentUrl) return { attachmentUrl: null, attachmentName: null };
-    const key = attachmentUrl.slice("/uploads/".length);
+    url: string | null | undefined,
+    name: string | null | undefined,
+  ): Promise<{ url: string; name: string } | null> {
+    if (!url) return null;
+    const key = url.slice("/uploads/".length);
     const upload = isSafeStorageKey(key) ? await storage.getUploadByStorageKey(key) : undefined;
     if (!upload || upload.uploadedBy !== ctx.userId) {
-      throw new HttpError(400, "That file is not one you uploaded. Attach it again and try posting.");
+      throw new HttpError(400, "That file is not one you uploaded. Upload it again and try saving.");
     }
-    return { attachmentUrl, attachmentName: attachmentName || upload.originalName };
+    return { url, name: name || upload.originalName };
   }
 
   app.get('/api/maintenance-requests/:id/comments', isAuthenticated, async (req: any, res) => {
@@ -1071,7 +1143,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       // After the post rule, so a refused caller learns nothing about which
       // storage keys exist.
-      const attachment = await commentAttachmentFromClient(ctx, parsed.attachmentUrl, parsed.attachmentName);
+      const attachment = await ownUploadFromClient(ctx, parsed.attachmentUrl, parsed.attachmentName);
 
       // The author is the session, never the body. The name is stored beside
       // the id so the thread still says who wrote it after the account goes.
@@ -1079,7 +1151,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const comment = await storage.createMaintenanceRequestComment({
         body: commentBodyFromClient(parsed.body),
         isInternal,
-        ...attachment,
+        attachmentUrl: attachment?.url ?? null,
+        attachmentName: attachment?.name ?? null,
         // Relaying is a staff act -- an RA passing on a contractor's words.
         // A resident's comment is their own, whatever the body claims.
         relaySource: ctx.isResident ? null : parsed.relaySource || null,
@@ -1120,6 +1193,177 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ success: true });
     } catch (error) {
       sendError(res, error, "Failed to delete the comment");
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // Bids on a project
+  //
+  // The cost of ADR-0001 made concrete: bids and contract terms sit in the
+  // table a household leader can already read, so everything here is staff
+  // under the maintenance permission, region-checked through the request, and
+  // refused outright on a repair. A resident never reaches a bid because they
+  // never reach its parent, and the upload-reference rule in authz.ts refuses
+  // them by name besides. Delete is a hard delete; the file stays in storage
+  // (known issue 1), and the screen says so.
+  // ---------------------------------------------------------------------------
+
+  /**
+   * The project a bid route is about, or null after a response has been sent.
+   * Existence, then region, then type -- region before type, so an
+   * out-of-region caller learns nothing about what kind of work it is.
+   */
+  async function bidParent(res: Response, ctx: AuthContext, requestId: string): Promise<MaintenanceRequest | null> {
+    const request = await storage.getMaintenanceRequest(requestId);
+    if (!request) {
+      res.status(404).json({ message: "Maintenance request not found" });
+      return null;
+    }
+    if (!requireRegion(res, ctx, request.region)) return null;
+    if (!isProjectType(request.type)) {
+      res.status(400).json({ message: "Only projects and capital projects carry bids" });
+      return null;
+    }
+    return request;
+  }
+
+  /** The bid in the URL and the project it is on, with the same checks. */
+  async function bidAndParent(res: Response, ctx: AuthContext, bidId: string) {
+    const bid = await storage.getMaintenanceRequestBid(bidId);
+    if (!bid) {
+      res.status(404).json({ message: "Bid not found" });
+      return null;
+    }
+    const request = await bidParent(res, ctx, bid.requestId);
+    return request ? { bid, request } : null;
+  }
+
+  /**
+   * The contact a bid names, checked to exist and to be in the caller's
+   * reach -- the same rule as linking a contractor to a request, so a bid
+   * cannot become a way to attach a vendor the caller could not open.
+   */
+  async function requireBidContact(res: Response, ctx: AuthContext, contactId: string | null | undefined): Promise<boolean> {
+    if (!contactId) return true;
+    const contact = await storage.getMaintenanceContact(contactId);
+    if (!contact) {
+      res.status(400).json({ message: "That contractor is not on file. Pick one from the list or type the company's name." });
+      return false;
+    }
+    return requireRegion(res, ctx, contact.region);
+  }
+
+  const NO_VENDOR = "A bid needs a contractor: pick one from the list or type the company's name.";
+
+  app.get('/api/maintenance-requests/:id/bids', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canViewMaintenance", "canManageMaintenance")) return;
+      const request = await bidParent(res, ctx, req.params.id);
+      if (!request) return;
+
+      res.json(await storage.getMaintenanceRequestBids(request.id));
+    } catch (error) {
+      sendError(res, error, "Failed to fetch bids");
+    }
+  });
+
+  app.post('/api/maintenance-requests/:id/bids', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageMaintenance")) return;
+      const request = await bidParent(res, ctx, req.params.id);
+      if (!request) return;
+
+      const parsed = insertMaintenanceRequestBidSchema.parse(req.body);
+      if (!bidNamesAVendor(parsed)) return res.status(400).json({ message: NO_VENDOR });
+      if (!(await requireBidContact(res, ctx, parsed.contactId))) return;
+      const file = await ownUploadFromClient(ctx, parsed.documentUrl, parsed.documentName);
+
+      const bid = await storage.createMaintenanceRequestBid({
+        ...parsed,
+        documentUrl: file?.url ?? null,
+        documentName: file?.name ?? null,
+        requestId: request.id,
+      });
+      res.status(201).json(bid);
+    } catch (error) {
+      sendError(res, error, "Failed to record the bid");
+    }
+  });
+
+  app.patch('/api/maintenance-request-bids/:id', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageMaintenance")) return;
+      const found = await bidAndParent(res, ctx, req.params.id);
+      if (!found) return;
+
+      const parsed = insertMaintenanceRequestBidSchema.partial().parse(req.body);
+      // The vendor rule holds over the row as it will be, not the patch alone:
+      // an edit that clears the name on a bid with no contact leaves nobody.
+      if (!bidNamesAVendor({ ...found.bid, ...parsed })) return res.status(400).json({ message: NO_VENDOR });
+      if (parsed.contactId !== undefined && !(await requireBidContact(res, ctx, parsed.contactId))) return;
+
+      // A document left out of the body is left alone; null clears it; a URL
+      // has to be a file this caller stored.
+      let document = {};
+      if (parsed.documentUrl !== undefined) {
+        const file = await ownUploadFromClient(ctx, parsed.documentUrl, parsed.documentName);
+        document = { documentUrl: file?.url ?? null, documentName: file?.name ?? null };
+      }
+
+      res.json(await storage.updateMaintenanceRequestBid(found.bid.id, { ...parsed, ...document }));
+    } catch (error) {
+      sendError(res, error, "Failed to update the bid");
+    }
+  });
+
+  app.delete('/api/maintenance-request-bids/:id', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageMaintenance")) return;
+      const found = await bidAndParent(res, ctx, req.params.id);
+      if (!found) return;
+
+      // The row goes; the quote stays in storage (known issue 1).
+      await storage.deleteMaintenanceRequestBid(found.bid.id);
+      res.json({ success: true });
+    } catch (error) {
+      sendError(res, error, "Failed to remove the bid");
+    }
+  });
+
+  // Accepting is its own route and one storage call: the bid becomes the
+  // accepted one and every other bid on the request stops being, in the same
+  // transaction. That is how "at most one accepted bid" is enforced rather
+  // than left to a client remembering to clear the others.
+  app.post('/api/maintenance-request-bids/:id/accept', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageMaintenance")) return;
+      const found = await bidAndParent(res, ctx, req.params.id);
+      if (!found) return;
+
+      const bid = await storage.acceptMaintenanceRequestBid(found.request.id, found.bid.id);
+      // No row back means the bid went between the lookup above and the
+      // write: say so rather than answer with an acceptance that never happened.
+      if (!bid) {
+        return res.status(404).json({ message: "Bid not found" });
+      }
+      res.json(bid);
+    } catch (error) {
+      sendError(res, error, "Failed to accept the bid");
     }
   });
 
@@ -2356,6 +2600,48 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const stored = await storeUploadedFile(req.file, req.uploadContext);
       // The name is what the comment's link will say; the client keeps it
       // beside the URL until the comment is posted.
+      res.json({ url: stored.url, name: stored.originalName });
+    } catch (error) {
+      sendError(res, error, "Failed to upload the file");
+    }
+  });
+
+  // The quote on a bid (see "Bids on a project" above). Its own narrow route
+  // rather than /api/upload-doc so the permission is exactly the bid write's
+  // -- staff, the manage flag, the request's region, and a project rather
+  // than a repair -- and it runs before multer reads a byte. Same limits,
+  // same magic-byte check and same upload layer as /api/upload-doc, so the
+  // document audit event fires without this route adding one.
+  const requireBidDocumentPermission: RequestHandler = async (req: any, res, next) => {
+    try {
+      const ctx = await loadAuthContext(req);
+      if (!ctx) {
+        return res.status(403).json({ message: "Your account is not active." });
+      }
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageMaintenance")) return;
+      const request = await bidParent(res, ctx, req.params.id);
+      if (!request) return;
+      req.uploadContext = ctx;
+      next();
+    } catch (error) {
+      sendError(res, error, "Failed to verify upload permission.");
+    }
+  };
+
+  app.post('/api/maintenance-requests/:id/bid-documents', isAuthenticated, uploadRateLimit, requireBidDocumentPermission, ...guardedUpload(docUpload.single('file'), DOCUMENT_UPLOAD_MAX_BYTES), async (req: any, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ message: "No file uploaded" });
+      }
+      if (!(await bufferMatchesExtension(req.file.buffer, req.file.originalname))) {
+        return res.status(400).json({
+          message: "File contents do not match the file extension. The file was not saved.",
+        });
+      }
+      const stored = await storeUploadedFile(req.file, req.uploadContext);
+      // The name is what the bid's link will say; the client keeps it beside
+      // the URL until the bid is saved.
       res.json({ url: stored.url, name: stored.originalName });
     } catch (error) {
       sendError(res, error, "Failed to upload the file");
