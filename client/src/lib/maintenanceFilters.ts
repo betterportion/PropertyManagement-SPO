@@ -5,7 +5,8 @@
  * the status tabs and the per-house view all narrow the same way and can be
  * tested without rendering anything.
  */
-import { isClosedMaintenanceStatus, type MaintenanceRequest } from "@shared/schema";
+import { MAINTENANCE_REQUEST_TYPES, isClosedMaintenanceStatus, type MaintenanceRequest } from "@shared/schema";
+import { REQUEST_TYPE } from "./requestLabels";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -81,4 +82,30 @@ export function locationOptions(requests: readonly Pick<MaintenanceRequest, "loc
     if (location) seen.add(location);
   }
   return Array.from(seen).sort((a, b) => a.localeCompare(b));
+}
+
+/** Which kind of work to show. `all` is the default, not an escape hatch. */
+export type RequestTypeFilter = "all" | MaintenanceRequest["type"];
+
+/**
+ * The type filter's options: all types first, then each type in the order
+ * the schema lists them, labelled from the one shared map so the filter and
+ * the badges cannot disagree about what a `capex` is called.
+ */
+export const REQUEST_TYPE_FILTERS: readonly { value: RequestTypeFilter; label: string }[] = [
+  { value: "all", label: "All types" },
+  ...MAINTENANCE_REQUEST_TYPES.map((type) => ({ value: type, label: REQUEST_TYPE[type].label })),
+];
+
+/**
+ * Whether a request survives the type filter. A type filter and nothing
+ * more: a wishlist repair is still a repair, because wishlist is a priority.
+ */
+export function matchesType(request: Pick<MaintenanceRequest, "type">, filter: RequestTypeFilter): boolean {
+  // A value the vocabulary does not know -- a stale bookmark, a hand-edited
+  // link -- reads as "all" rather than as "nothing": a misspelt filter that
+  // empties the whole list looks like there is no work, which is the lie a
+  // triage screen cannot afford.
+  if (!(MAINTENANCE_REQUEST_TYPES as readonly string[]).includes(filter)) return true;
+  return request.type === filter;
 }

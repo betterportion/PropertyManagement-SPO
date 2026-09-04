@@ -23,6 +23,16 @@ test.describe("filtering the maintenance list", () => {
     await expect(page).toHaveURL(/closed=all/);
   });
 
+  test("shows every kind of work by default, and the type filter is in the URL", async ({ page }) => {
+    // Repairs, projects and capital projects together until an RA narrows;
+    // "all" is the default, not an escape hatch.
+    await page.goto("/maintenance");
+    await expect(page.getByTestId("select-filter-type")).toContainText("All types");
+    await page.getByTestId("select-filter-type").click();
+    await page.getByRole("option", { name: "Capital project" }).click();
+    await expect(page).toHaveURL(/type=capex/);
+  });
+
   test("picking a house narrows the room filter to that house's rooms", async ({ page }) => {
     // Offering every room name SPO has ever recorded would make the filter
     // useless the moment there is more than one house.

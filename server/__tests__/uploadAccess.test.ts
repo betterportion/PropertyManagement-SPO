@@ -79,7 +79,8 @@ const requestReference = (
   buildingAddress?: string,
 ): UploadReference => ({
   kind: "maintenanceRequest",
-  record: { id: "req-1", region, submittedBy, buildingAddress } as never,
+  // A repair: the type rule fails closed on a missing type.
+  record: { id: "req-1", region, submittedBy, buildingAddress, type: "request" } as never,
 });
 
 const photoReference = (requestId: string): UploadReference => ({
@@ -271,6 +272,7 @@ describe("canReadUpload, through a request photo row", () => {
       region: "Chicago",
       submittedBy: "someone.else@example.com",
       buildingAddress: HOUSE_A,
+      type: "request",
     });
     getProperty.mockResolvedValue({ id: "prop-a", address: HOUSE_A });
 
@@ -287,6 +289,7 @@ describe("canReadUpload, through a request photo row", () => {
       region: "Chicago",
       submittedBy: "someone.else@example.com",
       buildingAddress: HOUSE_A,
+      type: "request",
     });
     getProperty.mockResolvedValue({ id: "prop-b", address: "456 Oak Ave, Saint Paul, MN 55104" });
 

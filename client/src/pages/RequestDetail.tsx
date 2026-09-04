@@ -13,7 +13,7 @@ import RequestThread from "@/components/RequestThread";
 import { useAuth } from "@/hooks/useAuth";
 import { isForbiddenError } from "@/lib/authUtils";
 import { formatDate, formatValue } from "@/lib/format";
-import { REQUEST_PRIORITY, REQUEST_STATUS } from "@/lib/requestLabels";
+import { REQUEST_PRIORITY, REQUEST_STATUS, REQUEST_TYPE } from "@/lib/requestLabels";
 import {
   isClosedMaintenanceStatus,
   type MaintenanceContact,
@@ -145,6 +145,7 @@ export default function RequestDetail() {
   } else {
     const status = REQUEST_STATUS[request.status];
     const priority = REQUEST_PRIORITY[request.priority];
+    const type = REQUEST_TYPE[request.type];
     const isClosed = isClosedMaintenanceStatus(request.status);
 
     body = (
@@ -163,6 +164,12 @@ export default function RequestDetail() {
         />
 
         <div className="flex flex-wrap items-center gap-2">
+          {/* The type first: it is what the other two badges are about. A
+              resident only ever sees "Repair" here, because the server never
+              sends them anything else. */}
+          <Badge variant={type.variant} data-testid="badge-request-type">
+            {type.label}
+          </Badge>
           <Badge variant={status.variant} data-testid="badge-request-status">
             {status.label}
           </Badge>

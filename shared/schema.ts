@@ -156,6 +156,11 @@ export const maintenanceRequests = pgTable("maintenance_requests", {
   description: text("description").notNull(),
   category: varchar("category").notNull(),
   priority: varchar("priority", { enum: ["low", "medium", "high", "urgent", "wishlist"] }).notNull(),
+  // What kind of work this is: a repair, a project, or a capital project.
+  // Defaults to `request` so every row that predates the column is a repair.
+  // A resident account reads type `request` and nothing else -- the rule in
+  // server/authz.ts, landed in the same change as this column (ADR-0001).
+  type: varchar("type", { enum: ["request", "project", "capex"] }).notNull().default("request"),
   status: varchar("status", { enum: ["pending", "in_progress", "completed", "cancelled"] }).notNull().default("pending"),
   location: varchar("location").notNull(),
   region: varchar("region").notNull(),
@@ -187,6 +192,22 @@ export const CLOSED_MAINTENANCE_STATUSES = ["completed", "cancelled"] as const;
 export function isClosedMaintenanceStatus(status: string | null | undefined): boolean {
   return status != null && (CLOSED_MAINTENANCE_STATUSES as readonly string[]).includes(status);
 }
+
+/**
+ * The kinds of work a request can be.
+ *
+ * `request` is a repair, the only type a resident account ever sees or files.
+ * `project` is work SPO or a contractor initiates that is not a repair; `capex`
+ * is a capital project, with competing bids and a signed contract. Projects
+ * and capital projects reuse this table (ADR-0001) so they get status, rooms,
+ * contractor links and threads for free -- and that is exactly why the
+ * resident rule in server/authz.ts refuses everything but `request`: bid
+ * amounts and contract terms now sit in a table a household leader can read.
+ *
+ * Wishlist is a *priority*, never a type. A wishlist capital project is a
+ * coherent thing, and folding the two together would make it unsayable.
+ */
+export const MAINTENANCE_REQUEST_TYPES = ["request", "project", "capex"] as const;
 
 export const insertMaintenanceRequestSchema = createInsertSchema(maintenanceRequests).omit({
   id: true,

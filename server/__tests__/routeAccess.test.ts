@@ -159,12 +159,17 @@ function actAs(
   storageMock.getUserPermissions.mockResolvedValue(permissions);
 }
 
+// Every request a resident is expected to read says `type: "request"`
+// outright. The type rule in canReadMaintenanceRequest fails closed on a
+// missing type, so a fixture that stayed silent about it would be refused
+// for the wrong reason and a negative test would pass vacuously.
 const WEST_REQUEST = {
   id: "req-west",
   title: "Leaky tap",
   region: "West Central",
   submittedBy: ALICE.email,
   status: "pending",
+  type: "request",
 };
 
 const EAST_REQUEST = {
@@ -173,6 +178,7 @@ const EAST_REQUEST = {
   region: "East Central",
   submittedBy: BOB.email,
   status: "pending",
+  type: "request",
 };
 
 // ---------------------------------------------------------------------------
@@ -587,6 +593,7 @@ describe("a household leader opening a request from its page", () => {
     buildingAddress: HOUSE_A,
     submittedBy: BOB.email,
     status: "pending",
+    type: "request",
   };
   /** Another house's open request, in the same region as the leader's. */
   const OTHER_HOUSE_OPEN = { ...OWN_HOUSE_OPEN, id: "req-other-open", buildingAddress: HOUSE_B };
@@ -714,6 +721,7 @@ describe("the thread on a request", () => {
     buildingAddress: HOUSE_A,
     submittedBy: BOB.email,
     status: "pending",
+    type: "request",
   };
   const OTHER_HOUSE_OPEN = { ...OWN_HOUSE_OPEN, id: "req-other-open", buildingAddress: HOUSE_B };
   const EAST_OPEN = { ...OWN_HOUSE_OPEN, id: "req-east-open", region: "East Central" };
@@ -915,6 +923,191 @@ describe("the thread on a request", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Request types: residents see repairs only
+// ---------------------------------------------------------------------------
+
+/**
+ * ADR-0001 made projects and capital projects a TYPE on maintenance
+ * requests, which puts bid amounts and contract terms in a table a household
+ * leader can already read. The rule that keeps them out lives in
+ * canReadMaintenanceRequest; these cases pin it at every route a resident
+ * reads a request through, on the one case the house match would otherwise
+ * let through -- their own house.
+ */
+describe("a household leader and the requests that are not repairs", () => {
+  const HOUSE_A = "1 Main St";
+  const PROPERTY_A = { id: "prop-a", name: "Cleveland House", region: "West Central", address: HOUSE_A };
+  const westOnly = { ...ALL_MAINTENANCE, allowedRegions: ["West Central"] };
+
+  /** A repair on the leader's own house: the positive control throughout. */
+  const OWN_REPAIR = {
+    id: "req-own-repair",
+    title: "Blinds fell down",
+    region: "West Central",
+    buildingAddress: HOUSE_A,
+    submittedBy: BOB.email,
+    status: "pending",
+    type: "request",
+  };
+  /** A project on the same house, open, filed by the housemate. */
+  const OWN_PROJECT = { ...OWN_REPAIR, id: "req-own-project", title: "New back fence", type: "project" };
+  /** A capital project on the same house, with the finance conversation in its text. */
+  const OWN_CAPEX = {
+    ...OWN_REPAIR,
+    id: "req-own-capex",
+    title: "Roof replacement",
+    description: "Three bids in; lowest is $18,400.",
+    type: "capex",
+  };
+  /** A project the leader is recorded as having submitted -- the ownership path. */
+  const OWN_SUBMITTED_PROJECT = { ...OWN_PROJECT, id: "req-alice-project", submittedBy: ALICE.email };
+
+  const leaderOfHouseA = () => {
+    actAs({ ...ALICE, propertyId: "prop-a" } as typeof ALICE, ALL_MAINTENANCE);
+    storageMock.getProperty.mockResolvedValue(PROPERTY_A);
+  };
+
+  it("lists only the repairs on their house, never a project or a capital project", async () => {
+    leaderOfHouseA();
+    storageMock.getAllMaintenanceRequests.mockResolvedValue([OWN_REPAIR, OWN_PROJECT, OWN_CAPEX, OWN_SUBMITTED_PROJECT]);
+    const { status, body } = await get("/api/maintenance-requests");
+    expect(status).toBe(200);
+    expect(body.map((r: { id: string }) => r.id)).toEqual(["req-own-repair"]);
+    expect(JSON.stringify(body)).not.toContain("$18,400");
+  });
+
+  // Positive control for the list: staff see all three types.
+  it("lists all three types for staff in the region", async () => {
+    actAs(STAFF, westOnly);
+    storageMock.getAllMaintenanceRequests.mockResolvedValue([OWN_REPAIR, OWN_PROJECT, OWN_CAPEX]);
+    const { body } = await get("/api/maintenance-requests");
+    expect(body.map((r: { id: string }) => r.id)).toEqual(["req-own-repair", "req-own-project", "req-own-capex"]);
+  });
+
+  it("refuses the detail route for a capital project on their house, and never sends its contents", async () => {
+    leaderOfHouseA();
+    storageMock.getMaintenanceRequest.mockResolvedValue(OWN_CAPEX);
+    const { status, body } = await get("/api/maintenance-requests/req-own-capex");
+    expect(status).toBe(403);
+    expect(body).not.toHaveProperty("title");
+    expect(body).not.toHaveProperty("description");
+  });
+
+  it("refuses the detail route for a project on their house", async () => {
+    leaderOfHouseA();
+    storageMock.getMaintenanceRequest.mockResolvedValue(OWN_PROJECT);
+    expect((await get("/api/maintenance-requests/req-own-project")).status).toBe(403);
+  });
+
+  it("refuses a project even when they are recorded as its submitter", async () => {
+    leaderOfHouseA();
+    storageMock.getMaintenanceRequest.mockResolvedValue(OWN_SUBMITTED_PROJECT);
+    const { status, body } = await get("/api/maintenance-requests/req-alice-project");
+    expect(status).toBe(403);
+    expect(body).not.toHaveProperty("title");
+  });
+
+  // Positive control for the detail route: the same house, a repair, opens.
+  it("still opens a repair on their house", async () => {
+    leaderOfHouseA();
+    storageMock.getMaintenanceRequest.mockResolvedValue(OWN_REPAIR);
+    const { status, body } = await get("/api/maintenance-requests/req-own-repair");
+    expect(status).toBe(200);
+    expect(body.id).toBe("req-own-repair");
+  });
+
+  it("is refused a project's contractors before they are loaded", async () => {
+    leaderOfHouseA();
+    storageMock.getMaintenanceRequest.mockResolvedValue(OWN_PROJECT);
+    expect((await get("/api/maintenance-requests/req-own-project/contacts")).status).toBe(403);
+    expect(storageMock.getRequestContacts).not.toHaveBeenCalled();
+  });
+
+  it("is refused a project's thread before the comments are loaded", async () => {
+    leaderOfHouseA();
+    storageMock.getMaintenanceRequest.mockResolvedValue(OWN_PROJECT);
+    expect((await get("/api/maintenance-requests/req-own-project/comments")).status).toBe(403);
+    expect(storageMock.getMaintenanceRequestComments).not.toHaveBeenCalled();
+  });
+
+  // Positive control for the thread: a repair's shared comments still arrive.
+  it("still reads the shared comments on a repair on their house", async () => {
+    leaderOfHouseA();
+    storageMock.getMaintenanceRequest.mockResolvedValue(OWN_REPAIR);
+    storageMock.getMaintenanceRequestComments.mockResolvedValue([
+      { id: "c-shared", requestId: OWN_REPAIR.id, body: "Thursday at 9.", isInternal: false, authorUserId: STAFF.id },
+    ]);
+    const { status, body } = await get("/api/maintenance-requests/req-own-repair/comments");
+    expect(status).toBe(200);
+    expect(body.map((c: { id: string }) => c.id)).toEqual(["c-shared"]);
+  });
+
+  it("sees no photos on a project or capital project on their house through the photo list", async () => {
+    leaderOfHouseA();
+    storageMock.getAllMaintenanceRequests.mockResolvedValue([OWN_REPAIR, OWN_PROJECT, OWN_CAPEX]);
+    storageMock.getAllMaintenanceRequestPhotos.mockResolvedValue([
+      { id: "ph-repair", requestId: OWN_REPAIR.id, imageUrl: "/uploads/repair.png" },
+      { id: "ph-project", requestId: OWN_PROJECT.id, imageUrl: "/uploads/fence.png" },
+      { id: "ph-capex", requestId: OWN_CAPEX.id, imageUrl: "/uploads/roof.png" },
+    ]);
+    const { status, body } = await get("/api/maintenance-request-photos");
+    expect(status).toBe(200);
+    expect(body.map((p: { id: string }) => p.id)).toEqual(["ph-repair"]);
+  });
+
+  it("cannot download a photo attached to a project on their house", async () => {
+    const KEY = "0123456789abcdef0123456789abcdef.jpg";
+    leaderOfHouseA();
+    storageMock.getUploadByStorageKey.mockResolvedValue({ storageKey: KEY, uploadedBy: STAFF.id });
+    storageMock.findUploadReferences.mockResolvedValue([{ kind: "maintenanceRequest", record: OWN_PROJECT }]);
+    expect((await get(`/uploads/${KEY}`)).status).toBe(403);
+    expect(fileStoreMock.openUploadStream).not.toHaveBeenCalled();
+  });
+
+  // Positive control for the download: the same file on a repair streams.
+  it("can download a photo attached to a repair on their house", async () => {
+    const KEY = "0123456789abcdef0123456789abcdef.jpg";
+    leaderOfHouseA();
+    storageMock.getUploadByStorageKey.mockResolvedValue({ storageKey: KEY, uploadedBy: STAFF.id });
+    storageMock.findUploadReferences.mockResolvedValue([{ kind: "maintenanceRequest", record: OWN_REPAIR }]);
+    expect((await get(`/uploads/${KEY}`)).status).toBe(200);
+    expect(fileStoreMock.openUploadStream).toHaveBeenCalled();
+  });
+
+  // Residents cannot PATCH a request at all -- the route is requireStaff --
+  // so "a resident cannot set the type on an update" is asserted here as the
+  // existing refusal, with the write never reaching storage, rather than as
+  // a new branch that would only exist to be tested.
+  it("cannot change a request's type on an update: the PATCH is refused and nothing is written", async () => {
+    leaderOfHouseA();
+    storageMock.getMaintenanceRequest.mockResolvedValue(OWN_REPAIR);
+    const { status } = await request("PATCH", "/api/maintenance-requests/req-own-repair", { body: { type: "capex" } });
+    expect(status).toBe(403);
+    expect(storageMock.updateMaintenanceRequest).not.toHaveBeenCalled();
+  });
+
+  // Positive control: staff with the manage permission set the type on an update.
+  it("lets staff change a repair into a project on an update", async () => {
+    actAs(STAFF, westOnly);
+    storageMock.getMaintenanceRequest.mockResolvedValue(OWN_REPAIR);
+    const { status } = await request("PATCH", "/api/maintenance-requests/req-own-repair", { body: { type: "project" } });
+    expect(status).toBe(200);
+    expect(storageMock.updateMaintenanceRequest).toHaveBeenCalledWith(
+      "req-own-repair",
+      expect.objectContaining({ type: "project" }),
+    );
+  });
+
+  it("refuses a type outside the vocabulary as a 400, and writes nothing", async () => {
+    actAs(STAFF, westOnly);
+    storageMock.getMaintenanceRequest.mockResolvedValue(OWN_REPAIR);
+    const { status } = await request("PATCH", "/api/maintenance-requests/req-own-repair", { body: { type: "wishlist" } });
+    expect(status).toBe(400);
+    expect(storageMock.updateMaintenanceRequest).not.toHaveBeenCalled();
+  });
+});
+
 describe("submitting a maintenance request", () => {
   const body = {
     title: "Leaky tap",
@@ -940,6 +1133,43 @@ describe("submitting a maintenance request", () => {
     );
     const created = storageMock.createMaintenanceRequest.mock.calls[0][0];
     expect(created.region).not.toBe("East Central");
+  });
+
+  it("files a resident's request as a repair whatever type the body claims", async () => {
+    // A resident can never file a project: the type is forced server-side,
+    // the same way region and submitter are.
+    actAs(ALICE, ALL_MAINTENANCE);
+    storageMock.getActiveResidentByEmail.mockResolvedValue({ region: "West Central", buildingAddress: "1 Main St" });
+    storageMock.createMaintenanceRequest.mockImplementation(async (data: Record<string, unknown>) => ({ id: "new", ...data }));
+
+    const { status } = await request("POST", "/api/maintenance-requests", { body: { ...body, type: "capex" } });
+
+    expect(status).toBe(200);
+    expect(storageMock.createMaintenanceRequest).toHaveBeenCalledWith(expect.objectContaining({ type: "request" }));
+    const created = storageMock.createMaintenanceRequest.mock.calls[0][0];
+    expect(created.type).not.toBe("capex");
+  });
+
+  it("files a resident's request as a repair when the body says nothing about type", async () => {
+    actAs(ALICE, ALL_MAINTENANCE);
+    storageMock.getActiveResidentByEmail.mockResolvedValue({ region: "West Central", buildingAddress: "1 Main St" });
+    storageMock.createMaintenanceRequest.mockImplementation(async (data: Record<string, unknown>) => ({ id: "new", ...data }));
+
+    expect((await request("POST", "/api/maintenance-requests", { body })).status).toBe(200);
+    expect(storageMock.createMaintenanceRequest).toHaveBeenCalledWith(expect.objectContaining({ type: "request" }));
+  });
+
+  // Positive control: the same body from staff stores the type it names.
+  it("stores the type staff choose when they file one", async () => {
+    actAs(STAFF, { ...ALL_MAINTENANCE, allowedRegions: ["West Central"] });
+    storageMock.createMaintenanceRequest.mockImplementation(async (data: Record<string, unknown>) => ({ id: "new", ...data }));
+
+    const { status } = await request("POST", "/api/maintenance-requests", {
+      body: { ...body, region: "West Central", buildingAddress: "1 Main St", type: "capex" },
+    });
+
+    expect(status).toBe(200);
+    expect(storageMock.createMaintenanceRequest).toHaveBeenCalledWith(expect.objectContaining({ type: "capex" }));
   });
 
   it("refuses a resident who is not on any house roster, with a helpful message", async () => {

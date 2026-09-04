@@ -1,10 +1,10 @@
 /**
- * How a request's status and priority read on screen.
+ * How a request's status, priority and type read on screen.
  *
- * One definition, because the request page and the property page's request
- * table both draw these badges, and two copies is how "In progress" on one
- * screen becomes "in_progress" on the other. Every state carries its word;
- * colour is a second signal and never the only one.
+ * One definition, because the request page, the request cards and the
+ * property page's request table all draw these badges, and two copies is how
+ * "In progress" on one screen becomes "in_progress" on the other. Every state
+ * carries its word; colour is a second signal and never the only one.
  */
 import type { MaintenanceRequest } from "@shared/schema";
 
@@ -23,4 +23,15 @@ export const REQUEST_PRIORITY: Record<MaintenanceRequest["priority"], { label: s
   high: { label: "High", variant: "orange" },
   urgent: { label: "Urgent", variant: "destructive" },
   wishlist: { label: "Wishlist", variant: "secondary" },
+};
+
+/**
+ * The three kinds of work, in CONTEXT.md's words: the stored value is
+ * `capex`, the word on screen is never. Wishlist is not here -- it is a
+ * priority, and a wishlist capital project is a coherent thing.
+ */
+export const REQUEST_TYPE: Record<MaintenanceRequest["type"], { label: string; variant: BadgeVariant }> = {
+  request: { label: "Repair", variant: "secondary" },
+  project: { label: "Project", variant: "info" },
+  capex: { label: "Capital project", variant: "orange" },
 };

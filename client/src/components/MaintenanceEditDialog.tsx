@@ -14,7 +14,8 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import type { MaintenanceRequest, MaintenanceContact, Invoice, Property } from "@shared/schema";
+import { MAINTENANCE_REQUEST_TYPES, type MaintenanceRequest, type MaintenanceContact, type Invoice, type Property } from "@shared/schema";
+import { REQUEST_TYPE } from "@/lib/requestLabels";
 import { DollarSign, Link2, FileText, Plus, Check, X, ImageIcon } from "lucide-react";
 import { PhotoUpload } from "@/components/PhotoUpload";
 import { formatCurrency, formatDate } from "@/lib/format";
@@ -30,6 +31,7 @@ const editSchema = z.object({
   description: z.string().min(1, "Description is required"),
   category: z.string().min(1, "Category is required"),
   priority: z.enum(["low", "medium", "high", "urgent", "wishlist"]),
+  type: z.enum(MAINTENANCE_REQUEST_TYPES),
   status: z.enum(["pending", "in_progress", "completed", "cancelled"]),
   location: z.string().min(1, "Location is required"),
   photoUrl: z.string().nullable().optional(),
@@ -102,6 +104,7 @@ export default function MaintenanceEditDialog({ request, open, onClose }: Mainte
       description: request.description,
       category: request.category,
       priority: request.priority,
+      type: request.type,
       status: request.status,
       location: request.location,
       photoUrl: request.photoUrl ?? null,
@@ -236,6 +239,38 @@ export default function MaintenanceEditDialog({ request, open, onClose }: Mainte
                         <SelectItem value="wishlist">Wishlist</SelectItem>
                       </SelectContent>
                     </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="type"
+                render={({ field }) => (
+                  <FormItem className="col-span-2">
+                    <FormLabel>Type</FormLabel>
+                    <Select value={field.value} onValueChange={field.onChange}>
+                      <FormControl>
+                        <SelectTrigger data-testid="select-type">
+                          <SelectValue />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {MAINTENANCE_REQUEST_TYPES.map((type) => (
+                          <SelectItem key={type} value={type} data-testid={`option-type-${type}`}>
+                            {REQUEST_TYPE[type].label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {/* Said beside the control, not in a help page: changing
+                        a type away from Repair takes the request off the
+                        household's screen, and somebody doing that should
+                        know it before they save. */}
+                    <p className="text-xs text-muted-foreground" data-testid="text-type-resident-note">
+                      Projects and capital projects are not shown to residents.
+                    </p>
                     <FormMessage />
                   </FormItem>
                 )}
