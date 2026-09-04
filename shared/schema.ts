@@ -576,6 +576,59 @@ export const insertMaintenanceRequestPhotoSchema = createInsertSchema(maintenanc
 export type MaintenanceRequestPhoto = typeof maintenanceRequestPhotos.$inferSelect;
 export type InsertMaintenanceRequestPhoto = z.infer<typeof insertMaintenanceRequestPhotoSchema>;
 
+/**
+ * The thread on a request: what the handyman said on the phone, who is coming
+ * when, what it cost -- kept here instead of evaporating out of text messages.
+ *
+ * `isInternal` defaults to true because an RA will paste "he quoted $4,200"
+ * into an ordinary repair's thread, and if the default were shared a
+ * household would learn that the wrong way. Visibility is fixed at posting:
+ * there is no route that changes it, and no route that edits a body, so a
+ * dated comment stays the record of what was said at the time. Deletable.
+ *
+ * A relayed comment is one an RA posts on a contractor's behalf. `relaySource`
+ * is what renders ("Dave (handyman)"); `relayContactId` is the optional link
+ * to the contractor's record, set null when that record goes.
+ */
+export const maintenanceRequestComments = pgTable("maintenance_request_comments", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  requestId: varchar("request_id").notNull().references(() => maintenanceRequests.id, { onDelete: "cascade" }),
+  body: text("body").notNull(),
+  isInternal: boolean("is_internal").notNull().default(true),
+  // Set null rather than restrict, as contact notes do: the comment outlives
+  // the account, and the name and email kept alongside still say who wrote it.
+  authorUserId: varchar("author_user_id").references(() => users.id, { onDelete: "set null" }),
+  authorEmail: varchar("author_email"),
+  authorName: varchar("author_name"),
+  relaySource: varchar("relay_source"),
+  relayContactId: varchar("relay_contact_id").references(() => maintenanceContacts.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("maintenance_request_comments_request_idx").on(table.requestId),
+]);
+
+export const insertMaintenanceRequestCommentSchema = createInsertSchema(maintenanceRequestComments)
+  .omit({
+    id: true,
+    // Server-owned: the request comes from the URL and the author from the
+    // session. A comment whose author the client chose would be worth nothing.
+    requestId: true,
+    authorUserId: true,
+    authorEmail: true,
+    authorName: true,
+    createdAt: true,
+  })
+  .extend({
+    // The body's whitespace and length rules live in server/comments.ts, in
+    // one place; here only "something was typed" is checked.
+    body: z.string().trim().min(1, "Write something first"),
+    relaySource: z.string().trim().max(120).nullish(),
+    relayContactId: z.string().nullish(),
+  });
+
+export type MaintenanceRequestComment = typeof maintenanceRequestComments.$inferSelect;
+export type InsertMaintenanceRequestComment = z.infer<typeof insertMaintenanceRequestCommentSchema>;
+
 // Maintenance Contacts
 export const maintenanceContacts = pgTable("maintenance_contacts", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),

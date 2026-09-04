@@ -1,4 +1,4 @@
-import type { Express, RequestHandler } from "express";
+import type { Express, RequestHandler, Response } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { setupAuth, isAuthenticated, getUserId } from "./auth";
@@ -13,6 +13,9 @@ import {
   requireRegionMove,
   requireMaintenanceRequestAccess,
   canReadMaintenanceRequest,
+  canReadComment,
+  canPostComment,
+  canDeleteComment,
   residentHouseAddress,
   canReadUpload,
   filterByRegion,
@@ -76,10 +79,12 @@ import {
   insertPropertyBudgetSchema,
   setPropertySetupItemSchema,
   type InsertPropertyWithAddress,
+  insertMaintenanceRequestCommentSchema,
 } from "@shared/schema";
 import { STANDARD_SCHEDULE_TEMPLATES, addMonths } from "./schedules";
 import { buildActionItems } from "./actionItems";
 import { closedDateChange } from "./maintenanceStatus";
+import { commentBodyFromClient } from "./comments";
 import { planFromTemplate, planFromPreviousWalkthrough, templateRoomItems } from "./walkthroughTemplate";
 import { parseResidentCsv, buildImportPreview } from "./residentImport";
 import { SETUP_ITEMS, setupItemsFor } from "@shared/propertySetup";
@@ -888,6 +893,113 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ success: true });
     } catch (error) {
       sendError(res, error, "Failed to unlink contact");
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // Request threads
+  //
+  // Thread access is request access: every route here resolves the request,
+  // then decides through canReadComment / canPostComment / canDeleteComment
+  // in authz.ts and nothing else, so ownership, the house match, region
+  // scoping and the 120-day closed window all reach a thread without a
+  // second implementation. Filtering is server-side -- an internal comment
+  // never leaves the process for a resident. No audit event: a comment is
+  // neither access, money nor a document, and logging every one would bury
+  // the events that are.
+  // ---------------------------------------------------------------------------
+
+  /**
+   * The request a thread hangs off, or a 404. Existence is answered before
+   * access here, as on every other maintenance route -- known issue 3: an
+   * out-of-region id gets a 403, which confirms it exists. Accepted.
+   */
+  async function requestForThread(req: any, res: Response) {
+    const request = await storage.getMaintenanceRequest(req.params.id);
+    if (!request) {
+      res.status(404).json({ message: "Maintenance request not found" });
+      return null;
+    }
+    return request;
+  }
+
+  app.get('/api/maintenance-requests/:id/comments', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      const request = await requestForThread(req, res);
+      if (!request) return;
+      const residentHouse = await residentHouseAddress(ctx);
+      if (!requireMaintenanceRequestAccess(res, ctx, request, residentHouse)) return;
+
+      const comments = await storage.getMaintenanceRequestComments(request.id);
+      res.json(comments.filter((comment) => canReadComment(ctx, request, comment, residentHouse)));
+    } catch (error) {
+      sendError(res, error, "Failed to fetch the thread");
+    }
+  });
+
+  app.post('/api/maintenance-requests/:id/comments', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      // Staff only for now. canPostComment already lets a household post a
+      // shared comment on its own house; #120 removes this line and adds the
+      // tests for that write path. Until then the resident composer does not
+      // exist and nothing a resident sends here is written.
+      if (!requireStaff(res, ctx)) return;
+      const request = await requestForThread(req, res);
+      if (!request) return;
+
+      const parsed = insertMaintenanceRequestCommentSchema.parse(req.body);
+      const isInternal = parsed.isInternal ?? true;
+      const residentHouse = await residentHouseAddress(ctx);
+      if (!canPostComment(ctx, request, { isInternal }, residentHouse)) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+
+      // The author is the session, never the body. The name is stored beside
+      // the id so the thread still says who wrote it after the account goes.
+      const authorName = [ctx.user.firstName, ctx.user.lastName].filter(Boolean).join(" ") || null;
+      const comment = await storage.createMaintenanceRequestComment({
+        body: commentBodyFromClient(parsed.body),
+        isInternal,
+        relaySource: parsed.relaySource || null,
+        relayContactId: parsed.relayContactId || null,
+        requestId: request.id,
+        authorUserId: ctx.userId,
+        authorEmail: ctx.user.email ?? null,
+        authorName,
+      });
+      res.status(201).json(comment);
+    } catch (error) {
+      sendError(res, error, "Failed to post the comment");
+    }
+  });
+
+  app.delete('/api/maintenance-request-comments/:id', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      const comment = await storage.getMaintenanceRequestComment(req.params.id);
+      if (!comment) {
+        return res.status(404).json({ message: "Comment not found" });
+      }
+      // Reading the request first: somebody who may not see the thread may
+      // not take a comment off it, whatever the author column says.
+      const request = await storage.getMaintenanceRequest(comment.requestId);
+      if (!request) {
+        return res.status(404).json({ message: "Maintenance request not found" });
+      }
+      const residentHouse = await residentHouseAddress(ctx);
+      if (!canReadComment(ctx, request, comment, residentHouse) || !canDeleteComment(ctx, comment)) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+
+      await storage.deleteMaintenanceRequestComment(comment.id);
+      res.json({ success: true });
+    } catch (error) {
+      sendError(res, error, "Failed to delete the comment");
     }
   });
 

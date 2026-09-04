@@ -35,6 +35,9 @@ test.describe("resident experience", () => {
     // Edit is a staff action; the server refuses it for a resident, so the page does not offer it.
     await expect(page.getByTestId("button-edit-request")).toHaveCount(0);
     await expect(page.getByTestId("link-back-to-requests")).toHaveAttribute("href", "/my-requests");
+    // The thread is theirs to read; the composer is staff's until #120.
+    await expect(page.getByTestId("request-thread")).toBeVisible();
+    await expect(page.getByTestId("form-comment")).toHaveCount(0);
   });
 
   test("cannot reach an admin page by URL", async ({ page }) => {

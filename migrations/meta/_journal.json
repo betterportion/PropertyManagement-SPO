@@ -176,6 +176,13 @@
       "when": 1788398640831,
       "tag": "0024_add_resource_hub_permission",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1788488391003,
+      "tag": "0025_maintenance_request_comments",
+      "breakpoints": true
     }
   ]
 }

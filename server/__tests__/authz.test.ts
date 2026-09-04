@@ -50,6 +50,9 @@ import {
   RESIDENT_CLOSED_REQUEST_DAYS,
   requireMaintenanceRequestAccess,
   residentHouseAddress,
+  canReadComment,
+  canPostComment,
+  canDeleteComment,
   hasWalkthroughPermission,
   requireWalkthroughPermission,
   canAccessWalkthrough,
@@ -1163,5 +1166,172 @@ describe("requireCurrentWalkthrough", () => {
       walkthroughDate: "2026-09-01T00:00:00.000Z",
     });
     expect(getWalkthroughsByProperty).toHaveBeenCalledWith("prop-a");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Request threads
+// ---------------------------------------------------------------------------
+
+/**
+ * Thread access is request access, then a tier gate on top: whoever may read
+ * the request may read its shared comments, and only staff may read (or post)
+ * an internal one. Everything about who may read the request -- ownership,
+ * house, region, the 120-day window -- is canReadMaintenanceRequest's, and
+ * these tests lean on it rather than re-checking every branch of it.
+ */
+describe("canReadComment", () => {
+  const HOUSE_A = "123 Main St, Saint Paul, MN 55101";
+  const HOUSE_B = "456 Oak Ave, Saint Paul, MN 55104";
+  const NOW = new Date("2026-08-15T00:00:00Z");
+  const daysAgo = (n: number) => new Date(NOW.getTime() - n * 24 * 60 * 60 * 1000);
+
+  const INTERNAL = { isInternal: true };
+  const SHARED = { isInternal: false };
+
+  const housemateRequest = {
+    region: "West Central",
+    submittedBy: "bob@example.com",
+    buildingAddress: HOUSE_A,
+    status: "pending",
+  };
+
+  const staff = context({ allowedRegions: ["West Central"] });
+  const household = context({ role: "resident", email: "alice@example.com", propertyId: "prop-a" });
+  const unlinked = context({ role: "resident", email: "alice@example.com" });
+
+  it("lets staff read both kinds on a request in their region", () => {
+    expect(canReadComment(staff, housemateRequest, INTERNAL)).toBe(true);
+    expect(canReadComment(staff, housemateRequest, SHARED)).toBe(true);
+  });
+
+  it("refuses staff both kinds on a request outside their regions", () => {
+    const eastRequest = { ...housemateRequest, region: "East Central" };
+    expect(canReadComment(staff, eastRequest, INTERNAL)).toBe(false);
+    expect(canReadComment(staff, eastRequest, SHARED)).toBe(false);
+  });
+
+  it("lets an admin read everything", () => {
+    const admin = context({ role: "admin" });
+    expect(canReadComment(admin, { ...housemateRequest, region: "East Central" }, INTERNAL)).toBe(true);
+  });
+
+  it("lets a household account read a shared comment on its own house's request", () => {
+    expect(canReadComment(household, housemateRequest, SHARED, HOUSE_A)).toBe(true);
+  });
+
+  it("never lets a household account read an internal comment, even on its own house", () => {
+    expect(canReadComment(household, housemateRequest, INTERNAL, HOUSE_A)).toBe(false);
+  });
+
+  it("refuses a household account a shared comment on another house's request", () => {
+    expect(canReadComment(household, housemateRequest, SHARED, HOUSE_B)).toBe(false);
+  });
+
+  it("refuses an unlinked resident everything on a housemate's request", () => {
+    expect(canReadComment(unlinked, housemateRequest, SHARED, null)).toBe(false);
+    expect(canReadComment(unlinked, housemateRequest, INTERNAL, null)).toBe(false);
+  });
+
+  it("lets an unlinked resident read shared, and only shared, on their own submission", () => {
+    const ownRequest = { ...housemateRequest, submittedBy: "alice@example.com" };
+    expect(canReadComment(unlinked, ownRequest, SHARED, null)).toBe(true);
+    expect(canReadComment(unlinked, ownRequest, INTERNAL, null)).toBe(false);
+  });
+
+  it("closes the thread to a household when the request closed more than 120 days ago", () => {
+    const longClosed = { ...housemateRequest, status: "completed", completedDate: daysAgo(121) };
+    expect(canReadComment(household, longClosed, SHARED, HOUSE_A, NOW)).toBe(false);
+  });
+
+  // The positive control for the window: the date is what refused above.
+  it("keeps the thread open to a household while the request closed inside the window", () => {
+    const recentlyClosed = { ...housemateRequest, status: "completed", completedDate: daysAgo(119) };
+    expect(canReadComment(household, recentlyClosed, SHARED, HOUSE_A, NOW)).toBe(true);
+  });
+
+  it("does not subject staff to the window", () => {
+    const longClosed = { ...housemateRequest, status: "completed", completedDate: daysAgo(400) };
+    expect(canReadComment(staff, longClosed, INTERNAL, null, NOW)).toBe(true);
+  });
+});
+
+describe("canPostComment", () => {
+  const HOUSE_A = "123 Main St, Saint Paul, MN 55101";
+  const HOUSE_B = "456 Oak Ave, Saint Paul, MN 55104";
+  const NOW = new Date("2026-08-15T00:00:00Z");
+  const daysAgo = (n: number) => new Date(NOW.getTime() - n * 24 * 60 * 60 * 1000);
+
+  const INTERNAL = { isInternal: true };
+  const SHARED = { isInternal: false };
+
+  const housemateRequest = {
+    region: "West Central",
+    submittedBy: "bob@example.com",
+    buildingAddress: HOUSE_A,
+    status: "pending",
+  };
+
+  const staff = context({ allowedRegions: ["West Central"] });
+  const household = context({ role: "resident", email: "alice@example.com", propertyId: "prop-a" });
+  const unlinked = context({ role: "resident", email: "alice@example.com" });
+
+  it("lets staff post either way on a request in their region", () => {
+    expect(canPostComment(staff, housemateRequest, INTERNAL)).toBe(true);
+    expect(canPostComment(staff, housemateRequest, SHARED)).toBe(true);
+  });
+
+  it("refuses staff either way outside their regions", () => {
+    const eastRequest = { ...housemateRequest, region: "East Central" };
+    expect(canPostComment(staff, eastRequest, INTERNAL)).toBe(false);
+    expect(canPostComment(staff, eastRequest, SHARED)).toBe(false);
+  });
+
+  it("lets a household account post shared, and only shared, on its own house's request", () => {
+    expect(canPostComment(household, housemateRequest, SHARED, HOUSE_A)).toBe(true);
+    expect(canPostComment(household, housemateRequest, INTERNAL, HOUSE_A)).toBe(false);
+  });
+
+  it("refuses a household account another house's request", () => {
+    expect(canPostComment(household, housemateRequest, SHARED, HOUSE_B)).toBe(false);
+  });
+
+  it("refuses an unlinked resident a housemate's request, and allows shared on their own", () => {
+    expect(canPostComment(unlinked, housemateRequest, SHARED, null)).toBe(false);
+    const ownRequest = { ...housemateRequest, submittedBy: "alice@example.com" };
+    expect(canPostComment(unlinked, ownRequest, SHARED, null)).toBe(true);
+    expect(canPostComment(unlinked, ownRequest, INTERNAL, null)).toBe(false);
+  });
+
+  it("refuses a household account once the request closed more than 120 days ago", () => {
+    const longClosed = { ...housemateRequest, status: "completed", completedDate: daysAgo(121) };
+    expect(canPostComment(household, longClosed, SHARED, HOUSE_A, NOW)).toBe(false);
+    const recentlyClosed = { ...longClosed, completedDate: daysAgo(119) };
+    expect(canPostComment(household, recentlyClosed, SHARED, HOUSE_A, NOW)).toBe(true);
+  });
+});
+
+describe("canDeleteComment", () => {
+  const authored = { authorUserId: "user-1" };
+  const somebodyElses = { authorUserId: "user-2" };
+  const orphaned = { authorUserId: null };
+
+  it("lets the author delete their own comment", () => {
+    expect(canDeleteComment(context(), authored)).toBe(true);
+  });
+
+  it("refuses another staff member", () => {
+    expect(canDeleteComment(context(), somebodyElses)).toBe(false);
+  });
+
+  it("lets an admin delete anybody's", () => {
+    expect(canDeleteComment(context({ role: "admin" }), somebodyElses)).toBe(true);
+  });
+
+  it("treats a comment whose author account is gone as nobody's but an admin's", () => {
+    // authorUserId is set null when the account is deleted. Nothing about the
+    // caller can match a null, so only an admin may take it down.
+    expect(canDeleteComment(context(), orphaned)).toBe(false);
+    expect(canDeleteComment(context({ role: "admin" }), orphaned)).toBe(true);
   });
 });

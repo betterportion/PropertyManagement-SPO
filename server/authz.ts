@@ -339,6 +339,15 @@ function withinResidentWindow(
   return now.getTime() - closedAt <= RESIDENT_CLOSED_REQUEST_DAYS * DAY_MS;
 }
 
+/** The columns of a maintenance request the read rule looks at. */
+export interface RequestAccessFields {
+  region?: string | null;
+  submittedBy?: string | null;
+  buildingAddress?: string | null;
+  status?: string | null;
+  completedDate?: Date | string | null;
+}
+
 /**
  * The read rule for a maintenance request, which is the one place where the
  * resident and staff rules diverge:
@@ -363,13 +372,7 @@ function withinResidentWindow(
  */
 export function canReadMaintenanceRequest(
   ctx: AuthContext,
-  request: {
-    region?: string | null;
-    submittedBy?: string | null;
-    buildingAddress?: string | null;
-    status?: string | null;
-    completedDate?: Date | string | null;
-  },
+  request: RequestAccessFields,
   residentHouse: string | null = null,
   now: Date = new Date(),
 ): boolean {
@@ -490,18 +493,84 @@ export async function canReadUpload(
 export function requireMaintenanceRequestAccess(
   res: Response,
   ctx: AuthContext,
-  request: {
-    region?: string | null;
-    submittedBy?: string | null;
-    buildingAddress?: string | null;
-    status?: string | null;
-    completedDate?: Date | string | null;
-  },
+  request: RequestAccessFields,
   residentHouse: string | null = null,
 ): boolean {
   if (canReadMaintenanceRequest(ctx, request, residentHouse)) return true;
   res.status(403).json({ message: "Forbidden" });
   return false;
+}
+
+/**
+ * ---------------------------------------------------------------------------
+ * Request threads
+ * ---------------------------------------------------------------------------
+ * Thread access IS request access, with one tier gate on top. Whoever may
+ * read a request may read its thread -- a resident the shared half of it --
+ * so ownership, the house match, region scoping and the 120-day closed window
+ * all reach comments through canReadMaintenanceRequest with nothing
+ * implemented a second time. Every comment route decides through these three
+ * functions and nothing else.
+ */
+
+/** A comment's visibility. Fixed at posting; there is no route that changes it. */
+export interface CommentVisibility {
+  isInternal: boolean;
+}
+
+/**
+ * The tier half of the thread rules: an internal comment is staff's, in both
+ * directions. A resident never reads one and never posts one. Staff here means
+ * the same thing requireStaff means -- any account that is not a resident.
+ */
+function tierAllowsComment(ctx: AuthContext, comment: CommentVisibility): boolean {
+  return !comment.isInternal || !ctx.isResident;
+}
+
+/**
+ * Whether the user may read one comment on a request: may read the request,
+ * AND (is staff OR the comment is shared). The list route filters with this
+ * so an internal comment never leaves the server for a resident.
+ */
+export function canReadComment(
+  ctx: AuthContext,
+  request: RequestAccessFields,
+  comment: CommentVisibility,
+  residentHouse: string | null = null,
+  now: Date = new Date(),
+): boolean {
+  if (!canReadMaintenanceRequest(ctx, request, residentHouse, now)) return false;
+  return tierAllowsComment(ctx, comment);
+}
+
+/**
+ * Whether the user may post a comment with this visibility on a request: may
+ * read the request, AND (is staff OR posting shared). Kept as its own rule
+ * rather than an alias of canReadComment because reading and posting are two
+ * grants that happen to agree today; resident posting (#120) lands here.
+ */
+export function canPostComment(
+  ctx: AuthContext,
+  request: RequestAccessFields,
+  comment: CommentVisibility,
+  residentHouse: string | null = null,
+  now: Date = new Date(),
+): boolean {
+  if (!canReadMaintenanceRequest(ctx, request, residentHouse, now)) return false;
+  return tierAllowsComment(ctx, comment);
+}
+
+/**
+ * Who may take a comment down: its author, or an admin. Nobody may edit one.
+ * `authorUserId` is set null when the account is deleted, and nothing about a
+ * caller matches a null, so an orphaned comment is an admin's to remove.
+ */
+export function canDeleteComment(
+  ctx: AuthContext,
+  comment: { authorUserId: string | null | undefined },
+): boolean {
+  if (ctx.isAdmin) return true;
+  return !!comment.authorUserId && comment.authorUserId === ctx.userId;
 }
 
 /**
