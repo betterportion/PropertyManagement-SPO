@@ -16,6 +16,7 @@ import PropertyBudgetCard from "@/components/PropertyBudgetCard";
 import EmailHouseholdDialog from "@/components/EmailHouseholdDialog";
 import { useAuth } from "@/hooks/useAuth";
 import { formatCurrency, formatDate, formatValue } from "@/lib/format";
+import { REQUEST_STATUS } from "@/lib/requestLabels";
 import type {
   Asset,
   MaintenanceContact,
@@ -92,16 +93,6 @@ function scheduleStatus(schedule: MaintenanceSchedule) {
   if (days <= 30) return { label: "Due soon", variant: "warning" as const };
   return { label: "Up to date", variant: "success" as const };
 }
-
-const REQUEST_STATUS: Record<
-  MaintenanceRequest["status"],
-  { label: string; variant: "warning" | "info" | "success" | "secondary" }
-> = {
-  pending: { label: "Pending", variant: "warning" },
-  in_progress: { label: "In progress", variant: "info" },
-  completed: { label: "Completed", variant: "success" },
-  cancelled: { label: "Cancelled", variant: "secondary" },
-};
 
 const RENT_STATUS: Record<
   RentPayment["status"],
@@ -533,7 +524,15 @@ export default function PropertyDetail() {
                         key: "title",
                         header: "Request",
                         sortValue: (r) => r.title,
-                        cell: (r) => <span className="font-medium">{r.title}</span>,
+                        cell: (r) => (
+                          <Link
+                            href={`/maintenance/${r.id}`}
+                            className="font-medium underline-offset-2 hover:underline"
+                            data-testid={`link-property-request-${r.id}`}
+                          >
+                            {r.title}
+                          </Link>
+                        ),
                       },
                       {
                         key: "priority",

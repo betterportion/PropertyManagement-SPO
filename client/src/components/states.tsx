@@ -1,3 +1,4 @@
+import { AlertCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 
@@ -82,6 +83,31 @@ export function ErrorState({
           Try again
         </Button>
       )}
+    </div>
+  );
+}
+
+/**
+ * The server said no. Shown when a route answers 403 -- never decided on the
+ * client, which only reports what it was told. The description is where a
+ * page says what "no" most likely means for this reader.
+ */
+export function AccessDeniedState({
+  description = "You do not have permission to access this page.",
+  className,
+}: {
+  description?: string;
+  className?: string;
+}) {
+  return (
+    <div
+      className={cn("flex h-full flex-col items-center justify-center py-16 text-center", className)}
+      role="alert"
+      data-testid="state-access-denied"
+    >
+      <AlertCircle className="mb-4 h-12 w-12 text-destructive" />
+      <h2 className="mb-2 text-2xl font-semibold">Access Denied</h2>
+      <p className="max-w-prose text-muted-foreground">{description}</p>
     </div>
   );
 }

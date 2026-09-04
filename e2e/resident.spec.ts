@@ -26,6 +26,17 @@ test.describe("resident experience", () => {
     await expect(page.getByText("E2E resident request")).toBeVisible();
   });
 
+  test("opens their own request on its page, without the staff controls", async ({ page }) => {
+    await page.goto("/my-requests");
+    await page.locator('[data-testid^="link-request-"]', { hasText: "E2E resident request" }).first().click();
+    await expect(page).toHaveURL(/\/maintenance\/[^/]+$/);
+    await expect(page.getByRole("heading", { name: "E2E resident request" })).toBeVisible();
+    await expect(page.getByTestId("badge-request-status")).toBeVisible();
+    // Edit is a staff action; the server refuses it for a resident, so the page does not offer it.
+    await expect(page.getByTestId("button-edit-request")).toHaveCount(0);
+    await expect(page.getByTestId("link-back-to-requests")).toHaveAttribute("href", "/my-requests");
+  });
+
   test("cannot reach an admin page by URL", async ({ page }) => {
     await page.goto("/assets");
     // The resident router has no /assets route, so it falls through to NotFound.

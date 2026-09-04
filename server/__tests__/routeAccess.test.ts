@@ -560,6 +560,140 @@ describe("one resident reading another resident's request", () => {
   });
 });
 
+/**
+ * The request page's data route, opened by a household leader.
+ *
+ * The page at /maintenance/:id decides nothing about access: it fetches this
+ * route and shows whatever comes back, so the house rule and the 120-day
+ * window in canReadMaintenanceRequest are the only thing between a leader and
+ * a housemate's history. These cases pin that rule where the page reads it.
+ */
+describe("a household leader opening a request from its page", () => {
+  const HOUSE_A = "1 Main St";
+  const HOUSE_B = "2 River Rd";
+  const PROPERTY_A = { id: "prop-a", name: "Cleveland House", region: "West Central", address: HOUSE_A };
+
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  const daysAgo = (days: number) => new Date(Date.now() - days * DAY_MS).toISOString();
+
+  /** A housemate's open request on the leader's own house. */
+  const OWN_HOUSE_OPEN = {
+    id: "req-own-open",
+    title: "Blinds fell down",
+    region: "West Central",
+    buildingAddress: HOUSE_A,
+    submittedBy: BOB.email,
+    status: "pending",
+  };
+  /** Another house's open request, in the same region as the leader's. */
+  const OTHER_HOUSE_OPEN = { ...OWN_HOUSE_OPEN, id: "req-other-open", buildingAddress: HOUSE_B };
+  /** A housemate's request on the leader's house, closed well outside the window. */
+  const OWN_HOUSE_LONG_CLOSED = {
+    ...OWN_HOUSE_OPEN,
+    id: "req-own-old",
+    status: "completed",
+    completedDate: daysAgo(121),
+  };
+  /** The same, but closed inside the window: the positive control for the date rule. */
+  const OWN_HOUSE_RECENTLY_CLOSED = {
+    ...OWN_HOUSE_LONG_CLOSED,
+    id: "req-own-recent",
+    completedDate: daysAgo(119),
+  };
+
+  /** Alice leads house A: a resident login linked to that property. */
+  const leaderOfHouseA = () => {
+    actAs({ ...ALICE, propertyId: "prop-a" } as typeof ALICE, ALL_MAINTENANCE);
+    storageMock.getProperty.mockResolvedValue(PROPERTY_A);
+  };
+
+  it("opens their own house's open request", async () => {
+    leaderOfHouseA();
+    storageMock.getMaintenanceRequest.mockResolvedValue(OWN_HOUSE_OPEN);
+    const { status, body } = await get("/api/maintenance-requests/req-own-open");
+    expect(status).toBe(200);
+    expect(body.id).toBe("req-own-open");
+  });
+
+  it("refuses another house's request, and never sends its contents", async () => {
+    leaderOfHouseA();
+    storageMock.getMaintenanceRequest.mockResolvedValue(OTHER_HOUSE_OPEN);
+    const { status, body } = await get("/api/maintenance-requests/req-other-open");
+    expect(status).toBe(403);
+    expect(body).not.toHaveProperty("title");
+  });
+
+  it("refuses their own house's request once it has been closed for more than 120 days", async () => {
+    leaderOfHouseA();
+    storageMock.getMaintenanceRequest.mockResolvedValue(OWN_HOUSE_LONG_CLOSED);
+    const { status, body } = await get("/api/maintenance-requests/req-own-old");
+    expect(status).toBe(403);
+    expect(body).not.toHaveProperty("title");
+  });
+
+  // Positive control for the date rule: without it, the refusal above would
+  // also pass if every closed request were refused outright.
+  it("still opens their own house's request closed inside the window", async () => {
+    leaderOfHouseA();
+    storageMock.getMaintenanceRequest.mockResolvedValue(OWN_HOUSE_RECENTLY_CLOSED);
+    const { status, body } = await get("/api/maintenance-requests/req-own-recent");
+    expect(status).toBe(200);
+    expect(body.id).toBe("req-own-recent");
+  });
+
+  // The page also fetches the contractors on the request, through the same
+  // rule. Refusal there must happen before the vendor details are loaded.
+  it("is refused the contractors on another house's request before they are loaded", async () => {
+    leaderOfHouseA();
+    storageMock.getMaintenanceRequest.mockResolvedValue(OTHER_HOUSE_OPEN);
+    expect((await get("/api/maintenance-requests/req-other-open/contacts")).status).toBe(403);
+    expect(storageMock.getRequestContacts).not.toHaveBeenCalled();
+  });
+
+  it("reads the contractors on their own house's request", async () => {
+    leaderOfHouseA();
+    storageMock.getMaintenanceRequest.mockResolvedValue(OWN_HOUSE_OPEN);
+    storageMock.getRequestContacts.mockResolvedValue([{ id: "c-1", name: "Dave", company: "Dave's Plumbing" }]);
+    const { status, body } = await get("/api/maintenance-requests/req-own-open/contacts");
+    expect(status).toBe(200);
+    expect(storageMock.getRequestContacts).toHaveBeenCalledWith("req-own-open");
+    expect(body.map((c: { id: string }) => c.id)).toEqual(["c-1"]);
+  });
+
+  // The page's other data route, /api/maintenance-request-photos, applies the
+  // same rule from the opposite direction: it fetches every photo on every
+  // request and filters per-photo by canReadMaintenanceRequest, so the house
+  // match has to hold there too or a leader would see a housemate's photos
+  // through the list even though the detail route above refuses the request
+  // itself.
+  it("shows a leader photos on their own house's request but not another house's", async () => {
+    leaderOfHouseA();
+    storageMock.getAllMaintenanceRequests.mockResolvedValue([OWN_HOUSE_OPEN, OTHER_HOUSE_OPEN]);
+    storageMock.getAllMaintenanceRequestPhotos.mockResolvedValue([
+      { id: "ph-own", requestId: OWN_HOUSE_OPEN.id, imageUrl: "/uploads/own.png" },
+      { id: "ph-other", requestId: OTHER_HOUSE_OPEN.id, imageUrl: "/uploads/other.png" },
+    ]);
+    const { status, body } = await get("/api/maintenance-request-photos");
+    expect(status).toBe(200);
+    expect(body.map((p: { id: string }) => p.id)).toEqual(["ph-own"]);
+  });
+
+  // The 120-day window applies on this route too, not just on the detail
+  // route: the photo list has no window logic of its own, so this is really
+  // proving canReadMaintenanceRequest is the one thing both routes share.
+  it("hides photos on their own house's request once it has been closed for more than 120 days", async () => {
+    leaderOfHouseA();
+    storageMock.getAllMaintenanceRequests.mockResolvedValue([OWN_HOUSE_LONG_CLOSED, OWN_HOUSE_RECENTLY_CLOSED]);
+    storageMock.getAllMaintenanceRequestPhotos.mockResolvedValue([
+      { id: "ph-old", requestId: OWN_HOUSE_LONG_CLOSED.id, imageUrl: "/uploads/old.png" },
+      { id: "ph-recent", requestId: OWN_HOUSE_RECENTLY_CLOSED.id, imageUrl: "/uploads/recent.png" },
+    ]);
+    const { status, body } = await get("/api/maintenance-request-photos");
+    expect(status).toBe(200);
+    expect(body.map((p: { id: string }) => p.id)).toEqual(["ph-recent"]);
+  });
+});
+
 describe("submitting a maintenance request", () => {
   const body = {
     title: "Leaky tap",

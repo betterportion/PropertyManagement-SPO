@@ -58,6 +58,15 @@ test.describe("accessibility", () => {
     expect(violations, JSON.stringify(violations.map((v) => v.id), null, 2)).toEqual([]);
   });
 
+  test("a request page has no serious violations", async ({ page }) => {
+    await page.goto("/maintenance");
+    await expect(page.getByRole("heading", { name: "Maintenance requests" })).toBeVisible();
+    await page.locator('[data-testid^="link-request-"]').first().click();
+    await expect(page.getByTestId("badge-request-status")).toBeVisible();
+    const violations = await seriousViolations(page);
+    expect(violations, JSON.stringify(violations.map((v) => v.id), null, 2)).toEqual([]);
+  });
+
   test("the assets gallery has no serious violations", async ({ page }) => {
     await page.goto("/assets");
     await page.getByTestId("button-view-gallery").click();

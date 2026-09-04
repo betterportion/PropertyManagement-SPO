@@ -19,7 +19,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
-import { Search, UserCog, Shield, AlertCircle, Plus, MapPin, Eye, Settings2 } from "lucide-react";
+import { Search, UserCog, Shield, Plus, MapPin, Eye, Settings2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { useForm } from "react-hook-form";
@@ -31,7 +31,7 @@ import { ActivityLog } from "@/components/ActivityLog";
 import ResourceLinksSettings from "@/components/ResourceLinksSettings";
 import WalkthroughTemplateSettings from "@/components/WalkthroughTemplateSettings";
 import { Section, Container, PageHeader, PageStack } from "@/components/layout/page";
-import { EmptyState } from "@/components/states";
+import { AccessDeniedState, EmptyState } from "@/components/states";
 import { formatDate, formatValue } from "@/lib/format";
 
 const ALL_REGIONS = REGIONS.map((r) => ({ id: r, name: r }));
@@ -269,13 +269,7 @@ export default function Settings() {
   // This is a convenience only -- the server refuses these endpoints to
   // non-admins regardless of what the page decides to draw.
   if (!isAdmin) {
-    return (
-      <div className="flex flex-col items-center justify-center h-full">
-        <AlertCircle className="h-12 w-12 text-destructive mb-4" />
-        <h2 className="text-2xl font-semibold mb-2">Access Denied</h2>
-        <p className="text-muted-foreground">You do not have permission to access this page.</p>
-      </div>
-    );
+    return <AccessDeniedState />;
   }
 
   const filteredUsers = (users as User[] || []).filter((user) =>
