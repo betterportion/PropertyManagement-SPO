@@ -854,10 +854,114 @@ describe("the thread on a request", () => {
     expect(storageMock.createAuditEvent).not.toHaveBeenCalled();
   });
 
-  it("refuses a household leader posting, and writes nothing, until resident posting lands", async () => {
+  // -- a household posting (#120) ---------------------------------------------
+  //
+  // A new write path for a resident account, which is the shape of both
+  // historic authorization gaps here. The rule is the read rule plus
+  // "shared only" and nothing more, so every refusal below pairs with the
+  // refused write never reaching storage.
+
+  it("posts a household leader's comment on their own house's open request as shared, with the author from the session", async () => {
     leaderOfHouseA();
     storageMock.getMaintenanceRequest.mockResolvedValue(OWN_HOUSE_OPEN);
+    storageMock.createMaintenanceRequestComment.mockImplementation(async (c: unknown) => ({ id: "c-new", ...(c as object) }));
+    const { status, body } = await post("/api/maintenance-requests/req-own-open/comments", {
+      body: "Still leaking, worse than last week.",
+      isInternal: false,
+      authorUserId: STAFF.id,
+    });
+    expect(status).toBe(201);
+    expect(storageMock.createMaintenanceRequestComment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestId: "req-own-open",
+        isInternal: false,
+        authorUserId: ALICE.id,
+        authorEmail: ALICE.email,
+      }),
+    );
+    expect(body.id).toBe("c-new");
+  });
+
+  // The household composer has no visibility control, so a body marked
+  // internal from that tier is a client mistake, not a grant: it is stored
+  // shared, never refused and never stored internal.
+  it("stores a household leader's comment as shared even when the body says internal", async () => {
+    leaderOfHouseA();
+    storageMock.getMaintenanceRequest.mockResolvedValue(OWN_HOUSE_OPEN);
+    storageMock.createMaintenanceRequestComment.mockImplementation(async (c: unknown) => ({ id: "c-new", ...(c as object) }));
+    const { status } = await post("/api/maintenance-requests/req-own-open/comments", { body: "Still leaking.", isInternal: true });
+    expect(status).toBe(201);
+    expect(storageMock.createMaintenanceRequestComment).toHaveBeenCalledTimes(1);
+    expect(storageMock.createMaintenanceRequestComment).toHaveBeenCalledWith(expect.objectContaining({ isInternal: false }));
+  });
+
+  it("refuses a household leader posting on another house's request, and writes nothing", async () => {
+    leaderOfHouseA();
+    storageMock.getMaintenanceRequest.mockResolvedValue(OTHER_HOUSE_OPEN);
+    const { status } = await post("/api/maintenance-requests/req-other-open/comments", { body: "Still leaking.", isInternal: false });
+    expect(status).toBe(403);
+    expect(storageMock.createMaintenanceRequestComment).not.toHaveBeenCalled();
+  });
+
+  // The unlinked-ownership path, through the route rather than only the
+  // unit: an account with no house link at all, recorded as the request's
+  // own submitter on a house that is not theirs. Ownership carries the
+  // post exactly as it carries the read, and the "always shared" rule for
+  // this tier still applies on top of it.
+  it("posts an unlinked resident's own submission on another house as shared, even when the body says internal", async () => {
+    const EVE = { id: "u-eve", email: "eve@example.com", role: "resident", isActive: true };
+    actAs(EVE);
+    storageMock.getMaintenanceRequest.mockResolvedValue({ ...OTHER_HOUSE_OPEN, submittedBy: EVE.email });
+    storageMock.createMaintenanceRequestComment.mockImplementation(async (c: unknown) => ({ id: "c-new", ...(c as object) }));
+    const { status } = await post("/api/maintenance-requests/req-other-open/comments", { body: "My own report.", isInternal: true });
+    expect(status).toBe(201);
+    expect(storageMock.createMaintenanceRequestComment).toHaveBeenCalledWith(
+      expect.objectContaining({ isInternal: false, authorUserId: EVE.id }),
+    );
+  });
+
+  // The positive control's mirror: the same unlinked account gets nothing on
+  // a house's request it neither lives at nor filed.
+  it("refuses that same unlinked resident a house's request it did not submit, and writes nothing", async () => {
+    const EVE = { id: "u-eve", email: "eve@example.com", role: "resident", isActive: true };
+    actAs(EVE);
+    storageMock.getMaintenanceRequest.mockResolvedValue(OTHER_HOUSE_OPEN);
+    const { status } = await post("/api/maintenance-requests/req-other-open/comments", { body: "Not mine." });
+    expect(status).toBe(403);
+    expect(storageMock.createMaintenanceRequestComment).not.toHaveBeenCalled();
+  });
+
+  it("refuses a household leader posting on their own house's request closed more than 120 days ago, and writes nothing", async () => {
+    const daysAgo = (n: number) => new Date(Date.now() - n * 24 * 60 * 60 * 1000);
+    leaderOfHouseA();
+    storageMock.getMaintenanceRequest.mockResolvedValue({ ...OWN_HOUSE_OPEN, status: "completed", completedDate: daysAgo(121) });
     const { status } = await post("/api/maintenance-requests/req-own-open/comments", { body: "Still leaking.", isInternal: false });
+    expect(status).toBe(403);
+    expect(storageMock.createMaintenanceRequestComment).not.toHaveBeenCalled();
+
+    // Positive control for the window: closed inside it, the same post lands.
+    storageMock.getMaintenanceRequest.mockResolvedValue({ ...OWN_HOUSE_OPEN, status: "completed", completedDate: daysAgo(119) });
+    storageMock.createMaintenanceRequestComment.mockResolvedValue({ id: "c-new" });
+    expect((await post("/api/maintenance-requests/req-own-open/comments", { body: "Still leaking.", isInternal: false })).status).toBe(201);
+    expect(storageMock.createMaintenanceRequestComment).toHaveBeenCalledTimes(1);
+  });
+
+  // The repairs-only type rule reaches posting through the read rule: a
+  // capital project on the household's own house is not theirs to comment on.
+  it("refuses a household leader posting on a capital project on their own house, and writes nothing", async () => {
+    leaderOfHouseA();
+    storageMock.getMaintenanceRequest.mockResolvedValue({ ...OWN_HOUSE_OPEN, type: "capex" });
+    const { status } = await post("/api/maintenance-requests/req-own-open/comments", { body: "When does this start?", isInternal: false });
+    expect(status).toBe(403);
+    expect(storageMock.createMaintenanceRequestComment).not.toHaveBeenCalled();
+  });
+
+  // Both non-repair types, not only capex: a household may not read a
+  // project on its own house, so it may not post on one either.
+  it("refuses a household leader posting on an ordinary project on their own house, and writes nothing", async () => {
+    leaderOfHouseA();
+    storageMock.getMaintenanceRequest.mockResolvedValue({ ...OWN_HOUSE_OPEN, type: "project" });
+    const { status } = await post("/api/maintenance-requests/req-own-open/comments", { body: "When does this start?", isInternal: false });
     expect(status).toBe(403);
     expect(storageMock.createMaintenanceRequestComment).not.toHaveBeenCalled();
   });
@@ -895,7 +999,34 @@ describe("the thread on a request", () => {
     expect(storageMock.createMaintenanceRequestComment).not.toHaveBeenCalled();
   });
 
+  // The 4,000-character cap is validated before any role branch, but a
+  // household leader is the tier the plan calls out by name -- prove it
+  // holds for that tier too, not only for staff.
+  it("refuses a household leader's body over 4,000 characters as a 400, and writes nothing", async () => {
+    leaderOfHouseA();
+    storageMock.getMaintenanceRequest.mockResolvedValue(OWN_HOUSE_OPEN);
+    const { status, body } = await post("/api/maintenance-requests/req-own-open/comments", { body: "x".repeat(4001), isInternal: false });
+    expect(status).toBe(400);
+    expect(body.message).toContain("4,000");
+    expect(storageMock.createMaintenanceRequestComment).not.toHaveBeenCalled();
+  });
+
   // -- deleting ---------------------------------------------------------------
+
+  it("stores a resident's comment as their own words, whatever relay fields the body carries", async () => {
+    leaderOfHouseA();
+    storageMock.getMaintenanceRequest.mockResolvedValue(OWN_HOUSE_OPEN);
+    storageMock.createMaintenanceRequestComment.mockImplementation(async (c: unknown) => ({ id: "c-new", ...(c as object) }));
+    const { status } = await post("/api/maintenance-requests/req-own-open/comments", {
+      body: "Dave said Thursday.",
+      relaySource: "Dave (handyman)",
+      relayContactId: "contact-dave",
+    });
+    expect(status).toBe(201);
+    expect(storageMock.createMaintenanceRequestComment).toHaveBeenCalledWith(
+      expect.objectContaining({ relaySource: null, relayContactId: null, authorUserId: ALICE.id }),
+    );
+  });
 
   it("lets the author delete their own comment", async () => {
     actAs(STAFF, westOnly);
@@ -921,6 +1052,14 @@ describe("the thread on a request", () => {
     expect(storageMock.deleteMaintenanceRequestComment).toHaveBeenCalledWith("c-internal");
   });
 
+  it("lets a household leader delete their own comment", async () => {
+    leaderOfHouseA();
+    storageMock.getMaintenanceRequestComment.mockResolvedValue({ ...SHARED_COMMENT, id: "c-alice", authorUserId: ALICE.id });
+    storageMock.getMaintenanceRequest.mockResolvedValue(OWN_HOUSE_OPEN);
+    expect((await del("/api/maintenance-request-comments/c-alice")).status).toBe(200);
+    expect(storageMock.deleteMaintenanceRequestComment).toHaveBeenCalledWith("c-alice");
+  });
+
   it("refuses a household leader deleting a staff comment on their house, and deletes nothing", async () => {
     leaderOfHouseA();
     storageMock.getMaintenanceRequestComment.mockResolvedValue(SHARED_COMMENT);
@@ -938,6 +1077,23 @@ describe("the thread on a request", () => {
     storageMock.getMaintenanceRequest.mockResolvedValue(OWN_HOUSE_OPEN);
     expect((await del("/api/maintenance-request-comments/c-internal")).status).toBe(403);
     expect(storageMock.deleteMaintenanceRequestComment).not.toHaveBeenCalled();
+  });
+
+  // Deleting is reading plus authorship: once the request itself has aged
+  // out of the resident's 120-day window, the thread is closed to them too,
+  // and that holds even for a comment they wrote themselves.
+  it("refuses a household leader deleting their own comment once the request closed more than 120 days ago", async () => {
+    const daysAgo = (n: number) => new Date(Date.now() - n * 24 * 60 * 60 * 1000);
+    leaderOfHouseA();
+    storageMock.getMaintenanceRequestComment.mockResolvedValue({ ...SHARED_COMMENT, id: "c-alice", authorUserId: ALICE.id });
+    storageMock.getMaintenanceRequest.mockResolvedValue({ ...OWN_HOUSE_OPEN, status: "completed", completedDate: daysAgo(121) });
+    expect((await del("/api/maintenance-request-comments/c-alice")).status).toBe(403);
+    expect(storageMock.deleteMaintenanceRequestComment).not.toHaveBeenCalled();
+
+    // Positive control for the window: closed inside it, the same delete lands.
+    storageMock.getMaintenanceRequest.mockResolvedValue({ ...OWN_HOUSE_OPEN, status: "completed", completedDate: daysAgo(119) });
+    expect((await del("/api/maintenance-request-comments/c-alice")).status).toBe(200);
+    expect(storageMock.deleteMaintenanceRequestComment).toHaveBeenCalledWith("c-alice");
   });
 
   // -- emailing the thread ----------------------------------------------------
@@ -979,6 +1135,17 @@ describe("the thread on a request", () => {
         expect(message.text).toContain("Thursday at 9.");
         expect(message.to).not.toContain(",");
       }
+    });
+
+    // A household's own comment flows through the same rule: the housemate,
+    // the staff member already in the thread and the colleague covering the
+    // region hear about it; the author does not, and neither does the admin
+    // who has never posted here.
+    it("emails a household leader's comment to the housemate and to staff, never the author", async () => {
+      leaderOfHouseA();
+      const { status } = await post("/api/maintenance-requests/req-own-open/comments", { body: "Still leaking.", isInternal: false });
+      expect(status).toBe(201);
+      expect(addressed()).toEqual(["bob@example.com", "staff@example.com", "tom@example.com"]);
     });
 
     it("emails an internal comment to staff and to no resident address", async () => {

@@ -35,9 +35,12 @@ test.describe("resident experience", () => {
     // Edit is a staff action; the server refuses it for a resident, so the page does not offer it.
     await expect(page.getByTestId("button-edit-request")).toHaveCount(0);
     await expect(page.getByTestId("link-back-to-requests")).toHaveAttribute("href", "/my-requests");
-    // The thread is theirs to read; the composer is staff's until #120.
+    // The thread is theirs to read and post to, shared only: the composer
+    // is there, the visibility control and the relay switch are not.
     await expect(page.getByTestId("request-thread")).toBeVisible();
-    await expect(page.getByTestId("form-comment")).toHaveCount(0);
+    await expect(page.getByTestId("form-comment")).toBeVisible();
+    await expect(page.getByTestId("button-visibility-internal")).toHaveCount(0);
+    await expect(page.getByTestId("switch-comment-relayed")).toHaveCount(0);
   });
 
   test("cannot reach an admin page by URL", async ({ page }) => {

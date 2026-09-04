@@ -1029,16 +1029,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const ctx = await requireActiveUser(req, res);
       if (!ctx) return;
-      // Staff only for now. canPostComment already lets a household post a
-      // shared comment on its own house; #120 removes this line and adds the
-      // tests for that write path. Until then the resident composer does not
-      // exist and nothing a resident sends here is written.
-      if (!requireStaff(res, ctx)) return;
       const request = await requestForThread(req, res);
       if (!request) return;
 
       const parsed = insertMaintenanceRequestCommentSchema.parse(req.body);
-      const isInternal = parsed.isInternal ?? true;
+      // A household's comment is shared whatever the body says. Their
+      // composer has no visibility control, so a body marked internal from
+      // that tier is a client mistake, not a grant -- forced here rather
+      // than refused, the way the resident create route forces the type.
+      // canPostComment then decides the rest: own house (or own submission),
+      // a repair, inside the 120-day window.
+      const isInternal = ctx.isResident ? false : (parsed.isInternal ?? true);
       const residentHouse = await residentHouseAddress(ctx);
       if (!canPostComment(ctx, request, { isInternal }, residentHouse)) {
         return res.status(403).json({ message: "Forbidden" });
@@ -1050,8 +1051,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const comment = await storage.createMaintenanceRequestComment({
         body: commentBodyFromClient(parsed.body),
         isInternal,
-        relaySource: parsed.relaySource || null,
-        relayContactId: parsed.relayContactId || null,
+        // Relaying is a staff act -- an RA passing on a contractor's words.
+        // A resident's comment is their own, whatever the body claims.
+        relaySource: ctx.isResident ? null : parsed.relaySource || null,
+        relayContactId: ctx.isResident ? null : parsed.relayContactId || null,
         requestId: request.id,
         authorUserId: ctx.userId,
         authorEmail: ctx.user.email ?? null,

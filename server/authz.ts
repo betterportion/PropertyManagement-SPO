@@ -582,9 +582,13 @@ export function canReadComment(
 
 /**
  * Whether the user may post a comment with this visibility on a request: may
- * read the request, AND (is staff OR posting shared). Kept as its own rule
- * rather than an alias of canReadComment because reading and posting are two
- * grants that happen to agree today; resident posting (#120) lands here.
+ * read the request, AND (is staff OR posting shared). That is the whole of
+ * the household's write path: a resident posts shared on the requests they
+ * may read -- own house or own submission, a repair, inside the 120-day
+ * window -- and nothing else. The create route forces shared for a resident
+ * before asking, so the internal branch is never reached from that tier.
+ * Kept as its own rule rather than an alias of canReadComment because reading
+ * and posting are two grants that happen to agree today.
  */
 export function canPostComment(
   ctx: AuthContext,
