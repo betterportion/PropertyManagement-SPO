@@ -82,6 +82,11 @@ export const users = pgTable("users", {
   // than deleting them, so the people keep their history.
   propertyId: varchar("property_id").references(() => properties.id, { onDelete: "set null" }),
   isActive: boolean("is_active").notNull().default(true),
+  // The off switch for comment email. On by default; a person flips it from
+  // their own menu and an admin can flip it on the user edit screen. A
+  // preference rather than a permission, so it lives here and not on the
+  // permissions row, and changing it is not audited.
+  commentEmailsEnabled: boolean("comment_emails_enabled").notNull().default(true),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });

@@ -81,6 +81,8 @@ import {
   setPropertyFactsSchema,
   type InsertPropertyWithAddress,
   insertMaintenanceRequestCommentSchema,
+  type MaintenanceRequest,
+  type MaintenanceRequestComment,
 } from "@shared/schema";
 import { STANDARD_SCHEDULE_TEMPLATES, addMonths } from "./schedules";
 import { planHouseFacts } from "./houseFacts";
@@ -96,7 +98,10 @@ import { fromCents, splitEvenly, toCents } from "@shared/depositLedger";
 import { randomUUID } from "crypto";
 import { contractorLoad, recurringIssues } from "./aggregates";
 import { sendEmail } from "./email";
-import { householdEmail, maintenanceReceivedEmail, maintenanceStatusEmail } from "./notifications";
+import { commentEmail, householdEmail, maintenanceReceivedEmail, maintenanceStatusEmail } from "./notifications";
+import { commentRecipients } from "./commentRecipients";
+import { readAppUrlFromEnv } from "./config";
+import { log } from "./logger";
 import { normalizeRegion, normalizeRegions } from "./migrateRegions";
 import { REGIONS } from "@shared/regions";
 
@@ -147,6 +152,10 @@ const roleUpdateSchema = z.object({
 
 const statusUpdateSchema = z.object({
   isActive: z.boolean(),
+});
+
+const notificationsUpdateSchema = z.object({
+  commentEmailsEnabled: z.boolean(),
 });
 
 const permissionsUpdateSchema = z.object({
@@ -294,6 +303,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // The comment email off switch, flipped for oneself. Any active account,
+  // on either tier: silencing email is not a grant. A preference rather than
+  // access, money or a document, so nothing is audited.
+  app.patch('/api/auth/me/notifications', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+
+      const { commentEmailsEnabled } = notificationsUpdateSchema.parse(req.body);
+      const user = await storage.updateUserCommentEmails(ctx.userId, commentEmailsEnabled);
+      res.json(user);
+    } catch (error) {
+      sendError(res, error, "Failed to update your email settings");
+    }
+  });
+
   app.get('/api/users', isAuthenticated, async (req: any, res) => {
     try {
       const ctx = await requireActiveUser(req, res);
@@ -352,6 +377,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(user);
     } catch (error) {
       sendError(res, error, "Failed to update user status");
+    }
+  });
+
+  // The same switch, flipped for somebody else: a leader who tells their RA
+  // "stop emailing me" gets what they asked for. Admin-only, like every
+  // other change to an account.
+  app.patch('/api/users/:id/notifications', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireAdmin(res, ctx)) return;
+
+      const { commentEmailsEnabled } = notificationsUpdateSchema.parse(req.body);
+      const user = await storage.updateUserCommentEmails(req.params.id, commentEmailsEnabled);
+      res.json(user);
+    } catch (error) {
+      sendError(res, error, "Failed to update the account's email settings");
     }
   });
 
@@ -552,6 +594,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
    */
   function notify(message: { to: string; subject: string; text: string } | null) {
     if (message) void sendEmail(message);
+  }
+
+  /**
+   * Emails the people who can see a comment that was just posted.
+   *
+   * Who they are is one pure function (commentRecipients.ts) over the whole
+   * account list, the thread so far and the houses those accounts are linked
+   * to -- three queries, never one per person. The sends go through notify,
+   * unawaited, one message per person. Nothing in here may fail the comment:
+   * it is already saved by the time this runs, so a failure working out who
+   * to write to is logged and the caller answers 201 regardless.
+   */
+  async function emailThreadAbout(request: MaintenanceRequest, comment: MaintenanceRequestComment): Promise<void> {
+    try {
+      const [candidates, thread, properties] = await Promise.all([
+        storage.getAllUsersWithPermissions(),
+        storage.getMaintenanceRequestComments(request.id),
+        storage.getAllProperties(),
+      ]);
+      const addressById = new Map(properties.map((property) => [property.id, property.address]));
+      const recipients = commentRecipients({
+        request,
+        comment,
+        candidates,
+        participantIds: thread.map((entry) => entry.authorUserId),
+        houseAddressOf: (propertyId) => addressById.get(propertyId),
+      });
+      const appUrl = readAppUrlFromEnv().url;
+      for (const { email } of recipients) {
+        notify(commentEmail({ to: email, request, comment, appUrl }));
+      }
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      log(`comment email skipped for request ${request.id}: ${detail}`, "email");
+    }
   }
 
   // Maintenance Requests Routes
@@ -980,6 +1057,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         authorEmail: ctx.user.email ?? null,
         authorName,
       });
+      // Saved first, emailed second: a mail outage never loses what was typed.
+      await emailThreadAbout(request, comment);
       res.status(201).json(comment);
     } catch (error) {
       sendError(res, error, "Failed to post the comment");

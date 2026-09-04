@@ -149,7 +149,15 @@ export interface IStorage {
   updateUserRole(id: string, role: "admin" | "regional_administrator" | "resident"): Promise<User>;
   updateUserActiveStatus(id: string, isActive: boolean): Promise<User>;
   updateUserProperty(id: string, propertyId: string | null): Promise<User>;
+  /** The comment email off switch. A preference, so it is not audited. */
+  updateUserCommentEmails(id: string, enabled: boolean): Promise<User>;
   getActiveResidentAccountByEmail(email: string): Promise<User | undefined>;
+  /**
+   * Every account beside its permissions row, in one query. The candidate
+   * list for the comment email; who among them is written to is decided in
+   * commentRecipients.ts, not here.
+   */
+  getAllUsersWithPermissions(): Promise<{ user: User; permissions: UserPermissions | null }[]>;
   getUserPermissions(userId: string): Promise<UserPermissions | undefined>;
   getAllUserPermissions(): Promise<UserPermissions[]>;
   upsertUserPermissions(permissions: InsertUserPermissions): Promise<UserPermissions>;
@@ -526,9 +534,10 @@ export class DatabaseStorage implements IStorage {
         // Remove the old record (cascades to userPermissions)
         await db.delete(users).where(eq(users.id, existingByEmail.id));
 
-        // Re-insert under the OIDC sub, preserving role, active status and the
+        // Re-insert under the OIDC sub, preserving role, active status, the
         // property link (a pre-created resident account already points at its
-        // house; the sign-in claims never carry propertyId).
+        // house; the sign-in claims never carry propertyId) and the comment
+        // email switch, which an admin may already have turned off.
         const [newUser] = await db
           .insert(users)
           .values({
@@ -536,6 +545,7 @@ export class DatabaseStorage implements IStorage {
             role: existingByEmail.role,
             isActive: existingByEmail.isActive,
             propertyId: userData.propertyId ?? existingByEmail.propertyId,
+            commentEmailsEnabled: existingByEmail.commentEmailsEnabled,
           })
           .returning();
 
@@ -627,12 +637,28 @@ export class DatabaseStorage implements IStorage {
     return user;
   }
 
+  async updateUserCommentEmails(id: string, enabled: boolean): Promise<User> {
+    const [user] = await db
+      .update(users)
+      .set({ commentEmailsEnabled: enabled, updatedAt: new Date() })
+      .where(eq(users.id, id))
+      .returning();
+    return user;
+  }
+
   async getUserPermissions(userId: string): Promise<UserPermissions | undefined> {
     const [permissions] = await db
       .select()
       .from(userPermissions)
       .where(eq(userPermissions.userId, userId));
     return permissions;
+  }
+
+  async getAllUsersWithPermissions(): Promise<{ user: User; permissions: UserPermissions | null }[]> {
+    return await db
+      .select({ user: users, permissions: userPermissions })
+      .from(users)
+      .leftJoin(userPermissions, eq(userPermissions.userId, users.id));
   }
 
   async getAllUserPermissions(): Promise<UserPermissions[]> {

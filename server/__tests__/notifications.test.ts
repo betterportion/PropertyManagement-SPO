@@ -9,11 +9,12 @@
  */
 import { describe, it, expect } from "vitest";
 import {
+  commentEmail,
   householdEmail,
   maintenanceReceivedEmail,
   maintenanceStatusEmail,
 } from "../notifications";
-import type { MaintenanceRequest } from "@shared/schema";
+import type { MaintenanceRequest, MaintenanceRequestComment } from "@shared/schema";
 
 function request(over: Partial<MaintenanceRequest> = {}): MaintenanceRequest {
   return {
@@ -130,5 +131,94 @@ describe("emailing a household", () => {
 
   it("sends nothing to an empty house", () => {
     expect(householdEmail([], "Cleveland House", "Subject", "Body")).toEqual([]);
+  });
+});
+
+describe("telling somebody a comment was posted", () => {
+  function comment(over: Partial<MaintenanceRequestComment> = {}): MaintenanceRequestComment {
+    return {
+      id: "c-1",
+      requestId: "req-1",
+      body: "The plumber is coming Thursday at 9.",
+      isInternal: false,
+      authorUserId: "u-sarah",
+      authorEmail: "sarah@example.com",
+      authorName: "Sarah Lee",
+      relaySource: null,
+      relayContactId: null,
+      createdAt: new Date("2026-09-01T10:00:00Z"),
+      ...over,
+    } as MaintenanceRequestComment;
+  }
+
+  const build = (over: Partial<MaintenanceRequestComment> = {}, appUrl: string | null = null, to = "bob@example.com") =>
+    commentEmail({ to, request: request(), comment: comment(over), appUrl });
+
+  it("is addressed to the recipient it was built for, one person per message", () => {
+    expect(build()?.to).toBe("bob@example.com");
+  });
+
+  it("carries the comment itself, the request and the house", () => {
+    const message = build();
+    expect(message?.subject).toContain("Leaky kitchen tap");
+    expect(message?.text).toContain("The plumber is coming Thursday at 9.");
+    expect(message?.text).toContain("Leaky kitchen tap");
+    expect(message?.text).toContain("1 Main St");
+  });
+
+  it("carries whatever the comment says, verbatim, without scrubbing it -- that is the author's own text and what the email is for", () => {
+    // Unlike the audit log, this builder never redacts the comment body: a
+    // household leader typing a gate code into a comment chose to share it
+    // there, and the email exists to relay exactly what was posted.
+    const message = build({ body: "The lockbox code is 4471." });
+    expect(message?.text).toContain("The lockbox code is 4471.");
+  });
+
+  it("carries nothing beyond the comment, the author line, the request title, the house and a link -- never the request's description", () => {
+    // request() only ever gives commentEmail id/title/buildingAddress (see
+    // CommentEmailInput's Pick<>), but this pins the content rule at the text
+    // itself so a future widening of that Pick cannot leak the description.
+    const message = build();
+    expect(message?.text).not.toContain("Drips overnight");
+  });
+
+  it("says who wrote it", () => {
+    expect(build()?.text).toContain("Sarah Lee");
+  });
+
+  it("reads as a relay when the comment came from a contractor", () => {
+    // Two years from now the thread must say Sarah relayed Dave, not that
+    // Sarah said it.
+    expect(build({ relaySource: "Dave (handyman)" })?.text).toContain("Sarah Lee, relaying Dave (handyman)");
+  });
+
+  it("falls back to the author's email, then to a generic line, when there is no name", () => {
+    expect(build({ authorName: null })?.text).toContain("sarah@example.com");
+    expect(build({ authorName: null, authorEmail: null })?.text.trim().length).toBeGreaterThan(0);
+  });
+
+  it("marks an internal comment as staff-only, and a shared one not", () => {
+    expect(build({ isInternal: true })?.text).toContain("Internal");
+    expect(build({ isInternal: true })?.text).toContain("staff only");
+    expect(build({ isInternal: false })?.text).not.toContain("staff only");
+  });
+
+  it("links to the request when the portal's address is configured", () => {
+    expect(build({}, "https://housing.spo.org")?.text).toContain("https://housing.spo.org/maintenance/req-1");
+  });
+
+  it("goes without a link when no address is configured, rather than a broken one", () => {
+    const text = build({}, null)?.text ?? "";
+    expect(text).not.toContain("/maintenance/");
+    expect(text).not.toContain("http");
+  });
+
+  it("sends nothing to an address that is not one", () => {
+    expect(build({}, null, "")).toBeNull();
+    expect(build({}, null, "not an email")).toBeNull();
+  });
+
+  it("sends nothing about an empty comment", () => {
+    expect(build({ body: "   " })).toBeNull();
   });
 });

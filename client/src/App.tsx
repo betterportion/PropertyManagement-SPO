@@ -119,6 +119,7 @@ type UserMenuUser = {
   firstName?: string | null;
   lastName?: string | null;
   email?: string | null;
+  commentEmailsEnabled?: boolean | null;
 } | null;
 
 function AppContent() {

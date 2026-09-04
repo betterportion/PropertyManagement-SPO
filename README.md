@@ -73,6 +73,8 @@ Outbound email is one of those optional groups and is worth calling out: with
 `RESEND_API_KEY` and `EMAIL_FROM` unset the app runs normally and simply sends nothing.
 Set **both** to turn it on — setting only one fails the boot check on purpose, because a
 half-configured mailer that silently drops messages is worse than one that is off.
+`APP_URL`, the address people open the portal at, is optional alongside them: set, it puts
+an "open this request" link in comment emails; unset, they go out without one.
 
 If anything required is missing, the server refuses to start and prints **every** missing value at once, rather than failing hours later when someone tries to log in or upload a file.
 

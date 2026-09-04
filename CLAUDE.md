@@ -51,7 +51,7 @@ Three conventions in that suite, all of which exist because of a real miss:
 | File | Responsibility |
 |---|---|
 | `index.ts` | Entry point. Validates configuration before anything else loads, sets `trust proxy`, security headers, JSON body parsing, API request logging, graceful shutdown, listens on `PORT`. |
-| `config.ts` | Every environment variable the server cannot run without, checked once at boot and reported together. Also owns the OIDC provider settings. |
+| `config.ts` | Every environment variable the server cannot run without, checked once at boot and reported together. Also owns the OIDC provider settings, the email settings and `APP_URL` — the portal's public address, optional, read by `readAppUrlFromEnv` for the links in comment email and never a boot failure when unset. |
 | `routes.ts` | Every API endpoint. One large file, ~133 handlers. |
 | `auth.ts` | OpenID Connect login and the session store. Reads its provider settings from `config.ts`. |
 | `authz.ts` | Who may do what: `requireActiveUser`, `requirePermission`, the region helpers, upload and maintenance ownership. |
@@ -74,6 +74,7 @@ Three conventions in that suite, all of which exist because of a real miss:
 | `objectStorage/` | File storage behind a `FileStore` interface: `local.ts` for development, `supabase.ts` for production. The only code that talks to a bucket. |
 | `uploadLimits.ts` | Per-file size limits and the in-flight memory ceiling. |
 | `notifications.ts` | The message builders — pure, a record in and a message out. Every builder returns `null` when there is nothing to send, so a caller never has to tell "no message" from a failed one. |
+| `commentRecipients.ts` | Who a comment is emailed to. One pure function over the request, the comment and the candidate accounts, deciding through the real `canReadComment` rule; it decides nothing about delivery. |
 | `email.ts` | The only code that talks to the email provider (Resend). `sendEmail` never throws — unconfigured and failed sends return a result — and email is off until `RESEND_API_KEY` + `EMAIL_FROM` are both set. |
 | `logger.ts` | `log()`. Separate from `vite.ts` so the production bundle never imports Vite. |
 | `static.ts` | Serves the built client in production. |
@@ -102,7 +103,7 @@ Defined in `shared/schema.ts` using Drizzle, with Zod insert schemas generated b
 | Table | Purpose | Key relationships |
 |---|---|---|
 | `sessions` | Express session store | Managed by `connect-pg-simple`, not by app code |
-| `users` | Accounts. `role` is `admin` / `regional_administrator` / `resident`, plus `isActive`; resident accounts carry a `propertyId` linking them to their house — the house whose maintenance requests that login may read *and* whose walkthroughs it may write | `id` is the identity provider's subject claim; `email` is unique |
+| `users` | Accounts. `role` is `admin` / `regional_administrator` / `resident`, plus `isActive`; resident accounts carry a `propertyId` linking them to their house — the house whose maintenance requests that login may read *and* whose walkthroughs it may write. `commentEmailsEnabled` (default true) is the comment email off switch: a preference, not a permission, so it lives here and is not audited | `id` is the identity provider's subject claim; `email` is unique |
 | `user_permissions` | One row per user, eighteen boolean flags (including the two finance flags, `canCompleteWalkthroughs` which is the resident-tier walkthrough grant, `canManagePropertySetup` which gates the per-property setup checklist, and `canViewResourceHub` which gates the resident-tier resource hub) plus `allowedRegions` (text array) | `userId` unique, cascades on user delete |
 | `maintenance_requests` | The core workflow. `type` is `request` (a repair) / `project` / `capex`, not null, default `request` — **a resident account reads and files type `request` and nothing else**, see "Request types". Priority includes a `wishlist` level, and wishlist is a priority, never a type; status is pending/in_progress/completed/cancelled. `completedDate` is the **close** date, set for `cancelled` as well as `completed`. `photoUrl` is the single photo filed *with* the request; anything added later lives in `maintenance_request_photos` | `submittedBy` stores an **email**, see gotchas |
 | `maintenance_request_photos` | Photos added to a request after it was filed, each with its uploader and date | `requestId` → `maintenance_requests`, cascades |
@@ -270,7 +271,7 @@ Every request carries a thread — `maintenance_request_comments`, read on the r
 - **A relayed comment says so.** `relaySource` ("Dave (handyman)") is what renders, as "Sarah, relaying Dave (handyman)"; `relayContactId` is the optional link to the contractor's record. Costs nothing now and keeps the history honest two years later.
 - **No audit event.** A comment is neither access, money nor a document, and logging every one would bury the events the log exists for — the same reasoning that keeps photo downloads out. `routeAccess.test.ts` asserts the audit write is not called on a post.
 
-For now the create route also carries `requireStaff`: a household reads its shared half and posts nothing until resident posting (#120) removes that one line and adds its own tests. The author — id, email and name — comes from the session and never from the body.
+For now the create route also carries `requireStaff`: a household reads its shared half and posts nothing until resident posting (#120) removes that one line and adds its own tests. The author — id, email and name — comes from the session and never from the body. Every posted comment is emailed to the people who can see it; that rule is under "Outbound email" below, and a resident-posted comment will flow through it without change.
 
 ### Request types
 
@@ -308,6 +309,17 @@ Every builder returns `null` (or an empty list) when there is nothing to send, s
 - **A status email fires on the same condition as the audit event** — an actual status change — so an edit to a description emails nobody about nothing.
 - **A household email goes to active residents only, one message per person.** A mail-out to people who moved out last spring is the kind of mistake that gets a tool abandoned, and one message per person means nobody's address is disclosed to the rest of the house. The recipients are listed on screen before sending. The audit summary records the house, the subject and the count — **never the body**, because a summary is bounded and a house mail-out can run to pages.
 - **The lease renewal reminder** is a seasonal task keyed on the house and the renewal date, raised `LEASE_RENEWAL_NOTICE_DAYS` (60) ahead — the same horizon the dashboard's lease item uses, so the two cannot tell an RA different things about one date. It clears when `renewalDecision` moves off `undecided`, either way.
+
+**Every new comment emails the people who can see it.** `commentEmail` in `notifications.ts` carries the comment, the author line with any relay ("Sarah Lee, relaying Dave (handyman)"), the request's title and house, an "Internal — staff only" marker when it is internal, and a link to `/maintenance/:id` only when `APP_URL` is set. Who gets it is **one pure function**, `commentRecipients` in `server/commentRecipients.ts` — the request, the comment and the candidate accounts in, `{ userId, email }` out — with four guards that are all required:
+
+1. **Never the author.**
+2. **Internal comments to staff only.** Not a second rule: every candidate is put through the real `canReadComment` via `authContextFor`, so the tier gate, the repairs-only type rule, the house match, region scoping and the 120-day closed window all reach email with nothing implemented twice. A resident is emailed exactly when the read rule says they could open the comment, and never about a project.
+3. **Anyone with `commentEmailsEnabled === false` is dropped**, on either tier. The switch is on the user row; a person flips their own from the account menu (`PATCH /api/auth/me/notifications`) and an admin flips anybody's from the users table in Settings (`PATCH /api/users/:id/notifications`, `requireAdmin` like every account change). Neither is audited — a preference is not access, money or a document. The email-based re-link in `upsertUser` preserves it, so an admin's "off" survives the account's first sign-in.
+4. **The function decides nothing about delivery.** Whether email is configured, and whether a send works, is `sendEmail`'s business.
+
+On top of the read rule, staff are narrowed to **those who have already posted in the thread** plus **regional administrators whose regions cover the request and who hold `canViewMaintenance` or `canManageMaintenance`**; an **admin is emailed only for a thread they have posted in**, or every thread nationally would land in one inbox. A participant who has since lost the region is dropped — "the people who can see it" is the rule, not "the people who once did".
+
+The route (`emailThreadAbout` in `routes.ts`) saves the comment first, then resolves the candidates in three queries — every account with its permissions row (`getAllUsersWithPermissions`, one join), the thread so far, and the properties for the house addresses — never one query per person, and fires one message per recipient through `notify`. A failure working out who to write to is logged and the comment still answers 201; a send that never settles does not hold the response. `APP_URL` is optional in `config.ts`: unset means no link, and only a value that is set but not http(s) fails the boot check, because everybody the email reaches clicks it.
 
 ### Deposits
 
@@ -470,7 +482,7 @@ Routine audit events are retained for **two years**. Account and access events (
 
 ## Integrations
 
-**Outbound email via Resend** lives behind `server/email.ts` — plain-text sends only, configured by `RESEND_API_KEY`/`EMAIL_FROM` (`EMAIL_REPLY_TO` optional). Unset means email is deliberately off and the server runs normally; a *partial* pair fails the boot check. A send failure must never fail the request that triggered it — callers get a result, not an exception. Keep message content to what the audit log could hold: names and amounts yes, credentials and banking identifiers never.
+**Outbound email via Resend** lives behind `server/email.ts` — plain-text sends only, configured by `RESEND_API_KEY`/`EMAIL_FROM` (`EMAIL_REPLY_TO` optional, `APP_URL` optional for the links in comment email). Unset means email is deliberately off and the server runs normally; a *partial* pair fails the boot check. A send failure must never fail the request that triggered it — callers get a result, not an exception. Keep message content to what the audit log could hold: names and amounts yes, credentials and banking identifiers never.
 
 The JotForm webhook that used to turn form submissions into maintenance requests was **removed** (2026-08-26, SPO decision: nothing JotForm-related) — residents submit through the portal's own form instead. If a webhook ever comes back (e.g. QuickBooks/Ramp), remember what the old one did right: it failed closed without its secret, compared the secret in constant time, and rate-limited the unauthenticated endpoint. The `rawBody` capture in `server/index.ts` was removed with it; webhook signature verification will need it re-added.
 

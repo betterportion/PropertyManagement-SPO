@@ -206,6 +206,24 @@ export default function Settings() {
     },
   });
 
+  // The comment email off switch on somebody else's account: a leader who
+  // tells their RA "stop emailing me" gets what they asked for.
+  const updateCommentEmailsMutation = useMutation({
+    mutationFn: async ({ id, enabled }: { id: string; enabled: boolean }) => {
+      await apiRequest("PATCH", `/api/users/${id}/notifications`, { commentEmailsEnabled: enabled });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/users"] });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to update the account's email setting",
+        variant: "destructive",
+      });
+    },
+  });
+
   const updatePropertyMutation = useMutation({
     mutationFn: async ({ id, propertyId }: { id: string; propertyId: string | null }) => {
       await apiRequest("PATCH", `/api/users/${id}/property`, { propertyId });
@@ -521,6 +539,23 @@ export default function Settings() {
                     data-testid={`switch-status-${user.id}`}
                   />
                   <Badge variant={user.isActive ? "success" : "secondary"}>{user.isActive ? "Active" : "Inactive"}</Badge>
+                </div>
+              ),
+              hideOnMobile: true,
+            },
+            {
+              key: "commentEmails",
+              header: "Comment emails",
+              cell: (user) => (
+                <div className="flex items-center gap-2">
+                  <Switch
+                    checked={user.commentEmailsEnabled}
+                    onCheckedChange={(checked) => updateCommentEmailsMutation.mutate({ id: user.id, enabled: checked })}
+                    disabled={updateCommentEmailsMutation.isPending}
+                    aria-label={`Email ${user.email ?? "this account"} about comments`}
+                    data-testid={`switch-comment-emails-${user.id}`}
+                  />
+                  <span className="text-sm text-muted-foreground">{user.commentEmailsEnabled ? "On" : "Off"}</span>
                 </div>
               ),
               hideOnMobile: true,
