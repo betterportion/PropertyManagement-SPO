@@ -6,14 +6,15 @@
  * both screens at once.
  */
 import { describe, it, expect } from "vitest";
-import { maintenanceRequests } from "@shared/schema";
-import { REQUEST_PRIORITY, REQUEST_STATUS } from "./requestLabels";
+import { MAINTENANCE_REQUEST_TYPES, maintenanceRequests } from "@shared/schema";
+import { REQUEST_PRIORITY, REQUEST_STATUS, REQUEST_TYPE } from "./requestLabels";
 
 // Read off the live column definition rather than retyping the enum here, so
 // this test fails the moment the schema and this module drift, instead of
 // silently agreeing with whichever list was copied in last.
 const STATUSES = maintenanceRequests.status.enumValues;
 const PRIORITIES = maintenanceRequests.priority.enumValues;
+const TYPES = maintenanceRequests.type.enumValues;
 
 describe("REQUEST_STATUS", () => {
   it("gives every status in the schema's vocabulary a label and a variant", () => {
@@ -63,5 +64,42 @@ describe("REQUEST_PRIORITY", () => {
     // CONTEXT.md: "Wishlist... A priority, never a type." This label sits
     // beside "Low"/"Medium"/etc. rather than reading as a category of work.
     expect(REQUEST_PRIORITY.wishlist.label).not.toMatch(/type|project/i);
+  });
+});
+
+describe("REQUEST_TYPE", () => {
+  it("gives every type in the schema's vocabulary a label and a variant", () => {
+    for (const type of TYPES) {
+      expect(REQUEST_TYPE[type], `missing label for type "${type}"`).toBeDefined();
+      expect(REQUEST_TYPE[type].label.length).toBeGreaterThan(0);
+      expect(REQUEST_TYPE[type].variant.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("defines nothing beyond the schema's vocabulary", () => {
+    expect(Object.keys(REQUEST_TYPE).sort()).toEqual([...TYPES].sort());
+  });
+
+  it("agrees with the shared constant the server exports", () => {
+    // The column's enum and MAINTENANCE_REQUEST_TYPES are two spellings of
+    // one list; a type added to one and not the other would leave a badge
+    // blank or a filter option dead.
+    expect([...TYPES].sort()).toEqual([...MAINTENANCE_REQUEST_TYPES].sort());
+  });
+
+  it("says what the database's word means in plain language (CONTEXT.md)", () => {
+    // The stored values are request / project / capex; the screen says
+    // Repair / Project / Capital project. "CapEx" is fine as a value and
+    // wrong as a word on screen.
+    expect(REQUEST_TYPE.request.label).toBe("Repair");
+    expect(REQUEST_TYPE.project.label).toBe("Project");
+    expect(REQUEST_TYPE.capex.label).toBe("Capital project");
+  });
+
+  it("never shows a resident-facing label that reads as a kind of work they can file", () => {
+    // Residents only ever see repairs; the other two words must not read as
+    // a priority either, so they cannot be confused with Wishlist.
+    expect(REQUEST_TYPE.project.label).not.toMatch(/wishlist|priority/i);
+    expect(REQUEST_TYPE.capex.label).not.toMatch(/wishlist|priority/i);
   });
 });

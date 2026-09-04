@@ -15,7 +15,8 @@ import { Search, Plus } from "lucide-react";
 import { PhotoUpload } from "@/components/PhotoUpload";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { insertMaintenanceRequestSchema, type MaintenanceRequest, type Property } from "@shared/schema";
+import { MAINTENANCE_REQUEST_TYPES, insertMaintenanceRequestSchema, type MaintenanceRequest, type Property } from "@shared/schema";
+import { REQUEST_TYPE } from "@/lib/requestLabels";
 import { REGIONS } from "@shared/regions";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
@@ -24,7 +25,15 @@ import { z } from "zod";
 import { Section, Container, PageHeader, PageStack } from "@/components/layout/page";
 import { EmptyState, ErrorState, LoadingState } from "@/components/states";
 import { useUrlState } from "@/hooks/use-url-state";
-import { CLOSED_RANGES, closedWithinRange, locationOptions, type ClosedRange } from "@/lib/maintenanceFilters";
+import {
+  CLOSED_RANGES,
+  REQUEST_TYPE_FILTERS,
+  closedWithinRange,
+  locationOptions,
+  matchesType,
+  type ClosedRange,
+  type RequestTypeFilter,
+} from "@/lib/maintenanceFilters";
 import MaintenanceAggregates from "@/components/MaintenanceAggregates";
 import { ClipboardList, SlidersHorizontal } from "lucide-react";
 
@@ -36,6 +45,7 @@ const createRequestSchema = insertMaintenanceRequestSchema.extend({
   priority: z.enum(["low", "medium", "high", "urgent", "wishlist"], {
     errorMap: () => ({ message: "Priority is required" }),
   }),
+  type: z.enum(MAINTENANCE_REQUEST_TYPES),
 });
 
 const CATEGORIES = [
@@ -52,6 +62,17 @@ interface User {
   id: string;
   email: string;
   role: string;
+  permissions?: { canManageMaintenance?: boolean | null } | null;
+}
+
+/**
+ * Who may choose a request's type: staff with the manage permission, the
+ * same people the edit dialog is for. Anyone else files a repair -- the
+ * control is simply not offered, and the form's default stands.
+ */
+function canSetRequestType(user: User | null): boolean {
+  if (!user) return false;
+  return user.role === "admin" || user.permissions?.canManageMaintenance === true;
 }
 
 export default function Maintenance() {
@@ -64,18 +85,23 @@ export default function Maintenance() {
     // what is happening, not four years of finished work. "All closed
     // requests" is one click away.
     closed: "90",
+    // All three kinds of work together by default; narrowing to the capital
+    // projects is what the filter is for.
+    type: "all",
   });
   const searchQuery = filters.q;
   const selectedRegion = filters.region;
   const selectedBuilding = filters.building;
   const selectedRoom = filters.room;
   const closedRange = filters.closed as ClosedRange;
+  const typeFilter = filters.type as RequestTypeFilter;
   const [selectedRequest, setSelectedRequest] = useState<MaintenanceRequest | null>(null);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
 
   const { user } = useAuth();
   const typedUser = user as User | null;
+  const canChooseType = canSetRequestType(typedUser);
   const { toast } = useToast();
 
   const { data: requests = [], isLoading, isError, refetch } = useQuery<MaintenanceRequest[]>({
@@ -123,7 +149,7 @@ export default function Maintenance() {
     const matchesRoom = selectedRoom === "all" || r.location === selectedRoom;
     // Open work always survives the range; the range is about history.
     const matchesRange = closedWithinRange(r, closedRange);
-    return matchesSearch && matchesRoom && matchesRange;
+    return matchesSearch && matchesRoom && matchesRange && matchesType(r, typeFilter);
   });
 
   const pendingRequests = filteredRequests.filter((r) => r.status === "pending");
@@ -147,6 +173,7 @@ export default function Maintenance() {
       description: "",
       category: "",
       priority: "medium",
+      type: "request",
       status: "pending",
       location: "",
       region: "",
@@ -293,6 +320,35 @@ export default function Maintenance() {
                     </FormItem>
                   )}
                 />
+                {canChooseType && (
+                  <FormField
+                    control={createForm.control}
+                    name="type"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Type</FormLabel>
+                        <Select onValueChange={field.onChange} value={field.value}>
+                          <FormControl>
+                            <SelectTrigger data-testid="select-type">
+                              <SelectValue placeholder="Select type" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {MAINTENANCE_REQUEST_TYPES.map((type) => (
+                              <SelectItem key={type} value={type} data-testid={`option-type-${type}`}>
+                                {REQUEST_TYPE[type].label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <p className="text-xs text-muted-foreground" data-testid="text-type-resident-note">
+                          Projects and capital projects are not shown to residents.
+                        </p>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                )}
                 <FormField
                   control={createForm.control}
                   name="buildingAddress"
@@ -427,6 +483,17 @@ export default function Maintenance() {
           <SelectContent>
             {CLOSED_RANGES.map((range) => (
               <SelectItem key={range.value} value={range.value}>{range.label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        <Select value={typeFilter} onValueChange={(value) => setFilters({ type: value })}>
+          <SelectTrigger className="w-44" data-testid="select-filter-type" aria-label="Filter by type of work">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {REQUEST_TYPE_FILTERS.map((option) => (
+              <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
             ))}
           </SelectContent>
         </Select>

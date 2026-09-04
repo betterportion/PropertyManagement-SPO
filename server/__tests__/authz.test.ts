@@ -507,9 +507,12 @@ describe("ownsRecord", () => {
 describe("canReadMaintenanceRequest", () => {
   const resident = context({ role: "resident", email: "alice@example.com" });
 
+  // Every fixture a resident is expected to read says `type: "request"`
+  // outright: the type rule fails closed on a missing type, so a fixture
+  // that stayed silent about it would be refused for the wrong reason.
   it("lets a resident read their own request, whatever region it is in", () => {
     expect(
-      canReadMaintenanceRequest(resident, { region: "South East", submittedBy: "alice@example.com" }),
+      canReadMaintenanceRequest(resident, { region: "South East", submittedBy: "alice@example.com", type: "request" }),
     ).toBe(true);
   });
 
@@ -561,6 +564,7 @@ describe("canReadMaintenanceRequest — housemates", () => {
     region: "South East",
     submittedBy: "bob@example.com",
     buildingAddress: HOUSE_A,
+    type: "request",
   };
 
   it("lets a resident read a housemate's request for their own house", () => {
@@ -577,7 +581,7 @@ describe("canReadMaintenanceRequest — housemates", () => {
     expect(
       canReadMaintenanceRequest(
         resident,
-        { region: "South East", submittedBy: "alice@example.com", buildingAddress: HOUSE_A },
+        { region: "South East", submittedBy: "alice@example.com", buildingAddress: HOUSE_A, type: "request" },
         null,
       ),
     ).toBe(true);
@@ -644,6 +648,7 @@ describe("canReadMaintenanceRequest — the closed-request window on the house p
     buildingAddress: HOUSE_A,
     status: "pending" as string,
     completedDate: null as Date | null,
+    type: "request",
     ...over,
   });
 
@@ -775,6 +780,90 @@ describe("canReadMaintenanceRequest — the closed-request window on the house p
     // A named constant, so the server rule and anything describing it to a
     // resident cannot drift.
     expect(RESIDENT_CLOSED_REQUEST_DAYS).toBe(120);
+  });
+});
+
+describe("canReadMaintenanceRequest — the type rule (residents see repairs only)", () => {
+  /**
+   * ADR-0001: projects and capital projects are a TYPE on maintenance
+   * requests, so bid amounts and contract terms now sit in a table a
+   * household leader can already read. The rule that keeps them out is the
+   * first line of the resident branch -- before the own-submission check and
+   * before the house match, because either of those is exactly what would
+   * otherwise let a project on their own house through.
+   */
+  const HOUSE_A = "123 Main St, Saint Paul, MN 55101";
+  const resident = context({ role: "resident", email: "alice@example.com" });
+
+  const onOwnHouse = (over: Record<string, unknown> = {}) => ({
+    region: "South East",
+    submittedBy: "bob@example.com",
+    buildingAddress: HOUSE_A,
+    status: "pending" as string,
+    completedDate: null as Date | null,
+    type: "request" as string | null | undefined,
+    ...over,
+  });
+
+  it("lets a resident read a repair on their own house (positive control)", () => {
+    expect(canReadMaintenanceRequest(resident, onOwnHouse({ type: "request" }), HOUSE_A)).toBe(true);
+  });
+
+  it("refuses a resident a project on their own house, house match notwithstanding", () => {
+    expect(canReadMaintenanceRequest(resident, onOwnHouse({ type: "project" }), HOUSE_A)).toBe(false);
+  });
+
+  it("refuses a resident a capital project on their own house", () => {
+    expect(canReadMaintenanceRequest(resident, onOwnHouse({ type: "capex" }), HOUSE_A)).toBe(false);
+  });
+
+  it("refuses a project or capital project even when the resident is recorded as its submitter", () => {
+    // The ownership path is the one that "breaks silently on both sides at
+    // once": it runs before the house match and would let this through if
+    // the type rule sat anywhere but first.
+    expect(
+      canReadMaintenanceRequest(resident, onOwnHouse({ type: "project", submittedBy: "alice@example.com" }), HOUSE_A),
+    ).toBe(false);
+    expect(
+      canReadMaintenanceRequest(resident, onOwnHouse({ type: "capex", submittedBy: "alice@example.com" }), HOUSE_A),
+    ).toBe(false);
+    // And the same submitter on a repair still reads: the refusal above is
+    // the type, not the submitter.
+    expect(
+      canReadMaintenanceRequest(resident, onOwnHouse({ type: "request", submittedBy: "alice@example.com" }), HOUSE_A),
+    ).toBe(true);
+  });
+
+  it("fails closed on a missing type rather than treating it as a repair", () => {
+    // Every real call site passes a storage row, which carries the column
+    // (not null, default request). A caller that somehow does not is refused
+    // for a resident, never widened.
+    expect(canReadMaintenanceRequest(resident, onOwnHouse({ type: undefined }), HOUSE_A)).toBe(false);
+    expect(canReadMaintenanceRequest(resident, onOwnHouse({ type: null }), HOUSE_A)).toBe(false);
+  });
+
+  it("is derived from the type column and nothing else: status and priority do not decide it", () => {
+    // A wishlist repair is still a repair; a completed project is still a
+    // project.
+    expect(
+      canReadMaintenanceRequest(resident, onOwnHouse({ type: "request", priority: "wishlist" }), HOUSE_A),
+    ).toBe(true);
+    expect(
+      canReadMaintenanceRequest(resident, onOwnHouse({ type: "project", priority: "low", status: "pending" }), HOUSE_A),
+    ).toBe(false);
+  });
+
+  it("leaves staff on the region rule: all three types read", () => {
+    const staff = context({ allowedRegions: ["South East"] });
+    for (const type of ["request", "project", "capex"]) {
+      expect(canReadMaintenanceRequest(staff, onOwnHouse({ type }), null)).toBe(true);
+    }
+  });
+
+  it("leaves admins alone: all three types read", () => {
+    for (const type of ["request", "project", "capex"]) {
+      expect(canReadMaintenanceRequest(context({ role: "admin" }), onOwnHouse({ type }), null)).toBe(true);
+    }
   });
 });
 
@@ -1194,6 +1283,7 @@ describe("canReadComment", () => {
     submittedBy: "bob@example.com",
     buildingAddress: HOUSE_A,
     status: "pending",
+    type: "request",
   };
 
   const staff = context({ allowedRegions: ["West Central"] });
@@ -1270,6 +1360,7 @@ describe("canPostComment", () => {
     submittedBy: "bob@example.com",
     buildingAddress: HOUSE_A,
     status: "pending",
+    type: "request",
   };
 
   const staff = context({ allowedRegions: ["West Central"] });

@@ -218,6 +218,9 @@ const alicesRequest = {
   region: "West Central",
   buildingAddress: PROPERTY_A.address,
   status: "open",
+  // A repair. The type rule fails closed on a missing type, so every fixture
+  // a resident is expected to read says so outright.
+  type: "request",
 };
 
 // Reset mock implementations before each test so leakage between tests is
@@ -528,6 +531,7 @@ describe("GET /api/maintenance-requests — the closed-request window", () => {
     buildingAddress: PROPERTY_A.address,
     status: "completed",
     completedDate: closedDaysAgo === null ? null : daysAgo(closedDaysAgo),
+    type: "request",
   });
 
   const bobsOpenRequest = {
@@ -538,6 +542,7 @@ describe("GET /api/maintenance-requests — the closed-request window", () => {
     buildingAddress: PROPERTY_A.address,
     status: "pending",
     completedDate: null,
+    type: "request",
   };
 
   it("withholds an old closed request from a housemate, in the response itself", async () => {

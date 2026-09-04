@@ -682,11 +682,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
               "We couldn't find your house on file. Ask your house director to add you to a house, then try again.",
           });
         }
+        // The type is forced too: a resident files a repair and nothing else,
+        // whatever the browser sends. A project is staff's to open, and a
+        // resident could not read one back anyway (the type rule in authz.ts).
         const validatedData = insertMaintenanceRequestSchema
-          .omit({ region: true, buildingAddress: true, submittedBy: true })
+          .omit({ region: true, buildingAddress: true, submittedBy: true, type: true })
           .parse(req.body);
         const request = await storage.createMaintenanceRequest({
           ...validatedData,
+          type: "request",
           region: residency.region,
           buildingAddress: residency.buildingAddress,
           submittedBy,

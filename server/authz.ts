@@ -346,24 +346,48 @@ export interface RequestAccessFields {
   buildingAddress?: string | null;
   status?: string | null;
   completedDate?: Date | string | null;
+  type?: string | null;
+}
+
+/**
+ * Whether a request is a repair -- the only type a resident may read.
+ *
+ * Derived from the type column and nothing else: never from status, never
+ * from priority, and never from what the request is about. Anything but the
+ * literal `request` is refused, so a missing type fails closed too. Every
+ * real call site passes a storage row, which always carries the column (not
+ * null, default `request`), so the missing case is a caller that has drifted
+ * rather than a row that exists.
+ */
+function isRepair(type: string | null | undefined): boolean {
+  return type === "request";
 }
 
 /**
  * The read rule for a maintenance request, which is the one place where the
  * resident and staff rules diverge:
  *
- *   - a resident may read requests they submitted, regardless of region and
+ *   - a resident reads type `request` (a repair) and nothing else. This comes
+ *     FIRST, before the own-submission check and before the house match,
+ *     because either of those is exactly what would otherwise let a project
+ *     on their own house through. Projects and capital projects carry bid
+ *     amounts and contract terms (ADR-0001), and a household leader must
+ *     never see them -- not even one they are recorded as having submitted;
+ *   - a resident may read repairs they submitted, regardless of region and
  *     regardless of age — that is their own report, and somebody must be able
  *     to read back what they themselves filed;
- *   - and requests filed for the house their account is linked to, which is
+ *   - and repairs filed for the house their account is linked to, which is
  *     how the two resident accounts on a property share one repair history —
  *     but on that path, only while the request is open or was closed within
  *     RESIDENT_CLOSED_REQUEST_DAYS;
- *   - everyone else is bound by their allowed regions, with no time limit at
- *     all. Staff keep the full history; this narrowing is resident-only.
+ *   - everyone else is bound by their allowed regions, with no time limit and
+ *     no type limit at all. Staff keep the full history; this narrowing is
+ *     resident-only.
  *
  * The time dimension is on the HOUSE path alone. Putting it on the ownership
  * path too would hide somebody's own report from them, which nobody asked for.
+ * The type dimension is on BOTH resident paths, which is why it sits above
+ * them rather than inside either.
  *
  * `residentHouse` is the caller's house from residentHouseAddress, resolved
  * once by the route rather than per record. It defaults to null — no house
@@ -378,6 +402,8 @@ export function canReadMaintenanceRequest(
 ): boolean {
   if (ctx.isAdmin) return true;
   if (ctx.isResident) {
+    // Repairs only. First, so neither path below can let a project through.
+    if (!isRepair(request.type)) return false;
     // Their own submission, whatever its age.
     if (ownsRecord(ctx, request.submittedBy)) return true;
     // A housemate's, only while it is open or recently closed.
