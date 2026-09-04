@@ -6,7 +6,7 @@
  * tested without rendering anything.
  */
 import { MAINTENANCE_REQUEST_TYPES, isClosedMaintenanceStatus, type MaintenanceRequest } from "@shared/schema";
-import { REQUEST_TYPE } from "./requestLabels";
+import { REQUEST_PRIORITY, REQUEST_TYPE } from "./requestLabels";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -108,4 +108,45 @@ export function matchesType(request: Pick<MaintenanceRequest, "type">, filter: R
   // triage screen cannot afford.
   if (!(MAINTENANCE_REQUEST_TYPES as readonly string[]).includes(filter)) return true;
   return request.type === filter;
+}
+
+/** The four groups of open work on a house. Three are types; wishlist is a priority. */
+export type OpenWorkKey = MaintenanceRequest["type"] | "wishlist";
+
+export interface OpenWorkGroup<T> {
+  key: OpenWorkKey;
+  label: string;
+  items: T[];
+}
+
+/**
+ * The groups in the order the property page shows them: the three types as
+ * the schema lists them, then the wishlist last -- "eventually" reads below
+ * what is due now, not ahead of it. Labels come from the one label map so a
+ * group and the badge on its items cannot call a `capex` two different things.
+ */
+export const OPEN_WORK_GROUPS: readonly { key: OpenWorkKey; label: string }[] = [
+  ...MAINTENANCE_REQUEST_TYPES.map((type) => ({ key: type, label: REQUEST_TYPE[type].plural })),
+  { key: "wishlist", label: REQUEST_PRIORITY.wishlist.label },
+];
+
+/**
+ * Open work on one house, grouped once.
+ *
+ * The wishlist is pulled out FIRST -- anything at wishlist priority, whatever
+ * its type -- and the rest fall into their type group, so every open item
+ * lands in exactly one group and the four counts add up to the open total. A
+ * wishlist capital project is therefore under Wishlist and nowhere else.
+ * Closed items are not here at all: this is what is still to do, not history.
+ */
+export function groupOpenWork<T extends Pick<MaintenanceRequest, "status" | "type" | "priority">>(
+  requests: readonly T[],
+): OpenWorkGroup<T>[] {
+  const open = requests.filter((request) => !isClosed(request));
+  const groupOf = (request: T): OpenWorkKey =>
+    request.priority === "wishlist" ? "wishlist" : request.type;
+  return OPEN_WORK_GROUPS.map((group) => ({
+    ...group,
+    items: open.filter((request) => groupOf(request) === group.key),
+  }));
 }
