@@ -197,6 +197,13 @@
       "when": 1788492116968,
       "tag": "0027_property_facts",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1788495184792,
+      "tag": "0028_comment_emails_enabled",
+      "breakpoints": true
     }
   ]
 }

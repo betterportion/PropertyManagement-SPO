@@ -47,6 +47,7 @@ const PRE_CREATED = {
   role: "resident",
   isActive: true,
   propertyId: "prop-west",
+  commentEmailsEnabled: false,
   firstName: "Pre",
   lastName: "Created",
 };
@@ -67,7 +68,7 @@ beforeEach(() => {
 });
 
 describe("upsertUser email re-linking", () => {
-  it("migrates role, active status AND the property link to the new identity", async () => {
+  it("migrates role, active status, the property link AND the comment email switch to the new identity", async () => {
     // 1st select: the account found by email; 2nd: its permissions row.
     selectQueue.push([PRE_CREATED], [PERMISSIONS_ROW]);
 
@@ -85,6 +86,9 @@ describe("upsertUser email re-linking", () => {
       role: "resident",
       isActive: true,
       propertyId: "prop-west",
+      // An admin who switched email off for a pre-created account did it
+      // for a reason; the first sign-in must not switch it back on.
+      commentEmailsEnabled: false,
     });
     expect(user.propertyId).toBe("prop-west");
   });

@@ -12,7 +12,7 @@
  * have put on the request after a successful OIDC login. Everything downstream
  * of that is production code.
  */
-import { describe, it, expect, vi, beforeEach, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, beforeAll, afterAll } from "vitest";
 import express from "express";
 import { Readable } from "node:stream";
 import type { Server } from "node:http";
@@ -100,6 +100,19 @@ vi.mock("multer", async (importOriginal) => {
   Object.assign(instrumented, realMulter);
 
   return { ...actual, default: instrumented };
+});
+
+/**
+ * The mail provider is replaced at the one seam every send goes through.
+ * A route that emails somebody is asserted on WHO it addressed -- the list
+ * of To lines -- never on whether a message left, because that is the
+ * provider's business and email is deliberately optional.
+ */
+const { sendEmailMock } = vi.hoisted(() => ({ sendEmailMock: vi.fn() }));
+
+vi.mock("../email", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../email")>();
+  return { ...actual, sendEmail: sendEmailMock };
 });
 
 // The real isAuthenticated and getUserId are kept. Only setupAuth is replaced,
@@ -231,6 +244,9 @@ beforeEach(() => {
   fileStoreMock.uploadExists.mockResolvedValue(true);
   fileStoreMock.createUploadSignedUrl.mockResolvedValue(null);
   fileStoreMock.openUploadStream.mockResolvedValue(Readable.from([Buffer.from("file-bytes")]));
+  storageMock.getAllUsersWithPermissions.mockResolvedValue([]);
+  sendEmailMock.mockReset();
+  sendEmailMock.mockResolvedValue({ sent: false, reason: "not_configured" });
 });
 
 // ---------------------------------------------------------------------------
@@ -922,6 +938,197 @@ describe("the thread on a request", () => {
     storageMock.getMaintenanceRequest.mockResolvedValue(OWN_HOUSE_OPEN);
     expect((await del("/api/maintenance-request-comments/c-internal")).status).toBe(403);
     expect(storageMock.deleteMaintenanceRequestComment).not.toHaveBeenCalled();
+  });
+
+  // -- emailing the thread ----------------------------------------------------
+
+  describe("emailing the people who can see a new comment", () => {
+    // The house's two accounts (Bob also filed the request), the author, a
+    // colleague covering the region, and an admin who has never posted.
+    const TOM = { id: "u-tom", email: "tom@example.com", role: "regional_administrator", isActive: true };
+    const on = { commentEmailsEnabled: true };
+    const candidates = [
+      { user: { ...ALICE, propertyId: "prop-a", ...on }, permissions: null },
+      { user: { ...BOB, propertyId: "prop-a", ...on }, permissions: null },
+      { user: { ...STAFF, ...on }, permissions: westOnly },
+      { user: { ...TOM, ...on }, permissions: { canViewMaintenance: true, allowedRegions: ["West Central"] } },
+      { user: { ...ADMIN, ...on }, permissions: null },
+    ];
+
+    const addressed = () => sendEmailMock.mock.calls.map(([message]) => message.to).sort();
+
+    beforeEach(() => {
+      actAs(STAFF, westOnly);
+      storageMock.getMaintenanceRequest.mockResolvedValue(OWN_HOUSE_OPEN);
+      storageMock.getAllUsersWithPermissions.mockResolvedValue(candidates);
+      storageMock.getAllProperties.mockResolvedValue([PROPERTY_A]);
+      // The author has posted before; nobody else has.
+      storageMock.getMaintenanceRequestComments.mockResolvedValue([INTERNAL_COMMENT]);
+      storageMock.createMaintenanceRequestComment.mockImplementation(async (c: unknown) => ({ id: "c-new", ...(c as object) }));
+    });
+
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
+    it("emails a shared comment to both house accounts and the covering colleague, one message each, never the author", async () => {
+      const { status } = await post("/api/maintenance-requests/req-own-open/comments", { body: "Thursday at 9.", isInternal: false });
+      expect(status).toBe(201);
+      expect(addressed()).toEqual(["alice@example.com", "bob@example.com", "tom@example.com"]);
+      for (const [message] of sendEmailMock.mock.calls) {
+        expect(message.text).toContain("Thursday at 9.");
+        expect(message.to).not.toContain(",");
+      }
+    });
+
+    it("emails an internal comment to staff and to no resident address", async () => {
+      const { status } = await post("/api/maintenance-requests/req-own-open/comments", { body: "He quoted $4,200." });
+      expect(status).toBe(201);
+      expect(addressed()).toEqual(["tom@example.com"]);
+    });
+
+    // The unlinked submitter: an account with no propertyId who filed the
+    // request itself. Reachable through ownsRecord, not the house match, so
+    // she must hear about a shared comment and never an internal one --
+    // exactly the EVE case commentRecipients.test.ts proves at the pure-
+    // function level, here through the real route.
+    it("emails a resident who submitted the request but has no house link, on a shared comment only", async () => {
+      const EVE = { id: "u-eve", email: "eve@example.com", role: "resident", isActive: true, propertyId: null, ...on };
+      storageMock.getMaintenanceRequest.mockResolvedValue({ ...OWN_HOUSE_OPEN, submittedBy: EVE.email });
+      storageMock.getAllUsersWithPermissions.mockResolvedValue([...candidates, { user: EVE, permissions: null }]);
+
+      const shared = await post("/api/maintenance-requests/req-own-open/comments", { body: "Shared note.", isInternal: false });
+      expect(shared.status).toBe(201);
+      expect(addressed()).toContain("eve@example.com");
+
+      sendEmailMock.mockClear();
+      const internal = await post("/api/maintenance-requests/req-own-open/comments", { body: "Internal note." });
+      expect(internal.status).toBe(201);
+      expect(addressed()).not.toContain("eve@example.com");
+    });
+
+    it("links to the request when APP_URL is set, and goes without a link when it is not", async () => {
+      await post("/api/maintenance-requests/req-own-open/comments", { body: "No link." });
+      expect(sendEmailMock.mock.calls[0][0].text).not.toContain("/maintenance/");
+
+      sendEmailMock.mockClear();
+      vi.stubEnv("APP_URL", "https://housing.spo.org/");
+      await post("/api/maintenance-requests/req-own-open/comments", { body: "With link." });
+      expect(sendEmailMock.mock.calls[0][0].text).toContain("https://housing.spo.org/maintenance/req-own-open");
+    });
+
+    it("does not hold the response for the sends", async () => {
+      // A send that never settles: the comment is still posted and answered.
+      sendEmailMock.mockReturnValue(new Promise(() => {}));
+      const { status, body } = await post("/api/maintenance-requests/req-own-open/comments", { body: "Noted." });
+      expect(status).toBe(201);
+      expect(body.id).toBe("c-new");
+      expect(sendEmailMock).toHaveBeenCalled();
+    });
+
+    it("still posts the comment when every send fails", async () => {
+      sendEmailMock.mockResolvedValue({ sent: false, reason: "send_failed" });
+      const { status, body } = await post("/api/maintenance-requests/req-own-open/comments", { body: "Noted." });
+      expect(status).toBe(201);
+      expect(body.id).toBe("c-new");
+      expect(storageMock.createMaintenanceRequestComment).toHaveBeenCalledTimes(1);
+    });
+
+    it("still posts the comment when working out who to email fails", async () => {
+      storageMock.getAllUsersWithPermissions.mockRejectedValue(new Error("database gone"));
+      const { status, body } = await post("/api/maintenance-requests/req-own-open/comments", { body: "Noted." });
+      expect(status).toBe(201);
+      expect(body.id).toBe("c-new");
+      expect(storageMock.createMaintenanceRequestComment).toHaveBeenCalledTimes(1);
+      expect(sendEmailMock).not.toHaveBeenCalled();
+    });
+
+    it("emails nobody when the comment was refused", async () => {
+      actAs(STAFF, westOnly);
+      storageMock.getMaintenanceRequest.mockResolvedValue(EAST_OPEN);
+      expect((await post("/api/maintenance-requests/req-east-open/comments", { body: "Noted." })).status).toBe(403);
+      expect(sendEmailMock).not.toHaveBeenCalled();
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The comment email off switch
+// ---------------------------------------------------------------------------
+
+describe("switching comment email off", () => {
+  const off = { commentEmailsEnabled: false };
+
+  beforeEach(() => {
+    storageMock.updateUserCommentEmails.mockImplementation(async (id: string, enabled: boolean) => ({
+      id,
+      commentEmailsEnabled: enabled,
+    }));
+  });
+
+  it("refuses an anonymous caller", async () => {
+    expect((await request("PATCH", "/api/auth/me/notifications", { body: off })).status).toBe(401);
+    expect((await request("PATCH", `/api/users/${BOB.id}/notifications`, { body: off })).status).toBe(401);
+    expect(storageMock.updateUserCommentEmails).not.toHaveBeenCalled();
+  });
+
+  it("lets anybody flip their own switch, on whichever tier", async () => {
+    actAs(ALICE);
+    const { status, body } = await request("PATCH", "/api/auth/me/notifications", { body: off });
+    expect(status).toBe(200);
+    expect(body.commentEmailsEnabled).toBe(false);
+    expect(storageMock.updateUserCommentEmails).toHaveBeenCalledWith(ALICE.id, false);
+
+    actAs(STAFF);
+    await request("PATCH", "/api/auth/me/notifications", { body: { commentEmailsEnabled: true } });
+    expect(storageMock.updateUserCommentEmails).toHaveBeenLastCalledWith(STAFF.id, true);
+  });
+
+  // The self-service route reads the actor off the session, never the body --
+  // the same shape as every other "for oneself" write in this file. Another
+  // user's id riding along in the body must change nothing.
+  it("ignores another user's id carried in the body of the self-service route", async () => {
+    actAs(ALICE);
+    const { status } = await request("PATCH", "/api/auth/me/notifications", { body: { ...off, userId: BOB.id, id: BOB.id } });
+    expect(status).toBe(200);
+    expect(storageMock.updateUserCommentEmails).toHaveBeenCalledWith(ALICE.id, false);
+    expect(storageMock.updateUserCommentEmails).not.toHaveBeenCalledWith(BOB.id, expect.anything());
+  });
+
+  it("refuses a deactivated account, and writes nothing", async () => {
+    actAs(DISABLED);
+    expect((await request("PATCH", "/api/auth/me/notifications", { body: off })).status).toBe(403);
+    expect(storageMock.updateUserCommentEmails).not.toHaveBeenCalled();
+  });
+
+  it("refuses a resident flipping somebody else's switch, and writes nothing", async () => {
+    actAs(ALICE);
+    expect((await request("PATCH", `/api/users/${BOB.id}/notifications`, { body: off })).status).toBe(403);
+    expect(storageMock.updateUserCommentEmails).not.toHaveBeenCalled();
+  });
+
+  it("refuses a regional administrator flipping somebody else's switch, and writes nothing", async () => {
+    actAs(STAFF, { canManageUsers: true, allowedRegions: ["West Central"] });
+    expect((await request("PATCH", `/api/users/${BOB.id}/notifications`, { body: off })).status).toBe(403);
+    expect(storageMock.updateUserCommentEmails).not.toHaveBeenCalled();
+  });
+
+  // The positive control: the account change is an admin's, like every other.
+  it("lets an admin flip anybody's switch, without an audit event", async () => {
+    actAs(ADMIN);
+    const { status } = await request("PATCH", `/api/users/${BOB.id}/notifications`, { body: off });
+    expect(status).toBe(200);
+    expect(storageMock.updateUserCommentEmails).toHaveBeenCalledWith(BOB.id, false);
+    // A preference, not access, money or a document.
+    expect(storageMock.createAuditEvent).not.toHaveBeenCalled();
+  });
+
+  it("refuses a value that is not a boolean, and writes nothing", async () => {
+    actAs(ALICE);
+    expect((await request("PATCH", "/api/auth/me/notifications", { body: { commentEmailsEnabled: "no" } })).status).toBe(400);
+    actAs(ADMIN);
+    expect((await request("PATCH", `/api/users/${BOB.id}/notifications`, { body: {} })).status).toBe(400);
+    expect(storageMock.updateUserCommentEmails).not.toHaveBeenCalled();
   });
 });
 

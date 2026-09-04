@@ -14,7 +14,7 @@
  * nothing to send, so a caller never has to distinguish "no message" from "a
  * message that failed".
  */
-import type { MaintenanceRequest } from "@shared/schema";
+import type { MaintenanceRequest, MaintenanceRequestComment } from "@shared/schema";
 import type { OutboundEmail } from "./email";
 
 /**
@@ -131,4 +131,60 @@ export function householdEmail(
     });
   }
   return messages;
+}
+
+/** What the comment email needs to know, and nothing more. */
+export interface CommentEmailInput {
+  /** One person. A thread is never emailed with everybody on one To line. */
+  to: string;
+  request: Pick<MaintenanceRequest, "id" | "title" | "buildingAddress">;
+  comment: Pick<
+    MaintenanceRequestComment,
+    "body" | "isInternal" | "authorName" | "authorEmail" | "relaySource"
+  >;
+  /** The portal's public address, or null for no link. From readAppUrlFromEnv. */
+  appUrl: string | null;
+}
+
+/**
+ * How a comment's author reads: "Sarah Lee", or "Sarah Lee, relaying Dave
+ * (handyman)" for one posted on a contractor's behalf. Never the bare
+ * contractor's name -- two years from now the thread must say who relayed it.
+ */
+function commentAuthorLine(comment: CommentEmailInput["comment"]): string {
+  const author = comment.authorName?.trim() || comment.authorEmail?.trim() || "Somebody at SPO";
+  const source = comment.relaySource?.trim();
+  return source ? `${author}, relaying ${source}` : author;
+}
+
+/**
+ * The note somebody gets when a comment lands on a thread they can see.
+ *
+ * Who "somebody" is was decided before this is called (server/commentRecipients.ts);
+ * this only says what the message is. It carries the comment, the author
+ * line, the request's title and house, an "internal" marker so staff know
+ * the household did not get it, and a link to the request page when the
+ * portal's public address is configured. Nothing else: the body is user
+ * text already bounded at posting, and everything here is what the audit
+ * log could hold.
+ */
+export function commentEmail({ to, request, comment, appUrl }: CommentEmailInput): OutboundEmail | null {
+  const address = usableAddress(to);
+  if (!address) return null;
+  const body = comment.body.trim();
+  if (!body) return null;
+
+  const where = `"${request.title}" at ${request.buildingAddress}`;
+  return {
+    to: address,
+    subject: `${comment.isInternal ? "Internal comment" : "New comment"} on ${request.title}`,
+    text:
+      `${commentAuthorLine(comment)} wrote on ${where}:\n\n` +
+      `${body}\n` +
+      (comment.isInternal
+        ? `\nInternal — staff only. The household does not see this comment.\n`
+        : "") +
+      (appUrl ? `\nOpen the request: ${appUrl}/maintenance/${request.id}` : "") +
+      SIGN_OFF,
+  };
 }

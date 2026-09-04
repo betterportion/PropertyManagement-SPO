@@ -81,11 +81,22 @@ export async function loadAuthContext(req: Request): Promise<AuthContext | null>
   }
 
   const permissions = await storage.getUserPermissions(userId);
+  return authContextFor(user, permissions);
+}
 
+/**
+ * The context for a user record and its permissions row, with no session
+ * behind it. This is what loadAuthContext builds for the caller; it is
+ * exported so a rule can be asked about somebody who is NOT the caller --
+ * "would this account be allowed to read this comment?" is how the comment
+ * email decides who to write to -- through the same functions the routes
+ * use, rather than a second reading of the permissions row.
+ */
+export function authContextFor(user: User, permissions: UserPermissions | null | undefined): AuthContext {
   return {
-    userId,
+    userId: user.id,
     user,
-    permissions,
+    permissions: permissions ?? undefined,
     isAdmin: user.role === "admin",
     isResident: user.role === "resident",
     allowedRegions: permissions?.allowedRegions ?? [],

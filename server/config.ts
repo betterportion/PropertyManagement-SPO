@@ -200,6 +200,48 @@ function checkEmail(problems: string[]): void {
   if (problem) problems.push(problem);
 }
 
+/**
+ * The portal's public address, for the links in outbound email. Read at call
+ * time like the email settings, so the boot check and the message builders
+ * agree on the same value.
+ *
+ * Optional, and deliberately never a boot failure when unset: a link in an
+ * email is a courtesy, and the comment goes out without one until an
+ * operator supplies the address. A value that is set but is not a web
+ * address IS a problem worth stopping for -- everybody the email reaches
+ * clicks that link, residents included, so it follows the same http(s)-only
+ * rule as every link the portal stores. The trailing slash is dropped so a
+ * path can be appended to it.
+ */
+export function readAppUrlFromEnv(): { url: string | null; problem?: string } {
+  const raw = process.env.APP_URL?.trim();
+  if (!raw) return { url: null };
+
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return {
+      url: null,
+      problem:
+        `APP_URL is not a valid URL: "${raw}". It is the address people open the portal\n` +
+        "    at, for example https://housing.spo.org, or unset it to send email without links.",
+    };
+  }
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+    return {
+      url: null,
+      problem: `APP_URL must start with https:// or http:// but starts with ${parsed.protocol}//`,
+    };
+  }
+  return { url: raw.replace(/\/+$/, "") };
+}
+
+function checkAppUrl(problems: string[]): void {
+  const { problem } = readAppUrlFromEnv();
+  if (problem) problems.push(problem);
+}
+
 function checkStorage(problems: string[]): void {
   let driver: string;
   try {
@@ -250,6 +292,7 @@ export function validateConfiguration(): void {
   checkAuth(problems);
   checkStorage(problems);
   checkEmail(problems);
+  checkAppUrl(problems);
 
   if (problems.length === 0) return;
 

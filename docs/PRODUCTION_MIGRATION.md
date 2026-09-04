@@ -92,7 +92,7 @@ npm run db:baseline -- <tag>     # then npm run db:migrate
 | The app as it runs today, before the audit log | `npm run db:baseline -- 0002_drop_monday_item_id` |
 | Only the original schema, no `uploads` table | `npm run db:baseline` |
 
-The middle row was the old Replit database: it had the `uploads` table (`0001`) and no longer had `monday_item_id` (`0002`), so it baselined through `0002_drop_monday_item_id` and then migrated. Yours will name a different tag — there are twenty-eight migrations now, through `0027_property_facts`.
+The middle row was the old Replit database: it had the `uploads` table (`0001`) and no longer had `monday_item_id` (`0002`), so it baselined through `0002_drop_monday_item_id` and then migrated. Yours will name a different tag — there are twenty-nine migrations now, through `0028_comment_emails_enabled`.
 
 You do not have to get this right by inspection. Before recording anything, the command compares the database against the migrations in both directions — a missing table or column, a column a later migration should already have dropped, or a table that only a later migration creates — and refuses if anything disagrees. It then works out which tag the database *does* match and tells you:
 
@@ -274,6 +274,8 @@ simply sends nothing. When the Resend domain is ready (issue #49), add `RESEND_A
 and `EMAIL_FROM` together — and optionally `EMAIL_REPLY_TO`. Setting only one of the pair
 fails the boot check on purpose, so a half-configured mailer can never silently swallow
 messages.
+
+`APP_URL` is optional too: set it to the address people open the portal at (the Render hostname, once you have it) and comment emails carry an "open this request" link; leave it unset and they go out without one. It must be an `https://` address when set.
 
 `.env.example` documents every one of these, and the optional tuning variables (`DATABASE_SSL`, `DATABASE_POOL_MAX`, `MAX_UPLOAD_BYTES_IN_FLIGHT`).
 

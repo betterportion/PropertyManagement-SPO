@@ -29,7 +29,7 @@ vi.mock("resend", () => ({
 }));
 
 import { sendEmail, isEmailConfigured } from "../email";
-import { readEmailConfigFromEnv } from "../config";
+import { readAppUrlFromEnv, readEmailConfigFromEnv } from "../config";
 
 const VALID_ENV = {
   RESEND_API_KEY: "re_test_key",
@@ -96,6 +96,34 @@ describe("readEmailConfigFromEnv", () => {
   });
 });
 
+describe("readAppUrlFromEnv", () => {
+  // The public address is a courtesy for the links in comment email, never a
+  // boot requirement: unset means the email goes out without a link.
+  it("is simply absent when APP_URL is not set", () => {
+    vi.stubEnv("APP_URL", undefined as unknown as string);
+    expect(readAppUrlFromEnv()).toEqual({ url: null });
+  });
+
+  it("drops a trailing slash so a path can be appended to it", () => {
+    vi.stubEnv("APP_URL", "https://housing.spo.org/");
+    expect(readAppUrlFromEnv()).toEqual({ url: "https://housing.spo.org" });
+  });
+
+  it("keeps an http address, for a development host", () => {
+    vi.stubEnv("APP_URL", "http://localhost:5000");
+    expect(readAppUrlFromEnv()).toEqual({ url: "http://localhost:5000" });
+  });
+
+  it("treats a value that is not a web address as a configuration problem", () => {
+    // A link in an email is clicked by everybody it reaches, residents
+    // included, so the scheme rule is the one the stored links follow.
+    vi.stubEnv("APP_URL", "javascript:alert(1)");
+    expect(readAppUrlFromEnv()).toMatchObject({ url: null, problem: expect.stringMatching(/APP_URL/) });
+    vi.stubEnv("APP_URL", "housing.spo.org");
+    expect(readAppUrlFromEnv()).toMatchObject({ url: null, problem: expect.stringMatching(/APP_URL/) });
+  });
+});
+
 describe("validateConfiguration wiring", () => {
   // The boot check reads other module-level config, so it is re-imported with
   // a fully valid environment to prove the email problem alone can fail it.
@@ -132,6 +160,16 @@ describe("validateConfiguration wiring", () => {
     stubEmailEnv(VALID_ENV);
     const validate = await freshValidate();
     expect(() => validate()).not.toThrow();
+  });
+
+  it("boots cleanly with no APP_URL, and fails on one that is not a web address", async () => {
+    stubBaseEnv();
+    vi.stubEnv("APP_URL", undefined as unknown as string);
+    const validateUnset = await freshValidate();
+    expect(() => validateUnset()).not.toThrow();
+    vi.stubEnv("APP_URL", "ftp://housing.spo.org");
+    const validate = await freshValidate();
+    expect(() => validate()).toThrow(/APP_URL/);
   });
 });
 
