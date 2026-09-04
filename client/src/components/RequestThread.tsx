@@ -1,7 +1,17 @@
 import { useState } from "react";
 import { useMutation, useQuery, type UseQueryResult } from "@tanstack/react-query";
-import { Lock, MessageSquare, Trash2, Users } from "lucide-react";
+import { Lock, MessageSquare, Paperclip, Trash2, Users } from "lucide-react";
 
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,6 +21,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { EmptyState, ErrorState, LoadingState } from "@/components/states";
+import { CommentAttachmentField, type PendingAttachment } from "@/components/CommentAttachmentField";
 import { useToast } from "@/hooks/use-toast";
 import { formatDateTime } from "@/lib/format";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -68,6 +79,12 @@ export default function RequestThread({ requestId, commentsQuery, isStaff, isAdm
   const [isRelayed, setIsRelayed] = useState(false);
   const [relaySource, setRelaySource] = useState("");
   const [relayContactId, setRelayContactId] = useState(NO_CONTACT);
+  // Already uploaded, not yet posted: the URL the attachment route returned
+  // and the name the file had. Only the schema-shaped URL ever reaches the
+  // body, because this is the only place one comes from.
+  const [attachment, setAttachment] = useState<PendingAttachment | null>(null);
+  // The comment somebody has asked to delete, awaiting their confirmation.
+  const [pendingDelete, setPendingDelete] = useState<MaintenanceRequestComment | null>(null);
 
   // Only fetched once somebody says a comment is relayed; a household never
   // reaches this list and staff rarely need it.
@@ -85,11 +102,14 @@ export default function RequestThread({ requestId, commentsQuery, isStaff, isAdm
         isInternal: isStaff ? isInternal : false,
         relaySource: isRelayed ? relaySource : null,
         relayContactId: isRelayed && relayContactId !== NO_CONTACT ? relayContactId : null,
+        attachmentUrl: attachment?.url ?? null,
+        attachmentName: attachment?.name ?? null,
       }),
     onSuccess: () => {
       // The thread's own key and nothing else: the request did not change.
       queryClient.invalidateQueries({ queryKey: commentsKey });
       setBody("");
+      setAttachment(null);
       setIsRelayed(false);
       setRelaySource("");
       setRelayContactId(NO_CONTACT);
@@ -160,7 +180,7 @@ export default function RequestThread({ requestId, commentsQuery, isStaff, isAdm
                         variant="ghost"
                         aria-label="Delete comment"
                         disabled={deleteComment.isPending}
-                        onClick={() => deleteComment.mutate(comment.id)}
+                        onClick={() => setPendingDelete(comment)}
                         data-testid={`button-delete-comment-${comment.id}`}
                       >
                         <Trash2 className="h-4 w-4" />
@@ -171,6 +191,21 @@ export default function RequestThread({ requestId, commentsQuery, isStaff, isAdm
                 <p className="mt-2 whitespace-pre-line" data-testid={`comment-body-${comment.id}`}>
                   {comment.body}
                 </p>
+                {/* The file goes through the authenticated upload route like
+                    every other, so the link is the plain URL; the server
+                    decides who gets the bytes. */}
+                {comment.attachmentUrl && (
+                  <a
+                    href={comment.attachmentUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="mt-2 inline-flex max-w-full items-center gap-1 underline underline-offset-2"
+                    data-testid={`comment-attachment-${comment.id}`}
+                  >
+                    <Paperclip className="h-3.5 w-3.5 shrink-0" />
+                    <span className="truncate">{comment.attachmentName || "Attached file"}</span>
+                  </a>
+                )}
               </li>
             ))}
           </ol>
@@ -271,7 +306,14 @@ export default function RequestThread({ requestId, commentsQuery, isStaff, isAdm
               </div>
             )}
 
-            <div className="flex justify-end">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <CommentAttachmentField
+                requestId={requestId}
+                value={attachment}
+                onChange={setAttachment}
+                onError={(message) => toast({ title: "The file was not attached", description: message, variant: "destructive" })}
+                disabled={postComment.isPending}
+              />
               <Button type="submit" variant="primary" disabled={!canPost} data-testid="button-post-comment">
                 {postComment.isPending ? "Posting..." : isInternal ? "Post internal comment" : "Share with the household"}
               </Button>
@@ -304,7 +346,14 @@ export default function RequestThread({ requestId, commentsQuery, isStaff, isAdm
               </p>
             </div>
 
-            <div className="flex justify-end">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <CommentAttachmentField
+                requestId={requestId}
+                value={attachment}
+                onChange={setAttachment}
+                onError={(message) => toast({ title: "The file was not attached", description: message, variant: "destructive" })}
+                disabled={postComment.isPending}
+              />
               <Button type="submit" variant="primary" disabled={!canPost} data-testid="button-post-comment">
                 {postComment.isPending ? "Posting..." : "Post"}
               </Button>
@@ -312,6 +361,34 @@ export default function RequestThread({ requestId, commentsQuery, isStaff, isAdm
           </form>
         )}
       </CardContent>
+
+      {/* Deleting is not undoable, and when the comment carries a file the
+          person deleting should know the file is not what goes (known issue
+          1: the row is removed, the object stays). */}
+      <AlertDialog open={!!pendingDelete} onOpenChange={(open) => !open && setPendingDelete(null)}>
+        <AlertDialogContent data-testid="dialog-delete-comment">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this comment?</AlertDialogTitle>
+            <AlertDialogDescription data-testid="text-delete-comment-explainer">
+              {pendingDelete?.attachmentUrl
+                ? `This removes the comment, not the file. ${pendingDelete.attachmentName || "The attached file"} stays in storage.`
+                : "It will be gone from the thread for everybody who can read it."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel data-testid="button-cancel-delete-comment">Keep it</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (pendingDelete) deleteComment.mutate(pendingDelete.id);
+                setPendingDelete(null);
+              }}
+              data-testid="button-confirm-delete-comment"
+            >
+              Delete comment
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Card>
   );
 }

@@ -124,6 +124,7 @@ vi.mock("../auth", async (importOriginal) => {
 
 import { registerRoutes } from "../routes";
 import { errorHandler } from "../errors";
+import { DOCUMENT_UPLOAD_MAX_BYTES } from "../uploadLimits";
 
 // ---------------------------------------------------------------------------
 // The simulated session
@@ -1311,6 +1312,318 @@ describe("switching comment email off", () => {
  * reads a request through, on the one case the house match would otherwise
  * let through -- their own house.
  */
+describe("a file on a comment", () => {
+  // The attachment route is a resident-reachable upload -- the first one
+  // that stores a document rather than a photo -- and the create route is a
+  // body that names a stored file. Both are the shape of the historic gaps:
+  // a refused caller must not have their body read, and a comment must not
+  // be able to point at a file its author never uploaded, because a file
+  // inherits every reference's visibility and one readable reference is
+  // enough to serve it.
+  const HOUSE_A = "1 Main St";
+  const HOUSE_B = "2 River Rd";
+  const PROPERTY_A = { id: "prop-a", name: "Cleveland House", region: "West Central", address: HOUSE_A };
+  const westOnly = { ...ALL_MAINTENANCE, allowedRegions: ["West Central"] };
+  const daysAgo = (n: number) => new Date(Date.now() - n * 24 * 60 * 60 * 1000);
+
+  const OWN_HOUSE_OPEN = {
+    id: "req-own-open",
+    title: "Blinds fell down",
+    region: "West Central",
+    buildingAddress: HOUSE_A,
+    submittedBy: BOB.email,
+    status: "pending",
+    type: "request",
+  };
+  const OTHER_HOUSE_OPEN = { ...OWN_HOUSE_OPEN, id: "req-other-open", buildingAddress: HOUSE_B };
+  const EAST_OPEN = { ...OWN_HOUSE_OPEN, id: "req-east-open", region: "East Central" };
+
+  const KEY = "0123456789abcdef0123456789abcdef.pdf";
+  const UPLOAD_URL = `/uploads/${KEY}`;
+  const uploadRow = (uploadedBy: string) => ({
+    id: "upload-1",
+    storageKey: KEY,
+    originalName: "quote.pdf",
+    contentType: "application/pdf",
+    sizeBytes: 1024,
+    uploadedBy,
+  });
+
+  const leaderOfHouseA = () => {
+    actAs({ ...ALICE, propertyId: "prop-a" } as typeof ALICE, ALL_MAINTENANCE);
+    storageMock.getProperty.mockResolvedValue(PROPERTY_A);
+  };
+
+  const ATTACH = (id: string) => `/api/maintenance-requests/${id}/attachments`;
+
+  /** A real (if tiny) PDF: the magic-byte check is the same one the other upload routes apply. */
+  const aQuote = () => {
+    const form = new FormData();
+    form.append("file", new Blob([new TextEncoder().encode("%PDF-1.4\n%quote\n")], { type: "application/pdf" }), "quote.pdf");
+    return form;
+  };
+
+  /** Bigger than the 20MB document limit, so the route's own size cap has to catch it. */
+  const aHugeQuote = () => {
+    const form = new FormData();
+    const oversized = new Uint8Array(DOCUMENT_UPLOAD_MAX_BYTES + 512 * 1024);
+    form.append("file", new Blob([oversized], { type: "application/pdf" }), "quote.pdf");
+    return form;
+  };
+
+  /** An executable renamed to .pdf, with a matching Content-Type header: the same
+   * disguise bufferMatchesExtension exists to catch on every other upload route. */
+  const aRenamedExecutable = () => {
+    const form = new FormData();
+    const exe = new Uint8Array([0x4d, 0x5a, 0x90, 0x00, 0x03, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00]);
+    form.append("file", new Blob([exe], { type: "application/pdf" }), "quote.pdf");
+    return form;
+  };
+
+  async function postForm(path: string, form: FormData) {
+    const res = await fetch(`${baseUrl}${path}`, { method: "POST", body: form });
+    let body: any = null;
+    try {
+      body = await res.json();
+    } catch {
+      body = null;
+    }
+    return { status: res.status, body };
+  }
+
+  const postFile = (path: string) => postForm(path, aQuote());
+
+  const post = (path: string, body: unknown) => request("POST", path, { body });
+  const del = (path: string) => request("DELETE", path);
+
+  // -- uploading ----------------------------------------------------------------
+
+  it("stores a household leader's file for their own house's request, under the session's account, and says what it was called", async () => {
+    // The positive control for every "not read" assertion below: the same
+    // account, the same file, a request it may post on -- and the parser
+    // does run, the file is written, and the row names who stored it.
+    leaderOfHouseA();
+    storageMock.getMaintenanceRequest.mockResolvedValue(OWN_HOUSE_OPEN);
+    const { status, body } = await postFile(ATTACH("req-own-open"));
+    expect(status).toBe(200);
+    expect(body.url).toMatch(/^\/uploads\/[0-9a-f]{32}\.pdf$/);
+    expect(body.name).toBe("quote.pdf");
+    expect(multerEntered).toHaveBeenCalledWith(ATTACH("req-own-open"));
+    expect(fileStoreMock.putUpload).toHaveBeenCalled();
+    expect(storageMock.createUpload).toHaveBeenCalledWith(expect.objectContaining({ uploadedBy: ALICE.id, originalName: "quote.pdf" }));
+  });
+
+  it("refuses a household leader another house's request before the parser reads a byte, and stores nothing", async () => {
+    leaderOfHouseA();
+    storageMock.getMaintenanceRequest.mockResolvedValue(OTHER_HOUSE_OPEN);
+    const { status } = await postFile(ATTACH("req-other-open"));
+    expect(status).toBe(403);
+    expect(multerEntered).not.toHaveBeenCalled();
+    expect(fileStoreMock.putUpload).not.toHaveBeenCalled();
+    expect(storageMock.createUpload).not.toHaveBeenCalled();
+  });
+
+  it("refuses a household leader once the request closed more than 120 days ago, before the parser reads a byte", async () => {
+    leaderOfHouseA();
+    storageMock.getMaintenanceRequest.mockResolvedValue({ ...OWN_HOUSE_OPEN, status: "completed", completedDate: daysAgo(121) });
+    const { status } = await postFile(ATTACH("req-own-open"));
+    expect(status).toBe(403);
+    expect(multerEntered).not.toHaveBeenCalled();
+    expect(fileStoreMock.putUpload).not.toHaveBeenCalled();
+  });
+
+  it("refuses staff a request outside their regions before the parser reads a byte, and stores nothing", async () => {
+    actAs(STAFF, westOnly);
+    storageMock.getMaintenanceRequest.mockResolvedValue(EAST_OPEN);
+    const { status } = await postFile(ATTACH("req-east-open"));
+    expect(status).toBe(403);
+    expect(multerEntered).not.toHaveBeenCalled();
+    expect(fileStoreMock.putUpload).not.toHaveBeenCalled();
+  });
+
+  it("refuses an anonymous caller before the parser reads a byte", async () => {
+    storageMock.getMaintenanceRequest.mockResolvedValue(OWN_HOUSE_OPEN);
+    const { status } = await postFile(ATTACH("req-own-open"));
+    expect(status).toBe(401);
+    expect(multerEntered).not.toHaveBeenCalled();
+    expect(fileStoreMock.putUpload).not.toHaveBeenCalled();
+  });
+
+  it("answers 404 for a request that does not exist, before the parser reads a byte", async () => {
+    actAs(STAFF, westOnly);
+    storageMock.getMaintenanceRequest.mockResolvedValue(undefined);
+    const { status } = await postFile(ATTACH("req-nope"));
+    expect(status).toBe(404);
+    expect(multerEntered).not.toHaveBeenCalled();
+    expect(fileStoreMock.putUpload).not.toHaveBeenCalled();
+  });
+
+  it("lets staff in the request's region store a file", async () => {
+    actAs(STAFF, westOnly);
+    storageMock.getMaintenanceRequest.mockResolvedValue(OWN_HOUSE_OPEN);
+    const { status, body } = await postFile(ATTACH("req-own-open"));
+    expect(status).toBe(200);
+    expect(body.name).toBe("quote.pdf");
+    expect(storageMock.createUpload).toHaveBeenCalledWith(expect.objectContaining({ uploadedBy: STAFF.id }));
+  });
+
+  // The upload layer records every document stored; this route goes through
+  // the same layer, so the event fires without this route adding one.
+  it("records the document upload in the audit log, as the other upload routes do", async () => {
+    leaderOfHouseA();
+    storageMock.getMaintenanceRequest.mockResolvedValue(OWN_HOUSE_OPEN);
+    const { status } = await postFile(ATTACH("req-own-open"));
+    expect(status).toBe(200);
+    expect(storageMock.createAuditEvent).toHaveBeenCalledTimes(1);
+    expect(storageMock.createAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "document.uploaded", entityType: "upload", actorId: ALICE.id, summary: "Uploaded quote.pdf" }),
+    );
+  });
+
+  it("refuses a file over the 20MB document limit with a 413 naming that limit, and stores nothing", async () => {
+    leaderOfHouseA();
+    storageMock.getMaintenanceRequest.mockResolvedValue(OWN_HOUSE_OPEN);
+    const { status, body } = await postForm(ATTACH("req-own-open"), aHugeQuote());
+    expect(status).toBe(413);
+    expect(body.message).toContain("20MB");
+    expect(fileStoreMock.putUpload).not.toHaveBeenCalled();
+    expect(storageMock.createUpload).not.toHaveBeenCalled();
+  });
+
+  it("refuses an executable renamed to .pdf, the same magic-byte check /api/upload-doc applies, and stores nothing", async () => {
+    leaderOfHouseA();
+    storageMock.getMaintenanceRequest.mockResolvedValue(OWN_HOUSE_OPEN);
+    const { status, body } = await postForm(ATTACH("req-own-open"), aRenamedExecutable());
+    expect(status).toBe(400);
+    expect(body.message).toMatch(/do not match/i);
+    expect(fileStoreMock.putUpload).not.toHaveBeenCalled();
+    expect(storageMock.createUpload).not.toHaveBeenCalled();
+  });
+
+  // -- posting the comment that names the file --------------------------------
+
+  it("stores the attachment on the comment when it points at a file the author uploaded", async () => {
+    actAs(STAFF, westOnly);
+    storageMock.getMaintenanceRequest.mockResolvedValue(OWN_HOUSE_OPEN);
+    storageMock.getUploadByStorageKey.mockResolvedValue(uploadRow(STAFF.id));
+    storageMock.createMaintenanceRequestComment.mockImplementation(async (c: unknown) => ({ id: "c-new", ...(c as object) }));
+    const { status, body } = await post("/api/maintenance-requests/req-own-open/comments", {
+      body: "His quote is attached.",
+      attachmentUrl: UPLOAD_URL,
+      attachmentName: "Dave's quote.pdf",
+    });
+    expect(status).toBe(201);
+    expect(storageMock.getUploadByStorageKey).toHaveBeenCalledWith(KEY);
+    expect(storageMock.createMaintenanceRequestComment).toHaveBeenCalledWith(
+      expect.objectContaining({ attachmentUrl: UPLOAD_URL, attachmentName: "Dave's quote.pdf" }),
+    );
+    expect(body.attachmentUrl).toBe(UPLOAD_URL);
+  });
+
+  it("names the file as it was stored when the body gives no name", async () => {
+    leaderOfHouseA();
+    storageMock.getMaintenanceRequest.mockResolvedValue(OWN_HOUSE_OPEN);
+    storageMock.getUploadByStorageKey.mockResolvedValue(uploadRow(ALICE.id));
+    storageMock.createMaintenanceRequestComment.mockImplementation(async (c: unknown) => ({ id: "c-new", ...(c as object) }));
+    const { status } = await post("/api/maintenance-requests/req-own-open/comments", { body: "Photo attached.", attachmentUrl: UPLOAD_URL });
+    expect(status).toBe(201);
+    expect(storageMock.createMaintenanceRequestComment).toHaveBeenCalledWith(
+      expect.objectContaining({ attachmentUrl: UPLOAD_URL, attachmentName: "quote.pdf" }),
+    );
+  });
+
+  it("stores no attachment at all when the body gives a name but no file", async () => {
+    actAs(STAFF, westOnly);
+    storageMock.getMaintenanceRequest.mockResolvedValue(OWN_HOUSE_OPEN);
+    storageMock.createMaintenanceRequestComment.mockImplementation(async (c: unknown) => ({ id: "c-new", ...(c as object) }));
+    const { status } = await post("/api/maintenance-requests/req-own-open/comments", { body: "Noted.", attachmentName: "quote.pdf" });
+    expect(status).toBe(201);
+    expect(storageMock.getUploadByStorageKey).not.toHaveBeenCalled();
+    expect(storageMock.createMaintenanceRequestComment).toHaveBeenCalledWith(
+      expect.objectContaining({ attachmentUrl: null, attachmentName: null }),
+    );
+  });
+
+  it("refuses an attachment URL on another origin as a 400, and writes nothing", async () => {
+    actAs(STAFF, westOnly);
+    storageMock.getMaintenanceRequest.mockResolvedValue(OWN_HOUSE_OPEN);
+    const { status } = await post("/api/maintenance-requests/req-own-open/comments", {
+      body: "See link.",
+      attachmentUrl: "https://evil.example/x.pdf",
+      attachmentName: "x.pdf",
+    });
+    expect(status).toBe(400);
+    expect(storageMock.getUploadByStorageKey).not.toHaveBeenCalled();
+    expect(storageMock.createMaintenanceRequestComment).not.toHaveBeenCalled();
+  });
+
+  it("refuses an attachment URL that climbs out of the uploads area as a 400, and writes nothing", async () => {
+    actAs(STAFF, westOnly);
+    storageMock.getMaintenanceRequest.mockResolvedValue(OWN_HOUSE_OPEN);
+    for (const attachmentUrl of ["/uploads/../etc/passwd", "/uploads/..", "/uploads/.hidden", "/uploads/", "javascript:alert(1)"]) {
+      const { status } = await post("/api/maintenance-requests/req-own-open/comments", { body: "See file.", attachmentUrl });
+      expect(status, attachmentUrl).toBe(400);
+    }
+    expect(storageMock.getUploadByStorageKey).not.toHaveBeenCalled();
+    expect(storageMock.createMaintenanceRequestComment).not.toHaveBeenCalled();
+  });
+
+  it("refuses an attachment name over 255 characters as a 400, and writes nothing", async () => {
+    actAs(STAFF, westOnly);
+    storageMock.getMaintenanceRequest.mockResolvedValue(OWN_HOUSE_OPEN);
+    storageMock.getUploadByStorageKey.mockResolvedValue(uploadRow(STAFF.id));
+    const { status } = await post("/api/maintenance-requests/req-own-open/comments", {
+      body: "See file.",
+      attachmentUrl: UPLOAD_URL,
+      attachmentName: "a".repeat(256),
+    });
+    expect(status).toBe(400);
+    expect(storageMock.createMaintenanceRequestComment).not.toHaveBeenCalled();
+  });
+
+  // A file inherits the visibility of every record that points at it, and
+  // one readable reference is enough to serve it. So a comment on a house's
+  // repair that named a vendor's W-9 would hand that W-9 to the household.
+  it("refuses an attachment pointing at a file somebody else uploaded, and writes nothing", async () => {
+    leaderOfHouseA();
+    storageMock.getMaintenanceRequest.mockResolvedValue(OWN_HOUSE_OPEN);
+    storageMock.getUploadByStorageKey.mockResolvedValue(uploadRow(STAFF.id));
+    const { status } = await post("/api/maintenance-requests/req-own-open/comments", { body: "See file.", attachmentUrl: UPLOAD_URL });
+    expect(status).toBe(400);
+    expect(storageMock.createMaintenanceRequestComment).not.toHaveBeenCalled();
+  });
+
+  it("refuses an attachment pointing at a file that was never stored, and writes nothing", async () => {
+    actAs(STAFF, westOnly);
+    storageMock.getMaintenanceRequest.mockResolvedValue(OWN_HOUSE_OPEN);
+    storageMock.getUploadByStorageKey.mockResolvedValue(undefined);
+    const { status } = await post("/api/maintenance-requests/req-own-open/comments", { body: "See file.", attachmentUrl: UPLOAD_URL });
+    expect(status).toBe(400);
+    expect(storageMock.createMaintenanceRequestComment).not.toHaveBeenCalled();
+  });
+
+  // -- deleting -----------------------------------------------------------------
+
+  it("removes the comment and leaves its file in storage", async () => {
+    // Known issue 1, deliberately: the row goes, the object stays. The screen
+    // says so.
+    actAs(STAFF, westOnly);
+    storageMock.getMaintenanceRequestComment.mockResolvedValue({
+      id: "c-file",
+      requestId: OWN_HOUSE_OPEN.id,
+      body: "His quote is attached.",
+      isInternal: true,
+      authorUserId: STAFF.id,
+      attachmentUrl: UPLOAD_URL,
+      attachmentName: "quote.pdf",
+    });
+    storageMock.getMaintenanceRequest.mockResolvedValue(OWN_HOUSE_OPEN);
+    expect((await del("/api/maintenance-request-comments/c-file")).status).toBe(200);
+    expect(storageMock.deleteMaintenanceRequestComment).toHaveBeenCalledWith("c-file");
+    expect(fileStoreMock.removeUpload).not.toHaveBeenCalled();
+  });
+});
+
 describe("a household leader and the requests that are not repairs", () => {
   const HOUSE_A = "1 Main St";
   const PROPERTY_A = { id: "prop-a", name: "Cleveland House", region: "West Central", address: HOUSE_A };

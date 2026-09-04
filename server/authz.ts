@@ -452,6 +452,17 @@ export async function canReadUploadReference(
       return !!request && canReadMaintenanceRequest(ctx, request, await residentHouseAddress(ctx));
     }
 
+    case "maintenanceRequestComment": {
+      // A comment's file inherits the COMMENT's visibility, not only the
+      // request's: the request rule decides the house, the region and the
+      // 120-day window, and the comment's own visibility decides the tier on
+      // top, so a quote on an internal comment is never served to a resident
+      // who can otherwise open the request. A missing request resolves to no
+      // access.
+      const request = await storage.getMaintenanceRequest(reference.record.requestId);
+      return !!request && canReadComment(ctx, request, reference.record, await residentHouseAddress(ctx));
+    }
+
     case "walkthroughPhoto":
       return (
         !ctx.isResident &&

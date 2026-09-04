@@ -28,7 +28,7 @@ import {
   type AuthContext,
 } from "./authz";
 import { z } from "zod";
-import { sendError, logError } from "./errors";
+import { sendError, logError, HttpError } from "./errors";
 import { recordAuditEvent, auditLookup, changedFields, AUDIT_ACTIONS } from "./audit";
 import { AUDIT_ACTION_VALUES } from "@shared/audit";
 import multer from "multer";
@@ -1009,6 +1009,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return request;
   }
 
+  /**
+   * The file a comment names, checked to be one this caller stored.
+   *
+   * A file inherits the visibility of every record that points at it, and one
+   * readable reference is enough to serve it -- so a body naming somebody
+   * else's upload (a vendor's W-9, say) would hand that file to everyone who
+   * can read the comment. The schema checked the URL's shape; here the row
+   * has to exist and be theirs, the same check attachRequestPhotos makes. No
+   * URL means no attachment, whatever name the body gave; no name means the
+   * name the file was stored under.
+   */
+  async function commentAttachmentFromClient(
+    ctx: AuthContext,
+    attachmentUrl: string | null | undefined,
+    attachmentName: string | null | undefined,
+  ): Promise<{ attachmentUrl: string | null; attachmentName: string | null }> {
+    if (!attachmentUrl) return { attachmentUrl: null, attachmentName: null };
+    const key = attachmentUrl.slice("/uploads/".length);
+    const upload = isSafeStorageKey(key) ? await storage.getUploadByStorageKey(key) : undefined;
+    if (!upload || upload.uploadedBy !== ctx.userId) {
+      throw new HttpError(400, "That file is not one you uploaded. Attach it again and try posting.");
+    }
+    return { attachmentUrl, attachmentName: attachmentName || upload.originalName };
+  }
+
   app.get('/api/maintenance-requests/:id/comments', isAuthenticated, async (req: any, res) => {
     try {
       const ctx = await requireActiveUser(req, res);
@@ -1044,6 +1069,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!canPostComment(ctx, request, { isInternal }, residentHouse)) {
         return res.status(403).json({ message: "Forbidden" });
       }
+      // After the post rule, so a refused caller learns nothing about which
+      // storage keys exist.
+      const attachment = await commentAttachmentFromClient(ctx, parsed.attachmentUrl, parsed.attachmentName);
 
       // The author is the session, never the body. The name is stored beside
       // the id so the thread still says who wrote it after the account goes.
@@ -1051,6 +1079,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const comment = await storage.createMaintenanceRequestComment({
         body: commentBodyFromClient(parsed.body),
         isInternal,
+        ...attachment,
         // Relaying is a staff act -- an RA passing on a contractor's words.
         // A resident's comment is their own, whatever the body claims.
         relaySource: ctx.isResident ? null : parsed.relaySource || null,
@@ -2280,6 +2309,56 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(await storeUploadedFile(req.file, req.uploadContext));
     } catch (error) {
       sendError(res, error, "Failed to upload document");
+    }
+  });
+
+  // The file on a comment (see "Request threads" above). Its own route rather
+  // than /api/upload-doc because that one refuses residents outright, and a
+  // household may attach a photo to the shared comment it may post. The
+  // permission is the whole post rule -- own house or own submission, in
+  // region for staff, a repair, inside the 120-day window -- run before multer
+  // reads a byte. Shared is the visibility asked about because it is the one
+  // both tiers may post; staff who may post internal may post shared too, so
+  // the answer is the same for them. Same limits, same magic-byte check and
+  // same upload layer as /api/upload-doc, so the document audit event fires
+  // without this route adding one.
+  const requireCommentAttachmentPermission: import("express").RequestHandler = async (req: any, res, next) => {
+    try {
+      const ctx = await loadAuthContext(req);
+      if (!ctx) {
+        return res.status(403).json({ message: "Your account is not active." });
+      }
+      const request = await storage.getMaintenanceRequest(req.params.id);
+      if (!request) {
+        return res.status(404).json({ message: "Maintenance request not found" });
+      }
+      const residentHouse = await residentHouseAddress(ctx);
+      if (!canPostComment(ctx, request, { isInternal: false }, residentHouse)) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+      req.uploadContext = ctx;
+      next();
+    } catch (error) {
+      sendError(res, error, "Failed to verify upload permission.");
+    }
+  };
+
+  app.post('/api/maintenance-requests/:id/attachments', isAuthenticated, uploadRateLimit, requireCommentAttachmentPermission, ...guardedUpload(docUpload.single('file'), DOCUMENT_UPLOAD_MAX_BYTES), async (req: any, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ message: "No file uploaded" });
+      }
+      if (!(await bufferMatchesExtension(req.file.buffer, req.file.originalname))) {
+        return res.status(400).json({
+          message: "File contents do not match the file extension. The file was not saved.",
+        });
+      }
+      const stored = await storeUploadedFile(req.file, req.uploadContext);
+      // The name is what the comment's link will say; the client keeps it
+      // beside the URL until the comment is posted.
+      res.json({ url: stored.url, name: stored.originalName });
+    } catch (error) {
+      sendError(res, error, "Failed to upload the file");
     }
   });
 

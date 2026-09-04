@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { commentBodyFromClient, tidyCommentBody, MAX_COMMENT_LENGTH } from "../comments";
 import { HttpError } from "../errors";
+import { insertMaintenanceRequestCommentSchema } from "@shared/schema";
 
 /**
  * The body rule is one function used by one route. These tests pin what it
@@ -49,5 +50,31 @@ describe("bounding a comment body", () => {
   it("measures the tidied length, not the raw one", () => {
     const padded = "x".repeat(MAX_COMMENT_LENGTH) + " ".repeat(50);
     expect(commentBodyFromClient(padded)).toHaveLength(MAX_COMMENT_LENGTH);
+  });
+});
+
+/**
+ * The attachment URL is checked at the boundary, in the insert schema, before
+ * the route's own recheck against the stored upload. Pinned here because a
+ * later refactor that drops the recheck (thinking the schema covers it) would
+ * otherwise open a path-traversal silently.
+ */
+describe("the attachment URL shape", () => {
+  const parse = (attachmentUrl: string) =>
+    insertMaintenanceRequestCommentSchema.safeParse({ body: "See attached.", attachmentUrl }).success;
+
+  it("accepts a bare storage key under /uploads/", () => {
+    expect(parse("/uploads/a1b2c3-quote.pdf")).toBe(true);
+  });
+
+  it.each([
+    "/uploads/../etc/passwd",
+    "/uploads/.hidden",
+    "/uploads/sub/dir.pdf",
+    "https://evil.example/x.pdf",
+    "uploads/a.pdf",
+    "/uploads/",
+  ])("refuses %s", (url) => {
+    expect(parse(url)).toBe(false);
   });
 });
