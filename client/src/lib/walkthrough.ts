@@ -16,6 +16,7 @@
  */
 import {
   WALKTHROUGH_FLAGGED_CONDITIONS,
+  foldName,
   type Walkthrough,
   type WalkthroughCondition,
   type WalkthroughItem,
@@ -285,4 +286,97 @@ export function canSeeResourceHub(user: WalkthroughUser | null | undefined): boo
     user.permissions?.canViewProperties === true ||
     user.permissions?.canManageProperties === true
   );
+}
+
+/** One walkthrough's photos of one room. Empty when nobody photographed it that visit. */
+export interface ComparisonColumn<P> {
+  walkthroughId: string;
+  date: Date | string | null;
+  photos: P[];
+}
+
+/** One room of the house, across every walkthrough. */
+export interface ComparisonRow<P> {
+  /** The folded name the room is matched on across years. */
+  key: string;
+  /** The first spelling seen, so it reads the way somebody wrote it. */
+  label: string;
+  /** One per walkthrough of the house, oldest first, whether or not the room was in it. */
+  columns: ComparisonColumn<P>[];
+}
+
+/**
+ * One room's photos laid side by side across a house's walkthroughs, to
+ * answer "has that crack grown".
+ *
+ * A view over existing data, not a table: walkthroughs, their rooms and the
+ * rooms' photos in, one row per room out. Rooms are matched across years by
+ * `foldName` — the same rule the recurring-issue rollups group a request's
+ * room by — so "Living room" and "living room" are one room, and the label
+ * is the spelling from the oldest walkthrough it appears in.
+ *
+ * Every row carries a column for every walkthrough, oldest to newest, with an
+ * undated one last. A room absent from one year is an empty column in its
+ * place, never a shifted one: the columns are the years, and a gap is the
+ * honest answer for a year nobody photographed the room.
+ *
+ * A photo whose room belongs to none of these walkthroughs is dropped. The
+ * photo list the page reads is region-wide, so most of it is other houses.
+ */
+export function comparePhotosByRoom<P extends { roomId: string }>(
+  walkthroughs: readonly { id: string; walkthroughDate?: Date | string | null }[],
+  rooms: readonly { id: string; name: string; walkthroughId: string | null; displayOrder?: number }[],
+  photos: readonly P[],
+): ComparisonRow<P>[] {
+  const ordered = walkthroughs
+    .map((walkthrough, index) => ({ walkthrough, index, time: walkthroughTime(walkthrough.walkthroughDate) }))
+    .sort((a, b) => {
+      // Undated sorts last; otherwise oldest first, with the input order as
+      // the tie-break so the result is stable.
+      if (a.time === null || b.time === null) return (a.time === null ? 1 : 0) - (b.time === null ? 1 : 0) || a.index - b.index;
+      return a.time - b.time || a.index - b.index;
+    })
+    .map(({ walkthrough }) => walkthrough);
+  const columnIndex = new Map(ordered.map((walkthrough, index) => [walkthrough.id, index]));
+
+  const roomToColumn = new Map<string, { row: ComparisonRow<P>; column: number }>();
+  const rows: ComparisonRow<P>[] = [];
+  const byKey = new Map<string, ComparisonRow<P>>();
+
+  // Walk the rooms in walkthrough order so the label and the row order come
+  // from the oldest visit, then by the room's own display order within it.
+  const sortedRooms = rooms
+    .filter((room) => room.walkthroughId !== null && columnIndex.has(room.walkthroughId))
+    .sort(
+      (a, b) =>
+        columnIndex.get(a.walkthroughId!)! - columnIndex.get(b.walkthroughId!)! ||
+        (a.displayOrder ?? 0) - (b.displayOrder ?? 0),
+    );
+  for (const room of sortedRooms) {
+    const key = foldName(room.name);
+    // A room with no name cannot be picked, so it has no row.
+    if (!key) continue;
+    let row = byKey.get(key);
+    if (!row) {
+      row = {
+        key,
+        label: room.name.trim(),
+        columns: ordered.map((walkthrough) => ({
+          walkthroughId: walkthrough.id,
+          date: walkthrough.walkthroughDate ?? null,
+          photos: [],
+        })),
+      };
+      byKey.set(key, row);
+      rows.push(row);
+    }
+    roomToColumn.set(room.id, { row, column: columnIndex.get(room.walkthroughId!)! });
+  }
+
+  for (const photo of photos) {
+    const place = roomToColumn.get(photo.roomId);
+    if (place) place.row.columns[place.column].photos.push(photo);
+  }
+
+  return rows;
 }

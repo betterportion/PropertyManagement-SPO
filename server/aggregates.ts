@@ -12,7 +12,7 @@
  * entitled to, so a rollup never widens what somebody can see — a link to a
  * request the caller cannot read contributes nothing, not even a count.
  */
-import type { MaintenanceRequest } from "@shared/schema";
+import { foldName, type MaintenanceRequest } from "@shared/schema";
 
 /**
  * Separates the parts of a grouping key.
@@ -27,24 +27,21 @@ const KEY_SEPARATOR = "\u0001";
 /**
  * The key a repeat is judged on: one house, one room, one category.
  *
- * Case- and whitespace-folded, because "Living room" and "  living ROOM " are
- * the same room typed twice. That folding is a backstop, not the fix — the
- * location field suggests from the house's walkthrough vocabulary precisely so
- * that new requests do not need it.
+ * Case- and whitespace-folded by `foldName`, because "Living room" and
+ * "  living ROOM " are the same room typed twice. That folding is a backstop,
+ * not the fix — the location field suggests from the house's walkthrough
+ * vocabulary precisely so that new requests do not need it. The photo
+ * comparison matches rooms across years by the same helper.
  *
  * The house is part of the key and always will be: "these blinds have broken
  * every year" is a claim about *these* blinds.
  */
 function issueKey(request: Pick<MaintenanceRequest, "buildingAddress" | "location" | "category">): string | null {
-  const location = request.location?.trim().toLowerCase();
+  const location = foldName(request.location);
   // No room recorded means no issue to group. Grouping on "" would invent an
   // issue called nothing, in every house.
   if (!location) return null;
-  return [
-    request.buildingAddress?.trim().toLowerCase() ?? "",
-    location,
-    request.category?.trim().toLowerCase() ?? "",
-  ].join(KEY_SEPARATOR);
+  return [foldName(request.buildingAddress), location, foldName(request.category)].join(KEY_SEPARATOR);
 }
 
 export interface RecurringIssue {

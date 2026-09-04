@@ -3572,6 +3572,50 @@ describe("the flagged-items list across walkthroughs", () => {
   });
 });
 
+/**
+ * The photo comparison on the staff walkthrough index.
+ *
+ * A view over existing data, read through routes that already exist: the
+ * rooms of each walkthrough, and the region-wide photo list. The list is the
+ * one that carries the photos, and it is staff-only in both directions -- a
+ * resident cannot upload a walkthrough photo and cannot be served one -- so
+ * the assertion that matters is that a household leader holding the
+ * completion grant for that very house still gets nothing from it, before
+ * the query runs.
+ */
+describe("comparing a room's photos across walkthrough years", () => {
+  const WEST_PHOTO = { id: "photo-west", roomId: "room-west", imageUrl: "/uploads/west.png", region: "West Central", buildingAddress: "1 Main St" };
+  const EAST_PHOTO = { id: "photo-east", roomId: "room-east", imageUrl: "/uploads/east.png", region: "East Central", buildingAddress: "2 River Rd" };
+
+  const bothRegions = () => storageMock.getAllWalkthroughPhotos.mockResolvedValue([WEST_PHOTO, EAST_PHOTO]);
+
+  it("refuses a household leader who may complete that house's walkthrough, without running the query", async () => {
+    actAs({ ...ALICE, propertyId: "prop-west" } as typeof ALICE, { canCompleteWalkthroughs: true });
+    storageMock.getProperty.mockResolvedValue({ id: "prop-west", address: "1 Main St", region: "West Central" });
+    bothRegions();
+    expect((await get("/api/walkthrough-photos")).status).toBe(403);
+    expect(storageMock.getAllWalkthroughPhotos).not.toHaveBeenCalled();
+  });
+
+  it("gives staff outside the region nothing from it", async () => {
+    actAs(STAFF, { canViewWalkthroughs: true, allowedRegions: ["Northeast"] });
+    bothRegions();
+    const { status, body } = await get("/api/walkthrough-photos");
+    expect(status).toBe(200);
+    expect(body).toEqual([]);
+  });
+
+  // The positive control for the "not called" above.
+  it("gives staff in the region that region's photos and no other", async () => {
+    actAs(STAFF, { canViewWalkthroughs: true, allowedRegions: ["West Central"] });
+    bothRegions();
+    const { status, body } = await get("/api/walkthrough-photos");
+    expect(status).toBe(200);
+    expect(storageMock.getAllWalkthroughPhotos).toHaveBeenCalled();
+    expect(body.map((photo: { id: string }) => photo.id)).toEqual(["photo-west"]);
+  });
+});
+
 describe("residents completing their own house's walkthrough", () => {
   const HOUSE_A = "1 Main St";
   const HOUSE_B = "2 River Rd";

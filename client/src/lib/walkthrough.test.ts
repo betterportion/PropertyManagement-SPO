@@ -8,6 +8,7 @@ import {
   canSeeResourceHub,
   canSeeWalkthroughPhotos,
   canWriteWalkthrough,
+  comparePhotosByRoom,
   conditionTone,
   isCurrentWalkthrough,
   isAssessed,
@@ -324,5 +325,108 @@ describe("who reaches the resource hub", () => {
   it("keeps out nobody signed in", () => {
     expect(canSeeResourceHub(null)).toBe(false);
     expect(canSeeResourceHub(undefined)).toBe(false);
+  });
+});
+
+describe("comparing one room's photos across years", () => {
+  const OLD = { id: "wt-2024", walkthroughDate: "2024-09-01T00:00:00.000Z" };
+  const MID = { id: "wt-2025", walkthroughDate: "2025-09-01T00:00:00.000Z" };
+  const NEW = { id: "wt-2026", walkthroughDate: "2026-09-01T00:00:00.000Z" };
+
+  const room = (id: string, name: string, walkthroughId: string, displayOrder = 0) => ({
+    id,
+    name,
+    walkthroughId,
+    displayOrder,
+  });
+  const photo = (id: string, roomId: string) => ({ id, roomId });
+
+  it("merges two spellings of one room into one row, labelled as first written", () => {
+    const rows = comparePhotosByRoom(
+      [OLD, NEW],
+      [room("r1", "Living room", "wt-2024"), room("r2", "living  ROOM", "wt-2026")],
+      [photo("p1", "r1"), photo("p2", "r2")],
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].label).toBe("Living room");
+    expect(rows[0].columns.map((column) => column.photos.map((p) => p.id))).toEqual([["p1"], ["p2"]]);
+  });
+
+  it("leaves a gap for a year the room was not in, never a shifted column", () => {
+    // The kitchen was photographed in 2024 and 2026 but not walked in 2025.
+    // Its 2026 photo must sit under 2026, with 2025 empty between them.
+    const rows = comparePhotosByRoom(
+      [OLD, MID, NEW],
+      [room("k24", "Kitchen", "wt-2024"), room("b25", "Bathroom", "wt-2025"), room("k26", "Kitchen", "wt-2026")],
+      [photo("p-old", "k24"), photo("p-new", "k26"), photo("p-bath", "b25")],
+    );
+    const kitchen = rows.find((row) => row.key === "kitchen")!;
+    expect(kitchen.columns.map((column) => column.walkthroughId)).toEqual(["wt-2024", "wt-2025", "wt-2026"]);
+    expect(kitchen.columns.map((column) => column.photos.map((p) => p.id))).toEqual([["p-old"], [], ["p-new"]]);
+  });
+
+  it("orders the columns oldest to newest whatever order the walkthroughs arrived in", () => {
+    const rows = comparePhotosByRoom(
+      [NEW, OLD, MID],
+      [room("r", "Hall", "wt-2024")],
+      [],
+    );
+    expect(rows[0].columns.map((column) => column.walkthroughId)).toEqual(["wt-2024", "wt-2025", "wt-2026"]);
+  });
+
+  it("puts an undated walkthrough last", () => {
+    const rows = comparePhotosByRoom(
+      [{ id: "wt-undated", walkthroughDate: null }, NEW, OLD],
+      [room("r", "Hall", "wt-undated")],
+      [],
+    );
+    expect(rows[0].columns.map((column) => column.walkthroughId)).toEqual(["wt-2024", "wt-2026", "wt-undated"]);
+  });
+
+  it("keeps every photo under the walkthrough it was taken on", () => {
+    const rows = comparePhotosByRoom(
+      [OLD, NEW],
+      [room("k24", "Kitchen", "wt-2024"), room("k26", "Kitchen", "wt-2026")],
+      [photo("a", "k26"), photo("b", "k24"), photo("c", "k26")],
+    );
+    const [old, recent] = rows[0].columns;
+    expect(old.photos.map((p) => p.id)).toEqual(["b"]);
+    expect(recent.photos.map((p) => p.id)).toEqual(["a", "c"]);
+  });
+
+  it("drops a photo of a room in some other house", () => {
+    // The photo list the page reads is region-wide; most of it is not this house.
+    const rows = comparePhotosByRoom([OLD], [room("k24", "Kitchen", "wt-2024")], [photo("elsewhere", "room-of-another-house")]);
+    expect(rows[0].columns[0].photos).toEqual([]);
+  });
+
+  it("lists rooms in the order the oldest walkthrough had them, then rooms that came later", () => {
+    const rows = comparePhotosByRoom(
+      [OLD, NEW],
+      [room("b", "Bedroom", "wt-2024", 2), room("k", "Kitchen", "wt-2024", 1), room("p", "Porch", "wt-2026", 0)],
+      [],
+    );
+    expect(rows.map((row) => row.label)).toEqual(["Kitchen", "Bedroom", "Porch"]);
+  });
+
+  it("gives a room only added in the newer walkthrough an empty column for the year before it existed", () => {
+    // The porch was never walked in 2024 -- it did not exist as a room yet.
+    // That is a gap too, not a reason to shrink the row to one column.
+    const rows = comparePhotosByRoom([OLD, NEW], [room("p", "Porch", "wt-2026")], []);
+    const porch = rows.find((row) => row.key === "porch")!;
+    expect(porch.columns.map((column) => column.walkthroughId)).toEqual(["wt-2024", "wt-2026"]);
+    expect(porch.columns.map((column) => column.photos)).toEqual([[], []]);
+  });
+
+  it("merges two rooms named the same within one walkthrough rather than losing either's photos", () => {
+    // A house with two "Bedroom"s: both fold to the same key, and both must
+    // still contribute their photos rather than one silently disappearing.
+    const rows = comparePhotosByRoom(
+      [OLD],
+      [room("bed1", "Bedroom", "wt-2024"), room("bed2", "Bedroom", "wt-2024")],
+      [photo("p1", "bed1"), photo("p2", "bed2")],
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].columns[0].photos.map((p) => p.id).sort()).toEqual(["p1", "p2"]);
   });
 });
