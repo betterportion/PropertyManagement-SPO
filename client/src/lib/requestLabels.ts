@@ -30,8 +30,11 @@ export const REQUEST_PRIORITY: Record<MaintenanceRequest["priority"], { label: s
  * `capex`, the word on screen is never. Wishlist is not here -- it is a
  * priority, and a wishlist capital project is a coherent thing.
  */
-export const REQUEST_TYPE: Record<MaintenanceRequest["type"], { label: string; variant: BadgeVariant }> = {
-  request: { label: "Repair", variant: "secondary" },
-  project: { label: "Project", variant: "info" },
-  capex: { label: "Capital project", variant: "orange" },
+export const REQUEST_TYPE: Record<
+  MaintenanceRequest["type"],
+  { label: string; plural: string; variant: BadgeVariant }
+> = {
+  request: { label: "Repair", plural: "Repairs", variant: "secondary" },
+  project: { label: "Project", plural: "Projects", variant: "info" },
+  capex: { label: "Capital project", plural: "Capital projects", variant: "orange" },
 };

@@ -8,8 +8,10 @@
 import { describe, it, expect } from "vitest";
 import {
   CLOSED_RANGES,
+  OPEN_WORK_GROUPS,
   REQUEST_TYPE_FILTERS,
   closedWithinRange,
+  groupOpenWork,
   isClosed,
   locationOptions,
   matchesType,
@@ -161,5 +163,97 @@ describe("the type filter", () => {
     for (const type of MAINTENANCE_REQUEST_TYPES) {
       expect(matchesType(request({ type }), unknownFilter)).toBe(true);
     }
+  });
+});
+
+describe("open work on a house", () => {
+  const ids = (groups: ReturnType<typeof groupOpenWork>, key: string) =>
+    groups.find((group) => group.key === key)!.items.map((item) => item.id);
+
+  it("keeps the four groups in a fixed order, wishlist last", () => {
+    expect(OPEN_WORK_GROUPS.map((group) => group.key)).toEqual(["request", "project", "capex", "wishlist"]);
+    expect(OPEN_WORK_GROUPS.map((group) => group.label)).toEqual([
+      "Repairs",
+      "Projects",
+      "Capital projects",
+      "Wishlist",
+    ]);
+    expect(groupOpenWork([]).map((group) => group.key)).toEqual(["request", "project", "capex", "wishlist"]);
+  });
+
+  it("yields four empty groups for no requests, rather than no groups", () => {
+    // An empty group stays on screen and says so; a group that vanished would
+    // read as a page that forgot to load.
+    expect(groupOpenWork([]).map((group) => group.items)).toEqual([[], [], [], []]);
+  });
+
+  it("puts a wishlist capital project under Wishlist and nowhere else", () => {
+    const groups = groupOpenWork([
+      request({ id: "wish-capex", status: "pending", type: "capex", priority: "wishlist" }),
+      request({ id: "capex", status: "pending", type: "capex", priority: "high" }),
+    ]);
+    expect(ids(groups, "wishlist")).toEqual(["wish-capex"]);
+    expect(ids(groups, "capex")).toEqual(["capex"]);
+    expect(ids(groups, "request")).toEqual([]);
+    expect(ids(groups, "project")).toEqual([]);
+  });
+
+  it("puts a wishlist-priority repair under Wishlist, not Repairs", () => {
+    // The capital-project case above only proves capex is pulled out. A
+    // grouping that only special-cased capex -- or that grouped by type and
+    // never checked priority at all -- would still pass it.
+    const groups = groupOpenWork([
+      request({ id: "wish-repair", status: "pending", type: "request", priority: "wishlist" }),
+      request({ id: "repair", status: "pending", type: "request", priority: "high" }),
+    ]);
+    expect(ids(groups, "wishlist")).toEqual(["wish-repair"]);
+    expect(ids(groups, "request")).toEqual(["repair"]);
+    expect(ids(groups, "project")).toEqual([]);
+    expect(ids(groups, "capex")).toEqual([]);
+  });
+
+  it("leaves closed work out, whatever its type or priority", () => {
+    const groups = groupOpenWork([
+      request({ id: "done-repair", status: "completed", type: "request", priority: "high" }),
+      request({ id: "dropped-project", status: "cancelled", type: "project", priority: "medium" }),
+      request({ id: "done-wish", status: "completed", type: "capex", priority: "wishlist" }),
+      request({ id: "open-repair", status: "in_progress", type: "request", priority: "low" }),
+    ]);
+    expect(groups.flatMap((group) => group.items.map((item) => item.id))).toEqual(["open-repair"]);
+  });
+
+  it("places every open item in exactly one group, so the counts add up", () => {
+    const priorities = ["low", "medium", "high", "urgent", "wishlist"] as const;
+    const statuses = ["pending", "in_progress", "completed", "cancelled"] as const;
+    const everyCombination: MaintenanceRequest[] = [];
+    for (const type of MAINTENANCE_REQUEST_TYPES) {
+      for (const priority of priorities) {
+        for (const status of statuses) {
+          everyCombination.push(request({ id: `${type}-${priority}-${status}`, type, priority, status }));
+        }
+      }
+    }
+    const openIds = everyCombination.filter((r) => !isClosed(r)).map((r) => r.id);
+
+    const groups = groupOpenWork(everyCombination);
+    const placed = groups.flatMap((group) => group.items.map((item) => item.id));
+
+    // The union of the groups is the open set...
+    expect([...placed].sort()).toEqual([...openIds].sort());
+    // ...and the groups are disjoint: no id appears twice.
+    expect(new Set(placed).size).toBe(placed.length);
+    expect(groups.reduce((n, group) => n + group.items.length, 0)).toBe(openIds.length);
+  });
+
+  it("files an open non-wishlist item under its own type", () => {
+    const groups = groupOpenWork([
+      request({ id: "repair", status: "pending", type: "request", priority: "urgent" }),
+      request({ id: "project", status: "pending", type: "project", priority: "medium" }),
+      request({ id: "capex", status: "in_progress", type: "capex", priority: "low" }),
+    ]);
+    expect(ids(groups, "request")).toEqual(["repair"]);
+    expect(ids(groups, "project")).toEqual(["project"]);
+    expect(ids(groups, "capex")).toEqual(["capex"]);
+    expect(ids(groups, "wishlist")).toEqual([]);
   });
 });

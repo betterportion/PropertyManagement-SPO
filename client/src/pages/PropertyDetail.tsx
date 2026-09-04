@@ -14,6 +14,7 @@ import PropertySetupChecklist from "@/components/PropertySetupChecklist";
 import ResidentPaperwork from "@/components/ResidentPaperwork";
 import PropertyBudgetCard from "@/components/PropertyBudgetCard";
 import HouseFactsCard from "@/components/HouseFactsCard";
+import PropertyOpenWork from "@/components/PropertyOpenWork";
 import EmailHouseholdDialog from "@/components/EmailHouseholdDialog";
 import { useAuth } from "@/hooks/useAuth";
 import { formatCurrency, formatDate, formatValue } from "@/lib/format";
@@ -508,11 +509,15 @@ export default function PropertyDetail() {
             </TabsContent>
 
             <TabsContent value="maintenance" className="mt-4 space-y-6">
+              {/* What is still to do, grouped once; the table below is the
+                  whole history, closed work included. */}
+              <PropertyOpenWork requests={requests} isLoading={requestsQuery.isLoading} />
+
               <Card>
                 <CardHeader className="flex flex-row items-center justify-between gap-3 space-y-0">
                   <CardTitle className="flex items-center gap-2 text-base">
                     <Wrench className="h-4 w-4" />
-                    Requests
+                    All requests
                   </CardTitle>
                   <Button variant="ghost" size="sm" asChild>
                     <Link href="/maintenance" data-testid="link-all-maintenance">
