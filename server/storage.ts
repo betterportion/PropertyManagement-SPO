@@ -3,6 +3,7 @@ import {
   userPermissions,
   maintenanceRequests,
   maintenanceRequestPhotos,
+  maintenanceRequestComments,
   walkthroughRooms,
   walkthroughs,
   walkthroughItems,
@@ -34,6 +35,8 @@ import {
   type MaintenanceRequest,
   type InsertMaintenanceRequest,
   type MaintenanceRequestPhoto,
+  type MaintenanceRequestComment,
+  type InsertMaintenanceRequestComment,
   type InsertMaintenanceRequestPhoto,
   type WalkthroughRoom,
   type Walkthrough,
@@ -327,6 +330,20 @@ export interface IStorage {
     note: InsertContactNote & { contactId: string; authorUserId: string | null; authorEmail: string | null; region: string },
   ): Promise<ContactNote>;
   deleteContactNote(id: string): Promise<void>;
+
+  // Request threads
+  /** Every comment on a request, oldest first: a thread reads top to bottom. */
+  getMaintenanceRequestComments(requestId: string): Promise<MaintenanceRequestComment[]>;
+  getMaintenanceRequestComment(id: string): Promise<MaintenanceRequestComment | undefined>;
+  createMaintenanceRequestComment(
+    comment: InsertMaintenanceRequestComment & {
+      requestId: string;
+      authorUserId: string | null;
+      authorEmail: string | null;
+      authorName: string | null;
+    },
+  ): Promise<MaintenanceRequestComment>;
+  deleteMaintenanceRequestComment(id: string): Promise<void>;
 
   // Invoices
   createInvoice(invoice: InsertInvoice): Promise<Invoice>;
@@ -1655,6 +1672,36 @@ export class DatabaseStorage implements IStorage {
 
   async deleteContactNote(id: string): Promise<void> {
     await db.delete(contactNotes).where(eq(contactNotes.id, id));
+  }
+
+  // Request threads Implementation
+  async getMaintenanceRequestComments(requestId: string): Promise<MaintenanceRequestComment[]> {
+    return await db
+      .select()
+      .from(maintenanceRequestComments)
+      .where(eq(maintenanceRequestComments.requestId, requestId))
+      .orderBy(asc(maintenanceRequestComments.createdAt));
+  }
+
+  async getMaintenanceRequestComment(id: string): Promise<MaintenanceRequestComment | undefined> {
+    const [row] = await db.select().from(maintenanceRequestComments).where(eq(maintenanceRequestComments.id, id));
+    return row;
+  }
+
+  async createMaintenanceRequestComment(
+    comment: InsertMaintenanceRequestComment & {
+      requestId: string;
+      authorUserId: string | null;
+      authorEmail: string | null;
+      authorName: string | null;
+    },
+  ): Promise<MaintenanceRequestComment> {
+    const [row] = await db.insert(maintenanceRequestComments).values(comment).returning();
+    return row;
+  }
+
+  async deleteMaintenanceRequestComment(id: string): Promise<void> {
+    await db.delete(maintenanceRequestComments).where(eq(maintenanceRequestComments.id, id));
   }
 
   // Property setup checklist Implementation

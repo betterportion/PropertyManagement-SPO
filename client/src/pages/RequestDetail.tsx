@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Container, PageHeader, PageStack, Section } from "@/components/layout/page";
 import { AccessDeniedState, EmptyState, ErrorState, LoadingState } from "@/components/states";
 import MaintenanceEditDialog from "@/components/MaintenanceEditDialog";
+import RequestThread from "@/components/RequestThread";
 import { useAuth } from "@/hooks/useAuth";
 import { isForbiddenError } from "@/lib/authUtils";
 import { formatDate, formatValue } from "@/lib/format";
@@ -17,6 +18,7 @@ import {
   isClosedMaintenanceStatus,
   type MaintenanceContact,
   type MaintenanceRequest,
+  type MaintenanceRequestComment,
   type MaintenanceRequestPhoto,
 } from "@shared/schema";
 
@@ -37,6 +39,7 @@ import {
 
 /** The shape of `/api/auth/user` this page reads. */
 interface RequestUser {
+  id?: string | null;
   role?: string | null;
   permissions?: { canManageMaintenance?: boolean | null } | null;
 }
@@ -88,6 +91,13 @@ export default function RequestDetail() {
   // the list here without a second invalidation.
   const contactsQuery = useQuery<MaintenanceContact[]>({
     queryKey: ["/api/maintenance-requests", requestId, "contacts"],
+    enabled: !!requestId,
+  });
+
+  // The thread, fetched alongside the request rather than after it: the
+  // server has already filtered it to what this caller may read.
+  const commentsQuery = useQuery<MaintenanceRequestComment[]>({
+    queryKey: ["/api/maintenance-requests", requestId, "comments"],
     enabled: !!requestId,
   });
 
@@ -295,6 +305,14 @@ export default function RequestDetail() {
             )}
           </CardContent>
         </Card>
+
+        <RequestThread
+          requestId={request.id}
+          commentsQuery={commentsQuery}
+          isStaff={isStaff}
+          isAdmin={typedUser?.role === "admin"}
+          currentUserId={typedUser?.id ?? null}
+        />
 
         {canEdit && (
           <MaintenanceEditDialog request={request} open={isEditOpen} onClose={() => setIsEditOpen(false)} />
