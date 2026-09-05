@@ -1,4 +1,5 @@
 import { Link } from "wouter";
+import { AnimatedNumber } from "@/components/animated-number";
 import { Card, CardContent } from "@/components/ui/card";
 import { StatPlaceholder } from "@/components/states";
 import { cn } from "@/lib/utils";
@@ -8,7 +9,8 @@ import { cn } from "@/lib/utils";
  * §6 of the SPO design system.
  *
  * While a number is still loading it shows an em-dash placeholder, never a
- * spinner and never a misleading zero.
+ * spinner and never a misleading zero. Once it arrives, a plain-number value
+ * rolls up briefly; anything preformatted (currency strings) renders as-is.
  *
  * With `href` the whole tile is a link to the page behind the number, with a
  * subtle hover glow so it reads as clickable.
@@ -47,7 +49,13 @@ export function StatTile({
           className="mt-2 text-3xl font-semibold tabular-nums tracking-tight"
           data-testid={`stat-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
         >
-          {isLoading ? <StatPlaceholder /> : value}
+          {isLoading ? (
+            <StatPlaceholder />
+          ) : typeof value === "number" ? (
+            <AnimatedNumber value={value} />
+          ) : (
+            value
+          )}
         </p>
         {hint && <p className="mt-1 text-xs text-muted-foreground">{hint}</p>}
       </CardContent>
