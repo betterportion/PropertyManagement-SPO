@@ -232,6 +232,7 @@ server/                 Express backend
   actionItems.ts        What the dashboard says needs attention (pure, testable)
   maintenanceStatus.ts  When a request closed, from its status transition (pure)
   comments.ts           The body rule for a request thread: tidy, cap at 4,000, refuse over (pure)
+  houseFacts.ts         What a house's facts row becomes on a save, and which codes moved (pure)
   walkthroughTemplate.ts What a new walkthrough starts out containing (pure)
   residentImport.ts     Roster CSV parsing, validation and duplicates (pure)
   regionSummary.ts      The per-region rollup for a national admin (pure)
@@ -240,6 +241,7 @@ server/                 Express backend
   seasonalTasks.ts      Calendar reminders (walkthroughs, utilities) as tasks
   migrateRegions.ts     Idempotent startup fix-ups for legacy region spellings
   notifications.ts      Builds the message text for each kind of email (pure)
+  commentRecipients.ts  Who a new comment is emailed to, through the real read rule (pure)
   email.ts              The only code that talks to Resend; off until configured
   errors.ts             Error classification and the final error middleware
   storage.ts            All database access, behind one interface
@@ -259,6 +261,7 @@ shared/
   actionItems.ts        Types the dashboard and the server both read
   assetLifecycle.ts     Lifespans, thresholds and the replacement status
   depositLedger.ts      Deposit arithmetic and splits, in whole cents
+  houseFacts.ts         The house-facts field vocabulary and the access codes
   propertySetup.ts      The per-property setup checklist and its states
   residentDocuments.ts  The fixed list of documents a resident signs
 migrations/             Committed SQL migrations, applied with db:migrate
@@ -341,7 +344,10 @@ Two things to know about running more than one instance:
 | Document | What it covers |
 |---|---|
 | [`CLAUDE.md`](CLAUDE.md) | Detailed architecture, data model, conventions, standing rules and gotchas — written for AI coding assistants, but the most useful document here for any engineer |
+| [`CONTEXT.md`](CONTEXT.md) | The glossary: the words the portal uses for people, requests, threads, projects and the house, so screens, routes, tests and tickets say the same thing |
+| [`docs/adr/`](docs/adr/) | Architecture decision records — why projects are a request type, and why the portal holds a door code |
 | [`docs/PRODUCTION_MIGRATION.md`](docs/PRODUCTION_MIGRATION.md) | The staging-first runbook for standing up Supabase, Google Workspace login and Render |
 | [`design_guidelines.md`](design_guidelines.md) | Typography, spacing, layout and component design rules |
 | [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) | The current backlog: what has shipped, what is blocked and on whom, and what is deliberately left for later |
+| [`docs/IMPLEMENTATION_PLAN_ADDENDUM.md`](docs/IMPLEMENTATION_PLAN_ADDENDUM.md) | Phases 9–11 from a second regional administrator's feedback: request threads, project types and house facts |
 | [`docs/spo-design-system.md`](docs/spo-design-system.md) | The shared SPO design system — the authority behind `design_guidelines.md` |

@@ -52,7 +52,7 @@ Three conventions in that suite, all of which exist because of a real miss:
 |---|---|
 | `index.ts` | Entry point. Validates configuration before anything else loads, sets `trust proxy`, security headers, JSON body parsing, API request logging, graceful shutdown, listens on `PORT`. |
 | `config.ts` | Every environment variable the server cannot run without, checked once at boot and reported together. Also owns the OIDC provider settings, the email settings and `APP_URL` — the portal's public address, optional, read by `readAppUrlFromEnv` for the links in comment email and never a boot failure when unset. |
-| `routes.ts` | Every API endpoint. One large file, ~133 handlers. |
+| `routes.ts` | Every API endpoint. One large file, ~147 handlers. |
 | `auth.ts` | OpenID Connect login and the session store. Reads its provider settings from `config.ts`. |
 | `authz.ts` | Who may do what: `requireActiveUser`, `requirePermission`, the region helpers, upload and maintenance ownership. |
 | `audit.ts` | Records the actions somebody may have to account for later. See "Audit log" below. |
@@ -61,6 +61,7 @@ Three conventions in that suite, all of which exist because of a real miss:
 | `walkthroughTemplate.ts` | What a new walkthrough starts out containing. `planFromTemplate` for a property's first, `planFromPreviousWalkthrough` for every one after, `templateRoomItems` for the add-a-room prefill. Pure — rooms and items in, planned rooms out. |
 | `maintenanceStatus.ts` | When a maintenance request closed. `closedDateChange` is a pure function over the previous status, the next status and `now`, returning the patch to `completedDate`. Closing stamps it, reopening clears it, and an edit that does not change the status writes nothing. |
 | `comments.ts` | The body rule for a request thread: `commentBodyFromClient` tidies whitespace (paragraphs kept) and refuses anything over `MAX_COMMENT_LENGTH` (4,000) as a 400. One function, one call site, so the cap cannot drift per route. |
+| `houseFacts.ts` | What a house's facts row becomes on a save. `planHouseFacts` is a pure function over the stored row, the incoming content and `now`, returning the row to write and the codes whose value changed — so a `...UpdatedAt` moves only when its code does, and the client never sends a date. |
 | `actionItems.ts` | What the dashboard says needs attention, from schedules coming due, unpaid rent and deposits still held, plus the manual `tasks`. `buildActionItems` is pure — records plus `now` — so it tests without a database or a clock. |
 | `regionSummary.ts` | The per-region rollup a national admin reads. Also pure. "Health" is operational load only; unpaid rent is reported beside it, never inside it. |
 | `aggregates.ts` | Rollups over maintenance history — recurring issues and contractor callbacks. Computed over the caller's own visible requests, so a rollup can never widen what somebody can see. |

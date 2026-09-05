@@ -8,6 +8,11 @@ One thing in the main plan is **revised** by this addendum. Section 5.5 says not
 project entity. That judgment was about retrospective contractor history and it stands for
 that. It does not cover prospective project tracking, which is what Phase 10 adds.
 
+**Where things stand (2026-09-05):** every item below has shipped. Phase 9 in PRs
+#125, #126, #130, #131 and #132; Phase 10 in #127, #133 and #134; Phase 11 in
+#128; the 2.6 amendment in #135. The sections keep their full reasoning as a
+record; the ✅ marks say what landed and where.
+
 ---
 
 ## Decisions taken
@@ -21,12 +26,12 @@ that. It does not cover prospective project tracking, which is what Phase 10 add
 
 ---
 
-# Phase 9 — Request threads
+# Phase 9 — Request threads ✅
 
 The stated problem: everything about a repair currently happens over text and phone calls
 and then evaporates. Who was coming, when, what they found, what it cost.
 
-### 9.1 Comments
+### 9.1 Comments ✅ (merged in PRs #125, #126; the attachment in #132)
 
 One table: request ID, author (a user ID), body, internal flag, created timestamp.
 Optional attachment through the existing upload pipeline.
@@ -42,7 +47,7 @@ logging them buries the events that matter — the same reasoning that keeps pho
 out of the log. A comment carrying an attachment still records the document upload, because
 that already happens at the upload layer.
 
-### 9.2 Internal versus shared
+### 9.2 Internal versus shared ✅ (merged in PR #126)
 
 **Two comment visibilities, defaulting to internal.**
 
@@ -57,14 +62,14 @@ someone has to notice.
 Filtering happens server-side. A client-side filter over a full fetch ships internal
 comments to the browser of someone who should not have them.
 
-### 9.3 Relayed updates
+### 9.3 Relayed updates ✅ (merged in PR #126)
 
 An RA posting on the handyman's behalf marks the comment as relayed and names the source.
 It renders as "Sarah, relaying Dave (handyman)" rather than as Sarah's own words.
 
 Costs nothing now and keeps the history honest when someone reads it two years later.
 
-### 9.4 Email notification
+### 9.4 Email notification ✅ (merged in PR #130)
 
 Every new comment emails the people who can see it. Guards, all four required:
 
@@ -82,7 +87,7 @@ credential.
 If this turns out to be noisy in practice, the fix is a daily digest, not turning it off.
 Build the off switch now so nobody has to ship an emergency change.
 
-### 9.5 Resident posting
+### 9.5 Resident posting ✅ (merged in PR #131)
 
 Leaders and stewards can post shared comments on requests for their own house. They cannot
 post internal comments and cannot see them.
@@ -97,13 +102,13 @@ one rule in one place rather than implementing it twice.
 
 ---
 
-# Phase 10 — Request types: projects and CapEx
+# Phase 10 — Request types: projects and CapEx ✅
 
 The second RA described work that is not a repair: projects SPO or the handyman initiate,
 capital projects with competing bids and signed contracts, and a backlog of things to get
 to eventually.
 
-### 10.1 The type field
+### 10.1 The type field ✅ (merged in PR #127)
 
 Add a type to `maintenance_requests`: **`request` / `project` / `capex`.** Existing rows
 become `request`.
@@ -111,7 +116,7 @@ become `request`.
 Reusing the table gets status, room tagging, contractor links and threads for free, and
 gives one list per property instead of three. That was the reason for choosing it.
 
-### 10.2 Visibility — amends 5.2
+### 10.2 Visibility — amends 5.2 ✅ (merged in PR #127, in the same change as 10.1)
 
 **This is the catch, and it must land in the same change as 10.1.**
 
@@ -129,7 +134,7 @@ house — the house match is exactly what would otherwise let them through.
 Also note `submittedBy` holds an **email**, not a user ID, and `ownsRecord` compares against
 `ctx.user.email`. Do not re-key it.
 
-### 10.3 Project fields
+### 10.3 Project fields ✅ (merged in PR #133)
 
 Only on `project` and `capex` types:
 
@@ -145,7 +150,7 @@ Known issue to be aware of: deleting a record leaves the file in storage. A remo
 document persists in the bucket. Acceptable here, but do not let anyone believe a delete is
 a purge.
 
-### 10.4 Wishlist
+### 10.4 Wishlist ✅ (merged in PR #134 — kept a priority, as decided)
 
 `maintenance_requests.priority` already has a `wishlist` level, which covers "things we'd
 like to get to down the line."
@@ -154,7 +159,7 @@ like to get to down the line."
 questions — type is what kind of work this is, priority is how urgent. A wishlist CapEx
 project is a coherent thing and collapsing the two makes it unrepresentable.
 
-### 10.5 Open work on a property
+### 10.5 Open work on a property ✅ (merged in PR #134)
 
 The property page shows open items grouped by type: repairs, projects, capital projects,
 and the wishlist backlog. This was the explicit ask — see everything open for a house in
@@ -164,11 +169,11 @@ Staff view only. Residents see their repairs, per 10.2.
 
 ---
 
-# Phase 11 — Property information for leaders
+# Phase 11 — Property information for leaders ✅
 
 The first thing a household leader needs and currently has nowhere to find.
 
-### 11.1 The house facts list
+### 11.1 The house facts list ✅ (merged in PR #128)
 
 A structured, resident-visible block on the property: door and gate codes, security system
 and camera notes, parking and towing rules, surfaces needing specific care (butcher block,
@@ -184,7 +189,7 @@ be on a student's screen.
 
 Surfaces on the resource hub built in 8.1.
 
-### 11.2 Door codes
+### 11.2 Door codes ✅ (merged in PR #128)
 
 Fine to store, with three constraints:
 
@@ -201,7 +206,7 @@ Fine to store, with three constraints:
 
 # Amendments to existing phases
 
-**2.6 — year-over-year comparison.** Add a photo view: pick a room, see its photos across
+**2.6 — year-over-year comparison.** ✅ (merged in PR #135) Add a photo view: pick a room, see its photos across
 walkthrough years side by side. Once 2.1 makes walkthroughs dated events with photos
 attached per room, the data already supports this. It is a view, not new structure.
 
@@ -233,15 +238,15 @@ tagging in 5.1 is what makes "how often does this come up" answerable at all.
 
 # Suggested order
 
-| Order | Item | Blocked by |
-|---|---|---|
-| 1 | 9.1–9.3 threads, internal default, relay attribution | 5 |
-| 2 | 10.1 + 10.2 together — **never separately** | 5 |
-| 3 | 11 property information and door codes | 3 |
-| 4 | 9.4 email notification | 9.1, 7 |
-| 5 | 9.5 resident posting | 9.2 |
-| 6 | 10.3–10.5 project fields and property view | 10.1 |
-| 7 | 2.6 photo comparison | 2.1, second season of data |
+| Order | Item | Blocked by | Shipped |
+|---|---|---|---|
+| 1 | 9.1–9.3 threads, internal default, relay attribution | 5 | ✅ #125, #126, #132 |
+| 2 | 10.1 + 10.2 together — **never separately** | 5 | ✅ #127 |
+| 3 | 11 property information and door codes | 3 | ✅ #128 |
+| 4 | 9.4 email notification | 9.1, 7 | ✅ #130 |
+| 5 | 9.5 resident posting | 9.2 | ✅ #131 |
+| 6 | 10.3–10.5 project fields and property view | 10.1 | ✅ #133, #134 |
+| 7 | 2.6 photo comparison | 2.1, second season of data | ✅ #135 |
 
 **Highest-risk item:** 10.2. Shipping the type field without the visibility rule exposes
 cost and contract data to student accounts, and it will not be obvious that it happened.
