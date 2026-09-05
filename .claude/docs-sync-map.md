@@ -15,6 +15,10 @@ about *this* repo. When a change lands on a path with no row here, add the row i
 | `.env.example` | every environment variable, with placeholders |
 | `docs/PRODUCTION_MIGRATION.md` | the staging-first runbook: Supabase, Google Workspace login, Render, env tables |
 | `docs/IMPLEMENTATION_PLAN.md` | backlog phase status — what shipped, what is blocked |
+| `docs/IMPLEMENTATION_PLAN_ADDENDUM.md` | phases 9–11 (threads, request types, house facts) and the 2.6 amendment — same phase-status claims as the main plan |
+| `CONTEXT.md` | the glossary: the word the portal uses for each thing, and the words to avoid |
+| `docs/adr/` | one decision each; an ADR records why a choice was made and is superseded, never edited to agree with new code |
+| `docs/agents/` | the issue tracker, triage labels and domain-doc conventions CLAUDE.md's "Agent skills" section points at |
 | `design_guidelines.md`, `docs/spo-design-system.md` | design rules only; they make no claims about code shape |
 
 ## Surfaces
@@ -43,7 +47,9 @@ about *this* repo. When a change lands on a path with no row here, add the row i
 | `e2e/` | CLAUDE.md's walkthrough-screen section names `e2e/mobile.spec.ts` as what proves the note-saving rule; README "Checks before you push" | a renamed or deleted spec file breaks a doc that points at it by name |
 | `client/src/lib/` | CLAUDE.md where it names a module as owning a rule (`walkthrough.ts`, `maintenanceFilters.ts`, `format.ts`) | the named module still exports what the doc says it owns |
 | a known issue fixed, or a new one accepted | CLAUDE.md "Known open issues"; README "Known issues" | the two lists say the same things |
-| a plan item shipped | `docs/IMPLEMENTATION_PLAN.md` phase marks | the phase the PR title names |
+| a plan item shipped | phase marks in `docs/IMPLEMENTATION_PLAN.md` **and** `docs/IMPLEMENTATION_PLAN_ADDENDUM.md` | the phase the PR title names — the addendum carries phases 9–11, so a PR from those goes there, not in the main plan |
+| a doc added under `docs/`, or at the repo root | README "More documentation"; this map's Docs table | `ls *.md docs/*.md docs/*/` — every doc is named in one of them, or is deliberately reached through a doc that is |
+| vocabulary a screen or route uses for a thing | `CONTEXT.md` — a term renamed in code but not here, or a new thing with no entry | read the hunk against the glossary; a new noun on a screen needs an entry, a renamed one needs the entry moved |
 
 ## Not claims
 
