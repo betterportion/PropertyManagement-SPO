@@ -25,7 +25,7 @@ On top of the role, each user has a row of fine-grained permissions — eighteen
 
 ## Tech stack
 
-**Frontend** — React 18 + TypeScript, Vite, Wouter for routing, TanStack Query for server state, React Hook Form + Zod for forms, Tailwind CSS with shadcn/ui (New York style) on Radix primitives.
+**Frontend** — React 18 + TypeScript, Vite, Wouter for routing, TanStack Query for server state, React Hook Form + Zod for forms, Tailwind CSS with shadcn/ui (New York style) on Radix primitives, and `motion` for the one count-up on dashboard stat tiles.
 
 **Backend** — Express on Node 20, TypeScript with ESM, Passport with `openid-client` for OpenID Connect login, `express-session` backed by PostgreSQL, `papaparse` for the roster CSV import.
 
