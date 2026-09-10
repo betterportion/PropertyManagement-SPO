@@ -223,12 +223,47 @@ question.
 **8.1 — resource hub.** Add the Phase 11.1 house facts block to the property-specific
 section.
 
+## Amendments of 2026-09-09
+
+Four items, audited before anything was built. Two were already there.
+
+**5.3 — type filter on history and archive views.** ✅ Already built in PR #127: the
+maintenance list's type filter defaults to all types, the closed-range filter applies to
+every type, and the property page's request table has no filter at all, so a completed
+capital project stays in a house's history. What this amendment added is the test that
+mattered: a household leader asking the list route for `?type=project` or `?type=capex` by
+name still gets only their repairs, because the resident rule is a separate server-side
+condition on the type column and the query string is not read at all. The 120-day window
+is unchanged.
+
+**10.5 — two more views of open work.** ✅ The Maintenance page has an "Open work" tab
+(`?view=open`) rendering the property page's grouping over whatever the filters select —
+one house once a house is picked, which is the primary view. The dashboard reads open
+work through `actionItems.ts` as one aggregated line per house, pending and in-progress
+together, keyed on the address and linking to that house's open work; the stat tiles show
+open repairs and open jobs as two counts from `regionSummary.ts`. Never one line per
+request: that space belongs to triage. Staff only, region-scoped, failing closed on an
+empty region list.
+
+**8.1 — three named links.** ✅ `shared/resourceHubSlots.ts` fixes the three places —
+Household Code of Conduct, Fire Extinguisher guidelines, Active Shooter Policy — and a
+link fills one through `resource_links.slotKey` (migration `0031`). An empty slot renders
+"Not yet available" rather than being hidden or pointed at a placeholder, so the fire
+extinguisher document SPO has yet to write is visibly waiting. Bound by key, one holder
+per slot, national only; an admin binds one from Settings.
+
+**2.6 — room photos by year.** ✅ Already built in PR #135 as the photo comparison: pick a
+room, one column per dated walkthrough, the label derived from the walkthrough's date
+with no tagging and no upload step. The column carries the full date rather than the year
+alone, because a move-in and a move-out can share a year. Nothing added.
+
 ---
 
 # Not changing
 
 **Active shooter paperwork** was already in 8.1's global links, alongside the conduct policy
-and fire extinguisher guidance. Already covered.
+and fire extinguisher guidance. Now a named slot on the hub — see the 2026-09-09 amendment
+to 8.1 above.
 
 **Archived requests.** Already covered: range filters out to all-time in 5.3, per-property
 triage in 5.4, and recurring-issue aggregates in 8.4. Requests are never deleted. Room

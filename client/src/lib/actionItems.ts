@@ -104,6 +104,13 @@ export function resolveRequest(item: ActionItem): ResolveRequest {
       // Replacing something is a decision, not a click: the asset page is
       // where the date is corrected or the warning snoozed with a reason.
       return { actionLabel: "Open the asset", href: `/assets/${item.id}` };
+    case "maintenance": {
+      // Open work on a house resolves request by request, on the Maintenance
+      // page filtered to that house. The id is the house's address, which is
+      // what the building filter keys on.
+      const query = new URLSearchParams({ building: item.id, view: "open" });
+      return { actionLabel: "See the open work", href: `/maintenance?${query.toString()}` };
+    }
     default:
       // A newer server can send a kind this client has never heard of. The
       // row degrades to a link rather than white-screening the page, which is
@@ -117,6 +124,7 @@ export function categoryLabel(item: ActionItem): string {
   if (item.source === "lease") return "Lease";
   if (item.source === "setup") return "Setup";
   if (item.source === "asset") return "Asset";
+  if (item.source === "maintenance") return "Maintenance";
   if (item.category === "safety") return "Safety";
   if (item.source === "task") return "Task";
   if (item.category === "finance") return "Finance";

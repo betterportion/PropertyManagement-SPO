@@ -88,6 +88,7 @@ import {
   type MaintenanceRequest,
   type MaintenanceRequestComment,
 } from "@shared/schema";
+import { hubSlotProblem } from "@shared/resourceHubSlots";
 import { STANDARD_SCHEDULE_TEMPLATES, addMonths } from "./schedules";
 import { planHouseFacts } from "./houseFacts";
 import { buildActionItems } from "./actionItems";
@@ -3936,7 +3937,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!ctx) return;
       if (!requireAdmin(res, ctx)) return;
 
-      res.json(await storage.createResourceLink(insertResourceLinkSchema.parse(req.body)));
+      const link = insertResourceLinkSchema.parse(req.body);
+      // A named slot is national and has one holder -- see
+      // shared/resourceHubSlots.ts. The unique index is the backstop; this is
+      // the message a person can act on.
+      const problem = link.slotKey ? hubSlotProblem(link, await storage.getAllResourceLinks()) : null;
+      if (problem) return res.status(400).json({ message: problem });
+
+      res.json(await storage.createResourceLink(link));
     } catch (error) {
       sendError(res, error, "Failed to add the link");
     }
@@ -3953,9 +3961,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Link not found" });
       }
 
-      res.json(
-        await storage.updateResourceLink(req.params.id, insertResourceLinkSchema.partial().parse(req.body)),
-      );
+      const patch = insertResourceLinkSchema.partial().parse(req.body);
+      // Checked over the merged row: an edit sends only the field it changes,
+      // so narrowing a slotted link to one region arrives with no slotKey.
+      const merged = { ...existing, ...patch };
+      const problem = merged.slotKey ? hubSlotProblem(merged, await storage.getAllResourceLinks()) : null;
+      if (problem) return res.status(400).json({ message: problem });
+
+      res.json(await storage.updateResourceLink(req.params.id, patch));
     } catch (error) {
       sendError(res, error, "Failed to update the link");
     }
@@ -4176,7 +4189,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!requireStaff(res, ctx)) return;
       const seesFinance = hasPermission(ctx, "canViewFinancials", "canManageFinancials");
 
-      const [schedules, rentPayments, deposits, residents, allTasks, properties, setupItems, assets] = await Promise.all([
+      const [schedules, rentPayments, deposits, residents, allTasks, properties, setupItems, assets, requests] = await Promise.all([
         storage.getAllMaintenanceSchedules(),
         seesFinance ? storage.getAllRentPayments() : [],
         seesFinance ? storage.getAllSecurityDeposits() : [],
@@ -4185,6 +4198,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         storage.getAllProperties(),
         storage.getAllPropertySetupItems(),
         storage.getAllAssets(),
+        storage.getAllMaintenanceRequests(),
       ]);
 
       const items = buildActionItems({
@@ -4202,6 +4216,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // region has nothing to attach to.
         setupItems,
         assets: filterByRegion(ctx, assets),
+        // Staff only (requireStaff above), so the region rule is the whole
+        // rule -- and it fails closed on an empty region list.
+        requests: filterByRegion(ctx, requests),
       });
       res.json(items);
     } catch (error) {

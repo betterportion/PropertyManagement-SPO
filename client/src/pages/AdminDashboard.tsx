@@ -1,11 +1,9 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
-import { Building2, Wrench, DollarSign, CalendarClock, ShieldCheck, ArrowLeft, Plus } from "lucide-react";
+import { Building2, Wrench, Hammer, DollarSign, CalendarClock, ShieldCheck, ArrowLeft, Plus } from "lucide-react";
 
 import { useAuth } from "@/hooks/useAuth";
-import MaintenanceRequestCard from "@/components/MaintenanceRequestCard";
-import MaintenanceEditDialog from "@/components/MaintenanceEditDialog";
 import ActionItemList from "@/components/ActionItemList";
 import RegionCard, { type RegionSummary } from "@/components/RegionCard";
 import { Card, CardContent } from "@/components/ui/card";
@@ -15,33 +13,29 @@ import { StatGrid, StatTile } from "@/components/stat-tile";
 import { EmptyState } from "@/components/states";
 import { formatCurrency } from "@/lib/format";
 import type { ActionItem } from "@/lib/actionItems";
-import type { MaintenanceRequest, Property } from "@shared/schema";
+import type { Property } from "@shared/schema";
 
-function time(value: Date | string | null | undefined) {
-  if (!value) return 0;
-  const date = value instanceof Date ? value : new Date(value);
-  return Number.isNaN(date.getTime()) ? 0 : date.getTime();
-}
+/** How many houses with open work the dashboard lists before pointing at the Maintenance page. */
+const OPEN_WORK_HOUSES_SHOWN = 5;
 
 export default function AdminDashboard() {
   const { user } = useAuth();
   const isAdmin = (user as { role?: string } | null)?.role === "admin";
 
   const [selectedRegion, setSelectedRegion] = useState<string | null>(null);
-  const [selectedRequest, setSelectedRequest] = useState<MaintenanceRequest | null>(null);
-  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
 
   const summariesQuery = useQuery<RegionSummary[]>({ queryKey: ["/api/region-summary"] });
-  const requestsQuery = useQuery<MaintenanceRequest[]>({ queryKey: ["/api/maintenance-requests"] });
   const propertiesQuery = useQuery<Property[]>({ queryKey: ["/api/properties"] });
   const actionItemsQuery = useQuery<ActionItem[]>({ queryKey: ["/api/action-items"] });
 
   const summaries = summariesQuery.data ?? [];
-  const requests = requestsQuery.data ?? [];
   const actionItems = actionItemsQuery.data ?? [];
 
-  // Leadership KPIs, summed across every region the viewer can see.
-  const openRequestsTotal = summaries.reduce((sum, r) => sum + r.openRequests, 0);
+  // Leadership KPIs, summed across every region the viewer can see. Repairs
+  // and jobs (projects and capital projects) are two numbers, because they
+  // are two different conversations: one about a handyman, one about a bid.
+  const openRepairsTotal = summaries.reduce((sum, r) => sum + r.openRepairs, 0);
+  const openJobsTotal = summaries.reduce((sum, r) => sum + r.openJobs, 0);
   const renewalsTotal = summaries.reduce((sum, r) => sum + r.leaseRenewalsDue, 0);
   const unpaidTotal = summaries.reduce((sum, r) => sum + Number(r.unpaidRent.amount), 0);
 
@@ -52,24 +46,20 @@ export default function AdminDashboard() {
   const showOverview = !focusedRegion && summaries.length > 1;
   const canGoBack = !!selectedRegion && summaries.length > 1;
 
-  const openRequests = requests
-    .filter((r) => r.status === "pending" || r.status === "in_progress")
-    .sort((a, b) => time(b.submittedDate) - time(a.submittedDate));
-  const scopedRequests = (focusedRegion ? openRequests.filter((r) => r.region === focusedRegion) : openRequests).slice(0, 5);
+  // Open work, one line per house, from the same action-item rule the Tasks
+  // page reads. The items needing attention rather than the full list: the
+  // list itself is one click away on the Maintenance page, filtered to the
+  // house the line names.
+  const openWorkItems = actionItems.filter((i) => i.source === "maintenance");
+  const scopedOpenWork = (focusedRegion ? openWorkItems.filter((i) => i.region === focusedRegion) : openWorkItems).slice(
+    0,
+    OPEN_WORK_HOUSES_SHOWN,
+  );
 
   // Per-house maintenance schedules plus the region-level safety reminders
   // (walkthroughs, utilities) — everything that belongs to safety & preventive.
   const safetyItems = actionItems.filter((i) => i.source === "schedule" || i.category === "safety");
   const scopedSafety = (focusedRegion ? safetyItems.filter((i) => i.region === focusedRegion) : safetyItems).slice(0, 5);
-
-  const handleEditRequest = (request: MaintenanceRequest) => {
-    setSelectedRequest(request);
-    setIsEditDialogOpen(true);
-  };
-  const handleCloseDialog = () => {
-    setIsEditDialogOpen(false);
-    setSelectedRequest(null);
-  };
 
   const attentionHeading = focusedRegion ? `${focusedRegion} — needs attention` : "Needs attention";
 
@@ -94,7 +84,7 @@ export default function AdminDashboard() {
             }
           />
 
-          <StatGrid>
+          <StatGrid className="lg:grid-cols-5">
             <StatTile
               label="Properties"
               href="/properties"
@@ -104,12 +94,20 @@ export default function AdminDashboard() {
               isLoading={propertiesQuery.isLoading}
             />
             <StatTile
-              label="Open requests"
-              href="/maintenance"
-              value={openRequestsTotal}
+              label="Open repairs"
+              href="/maintenance?type=request"
+              value={openRepairsTotal}
               hint="Reported, not yet finished"
               icon={Wrench}
-              isLoading={requestsQuery.isLoading}
+              isLoading={summariesQuery.isLoading}
+            />
+            <StatTile
+              label="Open jobs"
+              href="/maintenance?view=open"
+              value={openJobsTotal}
+              hint="Projects and capital projects"
+              icon={Hammer}
+              isLoading={summariesQuery.isLoading}
             />
             <StatTile
               label="Renewals due"
@@ -162,25 +160,21 @@ export default function AdminDashboard() {
               <div className="space-y-4">
                 <div className="flex items-center justify-between gap-3">
                   <h3 className="flex items-center gap-2 font-medium">
-                    <Wrench className="h-4 w-4 text-muted-foreground" /> Maintenance requests
+                    <Wrench className="h-4 w-4 text-muted-foreground" /> Open work by house
                   </h3>
                   <Button variant="secondary" size="sm" asChild data-testid="button-view-all-requests">
-                    <Link href="/maintenance">View all</Link>
+                    <Link href="/maintenance?view=open">View all</Link>
                   </Button>
                 </div>
-                {scopedRequests.length === 0 ? (
-                  <Card>
-                    <CardContent className="p-0">
-                      <EmptyState icon={Wrench} title="No open requests" description="Reported problems that aren't finished yet show up here." className="py-6" />
-                    </CardContent>
-                  </Card>
-                ) : (
-                  <div className="space-y-4">
-                    {scopedRequests.map((request) => (
-                      <MaintenanceRequestCard key={request.id} request={request} isAdmin onEdit={() => handleEditRequest(request)} />
-                    ))}
-                  </div>
-                )}
+                <Card>
+                  <CardContent className="p-4">
+                    {scopedOpenWork.length === 0 ? (
+                      <EmptyState icon={Wrench} title="No open work" description="Repairs, projects and capital projects still open show up here, one line per house." className="py-6" />
+                    ) : (
+                      <ActionItemList items={scopedOpenWork} />
+                    )}
+                  </CardContent>
+                </Card>
               </div>
 
               <div className="space-y-4">
@@ -205,10 +199,6 @@ export default function AdminDashboard() {
             </div>
           </div>
         </PageStack>
-
-        {selectedRequest && (
-          <MaintenanceEditDialog request={selectedRequest} open={isEditDialogOpen} onClose={handleCloseDialog} />
-        )}
       </Container>
     </Section>
   );

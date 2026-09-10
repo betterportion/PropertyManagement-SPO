@@ -42,6 +42,44 @@ describe("buildRegionSummaries", () => {
     expect(summary.attentionScore).toBe(3);
   });
 
+  // Amendment to 5.3 / 10.5: the dashboard reports repairs and jobs as two
+  // numbers. A job is a project or a capital project; a repair is a request.
+  it("splits open work into repairs and jobs, and the two add up to open requests", () => {
+    const [summary] = buildRegionSummaries(
+      {
+        ...empty,
+        requests: [
+          request({ id: "repair-pending", type: "request", status: "pending" }),
+          request({ id: "repair-going", type: "request", status: "in_progress" }),
+          request({ id: "project", type: "project", status: "pending" }),
+          request({ id: "capex", type: "capex", status: "in_progress" }),
+          request({ id: "done-project", type: "project", status: "completed" }),
+          request({ id: "dropped-capex", type: "capex", status: "cancelled" }),
+          request({ id: "elsewhere", type: "request", status: "pending", region: "East Central" }),
+        ],
+      },
+      ["Northwest"],
+      NOW,
+    );
+    expect(summary.openRepairs).toBe(2);
+    expect(summary.openJobs).toBe(2);
+    expect(summary.openRequests).toBe(summary.openRepairs + summary.openJobs);
+  });
+
+  it("counts a request with no type as neither a repair nor a job, so nothing is guessed", () => {
+    // Every real row carries the column (not null, default request); a
+    // fixture without it stands in for a shape the code should not invent a
+    // kind for. The total still counts it as open.
+    const [summary] = buildRegionSummaries(
+      { ...empty, requests: [request({ id: "untyped", status: "pending", type: undefined })] },
+      ["Northwest"],
+      NOW,
+    );
+    expect(summary.openRequests).toBe(1);
+    expect(summary.openRepairs).toBe(0);
+    expect(summary.openJobs).toBe(0);
+  });
+
   it("counts open safety reminders (walkthroughs, utilities) toward safety load", () => {
     const [summary] = buildRegionSummaries(
       {

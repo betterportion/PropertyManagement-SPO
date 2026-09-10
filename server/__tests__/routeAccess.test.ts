@@ -1680,6 +1680,41 @@ describe("a household leader and the requests that are not repairs", () => {
     expect(body.map((r: { id: string }) => r.id)).toEqual(["req-own-repair", "req-own-project", "req-own-capex"]);
   });
 
+  // Amendment to 5.3: the type filter is a STAFF default. The resident
+  // constraint is a separate server-side condition, applied whatever the
+  // query string says, and derived from the type column alone -- never from
+  // status, priority or the filter. The house match in ownsRecord is exactly
+  // what would otherwise let these through.
+  it.each(["project", "capex"])(
+    "gives a household leader no %s on their own house even when asked for that type by name",
+    async (type) => {
+      leaderOfHouseA();
+      storageMock.getAllMaintenanceRequests.mockResolvedValue([OWN_REPAIR, OWN_PROJECT, OWN_CAPEX, OWN_SUBMITTED_PROJECT]);
+      const { status, body } = await get(`/api/maintenance-requests?type=${type}`);
+      expect(status).toBe(200);
+      expect(body.map((r: { id: string }) => r.id)).toEqual(["req-own-repair"]);
+      expect(JSON.stringify(body)).not.toContain("$18,400");
+    },
+  );
+
+  it("gives a household leader no project on their own house even when asked for every type", async () => {
+    leaderOfHouseA();
+    storageMock.getAllMaintenanceRequests.mockResolvedValue([OWN_REPAIR, OWN_PROJECT, OWN_CAPEX, OWN_SUBMITTED_PROJECT]);
+    const { body } = await get("/api/maintenance-requests?type=all");
+    expect(body.map((r: { id: string }) => r.id)).toEqual(["req-own-repair"]);
+  });
+
+  // Positive control: the same parameter changes nothing for staff either,
+  // because the type filter lives on the client. If a server-side type
+  // filter is ever added, this is the test that says the resident rule must
+  // stay independent of it.
+  it("lists all three types for staff whatever type the query names", async () => {
+    actAs(STAFF, westOnly);
+    storageMock.getAllMaintenanceRequests.mockResolvedValue([OWN_REPAIR, OWN_PROJECT, OWN_CAPEX]);
+    const { body } = await get("/api/maintenance-requests?type=project");
+    expect(body.map((r: { id: string }) => r.id)).toEqual(["req-own-repair", "req-own-project", "req-own-capex"]);
+  });
+
   it("refuses the detail route for a capital project on their house, and never sends its contents", async () => {
     leaderOfHouseA();
     storageMock.getMaintenanceRequest.mockResolvedValue(OWN_CAPEX);
@@ -5816,6 +5851,97 @@ describe("the resource hub", () => {
     expect(status).toBe(200);
     expect(storageMock.createResourceLink).toHaveBeenCalled();
   });
+
+  // ── The three named slots (amendment to 8.1) ─────────────────────────────
+
+  it("refuses a slot key the page has no place for, without storing it", async () => {
+    actAs(ADMIN);
+    const { status } = await request("POST", "/api/resource-links", {
+      body: { title: "x", url: "https://example.com", category: "Safety", slotKey: "parking_policy" },
+    });
+    expect(status).toBe(400);
+    expect(storageMock.createResourceLink).not.toHaveBeenCalled();
+  });
+
+  it("refuses a slotted link scoped to one region, because the slots are national", async () => {
+    actAs(ADMIN);
+    const { status, body } = await request("POST", "/api/resource-links", {
+      body: { title: "x", url: "https://example.com", category: "Safety", slotKey: "active_shooter", region: "West Central" },
+    });
+    expect(status).toBe(400);
+    expect(body.message).toMatch(/every region/i);
+    expect(storageMock.createResourceLink).not.toHaveBeenCalled();
+  });
+
+  it("refuses a second link claiming a slot another link already holds", async () => {
+    actAs(ADMIN);
+    storageMock.getAllResourceLinks.mockResolvedValue([
+      ...LINKS,
+      { id: "l-conduct", title: "Code of conduct 2025", url: "https://drive.google.com/e", region: null, category: "General", isActive: true, displayOrder: 0, slotKey: "code_of_conduct" },
+    ]);
+    const { status, body } = await request("POST", "/api/resource-links", {
+      body: { title: "Code of conduct 2026", url: "https://drive.google.com/f", category: "General", slotKey: "code_of_conduct" },
+    });
+    expect(status).toBe(400);
+    expect(body.message).toContain("Code of conduct 2025");
+    expect(storageMock.createResourceLink).not.toHaveBeenCalled();
+  });
+
+  it("refuses moving a link into a slot another link holds, without writing", async () => {
+    actAs(ADMIN);
+    storageMock.getAllResourceLinks.mockResolvedValue([
+      ...LINKS,
+      { id: "l-conduct", title: "Code of conduct 2025", url: "https://drive.google.com/e", region: null, category: "General", isActive: true, displayOrder: 0, slotKey: "code_of_conduct" },
+    ]);
+    storageMock.getResourceLink.mockResolvedValue(LINKS[0]);
+    const { status } = await request("PATCH", "/api/resource-links/l-national", { body: { slotKey: "code_of_conduct" } });
+    expect(status).toBe(400);
+    expect(storageMock.updateResourceLink).not.toHaveBeenCalled();
+  });
+
+  it("refuses narrowing a slotted link to one region on edit, checked over the stored row", async () => {
+    // An edit sends only the field it changes, so the region check has to
+    // read the slot off the stored row, not off the body.
+    actAs(ADMIN);
+    storageMock.getResourceLink.mockResolvedValue({ ...LINKS[0], id: "l-conduct", slotKey: "code_of_conduct" });
+    const { status } = await request("PATCH", "/api/resource-links/l-conduct", { body: { region: "West Central" } });
+    expect(status).toBe(400);
+    expect(storageMock.updateResourceLink).not.toHaveBeenCalled();
+  });
+
+  // Positive controls: an admin binds a slot, and re-saving the holder itself
+  // is not a clash.
+  it("lets an admin bind a national link to a slot", async () => {
+    actAs(ADMIN);
+    const { status } = await request("POST", "/api/resource-links", {
+      body: { title: "Household Code of Conduct", url: "https://drive.google.com/e", category: "General", slotKey: "code_of_conduct" },
+    });
+    expect(status).toBe(200);
+    expect(storageMock.createResourceLink).toHaveBeenCalledWith(expect.objectContaining({ slotKey: "code_of_conduct" }));
+  });
+
+  it("lets an admin edit the link that holds a slot without tripping over itself", async () => {
+    actAs(ADMIN);
+    const holder = { ...LINKS[0], id: "l-conduct", slotKey: "code_of_conduct" };
+    storageMock.getAllResourceLinks.mockResolvedValue([...LINKS, holder]);
+    storageMock.getResourceLink.mockResolvedValue(holder);
+    storageMock.updateResourceLink.mockResolvedValue(holder);
+    const { status } = await request("PATCH", "/api/resource-links/l-conduct", { body: { slotKey: "code_of_conduct", title: "Code of Conduct" } });
+    expect(status).toBe(200);
+    expect(storageMock.updateResourceLink).toHaveBeenCalled();
+  });
+
+  it("gives a household leader with no house the slotted national links", async () => {
+    // The slots are what a leader with a broken house link most needs to
+    // still find -- the fire extinguisher guidance is one of them.
+    actAs(ALICE, { canViewResourceHub: true });
+    storageMock.getAllResourceLinks.mockResolvedValue([
+      ...LINKS,
+      { id: "l-fire", title: "Fire Extinguisher guidelines", url: "https://drive.google.com/g", region: null, category: "Safety", isActive: true, displayOrder: 0, slotKey: "fire_extinguisher" },
+    ]);
+    const { body } = await get("/api/resource-links");
+    expect(body.map((link: { id: string }) => link.id).sort()).toEqual(["l-fire", "l-national"]);
+  });
 });
 
 describe("a resident reading their own house", () => {
@@ -7200,6 +7326,7 @@ describe("tasks & action items (regional leads only)", () => {
 
   it("builds region-scoped action items for an RA", async () => {
     actAs(STAFF, { ...WEST, canViewFinancials: true });
+    storageMock.getAllMaintenanceRequests.mockResolvedValue([]);
     storageMock.getAllMaintenanceSchedules.mockResolvedValue([]);
     storageMock.getAllRentPayments.mockResolvedValue([
       { id: "rp-w", status: "unpaid", period: "2026-07", amount: "700", buildingAddress: "1 Main St", region: "West Central" },
@@ -7219,6 +7346,7 @@ describe("tasks & action items (regional leads only)", () => {
 
   it("hides finance-derived action items from an RA without the finance flags", async () => {
     actAs(STAFF, WEST);
+    storageMock.getAllMaintenanceRequests.mockResolvedValue([]);
     storageMock.getAllMaintenanceSchedules.mockResolvedValue([]);
     storageMock.getAllRentPayments.mockResolvedValue([
       { id: "rp-w", status: "unpaid", period: "2026-07", amount: "700", buildingAddress: "1 Main St", region: "West Central" },
@@ -7234,8 +7362,56 @@ describe("tasks & action items (regional leads only)", () => {
     expect(body).toEqual([]);
   });
 
+  // Amendment to 10.5: open work on the dashboard, one item per house.
+  function mockOpenWork() {
+    storageMock.getAllMaintenanceSchedules.mockResolvedValue([]);
+    storageMock.getAllRentPayments.mockResolvedValue([]);
+    storageMock.getAllSecurityDeposits.mockResolvedValue([]);
+    storageMock.getAllResidents.mockResolvedValue([]);
+    storageMock.getAllTasks.mockResolvedValue([]);
+    storageMock.getAllPropertySetupItems.mockResolvedValue([]);
+    storageMock.getAllAssets.mockResolvedValue([]);
+    storageMock.getAllProperties.mockResolvedValue([
+      { id: "prop-w", name: "Cleveland House", address: "1 Main St", region: "West Central", ownership: "owned" },
+      { id: "prop-e", name: "Buckeye House", address: "9 Elm", region: "East Central", ownership: "owned" },
+    ]);
+    storageMock.getAllMaintenanceRequests.mockResolvedValue([
+      { id: "w-repair", title: "Blinds", region: "West Central", buildingAddress: "1 Main St", status: "pending", type: "request", priority: "medium" },
+      { id: "w-project", title: "Fence", region: "West Central", buildingAddress: "1 Main St", status: "in_progress", type: "project", priority: "medium" },
+      { id: "e-repair", title: "Window", region: "East Central", buildingAddress: "9 Elm", status: "pending", type: "request", priority: "medium" },
+    ]);
+  }
+
+  it("raises an RA's own region's open work by house, and never another region's", async () => {
+    actAs(STAFF, WEST);
+    mockOpenWork();
+    const { status, body } = await get("/api/action-items");
+    expect(status).toBe(200);
+    const work = body.filter((i: { source: string }) => i.source === "maintenance");
+    expect(work.map((i: { id: string }) => i.id)).toEqual(["1 Main St"]);
+    expect(work[0].subtitle).toContain("1 repair, 1 project");
+    expect(JSON.stringify(body)).not.toContain("9 Elm");
+  });
+
+  it("raises no open work at all for an RA with no regions -- fails closed, not open", async () => {
+    actAs(STAFF, { allowedRegions: [] });
+    mockOpenWork();
+    const { status, body } = await get("/api/action-items");
+    expect(status).toBe(200);
+    expect(body.filter((i: { source: string }) => i.source === "maintenance")).toEqual([]);
+  });
+
+  it("raises every region's open work for an admin", async () => {
+    actAs(ADMIN);
+    mockOpenWork();
+    const { body } = await get("/api/action-items");
+    const work = body.filter((i: { source: string }) => i.source === "maintenance");
+    expect(work.map((i: { id: string }) => i.id).sort()).toEqual(["1 Main St", "9 Elm"]);
+  });
+
   it("shows an RA a lease renewal in their region but not another region's", async () => {
     actAs(STAFF, WEST);
+    storageMock.getAllMaintenanceRequests.mockResolvedValue([]);
     storageMock.getAllMaintenanceSchedules.mockResolvedValue([]);
     storageMock.getAllRentPayments.mockResolvedValue([]);
     storageMock.getAllSecurityDeposits.mockResolvedValue([]);

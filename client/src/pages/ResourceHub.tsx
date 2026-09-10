@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
-import { BookOpen, ClipboardList, ExternalLink, FileText, Home, KeyRound, Phone, Wrench } from "lucide-react";
+import { BookOpen, ClipboardList, ExternalLink, FileText, Home, KeyRound, Phone, ShieldCheck, Wrench } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,7 @@ import { formatCurrency, formatDate } from "@/lib/format";
 import { canFillInWalkthroughs, type WalkthroughUser } from "@/lib/walkthrough";
 import type { PropertyBudget, PropertyFacts, ResourceLink, Walkthrough } from "@shared/schema";
 import { ACCESS_CODES, HOUSE_FACT_TEXT_FIELDS } from "@shared/houseFacts";
+import { resolveHubSlots, unslottedLinks } from "@shared/resourceHubSlots";
 
 /**
  * What /api/my-property answers: a named-field projection of one house, never
@@ -120,10 +121,15 @@ export default function ResourceHub() {
     budgets.find((row) => row.year === thisYear) ??
     [...budgets].sort((a, b) => b.year - a.year)[0];
 
-  /** Grouped by category so the page reads as sections rather than a list. */
+  // The three named places SPO fills for every house. Always all three: an
+  // empty one is shown as waiting, so "SPO has not written this yet" is
+  // visible rather than indistinguishable from "there is no such thing".
+  const slots = useMemo(() => resolveHubSlots(links), [links]);
+
+  /** Grouped by category so the page reads as sections rather than a list. A slotted link is up in its slot, not here as well. */
   const byCategory = useMemo(() => {
     const groups = new Map<string, ResourceLink[]>();
-    for (const link of links) {
+    for (const link of unslottedLinks(links)) {
       const existing = groups.get(link.category);
       if (existing) existing.push(link);
       else groups.set(link.category, [link]);
@@ -280,13 +286,62 @@ export default function ResourceHub() {
             </CardContent>
           </Card>
 
+          {!isLoading && (
+            <Card data-testid="card-hub-slots">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <ShieldCheck className="h-5 w-5 text-muted-foreground" />
+                  From SPO
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-1">
+                {slots.map(({ slot, link }) =>
+                  link ? (
+                    <a
+                      key={slot.key}
+                      href={link.url}
+                      target="_blank"
+                      rel="noreferrer noopener"
+                      className="flex items-start gap-3 rounded-md border-b border-border py-3 last:border-b-0 hover:underline"
+                      data-testid={`link-hub-slot-${slot.key}`}
+                    >
+                      <span className="min-w-0 flex-1">
+                        <span className="block font-medium">{slot.label}</span>
+                        {link.description && (
+                          <span className="block text-sm text-muted-foreground">{link.description}</span>
+                        )}
+                      </span>
+                      <ExternalLink className="mt-1 h-4 w-4 shrink-0 text-muted-foreground" />
+                    </a>
+                  ) : (
+                    <div
+                      key={slot.key}
+                      className="flex items-start gap-3 border-b border-border py-3 last:border-b-0"
+                      data-testid={`slot-hub-${slot.key}-empty`}
+                    >
+                      <span className="min-w-0 flex-1">
+                        <span className="block font-medium text-muted-foreground">{slot.label}</span>
+                        <span className="block text-sm text-muted-foreground">
+                          {slot.description} SPO is still writing this one — ask your RA if you need it sooner.
+                        </span>
+                      </span>
+                      <Badge variant="secondary" className="shrink-0">
+                        Not yet available
+                      </Badge>
+                    </div>
+                  ),
+                )}
+              </CardContent>
+            </Card>
+          )}
+
           {isLoading ? (
             <LoadingState message="Loading your resources..." />
           ) : byCategory.length === 0 ? (
             <EmptyState
               icon={BookOpen}
-              title="Nothing has been published here yet"
-              description="Your RA will add the house expectations, the deep clean checklist and the safety guidance here."
+              title="Nothing else has been published here yet"
+              description="Your RA will add the house expectations, the deep clean checklist and the rest of the safety guidance here."
             />
           ) : (
             byCategory.map(([category, categoryLinks]) => {
