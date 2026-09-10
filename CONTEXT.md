@@ -49,7 +49,11 @@ The lowest priority: something to get to eventually. A priority, never a type �
 _Avoid_: backlog, someday
 
 **Open work**:
-Everything on one house that is not yet closed, grouped once by kind: repairs, projects, capital projects and the wishlist. Each item appears in exactly one group.
+Everything on one house that is not yet closed, grouped once by kind: repairs, projects, capital projects and the wishlist. Each item appears in exactly one group. Shown on the property page, on the Maintenance page's Open work tab, and on the dashboard as one line per house.
+
+**Job**:
+A project or a capital project — the open work that is not a repair. The dashboard counts open repairs and open jobs as two numbers.
+_Avoid_: work order, ticket
 
 ## Threads
 
@@ -114,3 +118,7 @@ _Avoid_: password, PIN, key code
 **Photo comparison**:
 One room's walkthrough photos laid side by side across years, to answer "has that crack grown".
 _Avoid_: year-over-year view, diff
+
+**Named link**:
+One of the three documents every house is shown by name on the resource hub — Household Code of Conduct, Fire Extinguisher guidelines, Active Shooter Policy. A place on the page that stays visible, marked "not yet available", until a link fills it.
+_Avoid_: slot (fine in code — `slotKey` — never on screen), featured link, pinned

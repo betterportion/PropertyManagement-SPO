@@ -72,8 +72,16 @@ describe("what each resolution actually does", () => {
     expect(request.href).toBe("/assets/asset-1");
   });
 
+  it("sends an open-work item to the Maintenance page, filtered to that house's open work", () => {
+    // The id on a maintenance item is the house's address -- what the
+    // building filter keys on -- and the Open work tab is where it lands.
+    const request = resolveRequest(item({ source: "maintenance", id: "1 Main St" }));
+    expect(request.href).toBe("/maintenance?building=1+Main+St&view=open");
+    expect(request.method).toBeUndefined();
+  });
+
   it("does not offer a one-click resolve for anything that needs a form", () => {
-    for (const source of ["lease", "setup", "asset"] as const) {
+    for (const source of ["lease", "setup", "asset", "maintenance"] as const) {
       expect(resolveRequest(item({ source })).method).toBeUndefined();
     }
   });

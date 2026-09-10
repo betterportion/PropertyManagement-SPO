@@ -17,7 +17,7 @@ The portal serves three kinds of user, and each sees a completely different set 
 |---|---|
 | **Admin** | Full access to everything, including user management and permissions. Bypasses per-feature permission checks. |
 | **Regional administrator** | Manages properties, maintenance, walkthroughs, assets, contacts and invoices — but only for the regions they have been granted. |
-| **Resident** | Submits maintenance requests and follows them. Reads the resource hub — SPO's general guidance plus their own house's walkthrough, requests and startup budget. Sees the requests they filed *and* every request filed for the house their account is linked to — housemates share one repair history. Granted "Complete Walkthroughs", a household leader or steward also fills in their own house's current walkthrough and reads earlier ones read-only. Never sees another house, and never sees anything by region. |
+| **Resident** | Submits maintenance requests and follows them. Reads the resource hub — SPO's general guidance (with the Household Code of Conduct, Fire Extinguisher guidelines and Active Shooter Policy in three named places, each shown as "not yet available" until SPO links the document) plus their own house's walkthrough, requests and startup budget. Sees the requests they filed *and* every request filed for the house their account is linked to — housemates share one repair history. Granted "Complete Walkthroughs", a household leader or steward also fills in their own house's current walkthrough and reads earlier ones read-only. Never sees another house, and never sees anything by region. |
 
 On top of the role, each user has a row of fine-grained permissions — eighteen view/manage flags, including two that gate the finance screens on their own, one for the per-property setup checklist and one for the resident resource hub — and a list of allowed regions. Admins ignore both.
 
@@ -264,6 +264,7 @@ shared/
   houseFacts.ts         The house-facts field vocabulary and the access codes
   propertySetup.ts      The per-property setup checklist and its states
   residentDocuments.ts  The fixed list of documents a resident signs
+  resourceHubSlots.ts   The three named links on the resource hub, and the rules for binding one
 migrations/             Committed SQL migrations, applied with db:migrate
 scripts/                One-off maintenance scripts
 docs/                   Additional documentation

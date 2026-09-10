@@ -6,6 +6,8 @@ export interface RegionSummary {
   region: string;
   admins: { name: string; email: string | null }[];
   openRequests: number;
+  openRepairs: number;
+  openJobs: number;
   safetyPreventiveDue: number;
   leaseRenewalsDue: number;
   unpaidRent: { count: number; amount: string };

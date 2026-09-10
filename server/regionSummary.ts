@@ -11,7 +11,7 @@
  * is reported alongside but is NOT part of the health score: it is chased on its
  * own track (a KPI, a flag, and eventually an automated resident email).
  */
-import type { MaintenanceRequest, MaintenanceSchedule, Property, RentPayment, Task } from "@shared/schema";
+import { isProjectType, type MaintenanceRequest, type MaintenanceSchedule, type Property, type RentPayment, type Task } from "@shared/schema";
 import { SCHEDULE_LOOKAHEAD_DAYS, LEASE_LOOKAHEAD_DAYS } from "./actionItems";
 
 const DAY_MS = 24 * 60 * 60 * 1_000;
@@ -36,7 +36,12 @@ export interface RegionSummaryInputs {
 export interface RegionSummary {
   region: string;
   admins: { name: string; email: string | null }[];
+  /** Every open request of any type; the sum of the two below plus anything untyped. */
   openRequests: number;
+  /** Open repairs -- type `request`. */
+  openRepairs: number;
+  /** Open jobs -- projects and capital projects together. */
+  openJobs: number;
   safetyPreventiveDue: number;
   leaseRenewalsDue: number;
   unpaidRent: { count: number; amount: string };
@@ -75,9 +80,16 @@ export function buildRegionSummaries(
       .filter((s) => s.regions.includes("all") || s.regions.includes(region))
       .map((s) => ({ name: s.name, email: s.email }));
 
-    const openRequests = inputs.requests.filter(
+    const open = inputs.requests.filter(
       (r) => inRegion(r.region, region) && (r.status === "pending" || r.status === "in_progress"),
-    ).length;
+    );
+    const openRequests = open.length;
+    // Repairs and jobs are reported as two numbers on the dashboard. Derived
+    // from the type column and nothing else, so an untyped row -- which the
+    // schema does not allow, but a rollup should not guess about -- counts
+    // toward the total and toward neither kind.
+    const openRepairs = open.filter((r) => r.type === "request").length;
+    const openJobs = open.filter((r) => isProjectType(r.type)).length;
 
     const schedulesDue = inputs.schedules.filter((s) => {
       if (!s.isActive || !inRegion(s.region, region)) return false;
@@ -107,6 +119,8 @@ export function buildRegionSummaries(
       region,
       admins,
       openRequests,
+      openRepairs,
+      openJobs,
       safetyPreventiveDue,
       leaseRenewalsDue,
       unpaidRent: { count: unpaid.length, amount: unpaidAmount.toFixed(2) },

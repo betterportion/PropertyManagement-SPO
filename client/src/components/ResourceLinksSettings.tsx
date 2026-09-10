@@ -12,6 +12,7 @@ import { EmptyState, LoadingState } from "@/components/states";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { REGIONS } from "@shared/regions";
+import { RESOURCE_HUB_SLOTS, isResourceHubSlotKey } from "@shared/resourceHubSlots";
 import type { ResourceLink } from "@shared/schema";
 
 /**
@@ -30,6 +31,26 @@ import type { ResourceLink } from "@shared/schema";
 /** The "everybody" option; a Select cannot carry null. */
 const NATIONAL = "__national__";
 
+/** The "no named place" option, for the same reason. */
+const NO_SLOT = "__none__";
+
+/**
+ * What the server said, for a toast. A refused slot comes back with a reason
+ * a person can act on ("… already holds the … slot"), and that reason is
+ * worth more than a generic line.
+ */
+function serverMessage(error: unknown): string | undefined {
+  if (!(error instanceof Error)) return undefined;
+  // apiRequest throws "<status>: <body>"; the body is the route's JSON.
+  try {
+    const parsed: unknown = JSON.parse(error.message.replace(/^\d+:\s*/, ""));
+    const message = (parsed as { message?: unknown } | null)?.message;
+    return typeof message === "string" ? message : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Suggested groupings. Free text underneath, so SPO can add their own. */
 const CATEGORIES = ["General", "Housekeeping", "Safety", "Money", "Paperwork"];
 
@@ -40,6 +61,7 @@ export default function ResourceLinksSettings() {
   const [description, setDescription] = useState("");
   const [category, setCategory] = useState("General");
   const [region, setRegion] = useState(NATIONAL);
+  const [slot, setSlot] = useState(NO_SLOT);
 
   const { data: links = [], isLoading } = useQuery<ResourceLink[]>({
     queryKey: ["/api/resource-links"],
@@ -55,20 +77,31 @@ export default function ResourceLinksSettings() {
         description: description || null,
         category,
         region: region === NATIONAL ? null : region,
+        slotKey: isResourceHubSlotKey(slot) ? slot : null,
       }),
     onSuccess: () => {
       invalidate();
       setTitle("");
       setUrl("");
       setDescription("");
+      setSlot(NO_SLOT);
     },
-    onError: () => {
+    onError: (error) => {
       toast({
         title: "That link was not added",
-        description: "Check the address starts with https:// and try again.",
+        description: serverMessage(error) ?? "Check the address starts with https:// and try again.",
         variant: "destructive",
       });
     },
+  });
+
+  /** Moving a link into, or out of, one of the three named places. */
+  const setSlotOf = useMutation({
+    mutationFn: async (vars: { id: string; slotKey: string | null }) =>
+      await apiRequest("PATCH", `/api/resource-links/${vars.id}`, { slotKey: vars.slotKey }),
+    onSuccess: invalidate,
+    onError: (error) =>
+      toast({ title: "That link was not moved", description: serverMessage(error), variant: "destructive" }),
   });
 
   /** Turning a link off without losing it — a memo replaced next term. */
@@ -150,7 +183,27 @@ export default function ResourceLinksSettings() {
               </SelectContent>
             </Select>
           </div>
-          <div className="space-y-2 sm:col-span-2">
+          <div className="space-y-2">
+            <Label htmlFor="link-slot">Named place on the page</Label>
+            <Select value={slot} onValueChange={setSlot}>
+              <SelectTrigger id="link-slot" data-testid="select-resource-slot">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={NO_SLOT}>None — listed under its group</SelectItem>
+                {RESOURCE_HUB_SLOTS.map((option) => (
+                  <SelectItem key={option.key} value={option.key}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              The three documents every house is shown by name. A named link goes to every region, and an
+              empty place is shown as &ldquo;not yet available&rdquo; until a link fills it.
+            </p>
+          </div>
+          <div className="space-y-2">
             <Label htmlFor="link-description">One line about it (optional)</Label>
             <Input
               id="link-description"
@@ -207,6 +260,26 @@ export default function ResourceLinksSettings() {
                 <Badge variant={link.region ? "outline" : "secondary"} className="shrink-0">
                   {link.region ?? "Every region"}
                 </Badge>
+                <Select
+                  value={isResourceHubSlotKey(link.slotKey) ? link.slotKey : NO_SLOT}
+                  onValueChange={(value) => setSlotOf.mutate({ id: link.id, slotKey: isResourceHubSlotKey(value) ? value : null })}
+                >
+                  <SelectTrigger
+                    className="w-52 shrink-0"
+                    aria-label={`Named place for ${link.title}`}
+                    data-testid={`select-resource-slot-${link.id}`}
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={NO_SLOT}>No named place</SelectItem>
+                    {RESOURCE_HUB_SLOTS.map((option) => (
+                      <SelectItem key={option.key} value={option.key}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 <Button
                   size="sm"
                   variant="ghost"

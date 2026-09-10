@@ -8,14 +8,15 @@ test.describe("admin dashboard", () => {
 
   const tiles = [
     { testid: "link-stat-properties", path: "/properties", heading: "Properties" },
-    { testid: "link-stat-open-requests", path: "/maintenance", heading: "Maintenance" },
+    { testid: "link-stat-open-repairs", path: "/maintenance?type=request", heading: "Maintenance" },
+    { testid: "link-stat-open-jobs", path: "/maintenance?view=open", heading: "Maintenance" },
     { testid: "link-stat-unpaid-rent", path: "/finances", heading: "Finances" },
   ];
 
   for (const tile of tiles) {
     test(`the ${tile.testid} tile navigates to ${tile.path}`, async ({ page }) => {
       await page.getByTestId(tile.testid).click();
-      await expect(page).toHaveURL(new RegExp(`${tile.path}$`));
+      await expect(page).toHaveURL(new RegExp(`${tile.path.replace(/[?]/g, "\\?")}$`));
       await expect(page.getByRole("heading", { name: tile.heading }).first()).toBeVisible();
     });
   }

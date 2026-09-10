@@ -15,15 +15,17 @@
  * ranking is unit-testable without a database or a clock. The caller loads the
  * rows, filters each source to the caller's regions, and hands them in.
  */
-import type {
-  MaintenanceSchedule,
-  RentPayment,
-  SecurityDeposit,
-  Resident,
-  Task,
-  Property,
-  PropertySetupItem,
-  Asset,
+import {
+  isClosedMaintenanceStatus,
+  type MaintenanceRequest,
+  type MaintenanceSchedule,
+  type RentPayment,
+  type SecurityDeposit,
+  type Resident,
+  type Task,
+  type Property,
+  type PropertySetupItem,
+  type Asset,
 } from "@shared/schema";
 import { summarizeSetup, setupRowsByProperty } from "@shared/propertySetup";
 import { assetLifecycle } from "@shared/assetLifecycle";
@@ -73,6 +75,8 @@ export interface ActionItemInputs {
   properties: Property[];
   setupItems: PropertySetupItem[];
   assets: Asset[];
+  /** Every request the caller may see; only the open ones are read. */
+  requests: MaintenanceRequest[];
 }
 
 /** The last calendar day of a "YYYY-MM" period, as a UTC-midnight date. */
@@ -167,6 +171,41 @@ export function buildActionItems(inputs: ActionItemInputs, now: Date = new Date(
       dueDate: null,
       overdue: false,
       region: p.region,
+    });
+  }
+
+  // Property — open work on a house, one aggregated item per house.
+  //
+  // Pending and in-progress work together, whatever its type: what an RA
+  // still has on at that address. One line per house and never one per
+  // request, for the same reason the setup checklist is one line -- forty
+  // rows for a region's open repairs would push a deposit due back off the
+  // bottom of the list, and that reasoning only holds while this stays
+  // aggregated. It carries no due date: open work has no deadline SPO has
+  // agreed, and inventing one would put every house with a repair at the top.
+  //
+  // Keyed on the house's ADDRESS rather than the property id, because that is
+  // what the Maintenance page's building filter reads -- and because a request
+  // outlives its property record. A house SPO has let go of can still have a
+  // repair open on it, and that is not a reason for the work to disappear.
+  const propertyByAddress = new Map(inputs.properties.map((p) => [p.address, p]));
+  const openByHouse = new Map<string, MaintenanceRequest[]>();
+  for (const r of inputs.requests) {
+    if (isClosedMaintenanceStatus(r.status)) continue;
+    const list = openByHouse.get(r.buildingAddress) ?? [];
+    openByHouse.set(r.buildingAddress, [...list, r]);
+  }
+  for (const [address, open] of Array.from(openByHouse)) {
+    const house = propertyByAddress.get(address);
+    items.push({
+      id: address,
+      source: "maintenance",
+      category: "property",
+      title: `Open work — ${house?.name ?? address}`,
+      subtitle: `${describeOpenWork(open)} · ${address}`,
+      dueDate: null,
+      overdue: false,
+      region: house?.region ?? open[0].region,
     });
   }
 
@@ -298,6 +337,20 @@ export function buildActionItems(inputs: ActionItemInputs, now: Date = new Date(
   }
 
   return items.sort(compareUrgency);
+}
+
+/** "2 repairs, 1 project, 1 capital project" -- only the kinds that are there, in type order. */
+function describeOpenWork(open: readonly Pick<MaintenanceRequest, "type">[]): string {
+  const count = (type: MaintenanceRequest["type"]) => open.filter((r) => r.type === type).length;
+  const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+  return [
+    [count("request"), "repair", "repairs"],
+    [count("project"), "project", "projects"],
+    [count("capex"), "capital project", "capital projects"],
+  ]
+    .filter(([n]) => (n as number) > 0)
+    .map(([n, one, many]) => plural(n as number, one as string, many as string))
+    .join(", ");
 }
 
 const CATEGORY_RANK: Record<ActionItemCategory, number> = { finance: 0, safety: 1, property: 2, general: 3 };

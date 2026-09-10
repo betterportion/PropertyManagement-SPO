@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { buildActionItems, type ActionItemInputs } from "../actionItems";
-import type { MaintenanceSchedule, RentPayment, SecurityDeposit, Resident, Task, Property, PropertySetupItem, Asset } from "@shared/schema";
+import type { MaintenanceRequest, MaintenanceSchedule, RentPayment, SecurityDeposit, Resident, Task, Property, PropertySetupItem, Asset } from "@shared/schema";
 
 // buildActionItems only reads a handful of fields off each record, so the
 // factories fill just those and cast; a full row would be noise.
@@ -29,7 +29,14 @@ function property(over: Partial<Property>): Property {
   } as Property;
 }
 
-const empty: ActionItemInputs = { schedules: [], rentPayments: [], deposits: [], residents: [], tasks: [], properties: [], setupItems: [], assets: [] };
+const empty: ActionItemInputs = { schedules: [], rentPayments: [], deposits: [], residents: [], tasks: [], properties: [], setupItems: [], assets: [], requests: [] };
+
+function request(over: Partial<MaintenanceRequest>): MaintenanceRequest {
+  return {
+    id: "req-1", title: "Blinds fell down", status: "pending", type: "request", priority: "medium",
+    buildingAddress: "1 Main St", region: "West Central", ...over,
+  } as MaintenanceRequest;
+}
 
 function asset(over: Partial<Asset>): Asset {
   return {
@@ -433,5 +440,101 @@ describe("buildActionItems", () => {
       rentPayments: [rent({ id: "fin", period: "2026-07" })],
     }, NOW);
     expect(items.map((i) => i.category)).toEqual(["finance", "property"]);
+  });
+});
+
+// Amendment to 10.5: the dashboard's view of open work. One aggregated item
+// per house, never one per request -- the same reasoning that keeps the setup
+// checklist to a single row, and it only holds if this stays that way.
+describe("open work on the dashboard", () => {
+  const house = property({ id: "p1", name: "Cleveland House", address: "1 Main St", ownership: "owned", leaseRenewalDate: null });
+
+  it("raises one item per house naming its repairs and jobs, never one per request", () => {
+    const items = buildActionItems({
+      ...empty,
+      properties: [house],
+      requests: [
+        request({ id: "a", type: "request", status: "pending" }),
+        request({ id: "b", type: "request", status: "in_progress" }),
+        request({ id: "c", type: "project", status: "pending" }),
+        request({ id: "d", type: "capex", status: "in_progress" }),
+      ],
+    }, NOW);
+
+    const work = items.filter((i) => i.source === "maintenance");
+    expect(work).toHaveLength(1);
+    expect(work[0].title).toBe("Open work — Cleveland House");
+    expect(work[0].subtitle).toBe("2 repairs, 1 project, 1 capital project · 1 Main St");
+    expect(work[0].category).toBe("property");
+    expect(work[0].region).toBe("West Central");
+  });
+
+  it("keys the item on the house's address, which is what the Maintenance page filters on", () => {
+    const [item] = buildActionItems({ ...empty, properties: [house], requests: [request({})] }, NOW);
+    expect(item.id).toBe("1 Main St");
+  });
+
+  it("counts pending and in-progress work, and nothing closed", () => {
+    const items = buildActionItems({
+      ...empty,
+      properties: [house],
+      requests: [
+        request({ id: "open", status: "in_progress" }),
+        request({ id: "done", status: "completed" }),
+        request({ id: "dropped", status: "cancelled" }),
+      ],
+    }, NOW);
+    const [work] = items.filter((i) => i.source === "maintenance");
+    expect(work.subtitle).toBe("1 repair · 1 Main St");
+  });
+
+  it("says nothing about a house with nothing open", () => {
+    const items = buildActionItems({
+      ...empty,
+      properties: [house],
+      requests: [request({ status: "completed" })],
+    }, NOW);
+    expect(items.filter((i) => i.source === "maintenance")).toHaveLength(0);
+  });
+
+  it("still raises work on a house that is no longer on file, under its address", () => {
+    // The request carries the region and the address itself; a deleted
+    // property record is not a reason for open work to disappear.
+    const items = buildActionItems({ ...empty, requests: [request({ buildingAddress: "9 Elm" })] }, NOW);
+    const [work] = items.filter((i) => i.source === "maintenance");
+    expect(work.title).toBe("Open work — 9 Elm");
+    expect(work.id).toBe("9 Elm");
+  });
+
+  it("carries no due date and never reads as overdue, so it sits below dated items", () => {
+    // Open work has no deadline SPO has agreed; inventing one would put every
+    // house with a repair at the top of the list, ahead of a deposit due back.
+    const items = buildActionItems({
+      ...empty,
+      properties: [house],
+      requests: [request({})],
+      deposits: [deposit({ id: "dep" })],
+      residents: [resident({})],
+    }, NOW);
+    expect(items.map((i) => i.source)).toEqual(["deposit", "maintenance"]);
+    const work = items[1];
+    expect(work.dueDate).toBeNull();
+    expect(work.overdue).toBe(false);
+  });
+
+  it("groups by address exactly, one item per distinct house", () => {
+    const items = buildActionItems({
+      ...empty,
+      requests: [
+        request({ id: "a", buildingAddress: "1 Main St" }),
+        request({ id: "b", buildingAddress: "1 Main St" }),
+        request({ id: "c", buildingAddress: "9 Elm", region: "East Central" }),
+      ],
+    }, NOW);
+    const work = items.filter((i) => i.source === "maintenance");
+    expect(work.map((i) => [i.id, i.region])).toEqual([
+      ["1 Main St", "West Central"],
+      ["9 Elm", "East Central"],
+    ]);
   });
 });

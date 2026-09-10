@@ -35,6 +35,7 @@ import {
   type RequestTypeFilter,
 } from "@/lib/maintenanceFilters";
 import MaintenanceAggregates from "@/components/MaintenanceAggregates";
+import PropertyOpenWork from "@/components/PropertyOpenWork";
 import { ClipboardList, SlidersHorizontal } from "lucide-react";
 
 const createRequestSchema = insertMaintenanceRequestSchema.extend({
@@ -47,6 +48,9 @@ const createRequestSchema = insertMaintenanceRequestSchema.extend({
   }),
   type: z.enum(MAINTENANCE_REQUEST_TYPES),
 });
+
+/** The tabs on this page, in order; `view` in the URL names one of them. */
+const MAINTENANCE_VIEWS = ["all", "open", "pending", "in_progress", "completed", "patterns"];
 
 const CATEGORIES = [
   "Plumbing",
@@ -88,6 +92,9 @@ export default function Maintenance() {
     // All three kinds of work together by default; narrowing to the capital
     // projects is what the filter is for.
     type: "all",
+    // Which tab is open. In the URL so the dashboard can send somebody
+    // straight to one house's open work.
+    view: "all",
   });
   const searchQuery = filters.q;
   const selectedRegion = filters.region;
@@ -151,6 +158,18 @@ export default function Maintenance() {
     const matchesRange = closedWithinRange(r, closedRange);
     return matchesSearch && matchesRoom && matchesRange && matchesType(r, typeFilter);
   });
+
+  // A tab the page does not have -- a stale bookmark -- opens the queue
+  // rather than an empty pane.
+  const view = MAINTENANCE_VIEWS.includes(filters.view) ? filters.view : "all";
+
+  // What the Open work tab says it is looking at. An RA works one house at a
+  // time, and the tab is built for that; across every house it still groups,
+  // but the line says so rather than letting forty repairs read as one house.
+  const openWorkDescription =
+    selectedBuilding === "all"
+      ? "Every house in view. Pick a house in the filters above to see one house's open work."
+      : `Everything still open at ${selectedBuilding}, grouped by kind.`;
 
   const pendingRequests = filteredRequests.filter((r) => r.status === "pending");
   const inProgressRequests = filteredRequests.filter((r) => r.status === "in_progress");
@@ -511,11 +530,14 @@ export default function Maintenance() {
         <Button type="button" variant="ghost" size="sm" onClick={resetFilters}>Clear filters</Button>
       </div>
 
-      <Tabs defaultValue="all" data-testid="tabs-request-status">
+      <Tabs value={view} onValueChange={(value) => setFilters({ view: value })} data-testid="tabs-request-status">
         <div className="overflow-x-auto [&::-webkit-scrollbar]:hidden" style={{ scrollbarWidth: "none" }}>
           <TabsList className="w-max">
             <TabsTrigger value="all" data-testid="tab-all-requests">
               All ({filteredRequests.length})
+            </TabsTrigger>
+            <TabsTrigger value="open" data-testid="tab-open-work">
+              Open work
             </TabsTrigger>
             <TabsTrigger value="pending" data-testid="tab-pending-requests">
               Pending ({pendingRequests.length})
@@ -542,6 +564,14 @@ export default function Maintenance() {
             />
           ))}
           {filteredRequests.length === 0 && <EmptyState icon={ClipboardList} title="Your request queue is clear" description="Try another filter, or create a request when a property issue needs attention." />}
+        </TabsContent>
+
+        <TabsContent value="open" className="mt-6">
+          {/* The same grouping the property page shows, at whatever scope the
+              filters above set -- one house when a house is picked. Open
+              work ignores the closed range by construction, so the range
+              filter changes nothing here. */}
+          <PropertyOpenWork requests={filteredRequests} isLoading={isLoading} description={openWorkDescription} />
         </TabsContent>
 
         <TabsContent value="pending" className="space-y-4 mt-6">

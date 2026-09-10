@@ -28,9 +28,12 @@ const EMPTY: Record<OpenWorkKey, string> = {
 export default function PropertyOpenWork({
   requests,
   isLoading,
+  description,
 }: {
   requests: MaintenanceRequest[];
   isLoading: boolean;
+  /** One line under the heading saying which houses are in view -- the Maintenance page's tab needs it, the property page does not. */
+  description?: string;
 }) {
   const groups = groupOpenWork(requests);
   const total = groups.reduce((n, group) => n + group.items.length, 0);
@@ -47,6 +50,11 @@ export default function PropertyOpenWork({
         </span>
       </CardHeader>
       <CardContent>
+        {description && (
+          <p className="mb-4 text-sm text-muted-foreground" data-testid="open-work-description">
+            {description}
+          </p>
+        )}
         {isLoading ? (
           <LoadingState />
         ) : (

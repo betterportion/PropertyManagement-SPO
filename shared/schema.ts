@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import { pgTable, text, varchar, timestamp, jsonb, index, uniqueIndex, boolean, integer, numeric } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
+import { RESOURCE_HUB_SLOT_KEYS } from "./resourceHubSlots";
 
 /**
  * Field builders that reconcile three views of the same value: what a JSON
@@ -1573,6 +1574,13 @@ export const resourceLinks = pgTable("resource_links", {
   region: varchar("region"),
   displayOrder: integer("display_order").notNull().default(0),
   isActive: boolean("is_active").notNull().default(true),
+  /**
+   * Which named place on the hub this link fills, if any -- see
+   * shared/resourceHubSlots.ts. Bound by key rather than by title so a
+   * rename cannot silently empty the slot; unique, so a slot has one holder.
+   * A slotted link is national (region null), checked by the routes.
+   */
+  slotKey: varchar("slot_key").unique(),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -1588,6 +1596,9 @@ export const insertResourceLinkSchema = createInsertSchema(resourceLinks)
     // The column has a default, so a caller adding a link need not order it --
     // the page groups by category and falls back to the title.
     displayOrder: nonNegativeInt.optional(),
+    // Only a slot the page has a place for; anything else is a 400, not a
+    // new slot. Null clears it.
+    slotKey: z.enum(RESOURCE_HUB_SLOT_KEYS).nullish(),
   });
 
 export type ResourceLink = typeof resourceLinks.$inferSelect;
