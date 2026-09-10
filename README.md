@@ -252,6 +252,7 @@ server/                 Express backend
   health.ts             GET /api/health for the hosting platform
   objectStorage/        Where uploaded files are kept (local or Supabase)
   static.ts             Serves the built client in production
+  logger.ts             log() — separate from vite.ts so the production bundle never imports Vite
   vite.ts               Dev server wiring (development only)
   __tests__/            Vitest suites
 shared/
