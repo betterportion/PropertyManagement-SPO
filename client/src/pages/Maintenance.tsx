@@ -469,66 +469,72 @@ export default function Maintenance() {
         </Dialog>
         </div>} />
 
-      <div className="flex flex-col gap-3 rounded-lg border border-border/80 bg-muted/30 p-4 md:flex-row md:flex-wrap md:items-center">
-        <div className="flex items-center gap-2 text-sm font-medium text-foreground md:mr-1">
-          <SlidersHorizontal className="h-4 w-4 text-primary-strong" /> Filter requests
+      {/* Built for a computer screen first: the search on its own line, the
+          filters in even columns beneath it, stacking on a phone. The shared
+          region and house pickers carry fixed widths; here they fill their column. */}
+      <div className="space-y-3 rounded-lg border border-border/80 bg-muted/30 p-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+            <SlidersHorizontal className="h-4 w-4 text-primary-strong" /> Filter requests
+          </div>
+          <div className="relative flex-1 min-w-0">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Search by title or location..."
+              value={searchQuery}
+              onChange={(e) => setFilters({ q: e.target.value })}
+              className="pl-10"
+              data-testid="input-search-requests"
+            />
+          </div>
+          <Button type="button" variant="ghost" size="sm" onClick={resetFilters}>Clear filters</Button>
         </div>
-        <RegionSelector 
-          selectedRegion={selectedRegion}
-          onRegionChange={(value) => setFilters({ region: value })}
-        />
-        <BuildingSelector
-          selectedBuilding={selectedBuilding}
-          onBuildingChange={(value) => setFilters({ building: value })}
-          buildings={uniqueBuildings}
-        />
-        {roomOptions.length > 0 && (
-          <Select value={selectedRoom} onValueChange={(value) => setFilters({ room: value })}>
-            <SelectTrigger className="w-44" data-testid="select-filter-room" aria-label="Filter by room">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 [&_button[role=combobox]]:w-full">
+          <RegionSelector 
+            selectedRegion={selectedRegion}
+            onRegionChange={(value) => setFilters({ region: value })}
+          />
+          <BuildingSelector
+            selectedBuilding={selectedBuilding}
+            onBuildingChange={(value) => setFilters({ building: value })}
+            buildings={uniqueBuildings}
+          />
+          {roomOptions.length > 0 && (
+            <Select value={selectedRoom} onValueChange={(value) => setFilters({ room: value })}>
+              <SelectTrigger data-testid="select-filter-room" aria-label="Filter by room">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Every room</SelectItem>
+                {roomOptions.map((room) => (
+                  <SelectItem key={room} value={room}>{room}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+
+          <Select value={closedRange} onValueChange={(value) => setFilters({ closed: value })}>
+            <SelectTrigger data-testid="select-filter-closed-range" aria-label="How far back to show closed requests">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">Every room</SelectItem>
-              {roomOptions.map((room) => (
-                <SelectItem key={room} value={room}>{room}</SelectItem>
+              {CLOSED_RANGES.map((range) => (
+                <SelectItem key={range.value} value={range.value}>{range.label}</SelectItem>
               ))}
             </SelectContent>
           </Select>
-        )}
 
-        <Select value={closedRange} onValueChange={(value) => setFilters({ closed: value })}>
-          <SelectTrigger className="w-56" data-testid="select-filter-closed-range" aria-label="How far back to show closed requests">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {CLOSED_RANGES.map((range) => (
-              <SelectItem key={range.value} value={range.value}>{range.label}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-
-        <Select value={typeFilter} onValueChange={(value) => setFilters({ type: value })}>
-          <SelectTrigger className="w-44" data-testid="select-filter-type" aria-label="Filter by type of work">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {REQUEST_TYPE_FILTERS.map((option) => (
-              <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-
-        <div className="relative flex-1 min-w-0 md:min-w-64">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Search by title or location..."
-            value={searchQuery}
-            onChange={(e) => setFilters({ q: e.target.value })}
-            className="pl-10"
-            data-testid="input-search-requests"
-          />
+          <Select value={typeFilter} onValueChange={(value) => setFilters({ type: value })}>
+            <SelectTrigger data-testid="select-filter-type" aria-label="Filter by type of work">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {REQUEST_TYPE_FILTERS.map((option) => (
+                <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
-        <Button type="button" variant="ghost" size="sm" onClick={resetFilters}>Clear filters</Button>
       </div>
 
       <Tabs value={view} onValueChange={(value) => setFilters({ view: value })} data-testid="tabs-request-status">
