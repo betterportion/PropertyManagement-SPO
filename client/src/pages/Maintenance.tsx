@@ -425,7 +425,8 @@ export default function Maintenance() {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Region</FormLabel>
-                      <Select onValueChange={field.onChange} value={field.value}>
+                      {/* Set by the house; the server takes it from there too. */}
+                      <Select onValueChange={field.onChange} value={field.value} disabled={!!creatingForAddress}>
                         <FormControl>
                           <SelectTrigger data-testid="select-region">
                             <SelectValue placeholder="Select region" />
@@ -468,7 +469,7 @@ export default function Maintenance() {
         </Dialog>
         </div>} />
 
-      <div className="flex flex-col gap-3 rounded-lg border border-border/80 bg-muted/30 p-4 md:flex-row md:items-center">
+      <div className="flex flex-col gap-3 rounded-lg border border-border/80 bg-muted/30 p-4 md:flex-row md:flex-wrap md:items-center">
         <div className="flex items-center gap-2 text-sm font-medium text-foreground md:mr-1">
           <SlidersHorizontal className="h-4 w-4 text-primary-strong" /> Filter requests
         </div>

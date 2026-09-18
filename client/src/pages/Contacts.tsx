@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Plus, Upload, FileText, X, Loader2 } from "lucide-react";
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { insertMaintenanceContactSchema, type MaintenanceContact, type Property, type BillingRecord } from "@shared/schema";
 import { REGIONS } from "@shared/regions";
@@ -118,6 +118,8 @@ export default function Contacts() {
   const editForm = useForm<z.infer<typeof insertMaintenanceContactSchema>>({
     resolver: zodResolver(insertMaintenanceContactSchema),
   });
+  const addAddress = useWatch({ control: form.control, name: "buildingAddress" });
+  const editAddress = useWatch({ control: editForm.control, name: "buildingAddress" });
 
   const updateContactMutation = useMutation({
     mutationFn: async (data: z.infer<typeof insertMaintenanceContactSchema> & { id: string }) => {
@@ -150,6 +152,16 @@ export default function Contacts() {
     if (editingContact) {
       updateContactMutation.mutate({ ...data, id: editingContact.id });
     }
+  };
+
+  // A house knows its region, so picking one fills the region in and the
+  // region control locks: a contact tagged with one region but a house in
+  // another is hidden from that house's RA.
+  const houseRegion = (address: string | undefined) => properties.find(p => p.address === address)?.region;
+  const pickHouse = (target: typeof form, address: string) => {
+    target.setValue("buildingAddress", address);
+    const region = houseRegion(address);
+    if (region) target.setValue("region", region);
   };
 
   const handleEditPropertyChange = (propertyId: string) => {
@@ -253,6 +265,8 @@ export default function Contacts() {
       invoiceForm.setValue("companyName", contact.company || contact.name);
       invoiceForm.setValue("email", contact.email);
       invoiceForm.setValue("phone", contact.phone);
+      // A default, not a lock: a vendor can bill for work in another region.
+      invoiceForm.setValue("region", contact.region);
     }
   };
 
@@ -377,7 +391,7 @@ export default function Contacts() {
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>Region</FormLabel>
-                        <Select onValueChange={field.onChange} value={field.value}>
+                        <Select onValueChange={field.onChange} value={field.value} disabled={!!houseRegion(addAddress)}>
                           <FormControl>
                             <SelectTrigger data-testid="select-contact-region">
                               <SelectValue placeholder="Select region" />
@@ -399,7 +413,7 @@ export default function Contacts() {
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>Household Address</FormLabel>
-                        <Select onValueChange={field.onChange} value={field.value}>
+                        <Select onValueChange={(address) => pickHouse(form, address)} value={field.value}>
                           <FormControl>
                             <SelectTrigger data-testid="select-contact-building">
                               <SelectValue placeholder="Select property" />
@@ -814,7 +828,7 @@ export default function Contacts() {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Region</FormLabel>
-                      <Select onValueChange={field.onChange} value={field.value}>
+                      <Select onValueChange={field.onChange} value={field.value} disabled={!!houseRegion(editAddress)}>
                         <FormControl>
                           <SelectTrigger data-testid="select-edit-contact-region">
                             <SelectValue placeholder="Select region" />
@@ -836,7 +850,7 @@ export default function Contacts() {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Household Address</FormLabel>
-                      <Select onValueChange={field.onChange} value={field.value}>
+                      <Select onValueChange={(address) => pickHouse(editForm, address)} value={field.value}>
                         <FormControl>
                           <SelectTrigger data-testid="select-edit-contact-building">
                             <SelectValue placeholder="Select property" />
