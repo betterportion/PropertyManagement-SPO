@@ -21,6 +21,7 @@
 import { storage } from "../server/storage";
 import { generateStorageKey, putUpload } from "../server/objectStorage";
 import { closeDatabase } from "../server/db";
+import { isClosedMaintenanceStatus } from "../shared/schema";
 
 // A valid 1×1 PNG. Enough for <img> tags to render without broken-image icons.
 const PLACEHOLDER_PNG = Buffer.from(
@@ -133,16 +134,16 @@ async function seed(): Promise<void> {
 
   // ── Maintenance requests ──────────────────────────────────────────────────
   const requestRows = [
-    { title: "Kitchen faucet dripping constantly", description: "The cold tap drips even when fully closed. Bucket is filling overnight.", category: "Plumbing", priority: "high", status: "pending", property: cleveland, submittedBy: "joe.miller@spo.org" },
-    { title: "Furnace making banging noise", description: "Loud metal bang when the heat kicks in, from the basement unit.", category: "HVAC", priority: "urgent", status: "in_progress", property: como, submittedBy: "sam.oconnor@spo.org" },
-    { title: "Bedroom window won't latch", description: "Second-floor north bedroom window closes but the latch doesn't catch.", category: "Structural", priority: "medium", status: "pending", property: dinkytown, submittedBy: "clare.hughes@spo.org" },
-    { title: "Dryer not heating", description: "Runs a full cycle but clothes come out cold and damp.", category: "Appliance", priority: "high", status: "in_progress", property: buckeye, submittedBy: "ben.walsh@spo.org" },
-    { title: "Porch light flickering", description: "Front porch fixture flickers; new bulb did not fix it.", category: "Electrical", priority: "low", status: "completed", property: aggieland, submittedBy: "luke.tran@spo.org" },
-    { title: "Basement smells musty after rain", description: "Noticeable after last week's storms; no standing water visible.", category: "Structural", priority: "medium", status: "pending", property: como, submittedBy: "sam.oconnor@spo.org" },
-    { title: "Garbage disposal jammed", description: "Hums but doesn't spin. Already tried the reset button.", category: "Appliance", priority: "medium", status: "completed", property: cleveland, submittedBy: "joe.miller@spo.org" },
-    { title: "Add a second towel bar in shared bath", description: "Six guys, one towel bar. Not urgent, would be great to have.", category: "Other", priority: "wishlist", status: "pending", property: como, submittedBy: "sam.oconnor@spo.org" },
-    { title: "Smoke detector chirping", description: "Hallway detector chirps every minute; battery replaced, still chirping.", category: "Safety Equipment", priority: "high", status: "cancelled", property: dinkytown, submittedBy: "clare.hughes@spo.org" },
-    { title: "Water heater pilot keeps going out", description: "Relit three times this week; goes out again within a day.", category: "Plumbing", priority: "urgent", status: "pending", property: jayhawk, submittedBy: "will.chen@spo.org" },
+    { title: "Kitchen faucet dripping constantly", description: "The cold tap drips even when fully closed. Bucket is filling overnight.", category: "Plumbing", priority: "high", status: "pending", property: cleveland, location: "Kitchen", submittedBy: "joe.miller@spo.org" },
+    { title: "Furnace making banging noise", description: "Loud metal bang when the heat kicks in, from the basement unit.", category: "HVAC", priority: "urgent", status: "in_progress", property: como, location: "Basement", submittedBy: "sam.oconnor@spo.org" },
+    { title: "Bedroom window won't latch", description: "Second-floor north bedroom window closes but the latch doesn't catch.", category: "Structural", priority: "medium", status: "pending", property: dinkytown, location: "North bedroom", submittedBy: "clare.hughes@spo.org" },
+    { title: "Dryer not heating", description: "Runs a full cycle but clothes come out cold and damp.", category: "Appliance", priority: "high", status: "in_progress", property: buckeye, location: "Laundry room", submittedBy: "ben.walsh@spo.org" },
+    { title: "Porch light flickering", description: "Front porch fixture flickers; new bulb did not fix it.", category: "Electrical", priority: "low", status: "completed", property: aggieland, location: "Front porch", submittedBy: "luke.tran@spo.org" },
+    { title: "Basement smells musty after rain", description: "Noticeable after last week's storms; no standing water visible.", category: "Structural", priority: "medium", status: "pending", property: como, location: "Basement", submittedBy: "sam.oconnor@spo.org" },
+    { title: "Garbage disposal jammed", description: "Hums but doesn't spin. Already tried the reset button.", category: "Appliance", priority: "medium", status: "completed", property: cleveland, location: "Kitchen", submittedBy: "joe.miller@spo.org" },
+    { title: "Add a second towel bar in shared bath", description: "Six guys, one towel bar. Not urgent, would be great to have.", category: "Other", priority: "wishlist", status: "pending", property: como, location: "Shared bathroom", submittedBy: "sam.oconnor@spo.org" },
+    { title: "Smoke detector chirping", description: "Hallway detector chirps every minute; battery replaced, still chirping.", category: "Safety Equipment", priority: "high", status: "cancelled", property: dinkytown, location: "Hallway", submittedBy: "clare.hughes@spo.org" },
+    { title: "Water heater pilot keeps going out", description: "Relit three times this week; goes out again within a day.", category: "Plumbing", priority: "urgent", status: "pending", property: jayhawk, location: "Basement", submittedBy: "will.chen@spo.org" },
   ] as const;
 
   const requests = [];
@@ -156,11 +157,14 @@ async function seed(): Promise<void> {
         category: row.category,
         priority: row.priority,
         status: row.status,
-        location: row.property.name,
+        location: row.location,
         region: row.property.region,
         buildingAddress: row.property.address,
         submittedBy: row.submittedBy,
         photoUrl,
+        // Closed a couple of weeks ago, as the real routes would have stamped
+        // it: without a close date a household leader never sees the request.
+        completedDate: isClosedMaintenanceStatus(row.status) ? daysAgo(14) : null,
       }),
     );
   }

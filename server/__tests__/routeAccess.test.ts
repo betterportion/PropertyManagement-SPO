@@ -404,6 +404,13 @@ describe("an administrator with no permissions row", () => {
     actAs(ADMIN, { canViewMaintenance: false, canManageMaintenance: false, allowedRegions: [] });
     expect((await get("/api/maintenance-requests")).status).toBe(200);
   });
+
+  it("reads their own missing row as null, not a 404 every staff page logs", async () => {
+    actAs(ADMIN, undefined);
+    const { status, body } = await get(`/api/users/${ADMIN.id}/permissions`);
+    expect(status).toBe(200);
+    expect(body).toBeNull();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -2429,6 +2436,7 @@ describe("submitting a maintenance request", () => {
   it("stores the type staff choose when they file one", async () => {
     actAs(STAFF, { ...ALL_MAINTENANCE, allowedRegions: ["West Central"] });
     storageMock.createMaintenanceRequest.mockImplementation(async (data: Record<string, unknown>) => ({ id: "new", ...data }));
+    storageMock.getPropertyByAddress.mockResolvedValue({ address: "1 Main St", region: "West Central" });
 
     const { status } = await request("POST", "/api/maintenance-requests", {
       body: { ...body, region: "West Central", buildingAddress: "1 Main St", type: "capex" },
@@ -2452,6 +2460,7 @@ describe("submitting a maintenance request", () => {
   it("files a staff member's request into a region they can reach, session as submitter", async () => {
     actAs(STAFF, { ...ALL_MAINTENANCE, allowedRegions: ["West Central"] });
     storageMock.createMaintenanceRequest.mockImplementation(async (data: Record<string, unknown>) => ({ id: "new", ...data }));
+    storageMock.getPropertyByAddress.mockResolvedValue({ address: "1 Main St", region: "West Central" });
 
     const { status } = await request("POST", "/api/maintenance-requests", {
       body: { ...body, region: "West Central", buildingAddress: "1 Main St", submittedBy: "spoof@example.com" },
@@ -2465,6 +2474,7 @@ describe("submitting a maintenance request", () => {
 
   it("refuses a staff member filing into a region they cannot reach", async () => {
     actAs(STAFF, { ...ALL_MAINTENANCE, allowedRegions: ["West Central"] });
+    storageMock.getPropertyByAddress.mockResolvedValue({ address: "9 Elm", region: "East Central" });
 
     const { status } = await request("POST", "/api/maintenance-requests", {
       body: { ...body, region: "East Central", buildingAddress: "9 Elm" },
@@ -2472,6 +2482,45 @@ describe("submitting a maintenance request", () => {
 
     expect(status).toBe(403);
     expect(storageMock.createMaintenanceRequest).not.toHaveBeenCalled();
+  });
+
+  it("takes the region from the house, not the body, when staff file one", async () => {
+    // An admin who picks a Northwest house and then a Northeast region would
+    // otherwise hide the request from the Northwest RA.
+    actAs(ADMIN);
+    storageMock.getPropertyByAddress.mockResolvedValue({ address: "9 Elm", region: "East Central" });
+    storageMock.createMaintenanceRequest.mockImplementation(async (data: Record<string, unknown>) => ({ id: "new", ...data }));
+
+    const { status } = await request("POST", "/api/maintenance-requests", {
+      body: { ...body, region: "West Central", buildingAddress: "9 Elm" },
+    });
+
+    expect(status).toBe(200);
+    expect(storageMock.createMaintenanceRequest).toHaveBeenCalledWith(expect.objectContaining({ region: "East Central" }));
+  });
+
+  it("refuses a staff request for an address that is not a house", async () => {
+    actAs(ADMIN);
+    storageMock.getPropertyByAddress.mockResolvedValue(undefined);
+
+    const { status } = await request("POST", "/api/maintenance-requests", {
+      body: { ...body, region: "West Central", buildingAddress: "1 Nowhere Rd" },
+    });
+
+    expect(status).toBe(400);
+    expect(storageMock.getPropertyByAddress).toHaveBeenCalledWith("1 Nowhere Rd");
+    expect(storageMock.createMaintenanceRequest).not.toHaveBeenCalled();
+  });
+
+  it("refuses re-pointing a request at a house in a region the RA cannot reach", async () => {
+    actAs(STAFF, { ...ALL_MAINTENANCE, allowedRegions: ["West Central"] });
+    storageMock.getMaintenanceRequest.mockResolvedValue({ id: "r1", type: "request", status: "pending", region: "West Central", buildingAddress: "1 Main St" });
+    storageMock.getPropertyByAddress.mockResolvedValue({ address: "9 Elm", region: "East Central" });
+
+    const { status } = await request("PATCH", "/api/maintenance-requests/r1", { body: { buildingAddress: "9 Elm" } });
+
+    expect(status).toBe(403);
+    expect(storageMock.updateMaintenanceRequest).not.toHaveBeenCalled();
   });
 });
 

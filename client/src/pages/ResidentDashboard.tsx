@@ -2,12 +2,13 @@ import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import MaintenanceRequestCard from "@/components/MaintenanceRequestCard";
-import { Home, Wrench, Phone, Mail, MapPin } from "lucide-react";
+import { Home, Wrench, Phone, MapPin } from "lucide-react";
 import { Link } from "wouter";
 import { useAuth } from "@/hooks/useAuth";
 import type { MaintenanceRequest } from "@shared/schema";
 import { Section, Container, PageHeader, PageStack } from "@/components/layout/page";
 import { EmptyState, ErrorState, LoadingState } from "@/components/states";
+import { canSeeResourceHub, type WalkthroughUser } from "@/lib/walkthrough";
 
 export default function ResidentDashboard() {
   const { user } = useAuth();
@@ -16,6 +17,18 @@ export default function ResidentDashboard() {
 
   const { data: requests = [], isLoading, isError, refetch } = useQuery<MaintenanceRequest[]>({
     queryKey: ["/api/maintenance-requests"],
+  });
+
+  // The house comes from the one endpoint scoped to it, which carries the
+  // hub's own grant; without that grant the card says whom to ask instead.
+  const { data: house } = useQuery<{
+    name: string;
+    address: string;
+    rentalCompany: { name: string; company: string; phone: string | null } | null;
+  } | null>({
+    queryKey: ["/api/my-property"],
+    enabled: canSeeResourceHub(user as WalkthroughUser | null),
+    retry: false,
   });
 
   const activeRequests = requests.filter(
@@ -42,28 +55,28 @@ export default function ResidentDashboard() {
               <MapPin className="h-4 w-4 text-muted-foreground mt-0.5" />
               <div>
                 <p className="text-sm font-medium">Address</p>
-                <p className="text-sm text-muted-foreground">Contact your property manager for details</p>
+                {house ? (
+                  <p className="text-sm text-muted-foreground" data-testid="text-my-house">{house.name} · {house.address}</p>
+                ) : (
+                  <p className="text-sm text-muted-foreground">Ask your RA for your house's details</p>
+                )}
               </div>
             </div>
-            <div className="pt-3 border-t">
-              <p className="text-sm font-medium mb-2">Property Manager</p>
-              <div className="space-y-2">
-                <a
-                  href="tel:5125550100"
-                  className="flex items-center gap-2 text-sm hover-elevate active-elevate-2 p-2 rounded-md -ml-2"
-                >
-                  <Phone className="h-4 w-4" />
-                  <span>(512) 555-0100</span>
-                </a>
-                <a
-                  href="mailto:manager@sunsetapts.com"
-                  className="flex items-center gap-2 text-sm hover-elevate active-elevate-2 p-2 rounded-md -ml-2"
-                >
-                  <Mail className="h-4 w-4" />
-                  <span>manager@sunsetapts.com</span>
-                </a>
+            {house?.rentalCompany && (
+              <div className="pt-3 border-t">
+                <p className="text-sm font-medium mb-2">Who to call for repairs</p>
+                <p className="text-sm">{house.rentalCompany.company || house.rentalCompany.name}</p>
+                {house.rentalCompany.phone && (
+                  <a
+                    href={`tel:${house.rentalCompany.phone}`}
+                    className="flex items-center gap-2 text-sm hover-elevate active-elevate-2 p-2 rounded-md -ml-2"
+                  >
+                    <Phone className="h-4 w-4" />
+                    <span>{house.rentalCompany.phone}</span>
+                  </a>
+                )}
               </div>
-            </div>
+            )}
           </CardContent>
         </Card>
 
@@ -82,15 +95,6 @@ export default function ResidentDashboard() {
             <Button variant="secondary" className="w-full" asChild data-testid="button-view-requests"><Link href="/my-requests">
                 View My Requests ({isLoading || isError ? "—" : requests.length})
               </Link></Button>
-            <div className="pt-3 border-t">
-              <p className="text-sm font-medium mb-2 text-destructive">Emergency Maintenance</p>
-              <a href="tel:5125550911">
-                <Button variant="destructive" className="w-full" data-testid="button-emergency">
-                  <Phone className="h-4 w-4 mr-2" />
-                  Call Emergency Line
-                </Button>
-              </a>
-            </div>
           </CardContent>
         </Card>
       </div>

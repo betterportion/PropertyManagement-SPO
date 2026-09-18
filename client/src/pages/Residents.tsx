@@ -2,6 +2,7 @@ import { Link } from "wouter";
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { csvCell } from "@/lib/csv";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import RegionSelector from "@/components/RegionSelector";
@@ -212,10 +213,6 @@ export default function Residents() {
   // Export the former residents currently in view (respects the region/house
   // filters) as a CSV the user can open in a spreadsheet.
   const formerResidents = visible.filter((r) => !r.isActive);
-  const csvCell = (value: string | null | undefined) => {
-    const s = String(value ?? "");
-    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-  };
   const exportFormerResidents = () => {
     const headers = ["First name", "Last name", "Email", "House", "Region", "Moved in", "Moved out"];
     const rows = formerResidents.map((r) => [

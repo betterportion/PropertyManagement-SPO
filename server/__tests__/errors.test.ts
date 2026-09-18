@@ -3,6 +3,7 @@ import express from "express";
 import type { AddressInfo } from "net";
 import type { Server } from "http";
 import { z } from "zod";
+import { DrizzleQueryError } from "drizzle-orm/errors";
 import {
   HttpError,
   apiNotFound,
@@ -100,6 +101,17 @@ describe("classifyError", () => {
 
     // The driver message names the constraint; it must not be forwarded.
     expect(classifyError(duplicate).body.message).not.toContain("constraint");
+  });
+
+  it("maps a constraint violation that Drizzle has wrapped", () => {
+    // What a route actually catches: Drizzle puts the driver error on `cause`.
+    const driverError = (code: string): any => Object.assign(new Error("driver"), { code });
+    const wrapped = (code: string) => new DrizzleQueryError("insert ...", [], driverError(code));
+
+    expect(classifyError(wrapped("23505")).status).toBe(409);
+    expect(classifyError(wrapped("23503")).status).toBe(400);
+    expect(classifyError(wrapped("22003")).status).toBe(400);
+    expect(classifyError(wrapped("23505")).body.message).not.toContain("insert");
   });
 
   it("treats an unrecognised failure as a 500 with the supplied wording", () => {

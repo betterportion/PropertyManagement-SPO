@@ -10,6 +10,15 @@ test.describe("resident experience", () => {
     await expect(page.getByTestId("button-submit-maintenance").first()).toBeVisible();
   });
 
+  test("offers no made-up phone numbers or emails", async ({ page }) => {
+    // The dashboard once carried a placeholder manager and an "emergency line"
+    // that dialled a 555 number. A student in an emergency would reach nobody.
+    await page.goto("/");
+    await expect(page.getByRole("heading", { name: /Welcome back/ })).toBeVisible();
+    await expect(page.getByTestId("button-emergency")).toHaveCount(0);
+    await expect(page.locator('a[href^="tel:512555"], a[href*="sunsetapts"]')).toHaveCount(0);
+  });
+
   test("sees only resident navigation, not the admin sections", async ({ page }) => {
     await page.goto("/");
     await expect(page.getByTestId("link-dashboard")).toBeVisible();

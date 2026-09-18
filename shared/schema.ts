@@ -16,12 +16,23 @@ import { RESOURCE_HUB_SLOT_KEYS } from "./resourceHubSlots";
  * the column expects.
  */
 
+/** True when an amount is whole cents. The columns hold two decimals, and
+ *  Postgres would otherwise round 12.345 to 12.35 without saying so. The
+ *  tolerance absorbs float noise such as 19.99 * 100 = 1998.9999999999998. */
+export function isWholeCents(n: number): boolean {
+  return Math.abs(n * 100 - Math.round(n * 100)) < 1e-6;
+}
+
+export const WHOLE_CENTS_MESSAGE = "Use at most 2 decimal places";
+
 /** A non-negative amount. Accepts a number or numeric string; stored as the
- *  string the numeric column round-trips as. Rejects NaN, Infinity, negatives. */
+ *  string the numeric column round-trips as. Rejects NaN, Infinity, negatives
+ *  and fractions of a cent. */
 const nonNegativeAmount = z.coerce
   .number()
   .finite("Must be a valid number")
   .min(0, "Must be 0 or greater")
+  .refine(isWholeCents, WHOLE_CENTS_MESSAGE)
   .transform((n: number) => String(n));
 
 /** A non-negative whole count (bedrooms, age, display order). */
@@ -246,6 +257,8 @@ export const insertMaintenanceRequestSchema = createInsertSchema(maintenanceRequ
     updatedAt: true,
   })
   .extend({
+    // A request with a blank title reads as an empty row in every list.
+    title: z.string().trim().min(1, "Give the request a title"),
     // The project card renders this straight into an href, so the scheme is
     // checked here -- see httpUrlFromClient.
     contractUrl: httpUrlFromClient.nullish(),

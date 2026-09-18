@@ -84,6 +84,8 @@ import {
   insertMaintenanceRequestBidSchema,
   bidNamesAVendor,
   isProjectType,
+  isWholeCents,
+  WHOLE_CENTS_MESSAGE,
   type InsertMaintenanceRequest,
   type MaintenanceRequest,
   type MaintenanceRequestComment,
@@ -295,6 +297,8 @@ const PROJECT_FIELDS = ["contractUrl", "estimatedCost", "actualCost", "targetYea
 /** What a repair holds in every project field. */
 const CLEARED_PROJECT_FIELDS = { contractUrl: null, estimatedCost: null, actualCost: null, targetYear: null, targetQuarter: null };
 
+const NOT_A_HOUSE_MESSAGE = "Choose one of the portal's houses for this request.";
+
 function projectFieldsProblem(
   nextType: string,
   patch: Partial<InsertMaintenanceRequest>,
@@ -486,11 +490,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!ctx.isAdmin && req.params.id !== ctx.userId) {
         return res.status(403).json({ message: "Forbidden" });
       }
+      // No row is normal -- admins frequently have none -- so it answers null
+      // rather than a 404 that every staff page would log as an error.
       const permissions = await storage.getUserPermissions(req.params.id);
-      if (!permissions) {
-        return res.status(404).json({ message: "Permissions not found" });
-      }
-      res.json(permissions);
+      res.json(permissions ?? null);
     } catch (error) {
       sendError(res, error, "Failed to fetch permissions");
     }
@@ -834,7 +837,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Staff file into a region they can reach. submittedBy is still the
       // session, so it is omitted from the body here too.
-      const validatedData = insertMaintenanceRequestSchema.omit({ submittedBy: true }).parse(req.body);
+      const parsed = insertMaintenanceRequestSchema.omit({ submittedBy: true }).parse(req.body);
+      // The region is the house's, never the body's: a request tagged with one
+      // region but filed against a house in another is hidden from that
+      // house's RA while its household can still read it.
+      const house = await storage.getPropertyByAddress(parsed.buildingAddress);
+      if (!house) return res.status(400).json({ message: NOT_A_HOUSE_MESSAGE });
+      const validatedData = { ...parsed, region: house.region };
       if (!requireRegion(res, ctx, validatedData.region, "Forbidden - Cannot create in this region")) return;
       const problem = projectFieldsProblem(validatedData.type ?? "request", validatedData);
       if (problem) return res.status(400).json({ message: problem });
@@ -917,6 +926,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const validatedData = insertMaintenanceRequestSchema.partial().parse(req.body);
+
+      // As on create, a region follows the house. A new address must be a
+      // house; an older request whose address no longer matches one keeps the
+      // region it was given.
+      if (validatedData.buildingAddress !== undefined || validatedData.region !== undefined) {
+        const house = await storage.getPropertyByAddress(validatedData.buildingAddress ?? existingRequest.buildingAddress);
+        if (house) validatedData.region = house.region;
+        else if (validatedData.buildingAddress !== undefined) return res.status(400).json({ message: NOT_A_HOUSE_MESSAGE });
+      }
 
       if (!requireRegionMove(res, ctx, existingRequest.region, validatedData.region)) return;
 
@@ -3640,7 +3658,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             .trim()
             .min(1, "Say what the charge is for")
             .max(300, "Keep the description under 300 characters"),
-          amount: z.coerce.number().finite().min(0, "Must be 0 or greater"),
+          amount: z.coerce.number().finite().min(0, "Must be 0 or greater").refine(isWholeCents, WHOLE_CENTS_MESSAGE),
           chargeDate: z.coerce.date(),
           residentIds: z.array(z.string().min(1)).min(1, "Choose at least one person to split this across"),
         })

@@ -390,6 +390,7 @@ export interface IStorage {
   // Properties
   createProperty(property: InsertPropertyWithAddress): Promise<Property>;
   getProperty(id: string): Promise<Property | undefined>;
+  getPropertyByAddress(address: string): Promise<Property | undefined>;
   getAllProperties(): Promise<Property[]>;
 
   // Property setup checklist
@@ -1419,6 +1420,11 @@ export class DatabaseStorage implements IStorage {
 
   async getProperty(id: string): Promise<Property | undefined> {
     const [property] = await db.select().from(properties).where(eq(properties.id, id));
+    return property;
+  }
+
+  async getPropertyByAddress(address: string): Promise<Property | undefined> {
+    const [property] = await db.select().from(properties).where(eq(properties.address, address));
     return property;
   }
 

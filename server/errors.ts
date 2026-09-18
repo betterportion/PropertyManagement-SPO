@@ -138,8 +138,15 @@ export function classifyError(
       };
     }
 
-    if (typeof err.code === "string") {
-      const mapped = fromDatabaseError(err.code);
+    // Drizzle wraps the driver error in a DrizzleQueryError, so the Postgres
+    // code sits on `cause` rather than on the error the route catches.
+    const code = typeof err.code === "string"
+      ? err.code
+      : isRecord(err.cause) && typeof err.cause.code === "string"
+        ? err.cause.code
+        : undefined;
+    if (code) {
+      const mapped = fromDatabaseError(code);
       if (mapped) return mapped;
     }
 
