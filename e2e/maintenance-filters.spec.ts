@@ -38,7 +38,6 @@ test.describe("filtering the maintenance list", () => {
     // useless the moment there is more than one house.
     await page.goto("/maintenance");
     const roomFilter = page.getByTestId("select-filter-room");
-    if ((await roomFilter.count()) === 0) test.skip();
     await expect(roomFilter).toBeVisible();
   });
 
@@ -53,7 +52,6 @@ test.describe("a contractor's history", () => {
   test("their name opens what SPO knows about them", async ({ page }) => {
     await page.goto("/contacts");
     const firstContact = page.locator('[data-testid^="text-contact-name-"]').first();
-    if ((await firstContact.count()) === 0) test.skip();
 
     await firstContact.click();
     await expect(page).toHaveURL(/\/contacts\/[^/]+$/);
@@ -64,7 +62,6 @@ test.describe("a contractor's history", () => {
   test("a note can be added and reads back with its author and date", async ({ page }) => {
     await page.goto("/contacts");
     const firstContact = page.locator('[data-testid^="text-contact-name-"]').first();
-    if ((await firstContact.count()) === 0) test.skip();
     await firstContact.click();
 
     const add = page.getByTestId("button-add-contact-note");
@@ -82,7 +79,6 @@ test.describe("a contractor's history", () => {
     // arguments about the number and says less than a paragraph does.
     await page.goto("/contacts");
     const firstContact = page.locator('[data-testid^="text-contact-name-"]').first();
-    if ((await firstContact.count()) === 0) test.skip();
     await firstContact.click();
 
     await expect(page.getByRole("radiogroup", { name: /rating/i })).toHaveCount(0);
