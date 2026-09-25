@@ -9,6 +9,9 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { WalkthroughItem } from "@shared/schema";
 import ConditionPicker from "./ConditionPicker";
+import StandingNote from "./StandingNote";
+import { LastTimeItem } from "./LastTime";
+import type { PreviousItem } from "@/lib/walkthrough";
 import { formatDate } from "@/lib/format";
 
 /**
@@ -38,9 +41,14 @@ interface RoomChecklistProps {
   canManage: boolean;
   /** Staff only: the remove control. See `canRemoveWalkthroughItems`. */
   canRemove: boolean;
+  /**
+   * Last time's answer for an item, when this is a move-out and there was a
+   * last time: `{ when, find }`, or null to show nothing.
+   */
+  lastTime: { when: string; find: (item: WalkthroughItem) => PreviousItem | undefined } | null;
 }
 
-export default function RoomChecklist({ walkthroughId, items, canManage, canRemove }: RoomChecklistProps) {
+export default function RoomChecklist({ walkthroughId, items, canManage, canRemove, lastTime }: RoomChecklistProps) {
   const { toast } = useToast();
 
   const itemsKey = ["/api/walkthroughs", walkthroughId, "items"] as const;
@@ -114,6 +122,7 @@ export default function RoomChecklist({ walkthroughId, items, canManage, canRemo
             item={item}
             canManage={canManage}
             canRemove={canRemove}
+            lastTime={lastTime}
             onClearDismissal={() => clearDismissal.mutate(item.id)}
             // `mutate` keeps the same identity across renders, which is what
             // lets the autosave effects below depend on it without restarting
@@ -132,12 +141,13 @@ interface ItemRowProps {
   item: WalkthroughItem;
   canManage: boolean;
   canRemove: boolean;
+  lastTime: { when: string; find: (item: WalkthroughItem) => PreviousItem | undefined } | null;
   onClearDismissal: () => void;
   onSave: (change: { id: string; patch: Partial<WalkthroughItem> }) => void;
   onDelete: () => void;
 }
 
-function ItemRow({ item, canManage, canRemove, onSave, onDelete, onClearDismissal }: ItemRowProps) {
+function ItemRow({ item, canManage, canRemove, lastTime, onSave, onDelete, onClearDismissal }: ItemRowProps) {
   // Held locally while it is being typed. Saving every keystroke would mean a
   // request per character on a phone signal.
   const [notes, setNotes] = useState(item.notes ?? "");
@@ -198,12 +208,23 @@ function ItemRow({ item, canManage, canRemove, onSave, onDelete, onClearDismissa
           )}
         </div>
 
+        {/* Staff instruction that follows this item year to year. Leaders
+            read it; only staff (the remove gate) edit it. */}
+        <StandingNote
+          value={item.standingNote}
+          canEdit={canRemove}
+          onSave={(standingNote) => onSave({ id: item.id, patch: { standingNote } })}
+          testId={`standing-note-${item.id}`}
+        />
+
         <ConditionPicker
           value={item.condition}
           onChange={(condition) => onSave({ id: item.id, patch: { condition } })}
           disabled={!canManage}
           testId={item.id}
         />
+
+        {lastTime && <LastTimeItem previous={lastTime.find(item)} when={lastTime.when} itemId={item.id} />}
 
         {item.dismissedAt && (
           <p className="rounded-md border border-border bg-muted px-3 py-2 text-sm" data-testid={`text-item-dismissed-${item.id}`}>

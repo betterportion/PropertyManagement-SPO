@@ -312,6 +312,13 @@ export const walkthroughRooms = pgTable("walkthrough_rooms", {
   // than dropped so the migration stays reversible by inspection.
   requiredQuestions: text("required_questions").array(),
   displayOrder: integer("display_order").notNull(),
+  // A staff note that outlives this walkthrough: "floor has a crack by the
+  // window, photograph it each year". Copied forward onto the next
+  // walkthrough's copy of this room by planFromPreviousWalkthrough, so it
+  // appears during every future capture until a staff member clears it.
+  // Distinct from the walkthrough's own notes, which belong to one dated
+  // visit. Read by leaders (it is instruction for them), written by staff.
+  standingNote: text("standing_note"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -482,6 +489,8 @@ export const walkthroughItems = pgTable("walkthrough_items", {
   dismissedAt: timestamp("dismissed_at"),
   dismissReason: text("dismiss_reason"),
   dismissedByUserId: varchar("dismissed_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  // The item-level standing note; see walkthrough_rooms.standingNote.
+  standingNote: text("standing_note"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });

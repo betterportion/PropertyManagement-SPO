@@ -19,6 +19,8 @@ import { EmptyState, ErrorState, LoadingState } from "@/components/states";
 import RoomChecklist from "@/components/walkthrough/RoomChecklist";
 import RoomPhotos from "@/components/walkthrough/RoomPhotos";
 import RoomSwitcher from "@/components/walkthrough/RoomSwitcher";
+import StandingNote from "@/components/walkthrough/StandingNote";
+import { LastTimeRoomPhotos } from "@/components/walkthrough/LastTime";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -36,8 +38,10 @@ import {
   canRemoveWalkthroughItems,
   canReviewWalkthrough,
   canSubmitWalkthrough,
+  indexPreviousItems,
+  previousItemKey,
 } from "@/lib/walkthrough";
-import type { Walkthrough, WalkthroughItem, WalkthroughRoom } from "@shared/schema";
+import { foldName, type Walkthrough, type WalkthroughItem, type WalkthroughRoom } from "@shared/schema";
 
 /**
  * Filling in one walkthrough, one room at a time.
@@ -110,13 +114,50 @@ export default function WalkthroughRun() {
   // knowing what else their house has. `/api/walkthroughs` is already scoped to
   // their own house by the server, so this is one small request and only for
   // the tier that needs it -- staff writability does not depend on it.
+  // Also read for a move-out, by either tier, to find the visit before this
+  // one: the side-by-side below shows what that walkthrough recorded.
+  const isMoveOut = walkthrough?.type === "move_out";
   const { data: houseWalkthroughs = [] } = useQuery<Walkthrough[]>({
     queryKey: ["/api/walkthroughs"],
-    enabled: isResidentTier && canFillInWalkthroughs(typedUser),
+    enabled: (isResidentTier && canFillInWalkthroughs(typedUser)) || isMoveOut,
   });
+
+  // The newest earlier walkthrough of this house, on a move-out only.
+  const previousWalkthrough = useMemo(() => {
+    if (!isMoveOut || !walkthrough) return null;
+    const at = new Date(walkthrough.walkthroughDate).getTime();
+    return (
+      houseWalkthroughs
+        .filter((other) => other.propertyId === walkthrough.propertyId && other.id !== walkthrough.id)
+        .filter((other) => new Date(other.walkthroughDate).getTime() < at)
+        .sort((a, b) => new Date(b.walkthroughDate).getTime() - new Date(a.walkthroughDate).getTime())[0] ?? null
+    );
+  }, [isMoveOut, walkthrough, houseWalkthroughs]);
+
+  const { data: previousRooms = [] } = useQuery<WalkthroughRoom[]>({
+    queryKey: ["/api/walkthroughs", previousWalkthrough?.id, "rooms"],
+    enabled: !!previousWalkthrough,
+  });
+  const { data: previousItems = [] } = useQuery<WalkthroughItem[]>({
+    queryKey: ["/api/walkthroughs", previousWalkthrough?.id, "items"],
+    enabled: !!previousWalkthrough,
+  });
+  const previousIndex = useMemo(() => indexPreviousItems(previousRooms, previousItems), [previousRooms, previousItems]);
+  const previousRoomIdFor = (name: string) =>
+    previousRooms.find((room) => foldName(room.name) === foldName(name))?.id ?? null;
 
   // Whether the controls belong on screen at all, for THIS walkthrough.
   const canManage = canWriteWalkthrough(typedUser, walkthrough, houseWalkthroughs);
+
+  // A room's standing note is staff instruction; the room PATCH is staff-only.
+  const saveRoomNote = useMutation({
+    mutationFn: async ({ roomId, standingNote }: { roomId: string; standingNote: string | null }) => {
+      await apiRequest("PATCH", `/api/walkthrough-rooms/${roomId}`, { standingNote });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/walkthroughs", walkthroughId, "rooms"] });
+    },
+  });
   // Removing an item is staff work; a leader asks their RA.
   const canRemove = canManage && canRemoveWalkthroughItems(typedUser);
   // Disabled controls with no explanation read as a broken page. Say why.
@@ -217,7 +258,31 @@ export default function WalkthroughRun() {
           </p>
         </div>
 
-        <RoomChecklist walkthroughId={walkthroughId} items={roomItems} canManage={canManage} canRemove={canRemove} />
+        <StandingNote
+          value={currentRoom.standingNote}
+          canEdit={canRemove}
+          onSave={(standingNote) => saveRoomNote.mutate({ roomId: currentRoom.id, standingNote })}
+          testId={`standing-note-room-${currentRoom.id}`}
+        />
+
+        {previousWalkthrough && showPhotos && previousRoomIdFor(currentRoom.name) && (
+          <LastTimeRoomPhotos roomId={previousRoomIdFor(currentRoom.name)!} when={formatDate(previousWalkthrough.walkthroughDate)} />
+        )}
+
+        <RoomChecklist
+          walkthroughId={walkthroughId}
+          items={roomItems}
+          canManage={canManage}
+          canRemove={canRemove}
+          lastTime={
+            previousWalkthrough
+              ? {
+                  when: formatDate(previousWalkthrough.walkthroughDate),
+                  find: (item) => previousIndex.get(previousItemKey(currentRoom.name, item.label)),
+                }
+              : null
+          }
+        />
 
         {showPhotos && (
           <RoomPhotos
