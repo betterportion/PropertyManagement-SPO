@@ -284,6 +284,7 @@ Worth understanding before changing anything server-side.
 - **Regions fail closed.** An empty region list grants access to nothing, not everything. Updates check both the record's current region and the incoming one, so a record cannot be moved somewhere the user cannot reach.
 - **Uploaded files are not public.** `GET /uploads/:filename` requires a session and authorizes against the record that references the file. Production hands out a short-lived signed link; the bucket itself is private.
 - **Uploads are refused before the body is read.** The permission check sits ahead of the multipart parser, so someone with no right to upload cannot push megabytes into the server's memory.
+- **Photos are shrunk in the browser before upload** (2048 px long edge, JPEG), so a phone photo fits the 10 MB image limit and the bucket grows slowly. The server limit is unchanged.
 - **Errors never leak internals.** Only messages the app wrote itself reach the client; everything else becomes a generic message with the detail logged server-side.
 
 ### Audit log

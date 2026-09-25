@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { deflateSync } from "node:zlib";
 
 // Acts as the resident. global-setup puts this resident on a house roster, so
 // the submit flow can attach their region/house.
@@ -65,4 +66,79 @@ test.describe("resident submits a maintenance request", () => {
     await expect(page.getByText(title)).toBeVisible();
     await expect(page.locator('[data-testid^="request-photos-"]').first()).toBeVisible();
   });
+
+  test("a phone-sized photo is shrunk in the browser before it is uploaded", async ({ page }) => {
+    // 2026-09 RA review, item 2. The server's image limit is 10 MB and does
+    // not move; the phone shrinks the photo instead. This 2000x2000 PNG of
+    // noise is ~12 MB, so it only lands because the browser re-encoded it.
+    await page.goto("/submit-request");
+    await page.getByLabel("Issue title").fill(`E2E big photo ${Date.now()}`);
+    await page.getByLabel("Location").fill("Kitchen");
+    await page.locator("#category").click();
+    await page.getByRole("option", { name: "Plumbing" }).click();
+    await page.locator("#priority").click();
+    await page.getByRole("option", { name: "Medium" }).click();
+    await page.getByLabel("Description").fill("Photo straight off the camera.");
+
+    const big = noisePng(2000, 2000);
+    expect(big.length).toBeGreaterThan(10 * 1024 * 1024);
+
+    // Chromium does not hand Playwright a multipart body, so the proof is the
+    // request's size and the server's answer: over 10 MB the server refuses
+    // with 413 and no thumbnail appears.
+    const upload = page.waitForResponse((r) => r.url().includes("/api/maintenance-request-photos/upload"));
+    await page.getByTestId("input-file-upload").setInputFiles({ name: "IMG_4021.png", mimeType: "image/png", buffer: big });
+    const response = await upload;
+    expect(response.status()).toBe(200);
+    const sentBytes = Number((await response.request().allHeaders())["content-length"]);
+    expect(sentBytes).toBeGreaterThan(0);
+    expect(sentBytes).toBeLessThan(10 * 1024 * 1024);
+
+    await expect(page.getByTestId("request-photo-thumbs")).toBeVisible();
+  });
 });
+
+/**
+ * A valid PNG of random RGB noise, built by hand so the test needs no image
+ * library. Stored (level 0) deflate keeps it about as big as the raw pixels,
+ * which is the point: it has to be over the server's limit.
+ */
+function noisePng(width: number, height: number): Buffer {
+  const raw = Buffer.alloc((width * 3 + 1) * height);
+  for (let y = 0; y < height; y++) {
+    const row = y * (width * 3 + 1);
+    raw[row] = 0; // filter: none
+    for (let i = 1; i <= width * 3; i++) raw[row + i] = (Math.random() * 256) | 0;
+  }
+  const chunk = (type: string, data: Buffer) => {
+    const len = Buffer.alloc(4); len.writeUInt32BE(data.length);
+    const body = Buffer.concat([Buffer.from(type, "ascii"), data]);
+    const crc = Buffer.alloc(4); crc.writeUInt32BE(crc32(body));
+    return Buffer.concat([len, body, crc]);
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0); ihdr.writeUInt32BE(height, 4);
+  ihdr[8] = 8; ihdr[9] = 2; ihdr[10] = 0; ihdr[11] = 0; ihdr[12] = 0; // 8-bit RGB
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk("IHDR", ihdr),
+    chunk("IDAT", deflateSync(raw, { level: 0 })),
+    chunk("IEND", Buffer.alloc(0)),
+  ]);
+}
+
+const CRC_TABLE = (() => {
+  const table = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    table[n] = c >>> 0;
+  }
+  return table;
+})();
+
+function crc32(buf: Buffer): number {
+  let c = 0xffffffff;
+  for (const byte of buf) c = CRC_TABLE[(c ^ byte) & 0xff] ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
+}

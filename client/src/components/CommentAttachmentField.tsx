@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { Loader2, Paperclip, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { resizeImageForUpload } from "@/lib/resizeImage";
 
 /**
  * The one file a comment may carry, between choosing it and posting.
@@ -51,7 +52,10 @@ export function CommentAttachmentField({
   const inputRef = useRef<HTMLInputElement>(null);
   const [isUploading, setIsUploading] = useState(false);
 
-  async function upload(file: File) {
+  async function upload(chosen: File) {
+    // A photo of what the contractor found is shrunk like every other photo;
+    // a PDF or a Word file goes up as it is.
+    const file = chosen.type.startsWith("image/") ? await resizeImageForUpload(chosen) : chosen;
     if (file.size > MAX_BYTES) {
       onError("Files must be smaller than 20MB.");
       return;

@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import { Upload, X, Image, Loader2, Camera, ImageIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { resizeImageForUpload } from "@/lib/resizeImage";
 
 interface PhotoUploadProps {
   onUpload: (url: string) => void;
@@ -24,13 +25,19 @@ export function PhotoUpload({ onUpload, onRemove, onError, existingUrl, classNam
     setPreview(existingUrl ?? null);
   }, [existingUrl]);
 
-  const handleFile = useCallback(async (file: File) => {
-    if (!file.type.startsWith("image/")) {
+  const handleFile = useCallback(async (chosen: File) => {
+    if (!chosen.type.startsWith("image/")) {
       onError?.("Please select an image file");
       return;
     }
 
+    // Shrunk here, on the phone, before the size check: a 12 MB camera photo
+    // becomes a few hundred KB, and the server's limit stays where it is.
+    setIsUploading(true);
+    const file = await resizeImageForUpload(chosen);
+
     if (file.size > 10 * 1024 * 1024) {
+      setIsUploading(false);
       onError?.("File size must be less than 10MB");
       return;
     }
@@ -197,7 +204,7 @@ export function PhotoUpload({ onUpload, onRemove, onError, existingUrl, classNam
             </div>
             <div className="flex items-center gap-2 text-xs text-muted-foreground mt-2">
               <Image className="h-4 w-4" />
-              <span>JPG, PNG, GIF, WebP (max 10MB)</span>
+              <span>JPG, PNG, GIF, WebP — big photos are shrunk before upload</span>
             </div>
           </>
         )}
