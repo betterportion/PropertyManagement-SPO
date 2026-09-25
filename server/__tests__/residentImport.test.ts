@@ -12,12 +12,38 @@ import {
   buildImportPreview,
   parseImportDate,
 } from "../residentImport";
+import {
+  RESIDENT_IMPORT_TEMPLATE_EXAMPLE,
+  RESIDENT_IMPORT_TEMPLATE_HEADERS,
+} from "@shared/residentImportTemplate";
 
 const HEADER = "First Name,Last Name,Email,Phone,Move-in Date,Notes";
 
 function csv(...rows: string[]): string {
   return [HEADER, ...rows].join("\n");
 }
+
+describe("the downloadable template", () => {
+  it("uses headers the parser accepts, with every column landing where it should", () => {
+    // The client offers this exact file for download. If a header here
+    // stopped matching an alias, the column would be silently dropped on
+    // import -- worse than no template. Built from the shared constant so a
+    // change to either side fails here.
+    const text = [RESIDENT_IMPORT_TEMPLATE_HEADERS.join(","), RESIDENT_IMPORT_TEMPLATE_EXAMPLE.join(",")].join("\n");
+    const parsed = parseResidentCsv(text);
+    expect(parsed.fileErrors).toEqual([]);
+    expect(parsed.rows).toHaveLength(1);
+    expect(parsed.rows[0]).toMatchObject({
+      firstName: "Jane",
+      lastName: "Smith",
+      email: "jane.smith@example.com",
+      phone: "612-555-0100",
+      moveInDate: "2026-08-20",
+      notes: "Household leader",
+      errors: [],
+    });
+  });
+});
 
 describe("parseImportDate", () => {
   it("accepts an ISO date", () => {

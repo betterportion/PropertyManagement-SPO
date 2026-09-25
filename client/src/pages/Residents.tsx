@@ -2,7 +2,7 @@ import { Link } from "wouter";
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { csvCell } from "@/lib/csv";
+import { downloadCsv } from "@/lib/csv";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import RegionSelector from "@/components/RegionSelector";
@@ -224,13 +224,7 @@ export default function Residents() {
       r.moveInDate ? formatDate(r.moveInDate) : "",
       r.moveOutDate ? formatDate(r.moveOutDate) : "",
     ]);
-    const csv = [headers, ...rows].map((row) => row.map(csvCell).join(",")).join("\n");
-    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = "former-residents.csv";
-    link.click();
-    URL.revokeObjectURL(url);
+    downloadCsv("former-residents.csv", [headers, ...rows]);
   };
 
   const renderTab = (active: boolean) => {

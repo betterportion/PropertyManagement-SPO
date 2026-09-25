@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { queryClient } from "@/lib/queryClient";
 import { Link, useParams } from "wouter";
-import { AlertTriangle, ArrowLeft, Building2, ExternalLink, ListChecks, Mail, Package, UsersRound, Wrench } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Building2, Download, ExternalLink, ListChecks, Mail, Package, UsersRound, Wrench } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -16,6 +17,7 @@ import PropertyBudgetCard from "@/components/PropertyBudgetCard";
 import HouseFactsCard from "@/components/HouseFactsCard";
 import PropertyOpenWork from "@/components/PropertyOpenWork";
 import EmailHouseholdDialog from "@/components/EmailHouseholdDialog";
+import { RosterImportDialog, downloadRosterTemplate } from "@/components/RosterImportDialog";
 import { useAuth } from "@/hooks/useAuth";
 import { formatCurrency, formatDate, formatValue } from "@/lib/format";
 import { REQUEST_STATUS } from "@/lib/requestLabels";
@@ -446,11 +448,27 @@ export default function PropertyDetail() {
                     <UsersRound className="h-4 w-4" />
                     Who lives here
                   </CardTitle>
-                  <Button variant="ghost" size="sm" asChild>
-                    <Link href="/residents" data-testid="link-all-residents">
-                      Manage roster
-                    </Link>
-                  </Button>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {/* The import lives here because this is the screen an RA
+                        is standing on in August when eight people arrive. */}
+                    {canManageFacts && (
+                      <>
+                        <Button variant="ghost" size="sm" onClick={downloadRosterTemplate} data-testid="button-download-roster-template-property">
+                          <Download className="mr-2 h-4 w-4" /> Blank template
+                        </Button>
+                        <RosterImportDialog
+                          properties={[property]}
+                          property={property}
+                          onImported={() => queryClient.invalidateQueries({ queryKey: ["/api/residents"] })}
+                        />
+                      </>
+                    )}
+                    <Button variant="ghost" size="sm" asChild>
+                      <Link href="/residents" data-testid="link-all-residents">
+                        Manage roster
+                      </Link>
+                    </Button>
+                  </div>
                 </CardHeader>
                 <CardContent>
                   <DataTable

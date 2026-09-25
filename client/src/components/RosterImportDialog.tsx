@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { AlertTriangle, CheckCircle2, FileUp, Loader2 } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Download, FileUp, Loader2 } from "lucide-react";
 import type { Property } from "@shared/schema";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -17,6 +17,12 @@ import {
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import { downloadCsv } from "@/lib/csv";
+import {
+  RESIDENT_IMPORT_TEMPLATE_EXAMPLE,
+  RESIDENT_IMPORT_TEMPLATE_FILENAME,
+  RESIDENT_IMPORT_TEMPLATE_HEADERS,
+} from "@shared/residentImportTemplate";
 
 /**
  * Importing a house's roster from a spreadsheet.
@@ -60,23 +66,38 @@ const OUTCOME_STYLES: Record<RowOutcomeKind, { label: string; className: string 
   error: { label: "Needs fixing", className: "bg-red-100 text-red-900 dark:bg-red-950 dark:text-red-100" },
 };
 
+/** The blank spreadsheet, with one example row so the date spelling is never a guess. */
+export function downloadRosterTemplate(): void {
+  downloadCsv(RESIDENT_IMPORT_TEMPLATE_FILENAME, [
+    [...RESIDENT_IMPORT_TEMPLATE_HEADERS],
+    [...RESIDENT_IMPORT_TEMPLATE_EXAMPLE],
+  ]);
+}
+
 export function RosterImportDialog({
   properties,
+  property,
   onImported,
 }: {
   properties: Property[];
+  /**
+   * The house, when the dialog is opened from a property page. Fixed, so
+   * the picker is not shown: an RA standing on a house's roster in August
+   * should not be asked which house they mean.
+   */
+  property?: Property;
   onImported: () => void;
 }) {
   const { toast } = useToast();
   const fileInput = useRef<HTMLInputElement>(null);
 
   const [isOpen, setIsOpen] = useState(false);
-  const [propertyId, setPropertyId] = useState("");
+  const [propertyId, setPropertyId] = useState(property?.id ?? "");
   const [fileName, setFileName] = useState<string | null>(null);
   const [preview, setPreview] = useState<ImportPreview | null>(null);
 
   const reset = () => {
-    setPropertyId("");
+    setPropertyId(property?.id ?? "");
     setFileName(null);
     setPreview(null);
     if (fileInput.current) fileInput.current.value = "";
@@ -167,6 +188,11 @@ export function RosterImportDialog({
         </DialogHeader>
 
         <div className="space-y-4">
+          {property ? (
+            <p className="text-sm" data-testid="text-import-property">
+              <span className="text-muted-foreground">House:</span> {property.name}
+            </p>
+          ) : (
           <div className="space-y-2">
             <Label htmlFor="roster-property">House</Label>
             <Select
@@ -182,14 +208,15 @@ export function RosterImportDialog({
                 <SelectValue placeholder="Choose a house" />
               </SelectTrigger>
               <SelectContent>
-                {properties.map((property) => (
-                  <SelectItem key={property.id} value={property.id}>
-                    {property.name}
+                {properties.map((option) => (
+                  <SelectItem key={option.id} value={option.id}>
+                    {option.name}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </div>
+          )}
 
           <div className="space-y-2">
             <Label htmlFor="roster-file">Spreadsheet</Label>
@@ -206,6 +233,15 @@ export function RosterImportDialog({
             <p className="text-xs text-muted-foreground">
               A column each for first name, last name and email. Phone, move-in date and notes are optional.
             </p>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={downloadRosterTemplate}
+              data-testid="button-download-roster-template"
+            >
+              <Download className="mr-2 h-4 w-4" /> Download blank template
+            </Button>
           </div>
 
           {previewMutation.isPending && (
