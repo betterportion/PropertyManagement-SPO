@@ -16,7 +16,7 @@ import { Undo2 } from "lucide-react";
  * "Not checked yet" button puts an item back into it after a mis-tap.
  */
 
-/** The five real answers, in the order they are tapped most. */
+/** The six real answers, best first. */
 const CHOICES = WALKTHROUGH_CONDITIONS.filter((c) => c !== "not_recorded");
 
 const TONE_SELECTED: Record<ConditionTone, string> = {

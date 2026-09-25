@@ -26,7 +26,7 @@ import {
 export const WALKTHROUGH_TYPE_LABEL: Record<Walkthrough["type"], string> = {
   move_in: "Move in",
   move_out: "Move out",
-  annual: "Annual",
+  additional: "Additional",
   legacy: "Legacy",
 };
 
@@ -155,6 +155,7 @@ export function isCurrentWalkthrough(
 
 /** What an RA reads on the chip. Short, because these sit in a row on a phone. */
 export const CONDITION_LABEL: Record<WalkthroughCondition, string> = {
+  excellent: "Excellent",
   good: "Good",
   fair: "Fair",
   poor: "Poor",
@@ -168,6 +169,7 @@ export const CONDITION_LABEL: Record<WalkthroughCondition, string> = {
  * between "not here" and "not checked".
  */
 export const CONDITION_HINT: Record<WalkthroughCondition, string> = {
+  excellent: "Like new.",
   good: "No work needed.",
   fair: "Worn but working.",
   poor: "Needs attention.",
@@ -181,6 +183,7 @@ export type ConditionTone = "good" | "neutral" | "warn" | "bad" | "muted";
 /** The visual weight a condition carries. Always paired with its label. */
 export function conditionTone(condition: WalkthroughCondition): ConditionTone {
   switch (condition) {
+    case "excellent":
     case "good":
       return "good";
     case "fair":

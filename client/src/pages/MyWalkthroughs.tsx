@@ -45,8 +45,8 @@ import type { Walkthrough } from "@shared/schema";
  * shows what it is given and never filters again, so the two cannot drift.
  */
 
-/** A leader starts the annual inspection; move-in and move-out are staff events. */
-const RESIDENT_WALKTHROUGH_TYPE: Walkthrough["type"] = "annual";
+/** A leader starts an additional inspection; move-in and move-out are staff events. */
+const RESIDENT_WALKTHROUGH_TYPE: Walkthrough["type"] = "additional";
 
 export default function MyWalkthroughs() {
   const [, navigate] = useLocation();

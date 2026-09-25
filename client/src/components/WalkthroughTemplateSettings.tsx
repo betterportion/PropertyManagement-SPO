@@ -128,6 +128,11 @@ export default function WalkthroughTemplateSettings() {
           A room that is not ticked is still a known room <em>type</em> an RA can add; it just does
           not appear in a new house's first walkthrough. A garage is the usual example.
         </p>
+        <p className="text-sm text-muted-foreground" data-testid="text-template-prune-hint">
+          Keep this list a <strong>superset</strong>: include everything a house might have. On the
+          walkthrough itself the job is deleting what that house lacks, not adding what it has, and
+          a house keeps its own trimmed copy from one year to the next.
+        </p>
 
         <div className="flex gap-2">
           <Input

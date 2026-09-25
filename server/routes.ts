@@ -3288,7 +3288,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         action: AUDIT_ACTIONS.RENT_PAYMENT_CREATED,
         entityType: "rent_payment",
         entityId: payment.id,
-        summary: `Recorded ${payment.period} rent of ${payment.amount ?? "an unstated amount"} for a resident at ${payment.buildingAddress} (${payment.status})`,
+        summary: `Recorded ${payment.period} HH fees of ${payment.amount ?? "an unstated amount"} for a resident at ${payment.buildingAddress} (${payment.status})`,
         details: { residentId: payment.residentId, period: payment.period, amount: payment.amount ?? null, status: payment.status, region: payment.region },
       });
 
@@ -3321,7 +3321,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const amount = req.body.amount ?? (await storage.getLatestRentAmountForProperty(property.id));
       if (amount === undefined || amount === null || amount === "") {
-        return res.status(400).json({ message: "Enter an amount -- there is no previous rent for this house to copy." });
+        return res.status(400).json({ message: "Enter an amount -- there are no previous HH fees for this house to copy." });
       }
 
       const roster = await storage.getResidentsByProperty(property.id);
@@ -3345,7 +3345,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           action: AUDIT_ACTIONS.RENT_PAYMENT_CREATED,
           entityType: "rent_payment",
           entityId: payment.id,
-          summary: `Recorded ${payment.period} rent of ${payment.amount ?? "an unstated amount"} for a resident at ${payment.buildingAddress} (${payment.status})`,
+          summary: `Recorded ${payment.period} HH fees of ${payment.amount ?? "an unstated amount"} for a resident at ${payment.buildingAddress} (${payment.status})`,
           details: { residentId: payment.residentId, period: payment.period, amount: payment.amount ?? null, status: payment.status, region: payment.region, viaGenerate: true },
         });
       }
@@ -3364,7 +3364,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const existing = await storage.getRentPayment(req.params.id);
       if (!existing) {
-        return res.status(404).json({ message: "Rent payment not found" });
+        return res.status(404).json({ message: "HH fee payment not found" });
       }
       if (!requireRegion(res, ctx, existing.region)) return;
 
@@ -3378,7 +3378,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         action: AUDIT_ACTIONS.RENT_PAYMENT_UPDATED,
         entityType: "rent_payment",
         entityId: req.params.id,
-        summary: `Updated ${existing.period} rent for a resident at ${existing.buildingAddress} (now ${payment.status})`,
+        summary: `Updated ${existing.period} HH fees for a resident at ${existing.buildingAddress} (now ${payment.status})`,
         details: {
           changed: changedFields(existing as unknown as Record<string, unknown>, validatedData),
           status: payment.status,
@@ -3401,7 +3401,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const existing = await storage.getRentPayment(req.params.id);
       if (!existing) {
-        return res.status(404).json({ message: "Rent payment not found" });
+        return res.status(404).json({ message: "HH fee payment not found" });
       }
       if (!requireRegion(res, ctx, existing.region)) return;
 
@@ -3411,7 +3411,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         action: AUDIT_ACTIONS.RENT_PAYMENT_DELETED,
         entityType: "rent_payment",
         entityId: req.params.id,
-        summary: `Deleted ${existing.period} rent of ${existing.amount ?? "an unstated amount"} for a resident at ${existing.buildingAddress}`,
+        summary: `Deleted ${existing.period} HH fees of ${existing.amount ?? "an unstated amount"} for a resident at ${existing.buildingAddress}`,
         details: { residentId: existing.residentId, period: existing.period, amount: existing.amount ?? null, status: existing.status, region: existing.region },
       });
 

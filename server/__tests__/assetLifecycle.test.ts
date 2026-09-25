@@ -16,7 +16,9 @@
  */
 import { describe, it, expect } from "vitest";
 import {
+  ASSET_CATEGORIES,
   DEFAULT_LIFESPAN_YEARS,
+  FIXED_CATEGORIES,
   LIFECYCLE_URGENT_YEARS,
   LIFECYCLE_WARN_YEARS,
   assetLifecycle,
@@ -40,6 +42,23 @@ function asset(over: Partial<LifecycleAsset> = {}): LifecycleAsset {
     ...over,
   };
 }
+
+describe("the category list", () => {
+  it("gives the two detectors a lifespan, and counts them as part of the building", () => {
+    // Added in the 2026-09 RA review. Fixed, because they are screwed to a
+    // ceiling; a lifespan, because they expire whether or not anyone notices.
+    expect(DEFAULT_LIFESPAN_YEARS["Smoke Detector"]).toBe(10);
+    expect(DEFAULT_LIFESPAN_YEARS["Carbon Monoxide Detector"]).toBe(7);
+    expect(FIXED_CATEGORIES).toContain("Smoke Detector");
+    expect(FIXED_CATEGORIES).toContain("Carbon Monoxide Detector");
+  });
+
+  it("keys every default lifespan on a real category", () => {
+    for (const category of Object.keys(DEFAULT_LIFESPAN_YEARS)) {
+      expect(ASSET_CATEGORIES).toContain(category);
+    }
+  });
+});
 
 describe("working out when an asset is due for replacement", () => {
   it("has no answer for an asset with no acquisition date", () => {

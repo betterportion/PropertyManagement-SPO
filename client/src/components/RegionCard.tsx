@@ -67,7 +67,7 @@ export default function RegionCard({ summary, onSelect }: { summary: RegionSumma
 
           {summary.unpaidRent.count > 0 && (
             <p className="text-xs text-muted-foreground">
-              {summary.unpaidRent.count} behind on rent · {formatCurrency(summary.unpaidRent.amount)} outstanding
+              {summary.unpaidRent.count} behind on HH fees · {formatCurrency(summary.unpaidRent.amount)} outstanding
             </p>
           )}
         </CardContent>

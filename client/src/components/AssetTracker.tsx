@@ -124,9 +124,14 @@ function AssetList({ items, properties, onEdit, onDelete, onPhotos, onSnooze }: 
                       snoozed. Only the dashboard hides one -- hiding it
                       everywhere is how a boiler gets forgotten. */}
                   <LifecycleBadge asset={asset} />
-                  <Badge variant="secondary" data-testid={`badge-age-${asset.id}`}>
-                    {asset.type === "fixed" ? `${asset.ageInYears} ${asset.ageInYears === 1 ? "year" : "years"}` : formatCurrency(asset.purchasePrice)}
-                  </Badge>
+                  {/* The age is a number somebody typed, not a reading of the
+                      acquisition date, so it says so -- and a 0 is the form's
+                      default, not a claim, so it is not shown at all. */}
+                  {(asset.type !== "fixed" || asset.ageInYears > 0) && (
+                    <Badge variant="secondary" data-testid={`badge-age-${asset.id}`}>
+                      {asset.type === "fixed" ? `Age entered: ${asset.ageInYears} ${asset.ageInYears === 1 ? "yr" : "yrs"}` : formatCurrency(asset.purchasePrice)}
+                    </Badge>
+                  )}
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <Button size="icon" variant="ghost" data-testid={`button-menu-${asset.id}`} aria-label={`Actions for ${asset.name}`}>
@@ -209,9 +214,11 @@ function AssetGallery({ items, properties, coverPhotos, onPhotos }: AssetGallery
               {asset.name}
             </p>
             <p className="text-sm">
-              {asset.type === "fixed"
-                ? `${asset.ageInYears} ${asset.ageInYears === 1 ? "year" : "years"} old`
-                : formatCurrency(asset.purchasePrice)}
+              {asset.type !== "fixed"
+                ? formatCurrency(asset.purchasePrice)
+                : asset.ageInYears > 0
+                  ? `Age entered: ${asset.ageInYears} ${asset.ageInYears === 1 ? "yr" : "yrs"}`
+                  : "Age not entered"}
             </p>
             {place && <p className="truncate text-sm text-muted-foreground">{place}</p>}
           </button>
