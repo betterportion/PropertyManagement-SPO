@@ -2010,9 +2010,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!item) return res.status(404).json({ message: "Walkthrough item not found" });
       const room = await storage.getWalkthroughRoom(item.roomId);
       const walkthrough = room?.walkthroughId ? await storage.getWalkthrough(room.walkthroughId) : undefined;
+      // A legacy room with no walkthrough is a 404 for everyone, admins
+      // included -- the access rule would let an admin through to nothing.
+      if (!room || !walkthrough) return res.status(404).json({ message: "Walkthrough item not found" });
       if (!(await requireWalkthroughAccess(res, ctx, walkthrough))) return;
 
-      res.json({ ...item, roomName: room!.name, walkthroughId: walkthrough!.id, walkthroughDate: walkthrough!.walkthroughDate });
+      res.json({ ...item, roomName: room.name, walkthroughId: walkthrough.id, walkthroughDate: walkthrough.walkthroughDate });
     } catch (error) {
       sendError(res, error, "Failed to fetch walkthrough item");
     }
@@ -2032,6 +2035,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   ) {
     if (!requireStaff(res, ctx)) return undefined;
     if (!requirePermission(res, ctx, permission)) return undefined;
+    // Both writes are also walkthrough reads, so the walkthrough grant is
+    // checked here, before anything is loaded, for staff as for residents.
+    if (!requireWalkthroughPermission(res, ctx, "view")) return undefined;
     const item = await storage.getWalkthroughItem(req.params.id);
     if (!item) {
       res.status(404).json({ message: "Walkthrough item not found" });
@@ -2039,8 +2045,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
     const room = await storage.getWalkthroughRoom(item.roomId);
     const walkthrough = room?.walkthroughId ? await storage.getWalkthrough(room.walkthroughId) : undefined;
+    if (!room || !walkthrough) {
+      res.status(404).json({ message: "Walkthrough item not found" });
+      return undefined;
+    }
     if (!(await requireWalkthroughAccess(res, ctx, walkthrough))) return undefined;
-    return { item, room: room!, walkthrough: walkthrough! };
+    return { item, room, walkthrough };
   }
 
   // Dismissing a flagged item: somebody marked it poor and it turned out fine.
@@ -2105,7 +2115,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!ctx) return;
       const found = await walkthroughItemForStaff(req, res, ctx, "canManageMaintenance");
       if (!found) return;
-      if (!requireWalkthroughPermission(res, ctx, "view")) return;
       const { item, room, walkthrough } = found;
 
       const existing = await storage.getMaintenanceRequestByWalkthroughItem(item.id);

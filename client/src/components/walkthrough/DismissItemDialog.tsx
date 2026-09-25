@@ -51,8 +51,15 @@ export default function DismissItemDialog({
     },
   });
 
+  // A reason typed about one item must not be waiting when the next one
+  // opens: closing without saving forgets it.
+  const close = (next: boolean) => {
+    if (!next) setReason("");
+    onOpenChange(next);
+  };
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={close}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Dismiss this item</DialogTitle>
@@ -80,7 +87,7 @@ export default function DismissItemDialog({
           </div>
         </div>
         <DialogFooter>
-          <Button variant="secondary" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button variant="secondary" onClick={() => close(false)}>Cancel</Button>
           <Button
             variant="primary"
             disabled={reason.trim().length === 0 || dismiss.isPending}

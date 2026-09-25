@@ -3960,6 +3960,26 @@ describe("residents completing their own house's walkthrough", () => {
     expect(storageMock.createUpload).not.toHaveBeenCalled();
   });
 
+  it("refuses staff without a walkthrough grant before the item is read", async () => {
+    // The write is also a walkthrough read; the view grant is checked with
+    // the other guards, ahead of every storage call.
+    actAs(STAFF, { canManageMaintenance: true, allowedRegions: ["West Central"] });
+    ownHouse();
+    const { status } = await request("POST", "/api/walkthrough-items/item-a/maintenance-request", { body: {} });
+    expect(status).toBe(403);
+    expect(storageMock.getWalkthroughItem).not.toHaveBeenCalled();
+    expect(storageMock.createMaintenanceRequest).not.toHaveBeenCalled();
+  });
+
+  it("answers 404, not 500, for an item whose room has no walkthrough", async () => {
+    actAs(STAFF, { canViewWalkthroughs: true, canManageMaintenance: true, allowedRegions: ["all"] });
+    storageMock.getWalkthroughItem.mockResolvedValue(ITEM_A);
+    storageMock.getWalkthroughRoom.mockResolvedValue({ ...ROOM_A, walkthroughId: null });
+    expect((await request("GET", "/api/walkthrough-items/item-a")).status).toBe(404);
+    expect((await request("POST", "/api/walkthrough-items/item-a/maintenance-request", { body: {} })).status).toBe(404);
+    expect(storageMock.createMaintenanceRequest).not.toHaveBeenCalled();
+  });
+
   it("answers 409 with the existing request rather than raising a second one", async () => {
     actAs(STAFF, { canViewWalkthroughs: true, canManageMaintenance: true, allowedRegions: ["West Central"] });
     ownHouse();
