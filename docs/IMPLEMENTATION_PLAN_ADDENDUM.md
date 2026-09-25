@@ -8,10 +8,12 @@ One thing in the main plan is **revised** by this addendum. Section 5.5 says not
 project entity. That judgment was about retrospective contractor history and it stands for
 that. It does not cover prospective project tracking, which is what Phase 10 adds.
 
-**Where things stand (2026-09-05):** every item below has shipped. Phase 9 in PRs
+**Where things stand (2026-09-25):** every item below has shipped. Phase 9 in PRs
 #125, #126, #130, #131 and #132; Phase 10 in #127, #133 and #134; Phase 11 in
 #128; the 2.6 amendment in #135. The sections keep their full reasoning as a
-record; the ✅ marks say what landed and where.
+record; the ✅ marks say what landed and where. The **RA review round of
+2026-09-19** is at the end of this document: ten stacked PRs, #142 through #152,
+open for review at the time of writing.
 
 ---
 
@@ -297,3 +299,75 @@ cost and contract data to student accounts, and it will not be obvious that it h
    to this phase.
 3. **Retention for threads.** Requests are not deleted today. Confirm that is still wanted
    once threads make them substantially larger.
+
+---
+
+# RA review round (2026-09-19)
+
+Two regional administrators reviewed the app and produced eight numbered items. Built
+2026-09-25 as ten stacked PRs, each one increment, after an audit that found several items
+already built and several assumptions the codebase did not share. The audit findings are
+recorded here because they changed what was built.
+
+## Decisions taken in this round
+
+- **Removing a checklist item is staff work.** A leader marks what the house lacks as
+  "Not here" and asks their RA. This reversed a deliberate earlier design; confirmed by JR.
+- **A walkthrough can be marked submitted, then reviewed**, by two narrow routes that are
+  the only writers of `status`. Neither locks editing. The move-out damages worksheet opens
+  on either. The earlier stance — "nothing moves a walkthrough out of draft" — was reversed
+  because the worksheet needed a starting line; SPO's own definition of "finished" can
+  tighten this later.
+- **A resident's room is free text**, matched by `foldName` against walkthrough room
+  names, because there is no per-property room entity: rooms are rows of one dated
+  walkthrough, and a repeat walkthrough copies the last one. The same reasoning put
+  **standing notes** on the walkthrough's own rooms and items, copied forward.
+- **Sending a flagged item to maintenance references the room's photos on the repair**,
+  which makes them readable to the household through the request rule. A deliberate
+  widening, named in the confirm dialog.
+- **"Rent" is shown as "HH fees".** Label only; every identifier keeps `rent`.
+- **The deposit statement opens in the RA's own mail client.** The portal still never
+  sends a financial document to a resident.
+
+## What the audit found
+
+| Item | Finding |
+|---|---|
+| 1.1 excellent | The condition column is plain text: a TypeScript change, no migration. |
+| 1.2 annual → additional | Plain text too, but a data change: migration `0032` renames rows and moves the default to move-in. A leader-started walkthrough is `additional`. |
+| 1.3 deletes | Exactly one resident-reachable delete existed, the checklist item; rooms, photos and the record were already staff-only. |
+| 1.4 walls/floors | Already separate in the national template; only the demo seed combined them. The furnace filter is inserted by `0032`. |
+| 1.10 unrated year | The year was the hand-entered legacy `ageInYears`, nothing to do with the acquisition date. Now labelled "Age entered" and hidden when 0. |
+| 1.11 per-property view | The flagged page already took `?house=`; only the link from the property page was missing. |
+| 4 photos | Photos hang off the room, not the item, and the existing attach path only accepts the caller's own uploads, so a new route references them directly. |
+| 5 / 6 rooms | No per-property template exists. Free-text room on residents; standing notes on walkthrough rooms and items, copied forward. |
+| 7.1 status | No screen changed walkthrough status; the gate could never open. Submit and review added. |
+| 7.3–7.5 | The split preview, the statement worksheet and close-out editing already existed; the worksheet sits in front of them. Found on the way: the dashboard "Mark returned" recorded the full deposit whatever had been deducted. Fixed. |
+| 8 "next" | No Next in any create flow; the room pager and the Start buttons went grey silently. Each now says why. |
+| 8 "patterns" | The Patterns tab on the Maintenance page: recurring issues and contractor callbacks. Nothing built. |
+
+## Ledger
+
+| PR | Increment | Migration |
+|---|---|---|
+| #142 | A — disabled buttons say why | — |
+| #143 | B — small fixes: excellent, additional, labels, detectors, photo optional, age label, property link | `0032_walkthrough_type_additional` |
+| #144 | C — removing an item is staff work | — |
+| #145 | D — photos shrunk in the browser (2048 px, JPEG 0.82) | — |
+| #146 | E — roster import on the property page, blank template | — |
+| #147 | F — a resident's room | `0033_resident_room` |
+| #148 | G — dismiss a flagged item; send it to maintenance | `0034_item_dismissal_and_request_source` |
+| #149 | H2 — submitted, then reviewed | — |
+| #150 | H — standing notes; last time's answers on a move-out | `0035_standing_notes` |
+| #151 | I — damages worksheet, close-out, statement in your own mail | — |
+| #152 | this document | — |
+
+## Not done, on purpose
+
+- No contractor or handyman role, no server-side send for statements, no change to the
+  server upload limits, no rename of `rent_payments`, nothing added to the dashboard, and
+  no change to property copies when the global template changes.
+- The e2e suite and the five migrations were not run locally in the session that built
+  this (no local Postgres); the Playwright workflow does both. Screenshots of every
+  user-facing change are owed before merge.
+
