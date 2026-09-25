@@ -246,7 +246,7 @@ export function buildActionItems(inputs: ActionItemInputs, now: Date = new Date(
       id: p.id,
       source: "rent",
       category: "finance",
-      title: p.status === "failed" ? `Failed rent payment — ${p.period}` : `Unpaid rent — ${p.period}`,
+      title: p.status === "failed" ? `Failed HH fee payment — ${p.period}` : `Unpaid HH fees — ${p.period}`,
       subtitle: p.buildingAddress,
       amount: p.amount,
       dueDate: iso(due),

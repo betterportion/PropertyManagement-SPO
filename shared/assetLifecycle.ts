@@ -32,6 +32,7 @@ export const ASSET_CATEGORIES = [
   "Appliances - Small",
   "Artwork",
   "A/V Equipment",
+  "Carbon Monoxide Detector",
   "Computer - Accessories",
   "Computer - Desktop",
   "Computer - Laptop",
@@ -47,6 +48,7 @@ export const ASSET_CATEGORIES = [
   "Printers",
   "Roof",
   "Security System",
+  "Smoke Detector",
   "Tablets",
   "Tools",
   "Water Heater",
@@ -55,9 +57,11 @@ export const ASSET_CATEGORIES = [
 /** Categories that belong to the building rather than to a person. */
 export const FIXED_CATEGORIES: readonly string[] = [
   "Appliances - Large",
+  "Carbon Monoxide Detector",
   "HVAC",
   "Roof",
   "Security System",
+  "Smoke Detector",
   "Water Heater",
 ];
 
@@ -82,6 +86,9 @@ export const DEFAULT_LIFESPAN_YEARS: Readonly<Record<string, number>> = {
   "Appliances - Large": 12,
   "Appliances - Small": 6,
   "A/V Equipment": 7,
+  // The RA's range for a CO detector was 5-10; 7 is the midpoint, and the
+  // per-asset override is the correction when the box says otherwise.
+  "Carbon Monoxide Detector": 7,
   "Computer - Desktop": 6,
   "Computer - Laptop": 5,
   "Computer - Monitor": 8,
@@ -95,6 +102,7 @@ export const DEFAULT_LIFESPAN_YEARS: Readonly<Record<string, number>> = {
   Printers: 6,
   Roof: 25,
   "Security System": 10,
+  "Smoke Detector": 10,
   Tablets: 5,
   Tools: 12,
   "Water Heater": 12,

@@ -10,7 +10,7 @@ test.describe("admin dashboard", () => {
     { testid: "link-stat-properties", path: "/properties", heading: "Properties" },
     { testid: "link-stat-open-repairs", path: "/maintenance?type=request", heading: "Maintenance" },
     { testid: "link-stat-open-jobs", path: "/maintenance?view=open", heading: "Maintenance" },
-    { testid: "link-stat-unpaid-rent", path: "/finances", heading: "Finances" },
+    { testid: "link-stat-unpaid-hh-fees", path: "/finances", heading: "Finances" },
   ];
 
   for (const tile of tiles) {

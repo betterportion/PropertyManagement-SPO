@@ -201,11 +201,11 @@ async function seed(): Promise<void> {
   const walkthroughRows = [
     {
       property: cleveland,
-      type: "annual" as const,
+      type: "additional" as const,
       status: "submitted" as const,
       walkthroughDate: daysAgo(45),
       performedBy: "ra.northwest@spo.org",
-      notes: "Annual inspection. Kitchen sink needs a plumber.",
+      notes: "Mid-year inspection. Kitchen sink needs a plumber.",
       rooms: [
         {
           name: "Kitchen",
@@ -232,7 +232,7 @@ async function seed(): Promise<void> {
     },
     {
       property: como,
-      type: "annual" as const,
+      type: "additional" as const,
       status: "draft" as const,
       walkthroughDate: daysAgo(3),
       performedBy: "ra.northwest@spo.org",
@@ -255,7 +255,8 @@ async function seed(): Promise<void> {
           displayOrder: 2,
           photoNote: "Water staining on the north wall since last visit.",
           items: [
-            { label: "Walls and floor", condition: "not_recorded" as const, notes: null },
+            { label: "Walls", condition: "not_recorded" as const, notes: null },
+            { label: "Floor", condition: "not_recorded" as const, notes: null },
             { label: "Furnace area", condition: "not_recorded" as const, notes: null },
             { label: "Sump pump", condition: "not_recorded" as const, notes: null },
           ],

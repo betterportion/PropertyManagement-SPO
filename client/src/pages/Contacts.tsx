@@ -283,7 +283,7 @@ export default function Contacts() {
     <Section size="compact">
       <Container>
       <PageStack>
-      <PageHeader title="Maint Contacts & Invoices" description="Keep vendor relationships and invoice records ready for the next repair." />
+      <PageHeader title="Maintenance Contacts & Invoices" description="Keep vendor relationships and invoice records ready for the next repair." />
 
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="flex flex-wrap gap-4">

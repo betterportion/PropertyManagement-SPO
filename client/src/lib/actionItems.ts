@@ -67,8 +67,8 @@ export function resolveRequest(item: ActionItem): ResolveRequest {
         body: { status: "paid", paidDate: today() },
         actionLabel: "Mark paid",
         confirm: {
-          title: "Mark this rent as paid?",
-          body: "This records the rent as paid today. You can adjust it later on the Finances page.",
+          title: "Mark these HH fees as paid?",
+          body: "This records the HH fees as paid today. You can adjust it later on the Finances page.",
         },
         invalidate: [ACTION_ITEMS_KEY, "/api/rent-payments"],
       };

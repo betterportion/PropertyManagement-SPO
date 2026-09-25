@@ -288,7 +288,7 @@ Worth understanding before changing anything server-side.
 
 ### Audit log
 
-The `audit_log` table records the actions somebody may have to account for later: user, permission and house-link changes, maintenance status changes, invoice and billing changes, rent charge and security-deposit changes, and document uploads and downloads. Photo views are deliberately not recorded — there are far too many of them and they would bury everything else.
+The `audit_log` table records the actions somebody may have to account for later: user, permission and house-link changes, maintenance status changes, invoice and billing changes, HH fee (rent) charge and security-deposit changes, and document uploads and downloads. Photo views are deliberately not recorded — there are far too many of them and they would bury everything else.
 
 Admins can read it in the app: Settings shows the activity trail, backed by
 `GET /api/audit-log`. It can also be read directly with SQL:

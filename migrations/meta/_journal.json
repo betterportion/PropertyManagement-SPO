@@ -225,6 +225,13 @@
       "when": 1789008513630,
       "tag": "0031_resource_hub_slots",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1790323417320,
+      "tag": "0032_walkthrough_type_additional",
+      "breakpoints": true
     }
   ]
 }

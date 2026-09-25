@@ -518,7 +518,7 @@ export default function Residents() {
                 <p className="font-medium">Still outstanding</p>
                 {outstandingRent.length > 0 && (
                   <p>
-                    {outstandingRent.length} unpaid rent charge{outstandingRent.length === 1 ? "" : "s"} totaling{" "}
+                    {outstandingRent.length} unpaid HH fee charge{outstandingRent.length === 1 ? "" : "s"} totaling{" "}
                     {formatCurrency(outstandingRent.reduce((sum, p) => sum + Number(p.amount), 0))}. These stay
                     on record after move-out.
                   </p>

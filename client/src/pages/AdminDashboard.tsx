@@ -118,7 +118,7 @@ export default function AdminDashboard() {
               isLoading={summariesQuery.isLoading}
             />
             <StatTile
-              label="Unpaid rent"
+              label="Unpaid HH fees"
               href="/finances"
               value={formatCurrency(unpaidTotal)}
               hint="Outstanding — chase / notify"

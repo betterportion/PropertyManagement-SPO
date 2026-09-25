@@ -3838,7 +3838,7 @@ describe("residents completing their own house's walkthrough", () => {
     storageMock.createWalkthrough.mockImplementation(async (w: Record<string, unknown>) => ({ id: "wt-new", ...w }));
 
     const { status } = await request("POST", "/api/walkthroughs", {
-      body: { propertyId: "prop-a", type: "annual", walkthroughDate: "2026-09-02" },
+      body: { propertyId: "prop-a", type: "additional", walkthroughDate: "2026-09-02" },
     });
 
     expect(status).toBe(200);

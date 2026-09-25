@@ -375,7 +375,7 @@ describe("buildActionItems", () => {
       rentPayments: [rent({ id: "f", status: "failed", period: "2026-07" })],
     }, NOW);
     expect(items.map((i) => i.id)).toEqual(["f"]);
-    expect(items[0].title).toContain("Failed rent payment");
+    expect(items[0].title).toContain("Failed HH fee payment");
   });
 
   it("surfaces a held deposit only when its resident has moved out", () => {

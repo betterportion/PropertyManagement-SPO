@@ -339,6 +339,7 @@ export type InsertWalkthroughRoom = z.infer<typeof insertWalkthroughRoomSchema>;
  * clean bill of health for a room nobody looked at.
  */
 export const WALKTHROUGH_CONDITIONS = [
+  "excellent",
   "good",
   "fair",
   "poor",
@@ -416,7 +417,10 @@ export const walkthroughs = pgTable("walkthroughs", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   propertyId: varchar("property_id").notNull().references(() => properties.id, { onDelete: "cascade" }),
   walkthroughDate: timestamp("walkthrough_date").notNull().defaultNow(),
-  type: varchar("type", { enum: ["move_in", "move_out", "annual", "legacy"] }).notNull().default("annual"),
+  // `additional` is any inspection that is not a move-in or a move-out (it
+  // was `annual` until the 2026-09 RA review; migration 0032 renamed the
+  // rows). Move-in is the default because that is the one every house gets.
+  type: varchar("type", { enum: ["move_in", "move_out", "additional", "legacy"] }).notNull().default("move_in"),
   // draft survives leaving the page half-finished, which is the normal case
   // for somebody filling this in on a phone while walking around a house.
   status: varchar("status", { enum: ["draft", "submitted", "reviewed"] }).notNull().default("draft"),

@@ -233,7 +233,7 @@ export default function Tasks() {
                   <EmptyState
                     icon={ListChecks}
                     title="Nothing needs attention"
-                    description="Unpaid rent, deposits to return, maintenance coming due and your open tasks show up here."
+                    description="Unpaid HH fees, deposits to return, maintenance coming due and your open tasks show up here."
                   />
                 ) : (
                   <ActionItemList items={visibleItems} />

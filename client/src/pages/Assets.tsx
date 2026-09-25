@@ -298,13 +298,11 @@ export default function Assets() {
   };
 
   const onSubmitAdd = async (data: z.infer<typeof assetFormSchema>) => {
-    if (!addPhotoUrl) {
-      toast({ title: "Photo required", description: "Please upload a photo of the asset before saving.", variant: "destructive" });
-      return;
-    }
     try {
       const asset = await createAssetMutation.mutateAsync(data);
-      await createAssetPhotoMutation.mutateAsync({
+      // Recommended, not required (2026-09 RA review): an RA cataloguing a
+      // basement should not be stopped by a photo they can add later.
+      if (addPhotoUrl) await createAssetPhotoMutation.mutateAsync({
         assetId: asset.id,
         imageUrl: addPhotoUrl,
         uploadedBy: typedUser?.email || "Unknown",
@@ -591,12 +589,12 @@ export default function Assets() {
                   )}
                 />
 
-                {/* Photo (required) */}
+                {/* Photo (recommended) */}
                 <FormItem>
                   <FormLabel>
                     Photo
                     {!addPhotoUrl && (
-                      <span className="text-destructive ml-1 text-xs">* required</span>
+                      <span className="text-muted-foreground ml-1 text-xs">recommended</span>
                     )}
                     {addPhotoUrl && (
                       <span className="text-green-600 dark:text-green-400 ml-1 text-xs">✓ uploaded</span>

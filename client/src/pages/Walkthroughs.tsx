@@ -41,7 +41,7 @@ import type { Property, Walkthrough } from "@shared/schema";
  */
 
 /** Legacy walkthroughs came from the backfill; nobody starts one. */
-const STARTABLE_TYPES: Walkthrough["type"][] = ["annual", "move_in", "move_out"];
+const STARTABLE_TYPES: Walkthrough["type"][] = ["move_in", "move_out", "additional"];
 
 export default function Walkthroughs() {
   const [, navigate] = useLocation();
@@ -49,7 +49,7 @@ export default function Walkthroughs() {
 
   const [selectedProperty, setSelectedProperty] = useState<Property | null>(null);
   const [isStartOpen, setIsStartOpen] = useState(false);
-  const [newType, setNewType] = useState<Walkthrough["type"]>("annual");
+  const [newType, setNewType] = useState<Walkthrough["type"]>("move_in");
   const [newDate, setNewDate] = useState(today());
 
   // Computed, not returned on. An early return above the queries below would
@@ -121,7 +121,7 @@ export default function Walkthroughs() {
                   <Button
                     variant="primary"
                     onClick={() => {
-                      setNewType("annual");
+                      setNewType("move_in");
                       setNewDate(today());
                       setIsStartOpen(true);
                     }}
@@ -199,7 +199,7 @@ export default function Walkthroughs() {
                   <Button
                     variant="primary"
                     onClick={() => {
-                      setNewType("annual");
+                      setNewType("move_in");
                       setNewDate(today());
                       setIsStartOpen(true);
                     }}

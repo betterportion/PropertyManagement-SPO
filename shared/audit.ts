@@ -69,9 +69,11 @@ export const AUDIT_ACTION_LABELS: Record<AuditAction, string> = {
   "billing_record.created": "Billing record created",
   "billing_record.updated": "Billing record updated",
   "billing_record.deleted": "Billing record deleted",
-  "rent_payment.created": "Rent charge recorded",
-  "rent_payment.updated": "Rent charge updated",
-  "rent_payment.deleted": "Rent charge deleted",
+  // "HH fees" is what SPO calls them on screen; the action names keep the
+  // column's word because they are stored, not shown.
+  "rent_payment.created": "HH fee charge recorded",
+  "rent_payment.updated": "HH fee charge updated",
+  "rent_payment.deleted": "HH fee charge deleted",
   "security_deposit.created": "Security deposit recorded",
   "security_deposit.updated": "Security deposit updated",
   "security_deposit.deleted": "Security deposit deleted",

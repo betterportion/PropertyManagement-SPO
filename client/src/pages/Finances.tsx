@@ -110,11 +110,11 @@ export default function Finances() {
       setIsGenerateOpen(false);
       generateForm.reset({ propertyId: "", period: selectedPeriod, amount: 0 });
       toast({
-        title: body.created > 0 ? `Recorded rent for ${body.created} resident(s)` : "Nothing to record",
-        description: body.created > 0 ? "Mark each one paid as the rent comes in." : "Every current resident already has a charge for that month.",
+        title: body.created > 0 ? `Recorded HH fees for ${body.created} resident(s)` : "Nothing to record",
+        description: body.created > 0 ? "Mark each one paid as the fees come in." : "Every current resident already has a charge for that month.",
       });
     },
-    onError: () => toast({ title: "Error", description: "Could not record rent for the house", variant: "destructive" }),
+    onError: () => toast({ title: "Error", description: "Could not record HH fees for the house", variant: "destructive" }),
   });
 
   const setRentStatusMutation = useMutation({
@@ -149,8 +149,8 @@ export default function Finances() {
     if (periodPayments.length === 0) {
       return (
         <EmptyState
-          title="No rent recorded for this month"
-          description={canManage ? "Use “Record rent for a house” to add a charge for every current resident in one step." : "Nothing has been recorded for the selected month."}
+          title="No HH fees recorded for this month"
+          description={canManage ? "Use “Record HH fees for a house” to add a charge for every current resident in one step." : "Nothing has been recorded for the selected month."}
         />
       );
     }
@@ -202,7 +202,7 @@ export default function Finances() {
                             )}
                             <DropdownMenu>
                               <DropdownMenuTrigger asChild>
-                                <Button size="icon" variant="ghost" aria-label={`Actions for ${residentName(p.residentId)}'s rent`} data-testid={`button-menu-rent-${p.id}`}>
+                                <Button size="icon" variant="ghost" aria-label={`Actions for ${residentName(p.residentId)}'s HH fees`} data-testid={`button-menu-rent-${p.id}`}>
                                   <MoreVertical className="h-4 w-4" />
                                 </Button>
                               </DropdownMenuTrigger>
@@ -346,7 +346,7 @@ export default function Finances() {
       return (
         <EmptyState
           title="Nothing outstanding"
-          description="Every recorded charge is settled and no former resident's deposit is waiting. New unpaid months appear here as soon as rent is recorded."
+          description="Every recorded charge is settled and no former resident's deposit is waiting. New unpaid months appear here as soon as HH fees are recorded."
         />
       );
     }
@@ -361,7 +361,7 @@ export default function Finances() {
         <p className="text-sm text-muted-foreground" data-testid="text-outstanding-summary">
           {outstandingPayments.length > 0
             ? `${formatCurrency(outstandingTotal)} outstanding across ${outstandingPayments.length} charge${outstandingPayments.length === 1 ? "" : "s"}.`
-            : "No rent outstanding."}
+            : "No HH fees outstanding."}
           {failedPayments.length > 0 &&
             ` ${failedPayments.length} ${failedPayments.length === 1 ? "payment has" : "payments have"} failed and may need a new payment or a follow-up.`}
           {depositsToSettle.length > 0 &&
@@ -444,7 +444,7 @@ export default function Finances() {
         <PageStack>
           <PageHeader
             title="Finances"
-            description="Track monthly rent and security deposits for each resident. Visible to regional leads only."
+            description="Track monthly HH fees and security deposits for each resident. Visible to regional leads only."
           />
 
           <div className="flex flex-wrap items-center gap-4">
@@ -463,7 +463,7 @@ export default function Finances() {
                 {/* The chase list lands first: the question a finance person
                     opens this page with is "who still owes us?" */}
                 <TabsTrigger value="outstanding" data-testid="tab-outstanding"><AlertCircle className="mr-2 h-4 w-4" /> Outstanding</TabsTrigger>
-                <TabsTrigger value="rent" data-testid="tab-rent"><Wallet className="mr-2 h-4 w-4" /> Rent</TabsTrigger>
+                <TabsTrigger value="rent" data-testid="tab-rent"><Wallet className="mr-2 h-4 w-4" /> HH Fees</TabsTrigger>
                 <TabsTrigger value="deposits" data-testid="tab-deposits"><PiggyBank className="mr-2 h-4 w-4" /> Deposits</TabsTrigger>
               </TabsList>
 
@@ -488,11 +488,11 @@ export default function Finances() {
                   {canManage && (
                     <Dialog open={isGenerateOpen} onOpenChange={(o) => { setIsGenerateOpen(o); if (o) generateForm.reset({ propertyId: "", period: selectedPeriod, amount: 0 }); }}>
                       <DialogTrigger asChild>
-                        <Button data-testid="button-record-rent"><Plus className="mr-2 h-4 w-4" /> Record rent for a house</Button>
+                        <Button data-testid="button-record-rent"><Plus className="mr-2 h-4 w-4" /> Record HH fees for a house</Button>
                       </DialogTrigger>
                       <DialogContent className="max-w-lg">
                         <DialogHeader>
-                          <DialogTitle>Record rent for a house</DialogTitle>
+                          <DialogTitle>Record HH fees for a house</DialogTitle>
                           <DialogDescription>Adds an unpaid charge for every current resident of the house for the chosen month.</DialogDescription>
                         </DialogHeader>
                         <Form {...generateForm}>
@@ -519,7 +519,7 @@ export default function Finances() {
                               )} />
                               <FormField control={generateForm.control} name="amount" render={({ field }) => (
                                 <FormItem>
-                                  <FormLabel>Monthly rent ($)</FormLabel>
+                                  <FormLabel>Monthly HH fee ($)</FormLabel>
                                   <FormControl><Input type="number" min={0} step="0.01" {...field} data-testid="input-generate-amount" /></FormControl>
                                   <FormMessage />
                                 </FormItem>
@@ -531,7 +531,7 @@ export default function Finances() {
                             <DialogFooter>
                               <Button type="button" variant="secondary" onClick={() => setIsGenerateOpen(false)}>Cancel</Button>
                               <Button type="submit" disabled={generateMutation.isPending} data-testid="button-submit-rent">
-                                {generateMutation.isPending ? "Recording..." : "Record rent"}
+                                {generateMutation.isPending ? "Recording..." : "Record HH fees"}
                               </Button>
                             </DialogFooter>
                           </form>
@@ -651,7 +651,7 @@ export default function Finances() {
       <AlertDialog open={!!deletingRent} onOpenChange={() => setDeletingRent(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Remove this rent charge?</AlertDialogTitle>
+            <AlertDialogTitle>Remove this HH fee charge?</AlertDialogTitle>
             <AlertDialogDescription>This deletes the record for that resident and month.</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

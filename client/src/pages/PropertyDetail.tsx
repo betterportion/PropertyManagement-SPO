@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "wouter";
-import { ArrowLeft, Building2, ExternalLink, ListChecks, Mail, Package, UsersRound, Wrench } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Building2, ExternalLink, ListChecks, Mail, Package, UsersRound, Wrench } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -153,6 +153,12 @@ export default function PropertyDetail() {
   // over a checklist, not over what the household is told.
   const canManageFacts =
     typedUser?.role === "admin" || typedUser?.permissions?.canManageProperties === true;
+  // The flagged-items list is a walkthrough read, so it takes the walkthrough
+  // grant, not the property one.
+  const canSeeWalkthroughs =
+    typedUser?.role === "admin" ||
+    typedUser?.permissions?.canViewWalkthroughs === true ||
+    typedUser?.permissions?.canManageWalkthroughs === true;
 
   // Whichever contact this kind of house names. Two columns rather than one
   // because a rental company and a responsible person are different things.
@@ -261,15 +267,32 @@ export default function PropertyDetail() {
             title={property.name}
             description={property.address}
             actions={
-              canManageSetup ? (
-                <Button
-                  variant="secondary"
-                  onClick={() => setIsEmailOpen(true)}
-                  data-testid="button-email-household"
-                >
-                  <Mail className="h-4 w-4" />
-                  Email the household
-                </Button>
+              canSeeWalkthroughs || canManageSetup ? (
+                <div className="flex flex-wrap gap-2">
+                  {/* Opened from here, the needs-attention list starts on
+                      this house; from the nav it is region-wide. */}
+                  {canSeeWalkthroughs && (
+                    <Button variant="secondary" asChild>
+                      <Link
+                        href={`/walkthroughs/flagged?house=${encodeURIComponent(property.address)}`}
+                        data-testid="link-needs-attention"
+                      >
+                        <AlertTriangle className="h-4 w-4" />
+                        Needs attention
+                      </Link>
+                    </Button>
+                  )}
+                  {canManageSetup && (
+                    <Button
+                      variant="secondary"
+                      onClick={() => setIsEmailOpen(true)}
+                      data-testid="button-email-household"
+                    >
+                      <Mail className="h-4 w-4" />
+                      Email the household
+                    </Button>
+                  )}
+                </div>
               ) : undefined
             }
           />
@@ -474,7 +497,7 @@ export default function PropertyDetail() {
                       },
                       {
                         key: "rent",
-                        header: "Rent this month",
+                        header: "HH fees this month",
                         sortValue: (r) => rentThisMonth.get(r.id)?.status ?? "",
                         cell: (r) => {
                           const payment = rentThisMonth.get(r.id);
@@ -686,10 +709,10 @@ export default function PropertyDetail() {
                       },
                       {
                         key: "age",
-                        header: "Age",
+                        header: "Age entered",
                         align: "right",
                         sortValue: (a) => a.ageInYears,
-                        cell: (a) => `${a.ageInYears} yr`,
+                        cell: (a) => (a.ageInYears > 0 ? `${a.ageInYears} yr` : "—"),
                         hideOnMobile: true,
                       },
                       {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import type { WalkthroughItem } from "@shared/schema";
+import { WALKTHROUGH_CONDITIONS, type WalkthroughItem } from "@shared/schema";
 import {
   CONDITION_LABEL,
   WALKTHROUGH_STATUS_BADGE,
@@ -39,6 +39,7 @@ describe("condition presentation", () => {
   it("gives every condition in the vocabulary a plain-language label", () => {
     // Status is never carried by colour alone, so a missing label would leave
     // a chip that only a sighted user reading hue could tell apart.
+    expect(CONDITION_LABEL.excellent).toBe("Excellent");
     expect(CONDITION_LABEL.good).toBe("Good");
     expect(CONDITION_LABEL.fair).toBe("Fair");
     expect(CONDITION_LABEL.poor).toBe("Poor");
@@ -58,6 +59,14 @@ describe("condition presentation", () => {
     expect(conditionTone("poor")).toBe("warn");
     expect(conditionTone("damaged")).toBe("bad");
     expect(conditionTone("good")).toBe("good");
+  });
+
+  it("puts excellent above good, and never in the flagged set", () => {
+    // Added in the 2026-09 RA review. It is a grade, not a flag: nothing
+    // about a like-new item needs attention.
+    expect(WALKTHROUGH_CONDITIONS[0]).toBe("excellent");
+    expect(conditionTone("excellent")).toBe("good");
+    expect(progressOf([item("a", "r1", "excellent")])).toMatchObject({ assessed: 1, flagged: 0 });
   });
 });
 
@@ -148,7 +157,9 @@ describe("itemsByRoom", () => {
 
 describe("walkthrough vocabulary", () => {
   it("names every kind of walkthrough", () => {
-    expect(WALKTHROUGH_TYPE_LABEL.annual).toBe("Annual");
+    // "Additional" replaced "Annual" in the 2026-09 RA review: any visit
+    // that is not a move-in or a move-out.
+    expect(WALKTHROUGH_TYPE_LABEL.additional).toBe("Additional");
     expect(WALKTHROUGH_TYPE_LABEL.move_in).toBe("Move in");
     expect(WALKTHROUGH_TYPE_LABEL.move_out).toBe("Move out");
     expect(WALKTHROUGH_TYPE_LABEL.legacy).toBe("Legacy");
