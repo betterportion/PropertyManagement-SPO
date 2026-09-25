@@ -380,6 +380,21 @@ export default function WalkthroughRun() {
                 {moveOn.isPending ? "Saving…" : "Mark reviewed"}
               </Button>
             )}
+            {/* The damages worksheet: staff, on a move-out, once submitted.
+                Disabled with its reason on a draft rather than absent. */}
+            {!isResidentTier && isMoveOut && walkthrough && (
+              walkthrough.status === "draft" ? (
+                <Button variant="secondary" size="sm" disabled title="Mark it submitted first" data-testid="button-damages-worksheet">
+                  Damages (submit first)
+                </Button>
+              ) : (
+                <Button variant="secondary" size="sm" asChild>
+                  <Link href={`/walkthroughs/${walkthroughId}/damages`} data-testid="button-damages-worksheet">
+                    Damages
+                  </Link>
+                </Button>
+              )
+            )}
           </div>
         </div>
       </header>

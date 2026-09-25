@@ -80,7 +80,7 @@ export function resolveRequest(item: ActionItem): ResolveRequest {
         actionLabel: "Mark returned",
         confirm: {
           title: "Mark this deposit as returned?",
-          body: "This records the full deposit as returned today. For a partial return or deductions, use the Finances page.",
+          body: "This records the balance after deductions as returned today. To change the amount or add a reference, use the Finances page.",
         },
         invalidate: [ACTION_ITEMS_KEY, "/api/security-deposits"],
       };

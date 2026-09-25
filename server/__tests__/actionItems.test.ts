@@ -378,6 +378,30 @@ describe("buildActionItems", () => {
     expect(items[0].title).toContain("Failed HH fee payment");
   });
 
+  it("carries the balance after deductions as the amount to return, never the amount held", () => {
+    // The dashboard's "Mark returned" records this figure. Recording the
+    // full $500 for somebody with $120 of damage against them was a real bug.
+    const items = buildActionItems({
+      ...empty,
+      deposits: [deposit({ id: "d1", residentId: "r1", amountHeld: "500.00" })],
+      deductions: [
+        { id: "x1", residentId: "r1", amount: "80.00" } as never,
+        { id: "x2", residentId: "r1", amount: "40.00" } as never,
+        { id: "x3", residentId: "somebody-else", amount: "999.00" } as never,
+      ],
+      residents: [resident({ id: "r1", isActive: false })],
+    }, NOW);
+    expect(items[0].amount).toBe("380.00");
+
+    const overdrawn = buildActionItems({
+      ...empty,
+      deposits: [deposit({ id: "d1", residentId: "r1", amountHeld: "100.00" })],
+      deductions: [{ id: "x1", residentId: "r1", amount: "250.00" } as never],
+      residents: [resident({ id: "r1", isActive: false })],
+    }, NOW);
+    expect(overdrawn[0].amount).toBe("0.00");
+  });
+
   it("surfaces a held deposit only when its resident has moved out", () => {
     const moved = buildActionItems({ ...empty, deposits: [deposit({})], residents: [resident({ isActive: false })] }, NOW);
     expect(moved).toHaveLength(1);

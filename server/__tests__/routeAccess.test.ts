@@ -7311,6 +7311,15 @@ describe("splitting a common-area charge across a house", () => {
     expect(rows.map((r: { amount: string }) => r.amount)).toEqual(["50.00", "50.00"]);
   });
 
+  it("carries the walkthrough item link onto every row of a split", async () => {
+    // A split raised from the move-out worksheet stays traceable to the
+    // item that found the damage, on each person's line.
+    westLead();
+    await split({ ...validSplit, walkthroughItemId: "item-hole" });
+    const [rows] = storageMock.createDepositDeductions.mock.calls[0];
+    expect(rows.map((r: { walkthroughItemId: string | null }) => r.walkthroughItemId)).toEqual(["item-hole", "item-hole", "item-hole"]);
+  });
+
   it("refuses somebody who does not live in that house", async () => {
     westLead();
     const { status } = await split({ ...validSplit, residentIds: ["res-a", "res-outsider"] });
@@ -7628,6 +7637,7 @@ describe("tasks & action items (regional leads only)", () => {
       { id: "rp-e", status: "unpaid", period: "2026-07", amount: "700", buildingAddress: "9 Elm", region: "East Central" },
     ]);
     storageMock.getAllSecurityDeposits.mockResolvedValue([]);
+    storageMock.getAllDepositDeductions.mockResolvedValue([]);
     storageMock.getAllResidents.mockResolvedValue([]);
     storageMock.getAllTasks.mockResolvedValue([]);
     storageMock.getAllProperties.mockResolvedValue([]);

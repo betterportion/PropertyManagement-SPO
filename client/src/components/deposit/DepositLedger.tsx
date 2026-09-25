@@ -445,6 +445,7 @@ export default function DepositLedger({
         resident={resident}
         deposit={deposit}
         deductions={deductions}
+        houseDeductions={allDeductions}
         open={isStatementOpen}
         onOpenChange={setIsStatementOpen}
       />
