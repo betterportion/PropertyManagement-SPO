@@ -25,6 +25,7 @@ export const RESIDENT_IMPORT_COLUMNS = [
   "lastName",
   "email",
   "phone",
+  "roomName",
   "moveInDate",
   "notes",
 ] as const;
@@ -54,6 +55,9 @@ const HEADER_ALIASES: Record<string, (typeof RESIDENT_IMPORT_COLUMNS)[number]> =
   phonenumber: "phone",
   mobile: "phone",
   cell: "phone",
+  room: "roomName",
+  roomname: "roomName",
+  bedroom: "roomName",
   movein: "moveInDate",
   moveindate: "moveInDate",
   startdate: "moveInDate",
@@ -74,6 +78,8 @@ export interface ParsedResidentRow {
   lastName: string;
   email: string;
   phone: string | null;
+  /** Optional: which room they occupy, as typed. */
+  roomName: string | null;
   notes: string | null;
   moveInDate: string | null;
   /** Empty when the row is usable. */
@@ -184,6 +190,7 @@ export function parseResidentCsv(text: string): ParsedResidentCsv {
       lastName,
       email,
       phone: cleanCell(record.phone) || null,
+      roomName: cleanCell(record.roomName) || null,
       notes: cleanCell(record.notes) || null,
       moveInDate,
       errors,

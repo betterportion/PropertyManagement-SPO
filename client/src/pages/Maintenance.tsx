@@ -37,6 +37,7 @@ import {
 import MaintenanceAggregates from "@/components/MaintenanceAggregates";
 import PropertyOpenWork from "@/components/PropertyOpenWork";
 import { ClipboardList, SlidersHorizontal } from "lucide-react";
+import { useRoomSuggestions } from "@/hooks/useRoomSuggestions";
 
 const createRequestSchema = insertMaintenanceRequestSchema.extend({
   title: z.string().min(1, "Title is required"),
@@ -207,17 +208,7 @@ export default function Maintenance() {
   // is no house to ask about yet.
   const creatingForAddress = createForm.watch("buildingAddress");
   const creatingForProperty = properties.find((p) => p.address === creatingForAddress);
-  const { data: staffLocationSuggestions = [] } = useQuery<string[]>({
-    queryKey: ["/api/maintenance-locations", creatingForProperty?.id],
-    queryFn: async () => {
-      const response = await fetch(`/api/maintenance-locations?propertyId=${creatingForProperty!.id}`, {
-        credentials: "include",
-      });
-      if (!response.ok) return [];
-      return await response.json();
-    },
-    enabled: !!creatingForProperty,
-  });
+  const staffLocationSuggestions = useRoomSuggestions(creatingForProperty?.id);
 
   const createMutation = useMutation({
     mutationFn: async (data: z.infer<typeof createRequestSchema>) => {

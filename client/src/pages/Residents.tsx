@@ -27,6 +27,7 @@ import { z } from "zod";
 import { Section, Container, PageHeader, PageStack } from "@/components/layout/page";
 import { LoadingState, EmptyState } from "@/components/states";
 import { RosterImportDialog } from "@/components/RosterImportDialog";
+import { useRoomSuggestions } from "@/hooks/useRoomSuggestions";
 import { formatDate, formatCurrency } from "@/lib/format";
 
 const residentFormSchema = z.object({
@@ -35,6 +36,7 @@ const residentFormSchema = z.object({
   lastName: z.string().min(1, "Last name is required"),
   email: z.string().email("Enter a valid email address"),
   phone: z.string().optional(),
+  roomName: z.string().optional(),
   notes: z.string().optional(),
   moveInDate: z.string().optional(),
   // Blank means the house's figure applies; the numeric column round-trips as
@@ -190,6 +192,8 @@ export default function Residents() {
     resolver: zodResolver(residentFormSchema),
     defaultValues: { propertyId: "", firstName: "", lastName: "", email: "", phone: "", notes: "", moveInDate: "", depositAmountOverride: null },
   });
+  // Room names from the chosen house's walkthroughs, once a house is chosen.
+  const roomSuggestions = useRoomSuggestions(addForm.watch("propertyId") || null);
 
   const propertyName = (id: string) => properties.find((p) => p.id === id)?.name ?? "Unknown house";
 
@@ -271,7 +275,10 @@ export default function Residents() {
                           {r.firstName} {r.lastName}
                         </Link>
                       </p>
-                      <p className="mt-1 text-sm text-muted-foreground break-words">{r.email}</p>
+                      <p className="mt-1 text-sm text-muted-foreground break-words">
+                        {r.email}
+                        {r.roomName && <span data-testid={`text-resident-room-${r.id}`}> · {r.roomName}</span>}
+                      </p>
                       <p className="mt-1 text-sm text-muted-foreground">
                         {r.moveInDate ? `Moved in ${formatDate(r.moveInDate)}` : "Move-in date not recorded"}
                         {r.moveOutDate ? ` · moved out ${formatDate(r.moveOutDate)}` : ""}
@@ -394,6 +401,18 @@ export default function Residents() {
                         <FormItem>
                           <FormLabel>Phone <span className="text-muted-foreground text-xs">(optional)</span></FormLabel>
                           <FormControl><Input type="tel" {...field} placeholder="(555) 123-4567" data-testid="input-resident-phone" /></FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )} />
+                      <FormField control={addForm.control} name="roomName" render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Room <span className="text-muted-foreground text-xs">(optional)</span></FormLabel>
+                          <FormControl>
+                            <Input {...field} list="resident-room-suggestions" placeholder="e.g., Bedroom 2" data-testid="input-resident-room" />
+                          </FormControl>
+                          <datalist id="resident-room-suggestions">
+                            {roomSuggestions.map((name) => <option key={name} value={name} />)}
+                          </datalist>
                           <FormMessage />
                         </FormItem>
                       )} />
