@@ -100,7 +100,7 @@ import {
 } from "@shared/schema";
 import { db } from "./db";
 import { REGIONS } from "@shared/regions";
-import { eq, and, or, desc, asc, inArray, lt, lte, gte, ilike, count, notInArray, sql } from "drizzle-orm";
+import { eq, and, or, desc, asc, inArray, isNull, lt, lte, gte, ilike, count, notInArray, sql } from "drizzle-orm";
 
 // Helper function to filter out undefined values from partial updates
 function filterUndefined<T extends Record<string, any>>(obj: T): Partial<T> {
@@ -144,6 +144,13 @@ function computeDefaultPermissions(userId: string, role: "admin" | "regional_adm
   };
 }
 
+/** Written by the dismiss routes only. */
+export interface WalkthroughItemDismissFields {
+  dismissedAt?: Date | null;
+  dismissReason?: string | null;
+  dismissedByUserId?: string | null;
+}
+
 export interface IStorage {
   // User Management
   getUser(id: string): Promise<User | undefined>;
@@ -167,10 +174,14 @@ export interface IStorage {
   deleteUser(id: string): Promise<void>;
 
   // Maintenance Requests
+  // walkthroughItemId is not part of the insert schema either: only the
+  // send-to-maintenance route sets it, from the item it was called on.
   createMaintenanceRequest(
-    request: InsertMaintenanceRequest & { completedDate?: Date | null },
+    request: InsertMaintenanceRequest & { completedDate?: Date | null; walkthroughItemId?: string | null },
   ): Promise<MaintenanceRequest>;
   getMaintenanceRequest(id: string): Promise<MaintenanceRequest | undefined>;
+  /** The request already raised from a walkthrough item, if one was. */
+  getMaintenanceRequestByWalkthroughItem(walkthroughItemId: string): Promise<MaintenanceRequest | undefined>;
   getAllMaintenanceRequests(): Promise<MaintenanceRequest[]>;
   // completedDate is not part of the insert schema -- it is set by the server
   // from a status transition, never accepted from a request body. See
@@ -216,7 +227,9 @@ export interface IStorage {
   getWalkthroughItemsByWalkthrough(walkthroughId: string): Promise<WalkthroughItem[]>;
   /** Every item recorded poor or damaged, newest walkthrough first. */
   getFlaggedWalkthroughItems(): Promise<FlaggedWalkthroughItem[]>;
-  updateWalkthroughItem(id: string, data: Partial<InsertWalkthroughItem>): Promise<WalkthroughItem>;
+  // The dismiss columns are outside the insert schema, so the dismiss routes
+  // widen the type here exactly as the asset snooze does on updateAsset.
+  updateWalkthroughItem(id: string, data: Partial<InsertWalkthroughItem> & WalkthroughItemDismissFields): Promise<WalkthroughItem>;
   deleteWalkthroughItem(id: string): Promise<void>;
 
   // Walkthrough Rooms
@@ -706,9 +719,19 @@ export class DatabaseStorage implements IStorage {
 
   // Maintenance Requests Implementation
   async createMaintenanceRequest(
-    requestData: InsertMaintenanceRequest & { completedDate?: Date | null },
+    requestData: InsertMaintenanceRequest & { completedDate?: Date | null; walkthroughItemId?: string | null },
   ): Promise<MaintenanceRequest> {
     const [request] = await db.insert(maintenanceRequests).values(requestData).returning();
+    return request;
+  }
+
+  async getMaintenanceRequestByWalkthroughItem(walkthroughItemId: string): Promise<MaintenanceRequest | undefined> {
+    const [request] = await db
+      .select()
+      .from(maintenanceRequests)
+      .where(eq(maintenanceRequests.walkthroughItemId, walkthroughItemId))
+      .orderBy(desc(maintenanceRequests.submittedDate))
+      .limit(1);
     return request;
   }
 
@@ -933,13 +956,15 @@ export class DatabaseStorage implements IStorage {
       .from(walkthroughItems)
       .innerJoin(walkthroughRooms, eq(walkthroughItems.roomId, walkthroughRooms.id))
       .innerJoin(walkthroughs, eq(walkthroughRooms.walkthroughId, walkthroughs.id))
-      .where(inArray(walkthroughItems.condition, [...WALKTHROUGH_FLAGGED_CONDITIONS]))
+      // A dismissed item is off this list and nowhere else: it still shows,
+      // as dismissed, on its walkthrough.
+      .where(and(inArray(walkthroughItems.condition, [...WALKTHROUGH_FLAGGED_CONDITIONS]), isNull(walkthroughItems.dismissedAt)))
       .orderBy(desc(walkthroughs.walkthroughDate), walkthroughRooms.displayOrder, walkthroughItems.displayOrder);
 
     return rows;
   }
 
-  async updateWalkthroughItem(id: string, data: Partial<InsertWalkthroughItem>): Promise<WalkthroughItem> {
+  async updateWalkthroughItem(id: string, data: Partial<InsertWalkthroughItem> & WalkthroughItemDismissFields): Promise<WalkthroughItem> {
     const [row] = await db
       .update(walkthroughItems)
       .set({ ...filterUndefined(data), updatedAt: new Date() })

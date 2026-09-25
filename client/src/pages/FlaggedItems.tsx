@@ -1,7 +1,22 @@
-import { useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMemo, useState } from "react";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
-import { ArrowLeft, CheckCircle2, Camera, ChevronRight, TriangleAlert } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Camera, ChevronRight, EyeOff, TriangleAlert, Wrench } from "lucide-react";
+
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import DismissItemDialog from "@/components/walkthrough/DismissItemDialog";
+import { useAuth } from "@/hooks/useAuth";
+import { useToast } from "@/hooks/use-toast";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -36,7 +51,42 @@ const CONDITION_ORDER: Record<string, number> = { damaged: 0, poor: 1 };
 
 export default function FlaggedItems() {
   const [, navigate] = useLocation();
+  const { user } = useAuth();
+  const { toast } = useToast();
   const [filters, setFilters] = useUrlState({ house: "all", condition: "all" });
+  const [dismissing, setDismissing] = useState<FlaggedWalkthroughItem | null>(null);
+  const [sending, setSending] = useState<FlaggedWalkthroughItem | null>(null);
+
+  // Computed, never returned on. The routes decide; these only decide
+  // whether to offer the button.
+  const typedUser = user as { role?: string; permissions?: Record<string, boolean> } | null;
+  const isAdmin = typedUser?.role === "admin";
+  const canDismiss = isAdmin || typedUser?.permissions?.canManageWalkthroughs === true;
+  const canSend = isAdmin || typedUser?.permissions?.canManageMaintenance === true;
+
+  const send = useMutation({
+    mutationFn: async (item: FlaggedWalkthroughItem) => {
+      const response = await apiRequest("POST", `/api/walkthrough-items/${item.itemId}/maintenance-request`);
+      return (await response.json()) as { id: string };
+    },
+    onSuccess: (request) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/maintenance-requests"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/maintenance-request-photos"] });
+      setSending(null);
+      navigate(`/maintenance/${request.id}`);
+    },
+    onError: (error: Error) => {
+      // 409 carries the id of the request already raised; go there instead.
+      const match = /"requestId":"([^"]+)"/.exec(error.message);
+      setSending(null);
+      if (match) {
+        toast({ title: "Already raised", description: "A request already exists for this item." });
+        navigate(`/maintenance/${match[1]}`);
+        return;
+      }
+      toast({ title: "That did not save", description: "No request was created.", variant: "destructive" });
+    },
+  });
 
   const { data: items = [], isLoading } = useQuery<FlaggedWalkthroughItem[]>({
     queryKey: ["/api/walkthrough-flagged-items"],
@@ -202,6 +252,20 @@ export default function FlaggedItems() {
                               {item.roomPhotoCount}
                             </span>
                           )}
+                          {(canDismiss || canSend) && (
+                            <div className="flex shrink-0 flex-col gap-1 sm:flex-row" onClick={(event) => event.stopPropagation()}>
+                              {canSend && (
+                                <Button size="sm" variant="secondary" onClick={() => setSending(item)} data-testid={`button-send-to-maintenance-${item.itemId}`}>
+                                  <Wrench className="h-3.5 w-3.5" /> Send to maintenance
+                                </Button>
+                              )}
+                              {canDismiss && (
+                                <Button size="sm" variant="ghost" onClick={() => setDismissing(item)} data-testid={`button-dismiss-item-${item.itemId}`}>
+                                  <EyeOff className="h-3.5 w-3.5" /> Dismiss
+                                </Button>
+                              )}
+                            </div>
+                          )}
                           <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
                         </CardContent>
                       </Card>
@@ -211,6 +275,36 @@ export default function FlaggedItems() {
               ))}
             </div>
           )}
+
+          <DismissItemDialog item={dismissing} open={dismissing !== null} onOpenChange={(open) => !open && setDismissing(null)} />
+
+          <AlertDialog open={sending !== null} onOpenChange={(open) => !open && setSending(null)}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Raise a repair from this item?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This creates a maintenance request for {sending?.label} in the {sending?.roomName} at{" "}
+                  {sending?.buildingAddress}, with the room, the recorded condition and the walkthrough
+                  notes filled in. {sending && sending.roomPhotoCount > 0
+                    ? `The room's ${sending.roomPhotoCount} photo${sending.roomPhotoCount === 1 ? "" : "s"} will be attached and visible to the household on the request.`
+                    : "The household will be able to see it, as with any repair."}
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  disabled={send.isPending}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    if (sending) send.mutate(sending);
+                  }}
+                  data-testid="button-confirm-send-to-maintenance"
+                >
+                  {send.isPending ? "Creating…" : "Create the request"}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </PageStack>
       </Container>
     </Section>

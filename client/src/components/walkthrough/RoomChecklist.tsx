@@ -9,6 +9,7 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { WalkthroughItem } from "@shared/schema";
 import ConditionPicker from "./ConditionPicker";
+import { formatDate } from "@/lib/format";
 
 /**
  * One room's checklist: every item, its condition, and a place for a note.
@@ -72,6 +73,21 @@ export default function RoomChecklist({ walkthroughId, items, canManage, canRemo
     },
   });
 
+  // A dismissed item comes back onto the needs-attention list; the reason
+  // stays on the row as the record of why somebody once thought it fine.
+  const clearDismissal = useMutation({
+    mutationFn: async (id: string) => {
+      await apiRequest("DELETE", `/api/walkthrough-items/${id}/dismiss`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: itemsKey });
+      queryClient.invalidateQueries({ queryKey: ["/api/walkthrough-flagged-items"] });
+    },
+    onError: () => {
+      toast({ variant: "destructive", title: "Not saved", description: "The dismissal could not be cleared." });
+    },
+  });
+
   const deleteItem = useMutation({
     mutationFn: async (id: string) => {
       await apiRequest("DELETE", `/api/walkthrough-items/${id}`);
@@ -98,6 +114,7 @@ export default function RoomChecklist({ walkthroughId, items, canManage, canRemo
             item={item}
             canManage={canManage}
             canRemove={canRemove}
+            onClearDismissal={() => clearDismissal.mutate(item.id)}
             // `mutate` keeps the same identity across renders, which is what
             // lets the autosave effects below depend on it without restarting
             // their timer on every keystroke.
@@ -115,11 +132,12 @@ interface ItemRowProps {
   item: WalkthroughItem;
   canManage: boolean;
   canRemove: boolean;
+  onClearDismissal: () => void;
   onSave: (change: { id: string; patch: Partial<WalkthroughItem> }) => void;
   onDelete: () => void;
 }
 
-function ItemRow({ item, canManage, canRemove, onSave, onDelete }: ItemRowProps) {
+function ItemRow({ item, canManage, canRemove, onSave, onDelete, onClearDismissal }: ItemRowProps) {
   // Held locally while it is being typed. Saving every keystroke would mean a
   // request per character on a phone signal.
   const [notes, setNotes] = useState(item.notes ?? "");
@@ -186,6 +204,25 @@ function ItemRow({ item, canManage, canRemove, onSave, onDelete }: ItemRowProps)
           disabled={!canManage}
           testId={item.id}
         />
+
+        {item.dismissedAt && (
+          <p className="rounded-md border border-border bg-muted px-3 py-2 text-sm" data-testid={`text-item-dismissed-${item.id}`}>
+            <span className="font-medium">Dismissed {formatDate(item.dismissedAt)}</span>
+            {item.dismissReason ? ` — ${item.dismissReason}` : ""}
+            {canRemove && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="ml-2"
+                onClick={onClearDismissal}
+                data-testid={`button-clear-dismissal-${item.id}`}
+              >
+                Put it back
+              </Button>
+            )}
+          </p>
+        )}
 
         <Textarea
           value={notes}

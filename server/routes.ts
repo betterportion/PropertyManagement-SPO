@@ -89,6 +89,7 @@ import {
   type InsertMaintenanceRequest,
   type MaintenanceRequest,
   type MaintenanceRequestComment,
+  WALKTHROUGH_CONDITION_LABEL,
 } from "@shared/schema";
 import { hubSlotProblem } from "@shared/resourceHubSlots";
 import { STANDARD_SCHEDULE_TEMPLATES, addMonths } from "./schedules";
@@ -1992,6 +1993,177 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ success: true });
     } catch (error) {
       sendError(res, error, "Failed to delete walkthrough item");
+    }
+  });
+
+  // One checklist item with where it sits, for a screen that holds only the
+  // item's id: the request page linking back to the walkthrough it came from.
+  // The read rule is the item's walkthrough's, so a leader reaches their own
+  // house's and nobody else's.
+  app.get('/api/walkthrough-items/:id', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireWalkthroughPermission(res, ctx, "view")) return;
+
+      const item = await storage.getWalkthroughItem(req.params.id);
+      if (!item) return res.status(404).json({ message: "Walkthrough item not found" });
+      const room = await storage.getWalkthroughRoom(item.roomId);
+      const walkthrough = room?.walkthroughId ? await storage.getWalkthrough(room.walkthroughId) : undefined;
+      // A legacy room with no walkthrough is a 404 for everyone, admins
+      // included -- the access rule would let an admin through to nothing.
+      if (!room || !walkthrough) return res.status(404).json({ message: "Walkthrough item not found" });
+      if (!(await requireWalkthroughAccess(res, ctx, walkthrough))) return;
+
+      res.json({ ...item, roomName: room.name, walkthroughId: walkthrough.id, walkthroughDate: walkthrough.walkthroughDate });
+    } catch (error) {
+      sendError(res, error, "Failed to fetch walkthrough item");
+    }
+  });
+
+  /**
+   * A flagged item for a staff write: dismissing it, or raising a repair from
+   * it. Staff only (a leader has no business deciding a hole is fine), the
+   * given permission, and the walkthrough's region. Decided before the item
+   * is loaded, so a refusal reads nothing.
+   */
+  async function walkthroughItemForStaff(
+    req: any,
+    res: Response,
+    ctx: AuthContext,
+    permission: "canManageWalkthroughs" | "canManageMaintenance",
+  ) {
+    if (!requireStaff(res, ctx)) return undefined;
+    if (!requirePermission(res, ctx, permission)) return undefined;
+    // Both writes are also walkthrough reads, so the walkthrough grant is
+    // checked here, before anything is loaded, for staff as for residents.
+    if (!requireWalkthroughPermission(res, ctx, "view")) return undefined;
+    const item = await storage.getWalkthroughItem(req.params.id);
+    if (!item) {
+      res.status(404).json({ message: "Walkthrough item not found" });
+      return undefined;
+    }
+    const room = await storage.getWalkthroughRoom(item.roomId);
+    const walkthrough = room?.walkthroughId ? await storage.getWalkthrough(room.walkthroughId) : undefined;
+    if (!room || !walkthrough) {
+      res.status(404).json({ message: "Walkthrough item not found" });
+      return undefined;
+    }
+    if (!(await requireWalkthroughAccess(res, ctx, walkthrough))) return undefined;
+    return { item, room, walkthrough };
+  }
+
+  // Dismissing a flagged item: somebody marked it poor and it turned out fine.
+  // Who, when and a required reason, the asset-snooze shape. It leaves the
+  // needs-attention list and stays on the walkthrough saying so; the recorded
+  // condition is not rewritten. No audit event: not access, money or documents.
+  app.post('/api/walkthrough-items/:id/dismiss', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      const found = await walkthroughItemForStaff(req, res, ctx, "canManageWalkthroughs");
+      if (!found) return;
+
+      const body = z
+        .object({
+          reason: z
+            .string()
+            .trim()
+            .min(1, "Say why this does not need attention — it is what the next RA reads")
+            .max(500, "Keep the reason under 500 characters"),
+        })
+        .parse(req.body);
+
+      res.json(
+        await storage.updateWalkthroughItem(found.item.id, {
+          dismissedAt: new Date(),
+          dismissReason: body.reason,
+          dismissedByUserId: ctx.userId,
+        }),
+      );
+    } catch (error) {
+      sendError(res, error, "Failed to dismiss this item");
+    }
+  });
+
+  app.delete('/api/walkthrough-items/:id/dismiss', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      const found = await walkthroughItemForStaff(req, res, ctx, "canManageWalkthroughs");
+      if (!found) return;
+      // The reason stays, as a snooze's does: it is the record of why
+      // somebody once thought this was fine.
+      res.json(await storage.updateWalkthroughItem(found.item.id, { dismissedAt: null }));
+    } catch (error) {
+      sendError(res, error, "Failed to clear this dismissal");
+    }
+  });
+
+  // Raising a repair from a flagged item. The request is an ordinary type
+  // `request` on the item's house, so the household can read it -- which is
+  // correct, and why nothing staff-only is copied: the title, the room, the
+  // recorded condition and the item's own notes, which the household wrote or
+  // could read anyway. The room's photos are REFERENCED, not re-uploaded: a
+  // maintenance_request_photos row per existing upload, which is what makes
+  // them readable to the household through the request rule. submittedBy is
+  // the acting RA's email, because that column holds an email and ownsRecord
+  // compares against one.
+  app.post('/api/walkthrough-items/:id/maintenance-request', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      const found = await walkthroughItemForStaff(req, res, ctx, "canManageMaintenance");
+      if (!found) return;
+      const { item, room, walkthrough } = found;
+
+      const existing = await storage.getMaintenanceRequestByWalkthroughItem(item.id);
+      if (existing) {
+        return res.status(409).json({ message: "A request was already raised from this item", requestId: existing.id });
+      }
+
+      const house = await storage.getProperty(walkthrough.propertyId);
+      if (!house) return res.status(400).json({ message: NOT_A_HOUSE_MESSAGE });
+      if (!requireRegion(res, ctx, house.region, "Forbidden - Cannot create in this region")) return;
+
+      const submittedBy = ctx.user.email || "Unknown";
+      const when = new Date(walkthrough.walkthroughDate).toISOString().slice(0, 10);
+      const conditionWord = WALKTHROUGH_CONDITION_LABEL[item.condition] ?? item.condition;
+      const notes = item.notes?.trim();
+      const description = [
+        `Recorded "${conditionWord}" for ${item.label} in the ${room.name} on the ${when} walkthrough.`,
+        notes ? `Walkthrough notes: ${notes}` : null,
+      ]
+        .filter(Boolean)
+        .join("\n\n");
+
+      const request = await storage.createMaintenanceRequest({
+        title: `${item.label} — ${room.name}`,
+        description,
+        category: "General",
+        priority: "medium",
+        type: "request",
+        status: "pending",
+        location: room.name,
+        region: house.region,
+        buildingAddress: house.address,
+        submittedBy,
+        walkthroughItemId: item.id,
+      });
+
+      const photos = await storage.getWalkthroughPhotosByRoom(room.id);
+      for (const photo of photos) {
+        await storage.createMaintenanceRequestPhoto({
+          requestId: request.id,
+          imageUrl: photo.imageUrl,
+          uploadedBy: photo.uploadedBy || submittedBy,
+        });
+      }
+
+      notify(maintenanceReceivedEmail(request));
+      res.status(201).json(request);
+    } catch (error) {
+      sendError(res, error, "Failed to raise a request from this item");
     }
   });
 
