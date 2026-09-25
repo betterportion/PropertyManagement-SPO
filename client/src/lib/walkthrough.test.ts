@@ -6,7 +6,9 @@ import {
   WALKTHROUGH_TYPE_LABEL,
   canFillInWalkthroughs,
   canRemoveWalkthroughItems,
+  canReviewWalkthrough,
   canSeeResourceHub,
+  canSubmitWalkthrough,
   canSeeWalkthroughPhotos,
   canWriteWalkthrough,
   comparePhotosByRoom,
@@ -68,6 +70,32 @@ describe("condition presentation", () => {
     expect(WALKTHROUGH_CONDITIONS[0]).toBe("excellent");
     expect(conditionTone("excellent")).toBe("good");
     expect(progressOf([item("a", "r1", "excellent")])).toMatchObject({ assessed: 1, flagged: 0 });
+  });
+});
+
+describe("submitting and reviewing", () => {
+  const leader = { role: "resident", propertyId: "p1", permissions: { canCompleteWalkthroughs: true } };
+  const staff = { role: "regional_administrator", permissions: { canManageWalkthroughs: true } };
+  const current = { id: "w2", propertyId: "p1", walkthroughDate: "2026-09-01", status: "draft" as const };
+  const prior = { id: "w1", propertyId: "p1", walkthroughDate: "2025-09-01", status: "draft" as const };
+  const house = [current, prior];
+
+  it("offers submit to whoever may write it, on a draft only", () => {
+    expect(canSubmitWalkthrough(leader, current, house)).toBe(true);
+    expect(canSubmitWalkthrough(staff, current, house)).toBe(true);
+    expect(canSubmitWalkthrough(leader, { ...current, status: "submitted" }, house)).toBe(false);
+    // A prior year is read-only for a leader, so it cannot be submitted by one either.
+    expect(canSubmitWalkthrough(leader, prior, house)).toBe(false);
+    expect(canSubmitWalkthrough(staff, prior, house)).toBe(true);
+  });
+
+  it("offers review to staff on a submitted walkthrough, never to a leader", () => {
+    const submitted = { ...current, status: "submitted" as const };
+    expect(canReviewWalkthrough(staff, submitted)).toBe(true);
+    expect(canReviewWalkthrough({ role: "admin" }, submitted)).toBe(true);
+    expect(canReviewWalkthrough(leader, submitted)).toBe(false);
+    expect(canReviewWalkthrough(staff, current)).toBe(false);
+    expect(canReviewWalkthrough(staff, { ...current, status: "reviewed" })).toBe(false);
   });
 });
 

@@ -1,8 +1,18 @@
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "wouter";
-import { ArrowLeft, ArrowRight, ChevronLeft, DoorOpen, ListChecks } from "lucide-react";
+import { ArrowLeft, ArrowRight, CheckCircle2, ChevronLeft, DoorOpen, ListChecks } from "lucide-react";
 
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState, ErrorState, LoadingState } from "@/components/states";
@@ -10,6 +20,8 @@ import RoomChecklist from "@/components/walkthrough/RoomChecklist";
 import RoomPhotos from "@/components/walkthrough/RoomPhotos";
 import RoomSwitcher from "@/components/walkthrough/RoomSwitcher";
 import { useAuth } from "@/hooks/useAuth";
+import { useToast } from "@/hooks/use-toast";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 import { formatDate } from "@/lib/format";
 import {
   WALKTHROUGH_STATUS_BADGE,
@@ -22,6 +34,8 @@ import {
   progressOf,
   type WalkthroughUser,
   canRemoveWalkthroughItems,
+  canReviewWalkthrough,
+  canSubmitWalkthrough,
 } from "@/lib/walkthrough";
 import type { Walkthrough, WalkthroughItem, WalkthroughRoom } from "@shared/schema";
 
@@ -121,6 +135,33 @@ export default function WalkthroughRun() {
   const currentIndex = currentRoom ? rooms.findIndex((room) => room.id === currentRoom.id) : -1;
   const isFirstRoom = currentIndex <= 0;
   const isLastRoom = currentIndex >= rooms.length - 1;
+
+  // The two things that move a walkthrough on. Submitting says the house has
+  // been walked; reviewing is staff reading it over. Neither locks editing.
+  const { toast } = useToast();
+  const [isSubmitOpen, setIsSubmitOpen] = useState(false);
+  const canSubmit = canSubmitWalkthrough(typedUser, walkthrough, houseWalkthroughs);
+  const canReview = canReviewWalkthrough(typedUser, walkthrough);
+  const moveOn = useMutation({
+    mutationFn: async (step: "submit" | "review") => {
+      await apiRequest("POST", `/api/walkthroughs/${walkthroughId}/${step}`);
+      return step;
+    },
+    onSuccess: (step) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/walkthroughs", walkthroughId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/walkthroughs"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/walkthrough-flagged-items"] });
+      setIsSubmitOpen(false);
+      toast({
+        title: step === "submit" ? "Submitted" : "Marked reviewed",
+        description: step === "submit" ? "Conditions and notes can still be changed." : undefined,
+      });
+    },
+    onError: () => {
+      setIsSubmitOpen(false);
+      toast({ variant: "destructive", title: "Not saved", description: "That did not go through. Try again in a moment." });
+    },
+  });
 
   const isLoading = walkthroughLoading || roomsLoading || itemsLoading;
   const status = walkthrough ? WALKTHROUGH_STATUS_BADGE[walkthrough.status] : null;
@@ -256,6 +297,24 @@ export default function WalkthroughRun() {
               <ListChecks className="h-4 w-4" />
               {currentRoom ? `Room ${currentIndex + 1} of ${rooms.length}` : "Rooms"}
             </Button>
+            {canSubmit && (
+              <Button variant="primary" size="sm" onClick={() => setIsSubmitOpen(true)} data-testid="button-submit-walkthrough">
+                <CheckCircle2 className="h-4 w-4" />
+                Mark submitted
+              </Button>
+            )}
+            {canReview && (
+              <Button
+                variant="primary"
+                size="sm"
+                disabled={moveOn.isPending}
+                onClick={() => moveOn.mutate("review")}
+                data-testid="button-review-walkthrough"
+              >
+                <CheckCircle2 className="h-4 w-4" />
+                {moveOn.isPending ? "Saving…" : "Mark reviewed"}
+              </Button>
+            )}
           </div>
         </div>
       </header>
@@ -297,6 +356,34 @@ export default function WalkthroughRun() {
           </div>
         </footer>
       )}
+
+      <AlertDialog open={isSubmitOpen} onOpenChange={setIsSubmitOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Mark this walkthrough submitted?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This says the house has been walked. Conditions and notes can still be changed
+              afterwards, and your regional administrator will read it over.
+              {overall.total > 0 && overall.assessed < overall.total
+                ? ` ${overall.total - overall.assessed} item${overall.total - overall.assessed === 1 ? " has" : "s have"} not been checked yet.`
+                : ""}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Not yet</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={moveOn.isPending}
+              onClick={(event) => {
+                event.preventDefault();
+                moveOn.mutate("submit");
+              }}
+              data-testid="button-confirm-submit-walkthrough"
+            >
+              {moveOn.isPending ? "Saving…" : "Mark submitted"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <RoomSwitcher
         open={isSwitcherOpen}

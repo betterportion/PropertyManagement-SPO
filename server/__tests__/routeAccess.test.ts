@@ -3474,12 +3474,14 @@ describe("walkthroughs and walkthrough items", () => {
     storageMock.getWalkthrough.mockResolvedValue(WEST_WT);
     storageMock.updateWalkthrough.mockResolvedValue(WEST_WT);
 
+    // `notes` is the carrier here: status is stripped too, since the submit
+    // and review routes became its only writers (2026-09 RA review).
     await request("PATCH", "/api/walkthroughs/wt-west", {
-      body: { status: "reviewed", propertyId: "prop-east", region: "East Central", buildingAddress: "2 River Rd" },
+      body: { notes: "Reviewed on site", propertyId: "prop-east", region: "East Central", buildingAddress: "2 River Rd" },
     });
 
     const patch = storageMock.updateWalkthrough.mock.calls[0][1];
-    expect(patch).toEqual({ status: "reviewed" });
+    expect(patch).toEqual({ notes: "Reviewed on site" });
   });
 
   // ── The region chain, and what happens when it breaks ────────────────────
@@ -3881,6 +3883,76 @@ describe("residents completing their own house's walkthrough", () => {
     expect(storageMock.deleteWalkthroughItem).toHaveBeenCalledWith("item-a");
   });
 
+  // ── Submitting and reviewing (2026-09 RA review, 7.1) ────────────────────
+
+  it("submits their own current walkthrough, and only from draft", async () => {
+    leaderOfHouseA();
+    ownHouse();
+    storageMock.updateWalkthrough.mockResolvedValue({ ...WT_A, status: "submitted" });
+
+    const { status } = await request("POST", "/api/walkthroughs/wt-a/submit", { body: {} });
+    expect(status).toBe(200);
+    expect(storageMock.updateWalkthrough).toHaveBeenCalledWith("wt-a", { status: "submitted" });
+    expect(storageMock.recordAuditEvent).not.toHaveBeenCalled();
+
+    storageMock.updateWalkthrough.mockClear();
+    storageMock.getWalkthrough.mockResolvedValue({ ...WT_A, status: "submitted" });
+    const again = await request("POST", "/api/walkthroughs/wt-a/submit", { body: {} });
+    expect(again.status).toBe(409);
+    expect(storageMock.updateWalkthrough).not.toHaveBeenCalled();
+  });
+
+  it("cannot submit a prior year — the date rule applies to submitting too", async () => {
+    leaderOfHouseA();
+    ownHousePriorYear();
+    const { status, body } = await request("POST", "/api/walkthroughs/wt-a-prior/submit", { body: {} });
+    expect(status).toBe(403);
+    expect(body.message).toContain("read-only");
+    expect(storageMock.updateWalkthrough).not.toHaveBeenCalled();
+  });
+
+  it("cannot mark a walkthrough reviewed — that is staff reading it over", async () => {
+    leaderOfHouseA();
+    storageMock.getWalkthrough.mockResolvedValue({ ...WT_A, status: "submitted" });
+    const { status } = await request("POST", "/api/walkthroughs/wt-a/review", { body: {} });
+    expect(status).toBe(403);
+    expect(storageMock.updateWalkthrough).not.toHaveBeenCalled();
+  });
+
+  it("lets staff mark a submitted walkthrough reviewed, and refuses a draft", async () => {
+    actAs(STAFF, { canViewWalkthroughs: true, canManageWalkthroughs: true, allowedRegions: ["West Central"] });
+    storageMock.getWalkthrough.mockResolvedValue({ ...WT_A, status: "draft" });
+    const draft = await request("POST", "/api/walkthroughs/wt-a/review", { body: {} });
+    expect(draft.status).toBe(409);
+    expect(storageMock.updateWalkthrough).not.toHaveBeenCalled();
+
+    storageMock.getWalkthrough.mockResolvedValue({ ...WT_A, status: "submitted" });
+    storageMock.updateWalkthrough.mockResolvedValue({ ...WT_A, status: "reviewed" });
+    const { status } = await request("POST", "/api/walkthroughs/wt-a/review", { body: {} });
+    expect(status).toBe(200);
+    expect(storageMock.updateWalkthrough).toHaveBeenCalledWith("wt-a", { status: "reviewed" });
+  });
+
+  it("ignores a status in the body of the create and edit routes — the two routes above are its only writers", async () => {
+    actAs(STAFF, { canViewWalkthroughs: true, canManageWalkthroughs: true, allowedRegions: ["West Central"] });
+    ownHouse();
+    seedsNothing();
+    storageMock.getProperty.mockResolvedValue(PROPERTY_A);
+    storageMock.createWalkthrough.mockImplementation(async (data: Record<string, unknown>) => ({ id: "wt-new", ...data }));
+    storageMock.updateWalkthrough.mockResolvedValue(WT_A);
+
+    const created = await request("POST", "/api/walkthroughs", { body: { propertyId: "prop-a", status: "reviewed" } });
+    expect(created.status).toBe(200);
+    const inserted = storageMock.createWalkthrough.mock.calls[0][0] as { status?: string };
+    expect(inserted.status).toBeUndefined();
+
+    const edited = await request("PATCH", "/api/walkthroughs/wt-a", { body: { status: "reviewed", notes: "Kitchen redone" } });
+    expect(edited.status).toBe(200);
+    // The positive control: the same PATCH still changes what it may.
+    expect(storageMock.updateWalkthrough).toHaveBeenCalledWith("wt-a", expect.objectContaining({ notes: "Kitchen redone" }));
+    expect((storageMock.updateWalkthrough.mock.calls[0][1] as { status?: string }).status).toBeUndefined();
+  });
+
   // ── Dismissing an item, and raising a repair from one (2026-09 RA review) ──
 
   it("cannot dismiss a flagged item — deciding a hole is fine is staff work", async () => {
@@ -4162,6 +4234,7 @@ describe("residents completing their own house's walkthrough", () => {
   it.each([
     ["PATCH", "/api/walkthroughs/wt-a"],
     ["DELETE", "/api/walkthroughs/wt-a"],
+    ["POST", "/api/walkthroughs/wt-a/review"],
     ["POST", "/api/walkthrough-items"],
     ["DELETE", "/api/walkthrough-items/item-a"],
     ["POST", "/api/walkthrough-items/item-a/dismiss"],

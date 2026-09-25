@@ -1661,8 +1661,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // region and buildingAddress come from the property, never the caller,
       // so a walkthrough cannot be filed into a region its author cannot see.
+      // Nor does the status: every walkthrough starts as a draft, and only the
+      // submit and review routes move it on.
+      const { status: _status, ...startBody } = req.body ?? {};
       const validatedData = insertWalkthroughSchema.parse({
-        ...req.body,
+        ...startBody,
         region: property.region,
         buildingAddress: property.address,
         performedBy: ctx.user.email ?? null,
@@ -1823,13 +1826,64 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!requireRegion(res, ctx, existing.region)) return;
 
       // The house a walkthrough belongs to is fixed, so its property and the
-      // region and address derived from it are not editable.
-      const { propertyId: _p, region: _r, buildingAddress: _b, ...editable } = req.body ?? {};
+      // region and address derived from it are not editable. The status is
+      // not either: the submit and review routes below are its only writers.
+      const { propertyId: _p, region: _r, buildingAddress: _b, status: _s, ...editable } = req.body ?? {};
       const validatedData = insertWalkthroughSchema.partial().parse(editable);
 
       res.json(await storage.updateWalkthrough(req.params.id, validatedData));
     } catch (error) {
       sendError(res, error, "Failed to update walkthrough");
+    }
+  });
+
+  // The two writers of `status` (2026-09 RA review, 7.1). Submitting is what
+  // whoever filled the walkthrough in does when the house is walked -- a
+  // leader on their own current one, or staff -- and it moves draft to
+  // submitted. Reviewing is staff reading it over: submitted to reviewed.
+  // Neither locks anything; the date rule stays the only lock, so a leader
+  // can still fix a note after submitting and their RA can correct any year.
+  // The damages worksheet opens on a move-out that has reached either. No
+  // audit event: not access, money or a document.
+  app.post('/api/walkthroughs/:id/submit', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireWalkthroughPermission(res, ctx, "manage")) return;
+
+      const existing = await storage.getWalkthrough(req.params.id);
+      if (!existing) return res.status(404).json({ message: "Walkthrough not found" });
+      if (!(await requireWalkthroughAccess(res, ctx, existing))) return;
+      if (!(await requireCurrentWalkthrough(res, ctx, existing))) return;
+      if (existing.status !== "draft") {
+        return res.status(409).json({ message: "This walkthrough has already been submitted" });
+      }
+
+      res.json(await storage.updateWalkthrough(existing.id, { status: "submitted" }));
+    } catch (error) {
+      sendError(res, error, "Failed to submit this walkthrough");
+    }
+  });
+
+  app.post('/api/walkthroughs/:id/review', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageWalkthroughs")) return;
+
+      const existing = await storage.getWalkthrough(req.params.id);
+      if (!existing) return res.status(404).json({ message: "Walkthrough not found" });
+      if (!requireRegion(res, ctx, existing.region)) return;
+      if (existing.status !== "submitted") {
+        return res.status(409).json({
+          message: existing.status === "draft" ? "Mark it submitted first" : "This walkthrough has already been reviewed",
+        });
+      }
+
+      res.json(await storage.updateWalkthrough(existing.id, { status: "reviewed" }));
+    } catch (error) {
+      sendError(res, error, "Failed to mark this walkthrough reviewed");
     }
   });
 
