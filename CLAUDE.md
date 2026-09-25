@@ -466,6 +466,8 @@ A further kind of route takes a file without storing one: the roster CSV import,
 
 Because uploads are buffered in memory, `server/uploadLimits.ts` bounds them. It is the single source of truth for the per-file limits (10MB images, 20MB documents, 2MB roster CSVs) — the multer configs import them rather than repeating the numbers.
 
+**Photos are shrunk on the phone, not on the server.** `client/src/lib/resizeImage.ts` re-encodes anything over 1 MB as a JPEG with a 2048 px long edge at quality 0.82 (a hairline drywall crack is still legible; a 12 MB camera photo lands at a few hundred KB), renames it `.jpg` because the server keys every check on the filename, leaves GIFs alone, and hands back the original on any failure so the server's own checks still decide. Both `PhotoUpload` and `CommentAttachmentField` call it before their size check. The server limits are unchanged and remain the ceiling: the resize is a courtesy to the limit, never a substitute for it. This is also the only lever on storage cost, since every walkthrough season is kept and a deleted record leaves its file behind (known issue 1).
+
 `guardedUpload()` wraps each upload route with two things:
 
 - **A ceiling on total in-flight upload bytes**, 64MB by default and configurable with `MAX_UPLOAD_BYTES_IN_FLIGHT`. Capacity is reserved from the request's `Content-Length` *before* the body is read and released when the response finishes or the client disconnects. Requests that would exceed the ceiling get `503` with `Retry-After`, so a burst degrades into a retry rather than an out-of-memory crash.
