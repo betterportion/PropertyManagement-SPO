@@ -54,6 +54,8 @@ interface RoomSwitcherProps {
   currentRoomId: string | null;
   onSelectRoom: (roomId: string) => void;
   canManage: boolean;
+  /** Staff only: whether the reader can remove items themselves. */
+  canRemove: boolean;
 }
 
 export default function RoomSwitcher({
@@ -65,6 +67,7 @@ export default function RoomSwitcher({
   currentRoomId,
   onSelectRoom,
   canManage,
+  canRemove,
 }: RoomSwitcherProps) {
   const { toast } = useToast();
   const [isAddOpen, setIsAddOpen] = useState(false);
@@ -101,7 +104,7 @@ export default function RoomSwitcher({
       toast({
         title: `${room.name} added`,
         description: room.itemsCreated > 0
-          ? `Started with ${room.itemsCreated} standard item${room.itemsCreated === 1 ? "" : "s"}. Remove anything this house does not have.`
+          ? `Started with ${room.itemsCreated} standard item${room.itemsCreated === 1 ? "" : "s"}. ${canRemove ? "Remove anything this house does not have." : "Mark anything this house does not have as \"Not here\"; your regional administrator can remove it."}`
           : "That room type has no standard items, so there is nothing to check in it yet.",
       });
     },
@@ -181,8 +184,10 @@ export default function RoomSwitcher({
           <DialogHeader>
             <DialogTitle>Add a room</DialogTitle>
             <DialogDescription>
-              Pick a room type and it starts with the usual items for that room. Anything this
-              house does not have can be removed afterwards.
+              Pick a room type and it starts with the usual items for that room.{" "}
+              {canRemove
+                ? "Anything this house does not have can be removed afterwards."
+                : "Mark anything this house does not have as \"Not here\"; your regional administrator can remove it."}
             </DialogDescription>
           </DialogHeader>
 

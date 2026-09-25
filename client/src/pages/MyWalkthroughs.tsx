@@ -98,7 +98,7 @@ export default function MyWalkthroughs() {
       <EmptyState
         icon={ClipboardList}
         title="Your house has not been walked yet"
-        description="The first walkthrough starts from the standard checklist. Go room by room, and remove anything your house does not have."
+        description="The first walkthrough starts from the standard checklist. Go room by room, and mark anything your house does not have as “Not here” — your regional administrator can remove it."
         action={
           <Button
             variant="primary"

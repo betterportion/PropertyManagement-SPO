@@ -93,6 +93,18 @@ export function canFillInWalkthroughs(user: WalkthroughUser | null | undefined):
 }
 
 /**
+ * Whether the remove-item control belongs on screen for this account.
+ *
+ * Staff only, since the 2026-09 RA review: a leader records conditions and
+ * notes and adds a room, and asks their RA to take out an item the house does
+ * not have. Mirrors the `requireStaff` on `DELETE /api/walkthrough-items/:id`,
+ * so the button is not offered to somebody every request behind it refuses.
+ */
+export function canRemoveWalkthroughItems(user: WalkthroughUser | null | undefined): boolean {
+  return canFillInWalkthroughs(user) && !isResidentAccount(user);
+}
+
+/**
  * Whether the room photos belong on screen for this account.
  *
  * Staff only, and deliberately narrower than `canManageWalkthroughs`: a

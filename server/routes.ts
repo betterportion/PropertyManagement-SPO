@@ -1972,6 +1972,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const ctx = await requireActiveUser(req, res);
       if (!ctx) return;
+      // Staff only (2026-09 RA review, item 1.3). A leader used to be able to
+      // remove an item their house lacks; now they ask their RA, who can
+      // still correct anything on any year. Decided before the item is even
+      // loaded, so a refused delete touches nothing.
+      if (!requireStaff(res, ctx)) return;
       if (!requireWalkthroughPermission(res, ctx, "manage")) return;
 
       const existing = await storage.getWalkthroughItem(req.params.id);

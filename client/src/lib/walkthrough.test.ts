@@ -5,6 +5,7 @@ import {
   WALKTHROUGH_STATUS_BADGE,
   WALKTHROUGH_TYPE_LABEL,
   canFillInWalkthroughs,
+  canRemoveWalkthroughItems,
   canSeeResourceHub,
   canSeeWalkthroughPhotos,
   canWriteWalkthrough,
@@ -67,6 +68,21 @@ describe("condition presentation", () => {
     expect(WALKTHROUGH_CONDITIONS[0]).toBe("excellent");
     expect(conditionTone("excellent")).toBe("good");
     expect(progressOf([item("a", "r1", "excellent")])).toMatchObject({ assessed: 1, flagged: 0 });
+  });
+});
+
+describe("canRemoveWalkthroughItems", () => {
+  // Removing an item is staff work since the 2026-09 RA review. The server
+  // refuses a leader outright; the screen must not offer the button.
+  it("offers the control to staff who can fill in walkthroughs", () => {
+    expect(canRemoveWalkthroughItems({ role: "admin" })).toBe(true);
+    expect(canRemoveWalkthroughItems({ role: "regional_administrator", permissions: { canManageWalkthroughs: true } })).toBe(true);
+    expect(canRemoveWalkthroughItems({ role: "regional_administrator", permissions: { canManageWalkthroughs: false } })).toBe(false);
+  });
+
+  it("never offers it to a leader, even one who may complete walkthroughs", () => {
+    expect(canRemoveWalkthroughItems({ role: "resident", propertyId: "p1", permissions: { canCompleteWalkthroughs: true } })).toBe(false);
+    expect(canRemoveWalkthroughItems(null)).toBe(false);
   });
 });
 
