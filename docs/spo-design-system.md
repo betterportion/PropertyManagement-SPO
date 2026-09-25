@@ -253,6 +253,14 @@ Never add `shadow-md` to a card to "make it pop". Use `bg-muted` or a border ins
 **Motion** — restrained. `transition-colors` on every interactive element; 200ms
 transforms for chevrons/accordions. No entrance animations on data, no parallax.
 
+*One exception:* the number on a dashboard stat tile (`StatTile`, through
+`AnimatedNumber`) settles to its value with a short spring, under a second, on
+load and when the value changes. It is skipped entirely under
+`prefers-reduced-motion`. This covers that one number and nothing else: tables,
+lists, charts, badges and every other number still appear already in place.
+Adopted in #137 after the 2026-09-05 cross-portfolio UI-library review; a second
+animated value is a new decision, not an extension of this one.
+
 ---
 
 ## 5. Components
