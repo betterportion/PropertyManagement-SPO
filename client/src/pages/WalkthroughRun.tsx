@@ -116,6 +116,8 @@ export default function WalkthroughRun() {
   const currentRoom =
     rooms.find((room) => room.id === activeRoomId) ?? rooms[0] ?? null;
   const currentIndex = currentRoom ? rooms.findIndex((room) => room.id === currentRoom.id) : -1;
+  const isFirstRoom = currentIndex <= 0;
+  const isLastRoom = currentIndex >= rooms.length - 1;
 
   const isLoading = walkthroughLoading || roomsLoading || itemsLoading;
   const status = walkthrough ? WALKTHROUGH_STATUS_BADGE[walkthrough.status] : null;
@@ -259,23 +261,34 @@ export default function WalkthroughRun() {
 
       {currentRoom && rooms.length > 1 && (
         <footer className="sticky bottom-0 border-t border-border bg-background/95 backdrop-blur">
+          {isLastRoom && (
+            <p
+              className="mx-auto w-full max-w-3xl px-4 pt-3 text-center text-sm text-muted-foreground"
+              data-testid="text-last-room"
+            >
+              This is the last room. Everything you tap is saved as you go — use Rooms to check any you skipped.
+            </p>
+          )}
           <div className="mx-auto flex w-full max-w-3xl items-center justify-between gap-2 px-4 py-3">
+            {/* A disabled button says why. "Next" going grey on the last room
+                read as the app refusing to finish, because nothing else on
+                this screen says the house is done. */}
             <Button
               variant="secondary"
-              disabled={currentIndex <= 0}
+              disabled={isFirstRoom}
               onClick={() => setActiveRoomId(rooms[currentIndex - 1].id)}
               data-testid="button-previous-room"
             >
               <ArrowLeft className="h-4 w-4" />
-              Previous
+              {isFirstRoom ? "First room" : "Previous"}
             </Button>
             <Button
               variant="secondary"
-              disabled={currentIndex >= rooms.length - 1}
+              disabled={isLastRoom}
               onClick={() => setActiveRoomId(rooms[currentIndex + 1].id)}
               data-testid="button-next-room"
             >
-              Next
+              {isLastRoom ? "Last room" : "Next"}
               <ArrowRight className="h-4 w-4" />
             </Button>
           </div>
