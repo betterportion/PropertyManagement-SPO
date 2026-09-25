@@ -4,7 +4,10 @@ A property management portal for **Saint Paul's Outreach, Inc. (SPO)**.
 
 Staff use it to manage properties, resident rosters, maintenance requests, walkthrough
 inspections, physical assets, preventive and safety schedules, vendor contacts, invoices
-and household finances. Residents use it to submit maintenance requests and follow their
+and household finances. A house's page lists its whole request history — repairs, projects
+and capital projects together, filterable by type and by how far back — and its walkthrough
+photos can be compared room by room across years, each column headed by the year of the
+walkthrough it came from. Residents use it to submit maintenance requests and follow their
 progress.
 
 ---

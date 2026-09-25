@@ -232,8 +232,11 @@ Four items, audited before anything was built. Two were already there.
 **5.3 — type filter on history and archive views.** ✅ Already built in PR #127: the
 maintenance list's type filter defaults to all types, the closed-range filter applies to
 every type, and the property page's request table has no filter at all, so a completed
-capital project stays in a house's history. What this amendment added is the test that
-mattered: a household leader asking the list route for `?type=project` or `?type=capex` by
+capital project stays in a house's history. Second pass (2026-09-22): the property page's
+history table gained the same type and range filters as the maintenance list, both
+defaulting to everything, plus a type column; the open-work groups above it are never
+filtered, and an emptied table says so rather than claiming nothing was reported. What this
+amendment added first was the test that mattered: a household leader asking the list route for `?type=project` or `?type=capex` by
 name still gets only their repairs, because the resident rule is a separate server-side
 condition on the type column and the query string is not read at all. The 120-day window
 is unchanged.
@@ -256,8 +259,12 @@ per slot, national only; an admin binds one from Settings.
 
 **2.6 — room photos by year.** ✅ Already built in PR #135 as the photo comparison: pick a
 room, one column per dated walkthrough, the label derived from the walkthrough's date
-with no tagging and no upload step. The column carries the full date rather than the year
-alone, because a move-in and a move-out can share a year. Nothing added.
+with no tagging and no upload step. The column carried the full date rather than the year
+alone, because a move-in and a move-out can share a year. Second pass (2026-09-22): the
+column is now headed by the year, as the amendment says, with the full date and the
+walkthrough type underneath so two visits in one year still read apart; an undated
+walkthrough is headed "Undated". `walkthroughYearLabel` derives it from the walkthrough's
+date the way `formatDate` parses, and is tested.
 
 ---
 

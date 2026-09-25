@@ -14,6 +14,7 @@ import {
   canSeeWalkthroughPhotos,
   canWriteWalkthrough,
   comparePhotosByRoom,
+  walkthroughYearLabel,
   conditionTone,
   isCurrentWalkthrough,
   isAssessed,
@@ -505,5 +506,26 @@ describe("comparing one room's photos across years", () => {
     );
     expect(rows).toHaveLength(1);
     expect(rows[0].columns[0].photos.map((p) => p.id).sort()).toEqual(["p1", "p2"]);
+  });
+});
+
+describe("walkthroughYearLabel", () => {
+  // The year comes from the walkthrough's own date and nowhere else: nobody
+  // tags a photo with a year and nobody can type one wrong.
+  it("reads the year off a timestamp the way the date beside it is shown", () => {
+    // Parsed like formatDate does, so the heading and the date under it
+    // cannot name different years.
+    expect(walkthroughYearLabel("2024-09-01T12:00:00.000Z")).toBe("2024");
+    expect(walkthroughYearLabel(new Date(2026, 8, 4))).toBe("2026");
+  });
+
+  it("reads a date-only string as that calendar day, so New Year's Day stays in its year", () => {
+    expect(walkthroughYearLabel("2026-01-01")).toBe("2026");
+  });
+
+  it("says so for an undated walkthrough rather than guessing", () => {
+    expect(walkthroughYearLabel(null)).toBe("Undated");
+    expect(walkthroughYearLabel(undefined)).toBe("Undated");
+    expect(walkthroughYearLabel("not a date")).toBe("Undated");
   });
 });
