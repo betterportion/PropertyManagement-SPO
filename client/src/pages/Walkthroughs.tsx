@@ -285,6 +285,11 @@ export default function Walkthroughs() {
                     onChange={(event) => setNewDate(event.target.value)}
                     data-testid="input-walkthrough-date"
                   />
+                  {!newDate && (
+                    <p className="text-sm text-muted-foreground" data-testid="text-start-disabled-reason">
+                      Choose a date to start.
+                    </p>
+                  )}
                 </div>
               </div>
 
