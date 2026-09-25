@@ -83,14 +83,16 @@ test.describe("resident submits a maintenance request", () => {
     const big = noisePng(2000, 2000);
     expect(big.length).toBeGreaterThan(10 * 1024 * 1024);
 
-    const upload = page.waitForRequest((r) => r.url().includes("/api/maintenance-request-photos/upload"));
+    // Chromium does not hand Playwright a multipart body, so the proof is the
+    // request's size and the server's answer: over 10 MB the server refuses
+    // with 413 and no thumbnail appears.
+    const upload = page.waitForResponse((r) => r.url().includes("/api/maintenance-request-photos/upload"));
     await page.getByTestId("input-file-upload").setInputFiles({ name: "IMG_4021.png", mimeType: "image/png", buffer: big });
-    const sent = await upload;
-    const body = sent.postDataBuffer();
-    expect(body).not.toBeNull();
-    // What went over the wire is a JPEG named after the original, and small.
-    expect(body!.toString("latin1")).toContain('filename="IMG_4021.jpg"');
-    expect(body!.length).toBeLessThan(10 * 1024 * 1024);
+    const response = await upload;
+    expect(response.status()).toBe(200);
+    const sentBytes = Number((await response.request().allHeaders())["content-length"]);
+    expect(sentBytes).toBeGreaterThan(0);
+    expect(sentBytes).toBeLessThan(10 * 1024 * 1024);
 
     await expect(page.getByTestId("request-photo-thumbs")).toBeVisible();
   });
