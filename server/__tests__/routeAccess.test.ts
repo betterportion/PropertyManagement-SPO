@@ -3881,6 +3881,105 @@ describe("residents completing their own house's walkthrough", () => {
     expect(storageMock.deleteWalkthroughItem).toHaveBeenCalledWith("item-a");
   });
 
+  // ── Dismissing an item, and raising a repair from one (2026-09 RA review) ──
+
+  it("cannot dismiss a flagged item — deciding a hole is fine is staff work", async () => {
+    leaderOfHouseA();
+    ownHouse();
+    const { status } = await request("POST", "/api/walkthrough-items/item-a/dismiss", { body: { reason: "Looked fine" } });
+    expect(status).toBe(403);
+    expect(storageMock.getWalkthroughItem).not.toHaveBeenCalled();
+    expect(storageMock.updateWalkthroughItem).not.toHaveBeenCalled();
+  });
+
+  it("lets staff dismiss it with a reason, and refuses a blank one", async () => {
+    actAs(STAFF, { canViewWalkthroughs: true, canManageWalkthroughs: true, allowedRegions: ["West Central"] });
+    ownHouse();
+    storageMock.updateWalkthroughItem.mockResolvedValue({ ...ITEM_A, dismissReason: "A scuff, not a hole" });
+
+    const blank = await request("POST", "/api/walkthrough-items/item-a/dismiss", { body: { reason: "  " } });
+    expect(blank.status).toBe(400);
+    expect(storageMock.updateWalkthroughItem).not.toHaveBeenCalled();
+
+    const { status } = await request("POST", "/api/walkthrough-items/item-a/dismiss", { body: { reason: "A scuff, not a hole" } });
+    expect(status).toBe(200);
+    expect(storageMock.updateWalkthroughItem).toHaveBeenCalledWith(
+      "item-a",
+      expect.objectContaining({ dismissReason: "A scuff, not a hole", dismissedByUserId: STAFF.id, dismissedAt: expect.any(Date) }),
+    );
+    expect(storageMock.recordAuditEvent).not.toHaveBeenCalled();
+  });
+
+  it("cannot raise a repair from an item — and the guard runs before the item is read", async () => {
+    leaderOfHouseA();
+    ownHouse();
+    const { status } = await request("POST", "/api/walkthrough-items/item-a/maintenance-request", { body: {} });
+    expect(status).toBe(403);
+    expect(storageMock.getWalkthroughItem).not.toHaveBeenCalled();
+    expect(storageMock.createMaintenanceRequest).not.toHaveBeenCalled();
+    expect(storageMock.createMaintenanceRequestPhoto).not.toHaveBeenCalled();
+  });
+
+  it("lets staff raise a repair the household can read, referencing the room's photos", async () => {
+    actAs(STAFF, { canViewWalkthroughs: true, canManageMaintenance: true, allowedRegions: ["West Central"] });
+    ownHouse();
+    storageMock.getProperty.mockResolvedValue(PROPERTY_A);
+    storageMock.getWalkthroughItem.mockResolvedValue({ ...ITEM_A, condition: "damaged", notes: "Hole by the window" });
+    storageMock.getMaintenanceRequestByWalkthroughItem.mockResolvedValue(undefined);
+    storageMock.getWalkthroughPhotosByRoom.mockResolvedValue([
+      { id: "ph-1", roomId: "room-a", imageUrl: "/uploads/aaaa.jpg", uploadedBy: "ra.west@spo.org" },
+    ]);
+    storageMock.createMaintenanceRequest.mockImplementation(async (data: Record<string, unknown>) => ({ id: "req-1", ...data }));
+    storageMock.createMaintenanceRequestPhoto.mockResolvedValue({ id: "rp-1" });
+
+    const { status, body } = await request("POST", "/api/walkthrough-items/item-a/maintenance-request", { body: {} });
+
+    expect(status).toBe(201);
+    expect(body.id).toBe("req-1");
+    expect(storageMock.createMaintenanceRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        // A repair: the one type a household leader can read.
+        type: "request",
+        status: "pending",
+        location: "Kitchen",
+        title: "Sink — Kitchen",
+        region: PROPERTY_A.region,
+        buildingAddress: HOUSE_A,
+        // An email, because ownsRecord compares against one.
+        submittedBy: STAFF.email,
+        walkthroughItemId: "item-a",
+      }),
+    );
+    const created = storageMock.createMaintenanceRequest.mock.calls[0][0] as { description: string };
+    expect(created.description).toContain('Recorded "Damaged" for Sink in the Kitchen');
+    expect(created.description).toContain("Hole by the window");
+    // Referenced, not re-uploaded: the existing upload's own URL.
+    expect(storageMock.createMaintenanceRequestPhoto).toHaveBeenCalledWith(
+      expect.objectContaining({ requestId: "req-1", imageUrl: "/uploads/aaaa.jpg" }),
+    );
+    expect(storageMock.createUpload).not.toHaveBeenCalled();
+  });
+
+  it("answers 409 with the existing request rather than raising a second one", async () => {
+    actAs(STAFF, { canViewWalkthroughs: true, canManageMaintenance: true, allowedRegions: ["West Central"] });
+    ownHouse();
+    storageMock.getProperty.mockResolvedValue(PROPERTY_A);
+    storageMock.getMaintenanceRequestByWalkthroughItem.mockResolvedValue({ id: "req-old" });
+
+    const { status, body } = await request("POST", "/api/walkthrough-items/item-a/maintenance-request", { body: {} });
+    expect(status).toBe(409);
+    expect(body.requestId).toBe("req-old");
+    expect(storageMock.createMaintenanceRequest).not.toHaveBeenCalled();
+  });
+
+  it("refuses staff outside the house's region, before anything is created", async () => {
+    actAs(STAFF, { canViewWalkthroughs: true, canManageMaintenance: true, allowedRegions: ["East Central"] });
+    ownHouse();
+    const { status } = await request("POST", "/api/walkthrough-items/item-a/maintenance-request", { body: {} });
+    expect(status).toBe(403);
+    expect(storageMock.createMaintenanceRequest).not.toHaveBeenCalled();
+  });
+
   // ── And nothing at all on anybody else's ─────────────────────────────────
 
   const OTHER_HOUSE_ROUTES: [string, string][] = [
@@ -4045,6 +4144,9 @@ describe("residents completing their own house's walkthrough", () => {
     ["DELETE", "/api/walkthroughs/wt-a"],
     ["POST", "/api/walkthrough-items"],
     ["DELETE", "/api/walkthrough-items/item-a"],
+    ["POST", "/api/walkthrough-items/item-a/dismiss"],
+    ["DELETE", "/api/walkthrough-items/item-a/dismiss"],
+    ["POST", "/api/walkthrough-items/item-a/maintenance-request"],
     ["POST", "/api/walkthrough-rooms"],
     ["PATCH", "/api/walkthrough-rooms/room-a"],
     ["DELETE", "/api/walkthrough-rooms/room-a"],
@@ -4065,6 +4167,7 @@ describe("residents completing their own house's walkthrough", () => {
       expect(status).toBe(403);
       expectNoWalkthroughWrite();
       expect(storageMock.createWalkthroughPhoto).not.toHaveBeenCalled();
+      expect(storageMock.createMaintenanceRequest).not.toHaveBeenCalled();
       expect(storageMock.updateWalkthroughRoom).not.toHaveBeenCalled();
       expect(storageMock.deleteWalkthroughRoom).not.toHaveBeenCalled();
       expect(storageMock.createWalkthroughTemplateRoom).not.toHaveBeenCalled();

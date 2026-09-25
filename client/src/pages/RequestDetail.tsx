@@ -106,6 +106,16 @@ export default function RequestDetail() {
     enabled: !!requestId,
   });
 
+  // Where a repair raised from a walkthrough came from, so the page can link
+  // back to the room. Staff only: the request itself tells a household all it
+  // needs, and the walkthrough read rule decides the rest server-side.
+  const sourceItemId = requestQuery.data?.walkthroughItemId ?? null;
+  const sourceQuery = useQuery<{ walkthroughId: string; roomId: string; roomName: string; walkthroughDate: string }>({
+    queryKey: ["/api/walkthrough-items", sourceItemId],
+    enabled: !!sourceItemId && isStaffAccount(user as RequestUser | null),
+    retry: false,
+  });
+
   // Computed below every hook, never returned on above one: a guard placed
   // over a useQuery changes the hook count when the auth query resolves.
   const typedUser = user as RequestUser | null;
@@ -202,6 +212,21 @@ export default function RequestDetail() {
                 <Fact label="Closed on" value={formatDate(request.completedDate)} testId="text-request-closed-on" />
               )}
               {isStaff && <Fact label="Region" value={formatValue(request.region)} />}
+              {isStaff && sourceQuery.data && (
+                <Fact
+                  label="From walkthrough"
+                  value={
+                    <Link
+                      href={`/walkthroughs/${sourceQuery.data.walkthroughId}?room=${sourceQuery.data.roomId}`}
+                      className="underline underline-offset-2"
+                      data-testid="link-request-source-walkthrough"
+                    >
+                      {sourceQuery.data.roomName}, {formatDate(sourceQuery.data.walkthroughDate)}
+                    </Link>
+                  }
+                  testId="text-request-source"
+                />
+              )}
             </dl>
           </CardContent>
         </Card>

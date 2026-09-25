@@ -197,6 +197,11 @@ export const maintenanceRequests = pgTable("maintenance_requests", {
   actualCost: numeric("actual_cost", { precision: 12, scale: 2 }),
   targetYear: integer("target_year"),
   targetQuarter: integer("target_quarter"),
+  // The walkthrough item this repair was raised from, when it was. A loose
+  // link like `deposit_deductions.walkthroughItemId`: no FK, so the request
+  // outlives the item being edited or removed. Written only by the
+  // send-to-maintenance route; the insert schema omits it.
+  walkthroughItemId: varchar("walkthrough_item_id"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -249,7 +254,7 @@ export function formatTargetPeriod(targetYear: number | null | undefined, target
 }
 
 export const insertMaintenanceRequestSchema = createInsertSchema(maintenanceRequests)
-  .omit({
+  .omit({ walkthroughItemId: true,
     id: true,
     submittedDate: true,
     completedDate: true,
@@ -349,6 +354,21 @@ export const WALKTHROUGH_CONDITIONS = [
 ] as const;
 
 export type WalkthroughCondition = (typeof WALKTHROUGH_CONDITIONS)[number];
+
+/**
+ * What each condition is called on screen, and in the description of a
+ * maintenance request built from a flagged item. Shared so the chip an RA
+ * tapped and the sentence the request carries use the same word.
+ */
+export const WALKTHROUGH_CONDITION_LABEL: Record<WalkthroughCondition, string> = {
+  excellent: "Excellent",
+  good: "Good",
+  fair: "Fair",
+  poor: "Poor",
+  damaged: "Damaged",
+  not_applicable: "Not here",
+  not_recorded: "Not checked",
+};
 
 /** The conditions the flagged-items view treats as needing attention. */
 export const WALKTHROUGH_FLAGGED_CONDITIONS = ["poor", "damaged"] as const;
@@ -453,12 +473,22 @@ export const walkthroughItems = pgTable("walkthrough_items", {
   condition: varchar("condition", { enum: WALKTHROUGH_CONDITIONS }).notNull().default("not_recorded"),
   notes: text("notes"),
   displayOrder: integer("display_order").notNull().default(0),
+  // A dismissal: somebody marked this poor and it turned out fine. The same
+  // shape as an asset snooze -- who, when and a required reason -- and, like
+  // a snooze, written only by its own routes. A dismissed item leaves the
+  // needs-attention list and stays on the walkthrough saying it was
+  // dismissed; the condition itself is not rewritten, because that would be
+  // inventing an assessment. Clearing keeps the reason (2026-09 RA review).
+  dismissedAt: timestamp("dismissed_at"),
+  dismissReason: text("dismiss_reason"),
+  dismissedByUserId: varchar("dismissed_by_user_id").references(() => users.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
 export const insertWalkthroughItemSchema = createInsertSchema(walkthroughItems)
-  .omit({ id: true, createdAt: true, updatedAt: true })
+  // The dismiss routes are the only writers of the three dismiss columns.
+  .omit({ id: true, createdAt: true, updatedAt: true, dismissedAt: true, dismissReason: true, dismissedByUserId: true })
   .extend({ displayOrder: nonNegativeInt });
 
 export type WalkthroughItem = typeof walkthroughItems.$inferSelect;

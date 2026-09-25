@@ -20,6 +20,7 @@ import {
   type Walkthrough,
   type WalkthroughCondition,
   type WalkthroughItem,
+  WALKTHROUGH_CONDITION_LABEL,
 } from "@shared/schema";
 
 /** What each kind of inspection is called on screen. */
@@ -165,16 +166,8 @@ export function isCurrentWalkthrough(
   return true;
 }
 
-/** What an RA reads on the chip. Short, because these sit in a row on a phone. */
-export const CONDITION_LABEL: Record<WalkthroughCondition, string> = {
-  excellent: "Excellent",
-  good: "Good",
-  fair: "Fair",
-  poor: "Poor",
-  damaged: "Damaged",
-  not_applicable: "Not here",
-  not_recorded: "Not checked",
-};
+/** What an RA reads on the chip. Shared with the server, which writes the same word into a request. */
+export const CONDITION_LABEL: Record<WalkthroughCondition, string> = WALKTHROUGH_CONDITION_LABEL;
 
 /**
  * The longer form, for the one place there is room to explain the difference
