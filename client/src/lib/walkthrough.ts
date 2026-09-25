@@ -94,6 +94,32 @@ export function canFillInWalkthroughs(user: WalkthroughUser | null | undefined):
 }
 
 /**
+ * Whether the "Mark submitted" control belongs on screen: whoever may write
+ * this walkthrough, while it is still a draft. Mirrors the submit route.
+ */
+export function canSubmitWalkthrough(
+  user: WalkthroughUser | null | undefined,
+  walkthrough: Pick<Walkthrough, "status" | "propertyId" | "walkthroughDate"> | null | undefined,
+  houseWalkthroughs: readonly Pick<Walkthrough, "id" | "propertyId" | "walkthroughDate">[],
+): boolean {
+  if (!walkthrough || walkthrough.status !== "draft") return false;
+  return canWriteWalkthrough(user, walkthrough, houseWalkthroughs);
+}
+
+/**
+ * Whether the "Mark reviewed" control belongs on screen: staff who manage
+ * walkthroughs, once it has been submitted. A leader never reviews their
+ * own house. Mirrors the review route.
+ */
+export function canReviewWalkthrough(
+  user: WalkthroughUser | null | undefined,
+  walkthrough: Pick<Walkthrough, "status"> | null | undefined,
+): boolean {
+  if (!walkthrough || walkthrough.status !== "submitted") return false;
+  return canFillInWalkthroughs(user) && !isResidentAccount(user);
+}
+
+/**
  * Whether the remove-item control belongs on screen for this account.
  *
  * Staff only, since the 2026-09 RA review: a leader records conditions and
