@@ -3814,16 +3814,13 @@ describe("residents completing their own house's walkthrough", () => {
     );
   });
 
-  it("removes an item their house does not have, and adds a room it does", async () => {
+  it("adds a room their house has", async () => {
     leaderOfHouseA();
     ownHouse();
     storageMock.getWalkthroughRoomsByWalkthrough.mockResolvedValue([ROOM_A]);
     storageMock.getWalkthroughTemplateRoom.mockResolvedValue({ id: "t-bath", name: "Bathroom" });
     storageMock.getAllWalkthroughTemplateItems.mockResolvedValue([]);
     storageMock.createWalkthroughRoom.mockResolvedValue({ id: "room-new", name: "Bathroom" });
-
-    expect((await request("DELETE", "/api/walkthrough-items/item-a")).status).toBe(200);
-    expect(storageMock.deleteWalkthroughItem).toHaveBeenCalledWith("item-a");
 
     const added = await request("POST", "/api/walkthroughs/wt-a/rooms", { body: { templateRoomId: "t-bath" } });
     expect(added.status).toBe(200);
@@ -3858,6 +3855,30 @@ describe("residents completing their own house's walkthrough", () => {
     const { status, body } = await request("GET", "/api/walkthrough-template/rooms");
     expect(status).toBe(200);
     expect(body).toHaveLength(1);
+  });
+
+  it("cannot remove an item, even from their own current walkthrough — that is staff work", async () => {
+    // 2026-09 RA review, item 1.3. A leader used to be able to prune an item
+    // their house lacks; now they mark it "Not here" and ask their RA. The
+    // guard sits before the item is loaded, so nothing is read or deleted.
+    leaderOfHouseA();
+    ownHouse();
+
+    const { status } = await request("DELETE", "/api/walkthrough-items/item-a");
+
+    expect(status).toBe(403);
+    expect(storageMock.getWalkthroughItem).not.toHaveBeenCalled();
+    expect(storageMock.deleteWalkthroughItem).not.toHaveBeenCalled();
+  });
+
+  it("lets staff remove that same item — the control that proves the delete spy fires", async () => {
+    actAs(STAFF, { canViewWalkthroughs: true, canManageWalkthroughs: true, allowedRegions: ["West Central"] });
+    ownHouse();
+
+    const { status } = await request("DELETE", "/api/walkthrough-items/item-a");
+
+    expect(status).toBe(200);
+    expect(storageMock.deleteWalkthroughItem).toHaveBeenCalledWith("item-a");
   });
 
   // ── And nothing at all on anybody else's ─────────────────────────────────
@@ -3910,6 +3931,11 @@ describe("residents completing their own house's walkthrough", () => {
   const PRIOR_YEAR_WRITES: [string, string][] = [
     ["POST", "/api/walkthroughs/wt-a-prior/rooms"],
     ["PATCH", "/api/walkthrough-items/item-a-prior"],
+  ];
+  // Deleting an item is staff-only outright, so a leader never reaches the
+  // date rule on it; it belongs on the staff side of this pair only.
+  const STAFF_PRIOR_YEAR_WRITES: [string, string][] = [
+    ...PRIOR_YEAR_WRITES,
     ["DELETE", "/api/walkthrough-items/item-a-prior"],
   ];
 
@@ -3922,7 +3948,7 @@ describe("residents completing their own house's walkthrough", () => {
     expectNoWalkthroughWrite();
   });
 
-  it.each(PRIOR_YEAR_WRITES)("lets staff correct a prior year: %s %s", async (method, path) => {
+  it.each(STAFF_PRIOR_YEAR_WRITES)("lets staff correct a prior year: %s %s", async (method, path) => {
     // The restriction is resident-tier only, which is what makes it safe:
     // anything a leader gets wrong, their regional administrator can fix.
     actAs(STAFF, { canViewWalkthroughs: true, canManageWalkthroughs: true, allowedRegions: ["West Central"] });
@@ -4018,6 +4044,7 @@ describe("residents completing their own house's walkthrough", () => {
     ["PATCH", "/api/walkthroughs/wt-a"],
     ["DELETE", "/api/walkthroughs/wt-a"],
     ["POST", "/api/walkthrough-items"],
+    ["DELETE", "/api/walkthrough-items/item-a"],
     ["POST", "/api/walkthrough-rooms"],
     ["PATCH", "/api/walkthrough-rooms/room-a"],
     ["DELETE", "/api/walkthrough-rooms/room-a"],

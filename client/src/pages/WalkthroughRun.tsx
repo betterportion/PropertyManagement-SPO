@@ -21,6 +21,7 @@ import {
   itemsByRoom,
   progressOf,
   type WalkthroughUser,
+  canRemoveWalkthroughItems,
 } from "@/lib/walkthrough";
 import type { Walkthrough, WalkthroughItem, WalkthroughRoom } from "@shared/schema";
 
@@ -102,6 +103,8 @@ export default function WalkthroughRun() {
 
   // Whether the controls belong on screen at all, for THIS walkthrough.
   const canManage = canWriteWalkthrough(typedUser, walkthrough, houseWalkthroughs);
+  // Removing an item is staff work; a leader asks their RA.
+  const canRemove = canManage && canRemoveWalkthroughItems(typedUser);
   // Disabled controls with no explanation read as a broken page. Say why.
   const isReadOnlyPriorYear =
     isResidentTier && canFillInWalkthroughs(typedUser) && !!walkthrough && !canManage;
@@ -173,7 +176,7 @@ export default function WalkthroughRun() {
           </p>
         </div>
 
-        <RoomChecklist walkthroughId={walkthroughId} items={roomItems} canManage={canManage} />
+        <RoomChecklist walkthroughId={walkthroughId} items={roomItems} canManage={canManage} canRemove={canRemove} />
 
         {showPhotos && (
           <RoomPhotos
@@ -304,6 +307,7 @@ export default function WalkthroughRun() {
         currentRoomId={currentRoom?.id ?? null}
         onSelectRoom={setActiveRoomId}
         canManage={canManage}
+        canRemove={canRemove}
       />
     </div>
   );

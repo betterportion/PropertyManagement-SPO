@@ -35,9 +35,11 @@ interface RoomChecklistProps {
   walkthroughId: string;
   items: WalkthroughItem[];
   canManage: boolean;
+  /** Staff only: the remove control. See `canRemoveWalkthroughItems`. */
+  canRemove: boolean;
 }
 
-export default function RoomChecklist({ walkthroughId, items, canManage }: RoomChecklistProps) {
+export default function RoomChecklist({ walkthroughId, items, canManage, canRemove }: RoomChecklistProps) {
   const { toast } = useToast();
 
   const itemsKey = ["/api/walkthroughs", walkthroughId, "items"] as const;
@@ -95,6 +97,7 @@ export default function RoomChecklist({ walkthroughId, items, canManage }: RoomC
             key={item.id}
             item={item}
             canManage={canManage}
+            canRemove={canRemove}
             // `mutate` keeps the same identity across renders, which is what
             // lets the autosave effects below depend on it without restarting
             // their timer on every keystroke.
@@ -111,11 +114,12 @@ export default function RoomChecklist({ walkthroughId, items, canManage }: RoomC
 interface ItemRowProps {
   item: WalkthroughItem;
   canManage: boolean;
+  canRemove: boolean;
   onSave: (change: { id: string; patch: Partial<WalkthroughItem> }) => void;
   onDelete: () => void;
 }
 
-function ItemRow({ item, canManage, onSave, onDelete }: ItemRowProps) {
+function ItemRow({ item, canManage, canRemove, onSave, onDelete }: ItemRowProps) {
   // Held locally while it is being typed. Saving every keystroke would mean a
   // request per character on a phone signal.
   const [notes, setNotes] = useState(item.notes ?? "");
@@ -162,7 +166,7 @@ function ItemRow({ item, canManage, onSave, onDelete }: ItemRowProps) {
           <h3 className="font-medium leading-tight" data-testid={`text-item-label-${item.id}`}>
             {item.label}
           </h3>
-          {canManage && (
+          {canRemove && (
             <Button
               type="button"
               variant="ghost"
