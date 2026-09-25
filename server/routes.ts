@@ -3902,6 +3902,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           amount: z.coerce.number().finite().min(0, "Must be 0 or greater").refine(isWholeCents, WHOLE_CENTS_MESSAGE),
           chargeDate: z.coerce.date(),
           residentIds: z.array(z.string().min(1)).min(1, "Choose at least one person to split this across"),
+          // The same loose links the single-deduction route accepts, so a
+          // split raised from the move-out worksheet stays traceable to the
+          // walkthrough item that found the damage.
+          walkthroughItemId: z.string().min(1).nullish(),
+          maintenanceRequestId: z.string().min(1).nullish(),
         })
         .parse(req.body);
 
@@ -3933,6 +3938,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         amount: fromCents(shares[index]),
         chargeDate: body.chargeDate,
         splitGroupId,
+        walkthroughItemId: body.walkthroughItemId ?? null,
+        maintenanceRequestId: body.maintenanceRequestId ?? null,
         region: property.region,
         buildingAddress: property.address,
         recordedByUserId: ctx.userId,
@@ -4448,10 +4455,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!requireStaff(res, ctx)) return;
       const seesFinance = hasPermission(ctx, "canViewFinancials", "canManageFinancials");
 
-      const [schedules, rentPayments, deposits, residents, allTasks, properties, setupItems, assets, requests] = await Promise.all([
+      const [schedules, rentPayments, deposits, deductions, residents, allTasks, properties, setupItems, assets, requests] = await Promise.all([
         storage.getAllMaintenanceSchedules(),
         seesFinance ? storage.getAllRentPayments() : [],
         seesFinance ? storage.getAllSecurityDeposits() : [],
+        seesFinance ? storage.getAllDepositDeductions() : [],
         storage.getAllResidents(),
         storage.getAllTasks(),
         storage.getAllProperties(),
@@ -4465,6 +4473,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         schedules: filterByRegion(ctx, schedules),
         rentPayments: filterByRegion(ctx, rentPayments),
         deposits: filterByRegion(ctx, deposits),
+        deductions: filterByRegion(ctx, deductions),
         // Residents are only used to tell which deposits belong to someone who
         // moved out; they need not be filtered (the deposits already are).
         residents,

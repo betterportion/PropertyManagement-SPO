@@ -73,6 +73,11 @@ export function resolveRequest(item: ActionItem): ResolveRequest {
         invalidate: [ACTION_ITEMS_KEY, "/api/rent-payments"],
       };
     case "deposit":
+      // Damage beyond the deposit is a shortfall for finance to decide about;
+      // a one-tap "returned" for nothing would close it as if settled.
+      if (Number(item.amount ?? 0) < 0) {
+        return { actionLabel: "Review on Finances", href: "/finances" };
+      }
       return {
         method: "PATCH",
         path: `/api/security-deposits/${item.id}`,
@@ -80,7 +85,7 @@ export function resolveRequest(item: ActionItem): ResolveRequest {
         actionLabel: "Mark returned",
         confirm: {
           title: "Mark this deposit as returned?",
-          body: "This records the full deposit as returned today. For a partial return or deductions, use the Finances page.",
+          body: "This records the balance after deductions as returned today. To change the amount or add a reference, use the Finances page.",
         },
         invalidate: [ACTION_ITEMS_KEY, "/api/security-deposits"],
       };

@@ -17,6 +17,7 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { formatCurrency } from "@/lib/format";
 import { fromCents, splitEvenly, toCents } from "@shared/depositLedger";
+import { residentsActiveOn } from "@shared/residents";
 import type { Property, Resident } from "@shared/schema";
 
 /**
@@ -66,17 +67,7 @@ export default function SplitChargeDialog({
    * Somebody who had already moved out is not on the hook for a hole made
    * after they left, and somebody who had not moved in yet is not either.
    */
-  const candidates = useMemo(() => {
-    const on = new Date(chargeDate).getTime();
-    if (Number.isNaN(on)) return residents;
-    return residents.filter((resident) => {
-      const movedIn = resident.moveInDate ? new Date(resident.moveInDate).getTime() : null;
-      const movedOut = resident.moveOutDate ? new Date(resident.moveOutDate).getTime() : null;
-      if (movedIn !== null && !Number.isNaN(movedIn) && movedIn > on) return false;
-      if (movedOut !== null && !Number.isNaN(movedOut) && movedOut < on) return false;
-      return true;
-    });
-  }, [residents, chargeDate]);
+  const candidates = useMemo(() => residentsActiveOn(residents, chargeDate), [residents, chargeDate]);
 
   const chosen = candidates.filter((resident) => !excluded.has(resident.id));
 

@@ -26,10 +26,11 @@ import {
   type Property,
   type PropertySetupItem,
   type Asset,
+  type DepositDeduction,
 } from "@shared/schema";
 import { summarizeSetup, setupRowsByProperty } from "@shared/propertySetup";
 import { assetLifecycle } from "@shared/assetLifecycle";
-import { depositReturnDeadline } from "@shared/depositLedger";
+import { depositReturnDeadline, fromCents, runningBalance } from "@shared/depositLedger";
 import type { ActionItemCategory, ActionItemSource } from "@shared/actionItems";
 
 /** How far ahead a recurring schedule becomes an action item. */
@@ -70,6 +71,13 @@ export interface ActionItemInputs {
   schedules: MaintenanceSchedule[];
   rentPayments: RentPayment[];
   deposits: SecurityDeposit[];
+  /**
+   * Every deduction the caller may see, so "Deposit to return" carries the
+   * balance after deductions rather than the amount held. The dashboard's
+   * "Mark returned" records this amount, and recording the full deposit for
+   * somebody with $200 of damage against them was a real bug.
+   */
+  deductions?: DepositDeduction[];
   residents: Resident[];
   tasks: Task[];
   properties: Property[];
@@ -306,13 +314,21 @@ export function buildActionItems(inputs: ActionItemInputs, now: Date = new Date(
     // existed: it is due now.
     const dueDate = deadline ?? (hasLeft ? now : null);
 
+    // The amount to give back: what is held less every deduction. Negative
+    // when damage exceeds the deposit -- shown as the shortfall it is, and
+    // the dashboard then offers Finances rather than a refund of nothing.
+    const owed = runningBalance(
+      d.amountHeld,
+      (inputs.deductions ?? []).filter((deduction) => deduction.residentId === d.residentId),
+    );
+
     items.push({
       id: d.id,
       source: "deposit",
       category: "finance",
       title: leavingSoon && !hasLeft ? "Deposit to return soon" : "Deposit to return",
       subtitle: d.buildingAddress,
-      amount: d.amountHeld,
+      amount: fromCents(owed),
       dueDate: iso(dueDate),
       overdue: deadline !== null ? deadline < now : hasLeft,
       region: d.region,

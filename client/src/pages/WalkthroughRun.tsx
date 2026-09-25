@@ -183,6 +183,12 @@ export default function WalkthroughRun() {
   const [isSubmitOpen, setIsSubmitOpen] = useState(false);
   const canSubmit = canSubmitWalkthrough(typedUser, walkthrough, houseWalkthroughs);
   const canReview = canReviewWalkthrough(typedUser, walkthrough);
+  // The damages worksheet is a deposit screen: finance flags, not walkthrough ones.
+  const financeUser = user as { role?: string; permissions?: Record<string, boolean> } | null;
+  const canSeeFinance =
+    financeUser?.role === "admin" ||
+    financeUser?.permissions?.canViewFinancials === true ||
+    financeUser?.permissions?.canManageFinancials === true;
   const moveOn = useMutation({
     mutationFn: async (step: "submit" | "review") => {
       await apiRequest("POST", `/api/walkthroughs/${walkthroughId}/${step}`);
@@ -379,6 +385,21 @@ export default function WalkthroughRun() {
                 <CheckCircle2 className="h-4 w-4" />
                 {moveOn.isPending ? "Saving…" : "Mark reviewed"}
               </Button>
+            )}
+            {/* The damages worksheet: staff, on a move-out, once submitted.
+                Disabled with its reason on a draft rather than absent. */}
+            {!isResidentTier && canSeeFinance && isMoveOut && walkthrough && (
+              walkthrough.status === "draft" ? (
+                <Button variant="secondary" size="sm" disabled title="Mark it submitted first" data-testid="button-damages-worksheet">
+                  Damages (submit first)
+                </Button>
+              ) : (
+                <Button variant="secondary" size="sm" asChild>
+                  <Link href={`/walkthroughs/${walkthroughId}/damages`} data-testid="button-damages-worksheet">
+                    Damages
+                  </Link>
+                </Button>
+              )
             )}
           </div>
         </div>

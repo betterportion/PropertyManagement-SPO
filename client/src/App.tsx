@@ -18,6 +18,7 @@ import Maintenance from "@/pages/Maintenance";
 import RequestDetail from "@/pages/RequestDetail";
 import Walkthroughs from "@/pages/Walkthroughs";
 import FlaggedItems from "@/pages/FlaggedItems";
+import DamagesWorksheet from "@/pages/DamagesWorksheet";
 import WalkthroughRun from "@/pages/WalkthroughRun";
 import Assets from "@/pages/Assets";
 import AssetDetail from "@/pages/AssetDetail";
@@ -68,6 +69,7 @@ function Router() {
         <Route path="/walkthroughs" component={Walkthroughs} />
         {/* Literal path first: wouter matches in order, so :id would swallow it. */}
         <Route path="/walkthroughs/flagged" component={FlaggedItems} />
+        <Route path="/walkthroughs/:id/damages" component={DamagesWorksheet} />
         <Route path="/walkthroughs/:id" component={WalkthroughRun} />
         <Route path="/assets" component={Assets} />
         {/* Literal path first: wouter matches in order, so :id would swallow it. */}
