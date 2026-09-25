@@ -103,6 +103,10 @@ export async function resizeImageForUpload(file: File): Promise<File> {
     canvas.height = target.height;
     const context = canvas.getContext("2d");
     if (!context) return file;
+    // JPEG has no alpha: a transparent PNG drawn straight onto the canvas
+    // comes out black where it was clear. White is what paper would be.
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, target.width, target.height);
     context.drawImage(source, 0, 0, target.width, target.height);
     if ("close" in source) source.close();
 
