@@ -208,6 +208,25 @@ function walkthroughTime(value: Date | string | null | undefined): number | null
 }
 
 /**
+ * The year a walkthrough's photos are labelled with, from the walkthrough's
+ * own date and nowhere else -- nobody tags a photo with a year, so nobody can
+ * type one wrong.
+ *
+ * Parsed the way `formatDate` parses: a date-only string is that calendar
+ * day, anything else is a timestamp. The heading and the date shown under it
+ * therefore always name the same year. An undated or unreadable date says
+ * "Undated" rather than guessing, for the same reason an undated walkthrough
+ * sorts last in `comparePhotosByRoom`.
+ */
+export function walkthroughYearLabel(value: Date | string | null | undefined): string {
+  if (!value) return "Undated";
+  const dateOnly = typeof value === "string" ? /^(\d{4})-(\d{2})-(\d{2})$/.exec(value) : null;
+  if (dateOnly) return dateOnly[1];
+  const time = walkthroughTime(value);
+  return time === null ? "Undated" : String(new Date(time).getFullYear());
+}
+
+/**
  * Whether this is the walkthrough of its house still being performed.
  *
  * The same rule as `isCurrentWalkthrough` in server/authz.ts, and for the same

@@ -116,7 +116,7 @@ A door, gate or alarm code for a house. Stored, shown to the household and staff
 _Avoid_: password, PIN, key code
 
 **Photo comparison**:
-One room's walkthrough photos laid side by side across years, to answer "has that crack grown".
+One room's walkthrough photos laid side by side across years, each column headed by the year of the walkthrough it came from, to answer "has that crack grown".
 _Avoid_: year-over-year view, diff
 
 **Named link**:

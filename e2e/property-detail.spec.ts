@@ -33,6 +33,8 @@ test.describe("property detail — everything about one house", () => {
 
     await page.getByTestId("tab-maintenance").click();
     await expect(page.getByTestId("table-property-requests")).toBeVisible();
+    await expect(page.getByTestId("select-property-history-type")).toBeVisible();
+    await expect(page.getByTestId("select-property-history-range")).toBeVisible();
     await expect(page.getByTestId("table-property-schedules")).toBeVisible();
 
     await page.getByTestId("tab-assets").click();
@@ -62,6 +64,19 @@ test.describe("property detail — everything about one house", () => {
       await expect(page.getByTestId("open-work-group-project").locator(item)).toBeVisible();
       await expect(page.getByTestId("open-work-group-request").locator(item)).toHaveCount(0);
       await expect(item).toHaveAttribute("href", `/maintenance/${projectId}`);
+
+      // The history table below has its own type filter, defaulting to every
+      // type so a completed project sits beside the closed repairs. Narrowed
+      // to projects, the row is there; narrowed to repairs, it is not.
+      const row = page.getByTestId(`link-property-request-${projectId}`);
+      await expect(row).toBeVisible();
+      await page.getByTestId("select-property-history-type").click();
+      await page.getByRole("option", { name: "Project", exact: true }).click();
+      await expect(row).toBeVisible();
+      await page.getByTestId("select-property-history-type").click();
+      await page.getByRole("option", { name: "Repair", exact: true }).click();
+      await expect(row).toHaveCount(0);
+      await expect(page.getByTestId("table-property-requests")).toBeVisible();
     } finally {
       await request.delete(`/api/maintenance-requests/${projectId}`);
     }

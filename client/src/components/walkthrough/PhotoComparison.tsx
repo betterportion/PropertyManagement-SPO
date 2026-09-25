@@ -6,7 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { LoadingState } from "@/components/states";
 import PhotoThumbnail from "@/components/walkthrough/PhotoThumbnail";
 import { formatDate } from "@/lib/format";
-import { WALKTHROUGH_TYPE_LABEL, comparePhotosByRoom } from "@/lib/walkthrough";
+import { WALKTHROUGH_TYPE_LABEL, comparePhotosByRoom, walkthroughYearLabel } from "@/lib/walkthrough";
 import type { Walkthrough, WalkthroughPhoto, WalkthroughRoom } from "@shared/schema";
 
 /**
@@ -90,10 +90,15 @@ export default function PhotoComparison({ walkthroughs }: { walkthroughs: Walkth
                     data-testid={`compare-column-${column.walkthroughId}`}
                   >
                     <div>
-                      <p className="font-semibold">{formatDate(column.date)}</p>
-                      {walkthrough && (
-                        <p className="text-xs text-muted-foreground">{WALKTHROUGH_TYPE_LABEL[walkthrough.type]}</p>
-                      )}
+                      {/* The year is the label; the date under it tells a
+                          move-in and a move-out in the same year apart. */}
+                      <p className="font-semibold" data-testid={`compare-year-${column.walkthroughId}`}>
+                        {walkthroughYearLabel(column.date)}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {formatDate(column.date)}
+                        {walkthrough && ` · ${WALKTHROUGH_TYPE_LABEL[walkthrough.type]}`}
+                      </p>
                     </div>
                     {column.photos.length === 0 ? (
                       <p className="rounded-md border border-dashed border-border p-3 text-sm text-muted-foreground">

@@ -7,6 +7,7 @@ import { AlertTriangle, ArrowLeft, Building2, Download, ExternalLink, ListChecks
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { DataTable } from "@/components/data-table";
 import { Container, PageHeader, PageStack, Section } from "@/components/layout/page";
@@ -20,7 +21,15 @@ import EmailHouseholdDialog from "@/components/EmailHouseholdDialog";
 import { RosterImportDialog, downloadRosterTemplate } from "@/components/RosterImportDialog";
 import { useAuth } from "@/hooks/useAuth";
 import { formatCurrency, formatDate, formatValue } from "@/lib/format";
-import { REQUEST_STATUS } from "@/lib/requestLabels";
+import {
+  CLOSED_RANGES,
+  REQUEST_TYPE_FILTERS,
+  closedWithinRange,
+  matchesType,
+  type ClosedRange,
+  type RequestTypeFilter,
+} from "@/lib/maintenanceFilters";
+import { REQUEST_STATUS, REQUEST_TYPE } from "@/lib/requestLabels";
 import type {
   Asset,
   MaintenanceContact,
@@ -140,6 +149,12 @@ export default function PropertyDetail() {
 
   const { user } = useAuth();
   const [isEmailOpen, setIsEmailOpen] = useState(false);
+  // The history table's filters. Both default to everything: a closed
+  // capital project belongs in a house's history beside its closed repairs,
+  // and narrowing is what the controls are for. Open work above the table is
+  // never filtered by these -- the range is about history.
+  const [historyType, setHistoryType] = useState<RequestTypeFilter>("all");
+  const [historyRange, setHistoryRange] = useState<ClosedRange>("all");
 
   const property = propertiesQuery.data?.find((p) => p.id === propertyId);
 
@@ -187,6 +202,11 @@ export default function PropertyDetail() {
         ? (requestsQuery.data ?? []).filter((r) => r.buildingAddress === property.address)
         : [],
     [requestsQuery.data, property],
+  );
+
+  const historyRequests = useMemo(
+    () => requests.filter((r) => matchesType(r, historyType) && closedWithinRange(r, historyRange)),
+    [requests, historyType, historyRange],
   );
 
   const schedules = useMemo(
@@ -573,18 +593,47 @@ export default function PropertyDetail() {
                     </Link>
                   </Button>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="space-y-4">
+                  <div className="grid gap-3 sm:grid-cols-2 [&_button[role=combobox]]:w-full">
+                    <Select value={historyType} onValueChange={(value) => setHistoryType(value as RequestTypeFilter)}>
+                      <SelectTrigger data-testid="select-property-history-type" aria-label="Filter this house's requests by type of work">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {REQUEST_TYPE_FILTERS.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Select value={historyRange} onValueChange={(value) => setHistoryRange(value as ClosedRange)}>
+                      <SelectTrigger data-testid="select-property-history-range" aria-label="How far back to show this house's closed requests">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {CLOSED_RANGES.map((range) => (
+                          <SelectItem key={range.value} value={range.value}>{range.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
                   <DataTable
-                    rows={requests}
+                    rows={historyRequests}
                     getRowId={(r) => r.id}
                     isLoading={requestsQuery.isLoading}
                     defaultSort={{ key: "submitted", direction: "desc" }}
                     data-testid="table-property-requests"
                     empty={
-                      <EmptyState
-                        title="No requests have been reported for this house"
-                        description="Anything a resident reports here will show up in this tab."
-                      />
+                      requests.length === 0 ? (
+                        <EmptyState
+                          title="No requests have been reported for this house"
+                          description="Anything a resident reports here will show up in this tab."
+                        />
+                      ) : (
+                        <EmptyState
+                          title="Nothing matches these filters"
+                          description="Widen the type or the range to see more of this house's history."
+                        />
+                      )
                     }
                     columns={[
                       {
@@ -600,6 +649,13 @@ export default function PropertyDetail() {
                             {r.title}
                           </Link>
                         ),
+                      },
+                      {
+                        key: "type",
+                        header: "Type",
+                        sortValue: (r) => r.type,
+                        cell: (r) => <Badge variant={REQUEST_TYPE[r.type].variant}>{REQUEST_TYPE[r.type].label}</Badge>,
+                        hideOnMobile: true,
                       },
                       {
                         key: "priority",
