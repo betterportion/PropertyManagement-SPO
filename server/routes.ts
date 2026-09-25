@@ -1731,12 +1731,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         propertyId: walkthrough.propertyId,
         buildingAddress: walkthrough.buildingAddress ?? "",
         displayOrder: room.displayOrder,
+        standingNote: room.standingNote,
       });
       for (const item of room.items) {
         await storage.createWalkthroughItem({
           roomId: created.id,
           label: item.label,
           displayOrder: item.displayOrder,
+          standingNote: item.standingNote,
         });
       }
     }
@@ -2016,6 +2018,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // An item cannot be moved to another room: that would carry it into a
       // different walkthrough, and possibly a different region.
       const { roomId: _r, ...editable } = req.body ?? {};
+      // A standing note is staff instruction to the household, so a resident
+      // may read it and never write it -- refused, not silently dropped, so a
+      // client mistake is visible.
+      if (ctx.isResident && "standingNote" in editable) {
+        return res.status(403).json({ message: "Forbidden - Standing notes are written by staff" });
+      }
       const validatedData = insertWalkthroughItemSchema.partial().parse(editable);
 
       res.json(await storage.updateWalkthroughItem(req.params.id, validatedData));

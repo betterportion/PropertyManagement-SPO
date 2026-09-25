@@ -21,6 +21,7 @@ import {
   type WalkthroughCondition,
   type WalkthroughItem,
   WALKTHROUGH_CONDITION_LABEL,
+  type WalkthroughRoom,
 } from "@shared/schema";
 
 /** What each kind of inspection is called on screen. */
@@ -91,6 +92,39 @@ export function canFillInWalkthroughs(user: WalkthroughUser | null | undefined):
   if (user.role === "admin") return true;
   if (isResidentAccount(user)) return user.permissions?.canCompleteWalkthroughs === true;
   return user.permissions?.canManageWalkthroughs === true;
+}
+
+/** The key a room and an item label fold to, for matching across walkthroughs. */
+export function previousItemKey(roomName: string, label: string): string {
+  return `${foldName(roomName)}\u0000${foldName(label)}`;
+}
+
+export interface PreviousItem {
+  condition: WalkthroughCondition;
+  notes: string | null;
+  roomId: string;
+}
+
+/**
+ * Last time's answers, indexed so this year's item can find its own.
+ *
+ * Matched by folded room name and folded label -- the same rule the photo
+ * comparison uses for rooms -- so "Living Rm" finds "living room". An item
+ * that was not there last time simply has no entry, and the screen says so
+ * rather than guessing. Pure.
+ */
+export function indexPreviousItems(
+  rooms: readonly Pick<WalkthroughRoom, "id" | "name">[],
+  items: readonly Pick<WalkthroughItem, "roomId" | "label" | "condition" | "notes">[],
+): Map<string, PreviousItem> {
+  const roomName = new Map(rooms.map((room) => [room.id, room.name]));
+  const index = new Map<string, PreviousItem>();
+  for (const item of items) {
+    const name = roomName.get(item.roomId);
+    if (name === undefined) continue;
+    index.set(previousItemKey(name, item.label), { condition: item.condition, notes: item.notes, roomId: item.roomId });
+  }
+  return index;
 }
 
 /**

@@ -19,19 +19,23 @@
 export interface PlannedRoom {
   name: string;
   displayOrder: number;
-  items: { label: string; displayOrder: number }[];
+  /** Carried from the previous walkthrough's copy of this room; null from the template. */
+  standingNote: string | null;
+  items: { label: string; displayOrder: number; standingNote: string | null }[];
 }
 
 interface SourceRoom {
   id: string;
   name: string;
   displayOrder?: number | null;
+  standingNote?: string | null;
 }
 
 interface SourceItem {
   roomId: string;
   label: string;
   displayOrder?: number | null;
+  standingNote?: string | null;
 }
 
 interface TemplateRoom {
@@ -69,6 +73,8 @@ function assemble<R, I>(
   itemKey: (item: I) => string,
   itemLabel: (item: I) => string,
   itemOrder: (item: I) => number | null | undefined,
+  roomNote: (room: R) => string | null | undefined = () => null,
+  itemNote: (item: I) => string | null | undefined = () => null,
 ): PlannedRoom[] {
   const byRoom = new Map<string, I[]>();
   for (const item of items) {
@@ -83,9 +89,11 @@ function assemble<R, I>(
     // Renumbered from zero rather than copied. A source whose orders have gaps
     // or duplicates -- which hand-editing produces -- must not pass them on.
     displayOrder: roomIndex,
+    standingNote: roomNote(room) ?? null,
     items: ordered(byRoom.get(roomKey(room)) ?? [], itemOrder, itemLabel).map((item, itemIndex) => ({
       label: itemLabel(item),
       displayOrder: itemIndex,
+      standingNote: itemNote(item) ?? null,
     })),
   }));
 }
@@ -118,10 +126,13 @@ export function planFromTemplate(
 /**
  * The structure for a repeat walkthrough: last time's rooms and items.
  *
- * Only the labels carry forward. Condition and notes deliberately do NOT --
- * a new walkthrough starts unassessed, and inheriting last year's "damaged"
- * would present a stale judgement as this year's finding. That is the same
- * reason the 0017 backfill refused to turn "unchanged" into a condition.
+ * The labels carry forward, and so do STANDING notes -- a staff instruction
+ * like "photograph the crack by the window each year" is exactly the thing
+ * that should follow a house from one visit to the next. Condition and the
+ * visit's own notes deliberately do NOT: a new walkthrough starts unassessed,
+ * and inheriting last year's "damaged" would present a stale judgement as
+ * this year's finding. That is the same reason the 0017 backfill refused to
+ * turn "unchanged" into a condition.
  */
 export function planFromPreviousWalkthrough(
   rooms: SourceRoom[],
@@ -136,6 +147,8 @@ export function planFromPreviousWalkthrough(
     (i) => i.roomId,
     (i) => i.label,
     (i) => i.displayOrder,
+    (r) => r.standingNote,
+    (i) => i.standingNote,
   );
 }
 

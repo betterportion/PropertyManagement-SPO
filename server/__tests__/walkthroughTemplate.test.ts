@@ -74,7 +74,7 @@ describe("planFromTemplate", () => {
 
   it("builds a room with no items as an empty room", () => {
     const plan = planFromTemplate([{ id: "t-1", name: "Hall", includeByDefault: true, displayOrder: 0 }], []);
-    expect(plan).toEqual([{ name: "Hall", displayOrder: 0, items: [] }]);
+    expect(plan).toEqual([{ name: "Hall", displayOrder: 0, standingNote: null, items: [] }]);
   });
 });
 
@@ -103,8 +103,29 @@ describe("planFromPreviousWalkthrough", () => {
     const plan = planFromPreviousWalkthrough(ROOMS, [
       { roomId: "r-kitchen", label: "Sink", displayOrder: 0, condition: "damaged", notes: "Cracked" } as never,
     ]);
-    expect(plan[0].items[0]).toEqual({ label: "Sink", displayOrder: 0 });
-    expect(Object.keys(plan[0].items[0])).toEqual(["label", "displayOrder"]);
+    // standingNote is the one extra field, and it is null here because the
+    // source item had none -- see the next test for the one that carries.
+    expect(plan[0].items[0]).toEqual({ label: "Sink", displayOrder: 0, standingNote: null });
+    expect(Object.keys(plan[0].items[0])).toEqual(["label", "displayOrder", "standingNote"]);
+  });
+
+  it("carries a standing note forward, on the room and on the item", () => {
+    // "Photograph the crack by the window each year" is instruction for the
+    // next visit; the visit's own notes and condition stay behind.
+    const rooms = [{ id: "r1", name: "Kitchen", displayOrder: 0, standingNote: "Check under the sink" }];
+    const items = [
+      { roomId: "r1", label: "Sink", displayOrder: 0, condition: "damaged", notes: "Leaking", standingNote: "Photograph the cabinet floor" },
+      { roomId: "r1", label: "Range", displayOrder: 1, condition: "good", notes: null },
+    ];
+    const plan = planFromPreviousWalkthrough(rooms, items);
+    expect(plan[0].standingNote).toBe("Check under the sink");
+    expect(plan[0].items[0]).toEqual({ label: "Sink", displayOrder: 0, standingNote: "Photograph the cabinet floor" });
+    expect(plan[0].items[1].standingNote).toBeNull();
+  });
+
+  it("starts a first walkthrough with no standing notes", () => {
+    const plan = planFromTemplate(TEMPLATE_ROOMS, TEMPLATE_ITEMS);
+    expect(plan.every((room) => room.standingNote === null && room.items.every((i) => i.standingNote === null))).toBe(true);
   });
 
   it("does not carry a deleted room back", () => {

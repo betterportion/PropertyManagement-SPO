@@ -7,6 +7,8 @@ import {
   canFillInWalkthroughs,
   canRemoveWalkthroughItems,
   canReviewWalkthrough,
+  indexPreviousItems,
+  previousItemKey,
   canSeeResourceHub,
   canSubmitWalkthrough,
   canSeeWalkthroughPhotos,
@@ -70,6 +72,26 @@ describe("condition presentation", () => {
     expect(WALKTHROUGH_CONDITIONS[0]).toBe("excellent");
     expect(conditionTone("excellent")).toBe("good");
     expect(progressOf([item("a", "r1", "excellent")])).toMatchObject({ assessed: 1, flagged: 0 });
+  });
+});
+
+describe("indexPreviousItems", () => {
+  it("finds last time's answer for the same room and label, folding case and spacing", () => {
+    const index = indexPreviousItems(
+      [{ id: "r-old", name: "Living Room" }],
+      [{ roomId: "r-old", label: "Walls and ceiling", condition: "damaged", notes: "Hole by the window" }],
+    );
+    expect(index.get(previousItemKey("living room", "Walls And Ceiling"))).toEqual({
+      condition: "damaged",
+      notes: "Hole by the window",
+      roomId: "r-old",
+    });
+  });
+
+  it("has no entry for an item that was not there last time", () => {
+    const index = indexPreviousItems([{ id: "r-old", name: "Kitchen" }], [{ roomId: "r-old", label: "Sink", condition: "good", notes: null }]);
+    expect(index.get(previousItemKey("Kitchen", "Dishwasher"))).toBeUndefined();
+    expect(index.get(previousItemKey("Bathroom", "Sink"))).toBeUndefined();
   });
 });
 

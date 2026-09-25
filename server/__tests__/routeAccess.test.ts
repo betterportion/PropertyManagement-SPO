@@ -3883,6 +3883,29 @@ describe("residents completing their own house's walkthrough", () => {
     expect(storageMock.deleteWalkthroughItem).toHaveBeenCalledWith("item-a");
   });
 
+  // ── Standing notes (2026-09 RA review, item 6) ───────────────────────────
+
+  it("cannot write a standing note — it is staff instruction to the household", async () => {
+    leaderOfHouseA();
+    ownHouse();
+    const { status } = await request("PATCH", "/api/walkthrough-items/item-a", {
+      body: { standingNote: "Photograph this each year" },
+    });
+    expect(status).toBe(403);
+    expect(storageMock.updateWalkthroughItem).not.toHaveBeenCalled();
+  });
+
+  it("lets staff write one on the item — the control that proves the field reaches storage", async () => {
+    actAs(STAFF, { canViewWalkthroughs: true, canManageWalkthroughs: true, allowedRegions: ["West Central"] });
+    ownHouse();
+    storageMock.updateWalkthroughItem.mockResolvedValue({ ...ITEM_A, standingNote: "Photograph this each year" });
+    const { status } = await request("PATCH", "/api/walkthrough-items/item-a", {
+      body: { standingNote: "Photograph this each year" },
+    });
+    expect(status).toBe(200);
+    expect(storageMock.updateWalkthroughItem).toHaveBeenCalledWith("item-a", expect.objectContaining({ standingNote: "Photograph this each year" }));
+  });
+
   // ── Submitting and reviewing (2026-09 RA review, 7.1) ────────────────────
 
   it("submits their own current walkthrough, and only from draft", async () => {
