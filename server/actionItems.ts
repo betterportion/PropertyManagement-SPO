@@ -314,9 +314,9 @@ export function buildActionItems(inputs: ActionItemInputs, now: Date = new Date(
     // existed: it is due now.
     const dueDate = deadline ?? (hasLeft ? now : null);
 
-    // The amount to give back: what is held less every deduction, never
-    // below zero. Damage beyond the deposit is a shortfall for finance to
-    // decide about, not a negative refund.
+    // The amount to give back: what is held less every deduction. Negative
+    // when damage exceeds the deposit -- shown as the shortfall it is, and
+    // the dashboard then offers Finances rather than a refund of nothing.
     const owed = runningBalance(
       d.amountHeld,
       (inputs.deductions ?? []).filter((deduction) => deduction.residentId === d.residentId),
@@ -328,7 +328,7 @@ export function buildActionItems(inputs: ActionItemInputs, now: Date = new Date(
       category: "finance",
       title: leavingSoon && !hasLeft ? "Deposit to return soon" : "Deposit to return",
       subtitle: d.buildingAddress,
-      amount: fromCents(Math.max(owed, 0)),
+      amount: fromCents(owed),
       dueDate: iso(dueDate),
       overdue: deadline !== null ? deadline < now : hasLeft,
       region: d.region,

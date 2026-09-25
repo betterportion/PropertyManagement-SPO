@@ -399,7 +399,7 @@ describe("buildActionItems", () => {
       deductions: [{ id: "x1", residentId: "r1", amount: "250.00" } as never],
       residents: [resident({ id: "r1", isActive: false })],
     }, NOW);
-    expect(overdrawn[0].amount).toBe("0.00");
+    expect(overdrawn[0].amount).toBe("-150.00");
   });
 
   it("surfaces a held deposit only when its resident has moved out", () => {

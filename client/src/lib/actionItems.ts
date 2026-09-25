@@ -73,6 +73,11 @@ export function resolveRequest(item: ActionItem): ResolveRequest {
         invalidate: [ACTION_ITEMS_KEY, "/api/rent-payments"],
       };
     case "deposit":
+      // Damage beyond the deposit is a shortfall for finance to decide about;
+      // a one-tap "returned" for nothing would close it as if settled.
+      if (Number(item.amount ?? 0) < 0) {
+        return { actionLabel: "Review on Finances", href: "/finances" };
+      }
       return {
         method: "PATCH",
         path: `/api/security-deposits/${item.id}`,

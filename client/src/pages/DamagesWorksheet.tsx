@@ -82,6 +82,7 @@ export default function DamagesWorksheet() {
   const isAdmin = typedUser?.role === "admin";
   const isStaff = isAdmin || typedUser?.role === "regional_administrator";
   const canManageFinance = isAdmin || typedUser?.permissions?.canManageFinancials === true;
+  const canSeeFinance = canManageFinance || typedUser?.permissions?.canViewFinancials === true;
 
   const walkthrough = walkthroughQuery.data;
   const deposits = depositsQuery.data ?? [];
@@ -91,10 +92,20 @@ export default function DamagesWorksheet() {
     () => (residentsQuery.data ?? []).filter((resident) => resident.propertyId === walkthrough?.propertyId),
     [residentsQuery.data, walkthrough?.propertyId],
   );
-  const activeResidents = useMemo(
-    () => residentsActiveOn(houseResidents, walkthrough?.walkthroughDate),
-    [houseResidents, walkthrough?.walkthroughDate],
-  );
+  /**
+   * Who can be charged: whoever was living there on the walkthrough date,
+   * plus anybody whose move-out is already recorded but whose deposit is
+   * still held -- a move-out walked after the move-outs were entered is the
+   * normal case, and those are exactly the people this screen is for.
+   */
+  const activeResidents = useMemo(() => {
+    const active = residentsActiveOn(houseResidents, walkthrough?.walkthroughDate);
+    const seen = new Set(active.map((resident) => resident.id));
+    const pending = new Set(
+      (depositsQuery.data ?? []).filter((d) => d.status === "held" || d.status === "statement_sent").map((d) => d.residentId),
+    );
+    return active.concat(houseResidents.filter((resident) => !seen.has(resident.id) && pending.has(resident.id)));
+  }, [houseResidents, walkthrough?.walkthroughDate, depositsQuery.data]);
 
   /** The flagged, undismissed items with their room, in walking order. */
   const rows = useMemo(() => {
@@ -183,7 +194,9 @@ export default function DamagesWorksheet() {
   });
 
   let body: React.ReactNode;
-  if (!isStaff) {
+  if (!isStaff || !canSeeFinance) {
+    // Deposits are admins and the finance team only; without the flag the
+    // deposit queries would answer 403 and the page would read as empty.
     body = <AccessDeniedState />;
   } else if (walkthroughQuery.isLoading || roomsQuery.isLoading || itemsQuery.isLoading) {
     body = <LoadingState message="Loading the walkthrough..." />;
@@ -317,7 +330,7 @@ export default function DamagesWorksheet() {
           </CardHeader>
           <CardContent>
             {activeResidents.length === 0 ? (
-              <p className="text-sm text-muted-foreground">Nobody on the roster was living here on the walkthrough date.</p>
+              <p className="text-sm text-muted-foreground">Nobody on the roster was living here on the walkthrough date, and no deposit is still held for this house.</p>
             ) : (
               <ul className="divide-y divide-border">
                 {activeResidents.map((resident) => {

@@ -51,6 +51,14 @@ describe("resolving every kind of action item", () => {
   });
 });
 
+describe("an overdrawn deposit", () => {
+  it("offers Finances rather than a refund of nothing", () => {
+    const request = resolveRequest(item({ source: "deposit", amount: "-150.00" }));
+    expect(request.href).toBe("/finances");
+    expect(request.method).toBeUndefined();
+  });
+});
+
 describe("what each resolution actually does", () => {
   it("marks rent paid behind a confirmation, because it moves a real record", () => {
     const request = resolveRequest(item({ source: "rent", id: "rp-1" }));
