@@ -507,6 +507,13 @@ export default function PropertyDetail() {
                         hideOnMobile: true,
                       },
                       {
+                        key: "room",
+                        header: "Room",
+                        sortValue: (r) => r.roomName ?? "",
+                        cell: (r) => formatValue(r.roomName),
+                        hideOnMobile: true,
+                      },
+                      {
                         key: "movedIn",
                         header: "Moved in",
                         sortValue: (r) => r.moveInDate,

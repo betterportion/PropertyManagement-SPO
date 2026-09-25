@@ -38,10 +38,22 @@ describe("the downloadable template", () => {
       lastName: "Smith",
       email: "jane.smith@example.com",
       phone: "612-555-0100",
+      roomName: "Bedroom 2",
       moveInDate: "2026-08-20",
       notes: "Household leader",
       errors: [],
     });
+  });
+});
+
+describe("the room column", () => {
+  it("is optional, and read under the spellings a spreadsheet uses", () => {
+    for (const header of ["Room", "room_name", "Bedroom"]) {
+      const parsed = parseResidentCsv(`First Name,Last Name,Email,${header}\nJane,Smith,jane@example.com,Bedroom 2`);
+      expect(parsed.rows[0].roomName).toBe("Bedroom 2");
+      expect(parsed.rows[0].errors).toEqual([]);
+    }
+    expect(parseResidentCsv(csv("Jane,Smith,jane@example.com,,,")).rows[0].roomName).toBeNull();
   });
 });
 

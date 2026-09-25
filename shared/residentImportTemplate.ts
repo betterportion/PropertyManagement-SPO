@@ -15,6 +15,7 @@ export const RESIDENT_IMPORT_TEMPLATE_HEADERS = [
   "Last name",
   "Email",
   "Phone",
+  "Room",
   "Move-in date",
   "Notes",
 ] as const;
@@ -25,6 +26,7 @@ export const RESIDENT_IMPORT_TEMPLATE_EXAMPLE = [
   "Smith",
   "jane.smith@example.com",
   "612-555-0100",
+  "Bedroom 2",
   "2026-08-20",
   "Household leader",
 ] as const;

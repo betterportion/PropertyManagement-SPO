@@ -232,6 +232,13 @@
       "when": 1790323417320,
       "tag": "0032_walkthrough_type_additional",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1790324220274,
+      "tag": "0033_resident_room",
+      "breakpoints": true
     }
   ]
 }

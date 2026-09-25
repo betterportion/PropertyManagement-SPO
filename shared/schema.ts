@@ -1238,6 +1238,15 @@ export const residents = pgTable("residents", {
   // deliberately not built (see CLAUDE.md) -- so this is a contact detail an
   // RA reads, not a channel the app uses.
   phone: varchar("phone"),
+  /**
+   * Which room they occupy -- "Bedroom 2", "Attic". Free text matched by
+   * `foldName` against the house's walkthrough room names, the way a request's
+   * `location` is, because rooms exist only as rows of one dated walkthrough
+   * and an id would go stale every year. Null means unassigned. It exists so
+   * bedroom damage on a move-out can be charged to that room's occupants and
+   * common-area damage to the house (2026-09 RA review, item 5).
+   */
+  roomName: varchar("room_name"),
   notes: text("notes"),
   /** Overrides the house's `depositAmount` for this person. Null means the
    *  house figure applies -- a scholarship or a partial term is a different
@@ -1260,6 +1269,7 @@ export const insertResidentSchema = createInsertSchema(residents)
   })
   .extend({
     email: z.string().email("Enter a valid email address"),
+    roomName: z.string().trim().max(80, "Keep the room name under 80 characters").nullish().transform((v) => v || null),
     depositAmountOverride: nonNegativeAmount.nullish(),
     moveInDate: dateFromClient.nullish(),
     moveOutDate: dateFromClient.nullish(),

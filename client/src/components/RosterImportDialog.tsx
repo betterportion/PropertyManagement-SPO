@@ -42,6 +42,7 @@ interface ParsedRow {
   lastName: string;
   email: string;
   phone: string | null;
+  roomName: string | null;
   notes: string | null;
   moveInDate: string | null;
 }
@@ -129,11 +130,12 @@ export function RosterImportDialog({
   const confirmMutation = useMutation({
     mutationFn: async (rows: ParsedRow[]) => {
       const res = await apiRequest("POST", `/api/properties/${propertyId}/residents/import`, {
-        rows: rows.map(({ firstName, lastName, email, phone, notes, moveInDate }) => ({
+        rows: rows.map(({ firstName, lastName, email, phone, roomName, notes, moveInDate }) => ({
           firstName,
           lastName,
           email,
           phone,
+          roomName,
           notes,
           moveInDate,
         })),
@@ -231,7 +233,7 @@ export function RosterImportDialog({
               className="block w-full text-sm file:mr-3 file:rounded-md file:border-0 file:bg-secondary file:px-3 file:py-2 file:text-sm file:font-medium disabled:opacity-50"
             />
             <p className="text-xs text-muted-foreground">
-              A column each for first name, last name and email. Phone, move-in date and notes are optional.
+              A column each for first name, last name and email. Phone, room, move-in date and notes are optional.
             </p>
             <Button
               type="button"

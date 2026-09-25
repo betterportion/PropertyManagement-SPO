@@ -1,7 +1,7 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "wouter";
-import { ArrowLeft, Mail, Package, Phone } from "lucide-react";
+import { ArrowLeft, Mail, Package, Pencil, Phone } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -10,6 +10,7 @@ import { Container, PageHeader, PageStack, Section } from "@/components/layout/p
 import { EmptyState, LoadingState } from "@/components/states";
 import DepositLedger from "@/components/deposit/DepositLedger";
 import ResidentPaperwork from "@/components/ResidentPaperwork";
+import ResidentEditDialog from "@/components/ResidentEditDialog";
 import { useAuth } from "@/hooks/useAuth";
 import { formatDate, formatValue } from "@/lib/format";
 import type { Asset, Property, Resident, SecurityDeposit } from "@shared/schema";
@@ -47,6 +48,7 @@ export default function ResidentDetail() {
   const residentId = params.id;
   const { user } = useAuth();
 
+  const [isEditOpen, setIsEditOpen] = useState(false);
   const residentsQuery = useQuery<Resident[]>({ queryKey: ["/api/residents"] });
   const propertiesQuery = useQuery<Property[]>({ queryKey: ["/api/properties"] });
   const assetsQuery = useQuery<Asset[]>({ queryKey: ["/api/assets"] });
@@ -119,7 +121,18 @@ export default function ResidentDetail() {
           <PageHeader
             title={`${resident.firstName} ${resident.lastName}`}
             description={resident.buildingAddress}
+            actions={
+              canManageProperties ? (
+                <Button variant="secondary" onClick={() => setIsEditOpen(true)} data-testid="button-edit-resident">
+                  <Pencil className="h-4 w-4" />
+                  Edit
+                </Button>
+              ) : undefined
+            }
           />
+          {canManageProperties && (
+            <ResidentEditDialog resident={resident} open={isEditOpen} onOpenChange={setIsEditOpen} />
+          )}
 
           <div className="flex flex-wrap items-center gap-3 text-sm">
             <Badge variant={resident.isActive ? "success" : "secondary"} data-testid="badge-resident-status">
@@ -168,6 +181,7 @@ export default function ResidentDetail() {
                     )
                   }
                 />
+                <Fact label="Room" value={formatValue(resident.roomName)} />
                 <Fact
                   label="Moved in"
                   value={resident.moveInDate ? formatDate(resident.moveInDate) : formatValue(null)}
