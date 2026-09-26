@@ -12,8 +12,8 @@ that. It does not cover prospective project tracking, which is what Phase 10 add
 #125, #126, #130, #131 and #132; Phase 10 in #127, #133 and #134; Phase 11 in
 #128; the 2.6 amendment in #135. The sections keep their full reasoning as a
 record; the ✅ marks say what landed and where. The **RA review round of
-2026-09-19** is at the end of this document: ten stacked PRs, #142 through #152,
-open for review at the time of writing.
+2026-09-19** is at the end of this document: eleven stacked PRs, #142 through #152,
+all merged on 2026-09-25.
 
 ---
 
@@ -374,7 +374,10 @@ recorded here because they changed what was built.
 - No contractor or handyman role, no server-side send for statements, no change to the
   server upload limits, no rename of `rent_payments`, nothing added to the dashboard, and
   no change to property copies when the global template changes.
-- The e2e suite and the five migrations were not run locally in the session that built
-  this (no local Postgres); the Playwright workflow does both. Screenshots of every
-  user-facing change are owed before merge.
+- The e2e suite and the migrations were not run locally in the session that built
+  this (no local Postgres); the Playwright workflow does both. Since then: every PR
+  passed CI before merge, the full Playwright suite passed 91/91 locally on a fresh
+  database with the round on `main`, and JR reviewed screenshots of every user-facing
+  change before asking for the merge. Migrations `0032`–`0035` still have to be applied
+  to production (`npm run db:migrate`) on the next deploy.
 
