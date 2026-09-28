@@ -2204,6 +2204,14 @@ describe("project fields and bids", () => {
     expect(storageMock.updateMaintenanceRequestBid).not.toHaveBeenCalled();
   });
 
+  it("answers 400, not 500, to an edit carrying nothing it may change (#163)", async () => {
+    // The schema strips accepted, requestId and id, which would leave an empty
+    // update for the database to refuse.
+    actAs(STAFF, westOnly);
+    expect((await patch(BID("bid-b"), { accepted: true, requestId: "req-other" })).status).toBe(400);
+    expect(storageMock.updateMaintenanceRequestBid).not.toHaveBeenCalled();
+  });
+
   it("refuses staff outside the region an edit, and writes nothing", async () => {
     actAs(STAFF, westOnly);
     expect((await patch(BID("bid-east"), { amount: 1 })).status).toBe(403);
@@ -2873,6 +2881,19 @@ describe("what reaches the audit log", () => {
     });
   });
 
+  it("answers 404 for an account that does not exist, and records nothing (#163)", async () => {
+    // user.status_changed is kept indefinitely; an event about nobody would
+    // sit in the log for good.
+    actAs(ADMIN);
+    storageMock.getUser.mockResolvedValueOnce(ADMIN).mockResolvedValue(undefined);
+
+    const { status } = await patch("/api/users/u-nobody/status", { isActive: false });
+
+    expect(status).toBe(404);
+    expect(storageMock.updateUserActiveStatus).not.toHaveBeenCalled();
+    expect(storageMock.createAuditEvent).not.toHaveBeenCalled();
+  });
+
   it("records a permission change as field names, not as a copy of the request", async () => {
     actAs(ADMIN);
     storageMock.getUserPermissions
@@ -3077,12 +3098,19 @@ describe("importing a roster from a spreadsheet", () => {
   const confirm = (propertyId: string, rows: unknown[]) =>
     request("POST", `/api/properties/${propertyId}/residents/import`, { body: { rows } });
 
+  // Both write paths: the confirm step writes in one batch, and a regression
+  // back to one-at-a-time must not make these assertions vacuous.
+  const expectNoResidentsWritten = () => {
+    expect(storageMock.createResidents).not.toHaveBeenCalled();
+    expect(storageMock.createResident).not.toHaveBeenCalled();
+  };
+
   // ── Who may import ────────────────────────────────────────────────────────
 
   it("refuses an anonymous caller", async () => {
     const { status } = await postRoster("prop-west");
     expect(status).toBe(401);
-    expect(storageMock.createResident).not.toHaveBeenCalled();
+    expectNoResidentsWritten();
   });
 
   it("refuses a resident", async () => {
@@ -3090,7 +3118,7 @@ describe("importing a roster from a spreadsheet", () => {
     storageMock.getProperty.mockResolvedValue(WEST_PROPERTY);
     const { status } = await postRoster("prop-west");
     expect(status).toBe(403);
-    expect(storageMock.createResident).not.toHaveBeenCalled();
+    expectNoResidentsWritten();
   });
 
   it("refuses staff who lack the property permission", async () => {
@@ -3098,7 +3126,7 @@ describe("importing a roster from a spreadsheet", () => {
     storageMock.getProperty.mockResolvedValue(WEST_PROPERTY);
     const { status } = await postRoster("prop-west");
     expect(status).toBe(403);
-    expect(storageMock.createResident).not.toHaveBeenCalled();
+    expectNoResidentsWritten();
   });
 
   it("refuses a house in a region the importer cannot reach", async () => {
@@ -3106,7 +3134,7 @@ describe("importing a roster from a spreadsheet", () => {
     storageMock.getProperty.mockResolvedValue(EAST_PROPERTY);
     const { status } = await postRoster("prop-east");
     expect(status).toBe(403);
-    expect(storageMock.createResident).not.toHaveBeenCalled();
+    expectNoResidentsWritten();
   });
 
   // ── The body must not be read for a caller who will be refused ────────────
@@ -3151,7 +3179,7 @@ describe("importing a roster from a spreadsheet", () => {
 
     expect(status).toBe(200);
     expect(body.counts).toEqual({ create: 2, duplicate: 0, error: 0 });
-    expect(storageMock.createResident).not.toHaveBeenCalled();
+    expectNoResidentsWritten();
   });
 
   it("reports a duplicate against the roster as it stands now", async () => {
@@ -3162,7 +3190,7 @@ describe("importing a roster from a spreadsheet", () => {
     const { body } = await postRoster("prop-west");
 
     expect(body.counts).toEqual({ create: 1, duplicate: 1, error: 0 });
-    expect(storageMock.createResident).not.toHaveBeenCalled();
+    expectNoResidentsWritten();
   });
 
   it("refuses a file that is not a CSV", async () => {
@@ -3177,7 +3205,7 @@ describe("importing a roster from a spreadsheet", () => {
     });
 
     expect(res.status).toBeGreaterThanOrEqual(400);
-    expect(storageMock.createResident).not.toHaveBeenCalled();
+    expectNoResidentsWritten();
   });
 
   // ── Confirm re-derives rather than trusting the client ────────────────────
@@ -3186,7 +3214,7 @@ describe("importing a roster from a spreadsheet", () => {
     actAs(STAFF, { ...ALL_PROPERTIES, allowedRegions: ["West Central"] });
     storageMock.getProperty.mockResolvedValue(WEST_PROPERTY);
     storageMock.getResidentsByProperty.mockResolvedValue([]);
-    storageMock.createResident.mockImplementation(async (r: Record<string, unknown>) => ({ id: "res-new", ...r }));
+    storageMock.createResidents.mockImplementation(async (rows: Record<string, unknown>[]) => rows.map((r, i) => ({ id: `res-new-${i}`, ...r })));
 
     const { status, body } = await confirm("prop-west", [
       { firstName: "Ada", lastName: "Lovelace", email: "ada@spo.org" },
@@ -3194,14 +3222,14 @@ describe("importing a roster from a spreadsheet", () => {
 
     expect(status).toBe(200);
     expect(body.created).toBe(1);
-    expect(storageMock.createResident).toHaveBeenCalledWith(
+    expect(storageMock.createResidents).toHaveBeenCalledWith([
       expect.objectContaining({
         propertyId: "prop-west",
         email: "ada@spo.org",
         region: "West Central",
         buildingAddress: "1 Main St",
       }),
-    );
+    ]);
   });
 
   it("takes region and house from the property, not from the caller", async () => {
@@ -3210,7 +3238,7 @@ describe("importing a roster from a spreadsheet", () => {
     actAs(STAFF, { ...ALL_PROPERTIES, allowedRegions: ["West Central"] });
     storageMock.getProperty.mockResolvedValue(WEST_PROPERTY);
     storageMock.getResidentsByProperty.mockResolvedValue([]);
-    storageMock.createResident.mockImplementation(async (r: Record<string, unknown>) => ({ id: "res-new", ...r }));
+    storageMock.createResidents.mockImplementation(async (rows: Record<string, unknown>[]) => rows.map((r, i) => ({ id: `res-new-${i}`, ...r })));
 
     await confirm("prop-west", [
       {
@@ -3224,9 +3252,9 @@ describe("importing a roster from a spreadsheet", () => {
       },
     ]);
 
-    expect(storageMock.createResident).toHaveBeenCalledWith(
+    expect(storageMock.createResidents).toHaveBeenCalledWith([
       expect.objectContaining({ propertyId: "prop-west", region: "West Central", buildingAddress: "1 Main St" }),
-    );
+    ]);
   });
 
   it("re-checks duplicates at confirm, not just at preview", async () => {
@@ -3243,7 +3271,7 @@ describe("importing a roster from a spreadsheet", () => {
     expect(status).toBe(200);
     expect(body.created).toBe(0);
     expect(body.skipped).toBe(1);
-    expect(storageMock.createResident).not.toHaveBeenCalled();
+    expectNoResidentsWritten();
   });
 
   it("refuses a confirm for a house in another region", async () => {
@@ -3255,7 +3283,7 @@ describe("importing a roster from a spreadsheet", () => {
     ]);
 
     expect(status).toBe(403);
-    expect(storageMock.createResident).not.toHaveBeenCalled();
+    expectNoResidentsWritten();
   });
 
   it("refuses a confirm carrying a row that is not usable", async () => {
@@ -3268,7 +3296,7 @@ describe("importing a roster from a spreadsheet", () => {
     ]);
 
     expect(status).toBe(400);
-    expect(storageMock.createResident).not.toHaveBeenCalled();
+    expectNoResidentsWritten();
   });
 
   it("refuses a property that does not exist", async () => {
@@ -3280,6 +3308,56 @@ describe("importing a roster from a spreadsheet", () => {
     ]);
 
     expect(status).toBe(404);
+    expectNoResidentsWritten();
+  });
+
+  it("re-runs the row checks at confirm, refusing a date that does not exist (#163)", async () => {
+    // Rebuilt with no errors, 2026-02-30 used to be stored as March 2.
+    actAs(STAFF, { ...ALL_PROPERTIES, allowedRegions: ["West Central"] });
+    storageMock.getProperty.mockResolvedValue(WEST_PROPERTY);
+    storageMock.getResidentsByProperty.mockResolvedValue([]);
+
+    const { status } = await confirm("prop-west", [
+      { firstName: "Ada", lastName: "Lovelace", email: "ada@spo.org", moveInDate: "2026-02-30" },
+    ]);
+
+    expect(status).toBe(400);
+    expectNoResidentsWritten();
+  });
+
+  it("writes none of the good rows when a later one is bad (#163)", async () => {
+    actAs(STAFF, { ...ALL_PROPERTIES, allowedRegions: ["West Central"] });
+    storageMock.getProperty.mockResolvedValue(WEST_PROPERTY);
+    storageMock.getResidentsByProperty.mockResolvedValue([]);
+
+    const { status } = await confirm("prop-west", [
+      { firstName: "Ada", lastName: "Lovelace", email: "ada@spo.org" },
+      { firstName: "Grace", lastName: "Hopper", email: "grace@spo.org", moveInDate: "someday" },
+    ]);
+
+    expect(status).toBe(400);
+    expectNoResidentsWritten();
+  });
+
+  it("writes every confirmed row in one call, with the date as the preview read it (#163)", async () => {
+    // The positive control: a US-style date the preview accepts is normalised
+    // the same way at confirm, and both rows land together.
+    actAs(STAFF, { ...ALL_PROPERTIES, allowedRegions: ["West Central"] });
+    storageMock.getProperty.mockResolvedValue(WEST_PROPERTY);
+    storageMock.getResidentsByProperty.mockResolvedValue([]);
+    storageMock.createResidents.mockImplementation(async (rows: Record<string, unknown>[]) => rows.map((r, i) => ({ id: `res-new-${i}`, ...r })));
+
+    const { status, body } = await confirm("prop-west", [
+      { firstName: "Ada", lastName: "Lovelace", email: "ada@spo.org", moveInDate: "8/20/2026" },
+      { firstName: "Grace", lastName: "Hopper", email: "grace@spo.org" },
+    ]);
+
+    expect(status).toBe(200);
+    expect(body.created).toBe(2);
+    expect(storageMock.createResidents).toHaveBeenCalledTimes(1);
+    const [rows] = storageMock.createResidents.mock.calls[0];
+    expect(rows).toHaveLength(2);
+    expect((rows[0].moveInDate as Date).toISOString().slice(0, 10)).toBe("2026-08-20");
     expect(storageMock.createResident).not.toHaveBeenCalled();
   });
 });
@@ -5966,6 +6044,47 @@ describe("resident finances (regional leads only)", () => {
     expect(storageMock.createRentPayment).toHaveBeenCalledWith(expect.objectContaining({ residentId: "res-b", amount: "450" }));
   });
 
+  it.each(["2026-13", "2026-00"])("refuses to generate HH fees for month %s (#163)", async (period) => {
+    actAs(STAFF, { canViewFinancials: true, canManageFinancials: true, allowedRegions: ["West Central"] });
+    storageMock.getProperty.mockResolvedValue(WEST_PROPERTY);
+    storageMock.getResidentsByProperty.mockResolvedValue([{ ...WEST_RESIDENT, id: "res-a", isActive: true }]);
+
+    const { status } = await request("POST", "/api/rent-payments/generate", {
+      body: { propertyId: WEST_PROPERTY.id, period, amount: 450 },
+    });
+
+    expect(status).toBe(400);
+    expect(storageMock.createRentPayment).not.toHaveBeenCalled();
+  });
+
+  it.each(["2026-13", "2026-00"])("refuses a single HH-fee charge for month %s (#163)", async (period) => {
+    actAs(STAFF, { canViewFinancials: true, canManageFinancials: true, allowedRegions: ["West Central"] });
+    storageMock.getResident.mockResolvedValue(WEST_RESIDENT);
+
+    const { status } = await request("POST", "/api/rent-payments", {
+      body: { residentId: WEST_RESIDENT.id, period, amount: 500 },
+    });
+
+    expect(status).toBe(400);
+    expect(storageMock.createRentPayment).not.toHaveBeenCalled();
+  });
+
+  it("still takes December (#163)", async () => {
+    // The positive control for the month refusals above.
+    actAs(STAFF, { canViewFinancials: true, canManageFinancials: true, allowedRegions: ["West Central"] });
+    storageMock.getProperty.mockResolvedValue(WEST_PROPERTY);
+    storageMock.getResidentsByProperty.mockResolvedValue([{ ...WEST_RESIDENT, id: "res-a", isActive: true }]);
+    storageMock.getRentPaymentForResidentPeriod.mockResolvedValue(undefined);
+    storageMock.createRentPayment.mockImplementation(async (data: Record<string, unknown>) => ({ id: "new", ...data }));
+
+    const { status } = await request("POST", "/api/rent-payments/generate", {
+      body: { propertyId: WEST_PROPERTY.id, period: "2026-12", amount: 450 },
+    });
+
+    expect(status).toBe(200);
+    expect(storageMock.createRentPayment).toHaveBeenCalledTimes(1);
+  });
+
   it("refuses to generate rent without an amount when the house has no prior charge", async () => {
     actAs(STAFF, { canViewFinancials: true, canManageFinancials: true, allowedRegions: ["West Central"] });
     storageMock.getProperty.mockResolvedValue(WEST_PROPERTY);
@@ -6000,6 +6119,52 @@ describe("resident finances (regional leads only)", () => {
     actAs(ALICE, { canManageProperties: true });
     const { status } = await get("/api/security-deposits");
     expect(status).toBe(403);
+  });
+
+  it("refuses a new deposit recording more returned than held (#163)", async () => {
+    actAs(STAFF, { canViewFinancials: true, canManageFinancials: true, allowedRegions: ["West Central"] });
+    storageMock.getResident.mockResolvedValue(WEST_RESIDENT);
+    storageMock.getSecurityDepositByResident.mockResolvedValue(undefined);
+
+    const { status } = await request("POST", "/api/security-deposits", {
+      body: { residentId: WEST_RESIDENT.id, amountHeld: 300, amountReturned: 300.01 },
+    });
+
+    expect(status).toBe(400);
+    expect(storageMock.createSecurityDeposit).not.toHaveBeenCalled();
+  });
+
+  it("refuses a deposit edit returning more than the stored amount held (#163)", async () => {
+    // Checked over the row as it will be: the edit sends only what changed.
+    actAs(STAFF, { canViewFinancials: true, canManageFinancials: true, allowedRegions: ["West Central"] });
+    storageMock.getSecurityDeposit.mockResolvedValue({ id: "dep-1", region: "West Central", buildingAddress: "1 Main St", status: "held", amountHeld: "300.00", amountReturned: null });
+
+    const { status } = await request("PATCH", "/api/security-deposits/dep-1", { body: { amountReturned: 450 } });
+
+    expect(status).toBe(400);
+    expect(storageMock.updateSecurityDeposit).not.toHaveBeenCalled();
+  });
+
+  it("refuses lowering the amount held below what was already returned (#163)", async () => {
+    actAs(STAFF, { canViewFinancials: true, canManageFinancials: true, allowedRegions: ["West Central"] });
+    storageMock.getSecurityDeposit.mockResolvedValue({ id: "dep-1", region: "West Central", buildingAddress: "1 Main St", status: "returned", amountHeld: "300.00", amountReturned: "300.00" });
+
+    const { status } = await request("PATCH", "/api/security-deposits/dep-1", { body: { amountHeld: 200 } });
+
+    expect(status).toBe(400);
+    expect(storageMock.updateSecurityDeposit).not.toHaveBeenCalled();
+  });
+
+  it("takes a deposit returned in full (#163)", async () => {
+    // The positive control: exactly the amount held is fine.
+    actAs(STAFF, { canViewFinancials: true, canManageFinancials: true, allowedRegions: ["West Central"] });
+    storageMock.getSecurityDeposit.mockResolvedValue({ id: "dep-1", region: "West Central", buildingAddress: "1 Main St", status: "held", amountHeld: "300.00", amountReturned: null });
+    storageMock.updateSecurityDeposit.mockImplementation(async (id: string, patch: Record<string, unknown>) => ({ id, ...patch }));
+
+    const { status } = await request("PATCH", "/api/security-deposits/dep-1", { body: { status: "returned", amountReturned: 300 } });
+
+    expect(status).toBe(200);
+    expect(storageMock.updateSecurityDeposit).toHaveBeenCalledTimes(1);
   });
 
   it("refuses a second deposit for a resident who already has one", async () => {
@@ -7326,6 +7491,13 @@ describe("splitting a common-area charge across a house", () => {
   it("refuses a house in another region, without writing", async () => {
     westLead();
     expect((await split({ ...validSplit, propertyId: "prop-east" })).status).toBe(403);
+    expect(storageMock.createDepositDeductions).not.toHaveBeenCalled();
+  });
+
+  it("refuses a split naming the same person twice, without writing (#163)", async () => {
+    // Otherwise they are charged two shares of one charge.
+    westLead();
+    expect((await split({ ...validSplit, residentIds: ["res-a", "res-b", "res-a"] })).status).toBe(400);
     expect(storageMock.createDepositDeductions).not.toHaveBeenCalled();
   });
 

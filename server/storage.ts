@@ -292,6 +292,8 @@ export interface IStorage {
 
   // Residents
   createResident(resident: InsertResident): Promise<Resident>;
+  /** Several at once, in one insert: all of them or none. */
+  createResidents(residents: InsertResident[]): Promise<Resident[]>;
   getResident(id: string): Promise<Resident | undefined>;
   getAllResidents(): Promise<Resident[]>;
   getResidentsByProperty(propertyId: string): Promise<Resident[]>;
@@ -1156,6 +1158,12 @@ export class DatabaseStorage implements IStorage {
   async createResident(residentData: InsertResident): Promise<Resident> {
     const [resident] = await db.insert(residents).values(residentData).returning();
     return resident;
+  }
+
+  async createResidents(residentRows: InsertResident[]): Promise<Resident[]> {
+    // One statement is atomic on its own; no transaction needed.
+    if (residentRows.length === 0) return [];
+    return await db.insert(residents).values(residentRows).returning();
   }
 
   async getResident(id: string): Promise<Resident | undefined> {

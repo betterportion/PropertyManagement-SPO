@@ -34,6 +34,19 @@ export function toCents(amount: string | number | null | undefined): number {
   return Math.round(value * CENTS);
 }
 
+/**
+ * Whether a deposit records more handed back than was ever held -- checked in
+ * cents over the row as it will be, since an edit sends only what changed.
+ * Nothing returned yet is never a problem.
+ */
+export function returnedExceedsHeld(
+  amountHeld: string | number | null | undefined,
+  amountReturned: string | number | null | undefined,
+): boolean {
+  if (amountReturned === null || amountReturned === undefined || amountReturned === "") return false;
+  return toCents(amountReturned) > toCents(amountHeld);
+}
+
 /** Cents back to the numeric string the column stores. */
 export function fromCents(cents: number): string {
   return (cents / CENTS).toFixed(2);

@@ -1369,6 +1369,12 @@ export const rentPayments = pgTable(
   (table) => [uniqueIndex("IDX_rent_payment_resident_period").on(table.residentId, table.period)],
 );
 
+/**
+ * A household-fee period: a real month as `YYYY-MM`. The shape alone let
+ * "2026-13" through, and a period cannot be edited once charges exist.
+ */
+export const RENT_PERIOD_PATTERN = /^\d{4}-(0[1-9]|1[0-2])$/;
+
 export const insertRentPaymentSchema = createInsertSchema(rentPayments)
   .omit({
     id: true,
@@ -1376,7 +1382,7 @@ export const insertRentPaymentSchema = createInsertSchema(rentPayments)
     updatedAt: true,
   })
   .extend({
-    period: z.string().regex(/^\d{4}-\d{2}$/, "Use a YYYY-MM month"),
+    period: z.string().regex(RENT_PERIOD_PATTERN, "Use a YYYY-MM month"),
     amount: nonNegativeAmount,
     paidDate: dateFromClient.nullish(),
   });
