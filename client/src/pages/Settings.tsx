@@ -167,14 +167,19 @@ export default function Settings() {
     mutationFn: async ({ id, role }: { id: string; role: "admin" | "regional_administrator" | "resident" }) => {
       await apiRequest("PATCH", `/api/users/${id}/role`, { role });
     },
-    onSuccess: async () => {
+    onSuccess: async (_data, { role }) => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["/api/users"] }),
         queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] })
       ]);
+      // Any change to a non-admin role resets permissions to that role's
+      // minimum (server/roleChange.ts), so the admin needs to know to grant.
       toast({
         title: "Success",
-        description: "User role updated successfully",
+        description:
+          role === "admin"
+            ? "User role updated successfully"
+            : "Role updated. Their permissions and regions were reset for the new role, so grant what they need under Permissions.",
       });
     },
     onError: () => {
