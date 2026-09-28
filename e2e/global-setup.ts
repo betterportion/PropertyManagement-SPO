@@ -144,6 +144,12 @@ export default async function globalSetup() {
     await saveStorageState(adminCookie, "e2e/.auth/admin.json");
     await saveStorageState(residentCookie, "e2e/.auth/resident.json");
 
+    // A deactivated staff account: the session is real, the account is not.
+    await ensureUser(pool, { id: "e2e-inactive", email: "e2e-inactive@test.local", role: "regional_administrator" });
+    await pool.query(`UPDATE users SET is_active = false WHERE id = $1`, ["e2e-inactive"]);
+    const inactiveCookie = await mintSession(pool, "e2e-inactive", "e2e-inactive@test.local");
+    await saveStorageState(inactiveCookie, "e2e/.auth/inactive.json");
+
     // A few real IDs so specs navigate deterministically instead of guessing.
     const property = (await pool.query(`SELECT id, region, chapter FROM properties WHERE chapter IS NOT NULL LIMIT 1`)).rows[0];
     const assetWithPhoto = (await pool.query(

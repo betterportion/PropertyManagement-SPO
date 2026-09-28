@@ -13,6 +13,7 @@ import { canFillInWalkthroughs, canSeeResourceHub, type WalkthroughUser } from "
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import NotFound from "@/pages/not-found";
 import Landing from "@/pages/Landing";
+import AccountInactive from "@/pages/AccountInactive";
 import AdminDashboard from "@/pages/AdminDashboard";
 import Maintenance from "@/pages/Maintenance";
 import RequestDetail from "@/pages/RequestDetail";
@@ -139,6 +140,13 @@ function AppContent() {
         <Router />
       </div>
     );
+  }
+
+  // /api/auth/user is the one route a deactivated account still reaches, and
+  // it answers with isActive false precisely so this can say so. Neither
+  // switch: without it they would get the full navigation over empty pages.
+  if ((user as any)?.isActive === false) {
+    return <AccountInactive />;
   }
 
   const role = (user as any)?.role || "resident";
