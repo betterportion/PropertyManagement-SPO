@@ -173,9 +173,9 @@ export default function PrivacyNotice() {
                     <li>Resident records are kept as part of SPO's household records (see SPO's Privacy Notice).</li>
                     <li>When SPO deletes a resident, their rent, deposit, and paperwork records are deleted with them.</li>
                     <li>
-                      Deleting a photo, document, repair request, walkthrough, or house also deletes its stored files.
-                      [CONFIRM after PR #179 follow-up: deleting a single comment or bid currently keeps its attached file;
-                      change this line if JR approves deleting those too.]
+                      Deleting a photo, document, comment, bid, repair request, walkthrough, asset, or house also deletes
+                      its stored files, unless another record still uses the same file. Replacing a file with a new one
+                      does not yet delete the old one.
                     </li>
                     <li>
                       The audit log of routine changes is kept for 2 years. Records of account and access changes are
