@@ -8519,6 +8519,11 @@ describe("every field that names a stored file checks the caller stored it", () 
       field: "imageUrl",
       body: (url) => ({ roomId: "room-1", imageUrl: url, region: "West Central", buildingAddress: "1 Main St", location: "Kitchen", uploadedBy: "x" }),
       write: "createWalkthroughPhoto",
+      // The photo's room and walkthrough, for the routes that scope by them.
+      setup: () => {
+        storageMock.getWalkthroughRoom.mockResolvedValue({ id: "room-1", walkthroughId: "wt-1" });
+        storageMock.getWalkthrough.mockResolvedValue({ id: "wt-1", region: "West Central", buildingAddress: "1 Main St", propertyId: "prop-1" });
+      },
     },
     {
       name: "a walkthrough photo edit, imageUrl",
