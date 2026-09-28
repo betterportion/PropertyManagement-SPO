@@ -248,6 +248,8 @@ Non-admins only see records in their `allowedRegions`.
 - `requireRegion(res, ctx, region)` — single-record check before create or delete.
 - `requireRegionMove(res, ctx, existingRegion, incomingRegion)` — on update, checks *both*, so a record cannot be moved into a region the user cannot reach.
 
+**A walkthrough room or photo takes its region from its walkthrough**, never from the body or the room's loose `propertyId` (`walkthroughScope` / `roomScope` in `routes.ts`): the create routes overwrite the body's region, house and property from the walkthrough, the edit routes cannot move a room to another walkthrough or a photo to another room, and room edit and delete check the walkthrough's region. The photo's own `region` is what every later read of it trusts, so it has to be written honestly.
+
 Region names are compared in one canonical form, so a stored legacy `west-central` still matches `West Central`.
 
 ### Where a maintenance request is, and who fixed it

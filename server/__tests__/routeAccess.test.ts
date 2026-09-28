@@ -5782,6 +5782,9 @@ describe("photo attribution is taken from the session, not the body", () => {
 
   it("stores a walkthrough photo under the signed-in user, ignoring a spoofed uploadedBy", async () => {
     actAs(ADMIN);
+    // The photo's room and walkthrough, which now decide its region and house.
+    storageMock.getWalkthroughRoom.mockResolvedValue({ id: "room-1", walkthroughId: "wt-1" });
+    storageMock.getWalkthrough.mockResolvedValue({ id: "wt-1", region: "West Central", buildingAddress: "1 Main St", propertyId: "prop-1" });
     storageMock.createWalkthroughPhoto.mockImplementation(async (data: Record<string, unknown>) => ({ id: "photo-1", ...data }));
     // The file itself must be the caller's own upload; attribution is what this tests.
     storageMock.getUploadByStorageKey.mockResolvedValue({ storageKey: "x.png", uploadedBy: ADMIN.id });
@@ -6099,6 +6102,168 @@ describe("deleting a resident", () => {
     expect(status).toBe(403);
     expect(storageMock.deleteResident).not.toHaveBeenCalled();
     expect(storageMock.createAuditEvent).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * A walkthrough room or photo belongs to a walkthrough, and the walkthrough
+ * is what carries the region. These routes used to check the region the
+ * request body named, or the room's loose propertyId, so a hand-made request
+ * could add a room to another region's walkthrough or plant a photo in
+ * another region's room. The scope is now read off the walkthrough, and the
+ * body's region, house and property are overwritten from it.
+ */
+describe("walkthrough rooms and photos are scoped by their walkthrough, not the body", () => {
+  const WT_WEST = { id: "wt-west", region: "West Central", buildingAddress: "1 Main St", propertyId: "prop-w" };
+  const WT_SOUTH = { id: "wt-south", region: "Southwest", buildingAddress: "9 South Rd", propertyId: "prop-s" };
+  const ROOM_WEST = { id: "room-west", walkthroughId: "wt-west", propertyId: "prop-w", buildingAddress: "1 Main St", name: "Kitchen", displayOrder: 0 };
+  // The loose propertyId names a West house; the walkthrough says Southwest.
+  const ROOM_SOUTH = { id: "room-south", walkthroughId: "wt-south", propertyId: "prop-w", buildingAddress: "9 South Rd", name: "Porch", displayOrder: 0 };
+  const PHOTO_WEST = { id: "wp-west", roomId: "room-west", imageUrl: "/uploads/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.jpg", region: "West Central", buildingAddress: "1 Main St", location: "Kitchen" };
+  // A photo whose own region claims West, sitting in a Southwest room.
+  const PHOTO_IN_SOUTH = { ...PHOTO_WEST, id: "wp-south", roomId: "room-south" };
+  const westRA = { canViewWalkthroughs: true, canManageWalkthroughs: true, allowedRegions: ["West Central"] };
+  const photoBody = (roomId: string) => ({
+    roomId,
+    imageUrl: "/uploads/0123456789abcdef0123456789abcdef.jpg",
+    region: "West Central",
+    buildingAddress: "1 Main St",
+    location: "Kitchen",
+    uploadedBy: "x",
+  });
+
+  beforeEach(() => {
+    const walkthroughs: Record<string, unknown> = { [WT_WEST.id]: WT_WEST, [WT_SOUTH.id]: WT_SOUTH };
+    const rooms: Record<string, unknown> = { [ROOM_WEST.id]: ROOM_WEST, [ROOM_SOUTH.id]: ROOM_SOUTH };
+    const photos: Record<string, unknown> = { [PHOTO_WEST.id]: PHOTO_WEST, [PHOTO_IN_SOUTH.id]: PHOTO_IN_SOUTH };
+    storageMock.getWalkthrough.mockImplementation(async (id: string) => walkthroughs[id]);
+    storageMock.getWalkthroughRoom.mockImplementation(async (id: string) => rooms[id]);
+    storageMock.getWalkthroughPhoto.mockImplementation(async (id: string) => photos[id]);
+    storageMock.getProperty.mockResolvedValue({ id: "prop-w", region: "West Central", address: "1 Main St" });
+    storageMock.createWalkthroughRoom.mockImplementation(async (r: unknown) => ({ id: "room-new", ...(r as object) }));
+    storageMock.updateWalkthroughRoom.mockImplementation(async (id: string, r: unknown) => ({ ...(rooms[id] as object), ...(r as object) }));
+    storageMock.createWalkthroughPhoto.mockImplementation(async (p: unknown) => ({ id: "wp-new", ...(p as object) }));
+    storageMock.updateWalkthroughPhoto.mockImplementation(async (id: string, p: unknown) => ({ ...(photos[id] as object), ...(p as object) }));
+    // The photo file is the caller's own upload, whatever else a test is about.
+    storageMock.getUploadByStorageKey.mockResolvedValue({ storageKey: "0123456789abcdef0123456789abcdef.jpg", uploadedBy: STAFF.id });
+  });
+
+  // -- rooms -------------------------------------------------------------------
+
+  it("refuses a room added to another region's walkthrough, whatever property the body names, and writes nothing", async () => {
+    actAs(STAFF, westRA);
+    const { status } = await request("POST", "/api/walkthrough-rooms", {
+      body: { walkthroughId: WT_SOUTH.id, propertyId: "prop-w", buildingAddress: "1 Main St", name: "Shed", displayOrder: 9 },
+    });
+    expect(status).toBe(403);
+    expect(storageMock.createWalkthroughRoom).not.toHaveBeenCalled();
+  });
+
+  it("refuses a room with no walkthrough, and writes nothing", async () => {
+    actAs(STAFF, westRA);
+    const { status } = await request("POST", "/api/walkthrough-rooms", {
+      body: { buildingAddress: "1 Main St", name: "Shed", displayOrder: 9 },
+    });
+    expect(status).toBe(400);
+    expect(storageMock.createWalkthroughRoom).not.toHaveBeenCalled();
+  });
+
+  it("adds a room to a walkthrough in the caller's region, taking house and property from the walkthrough", async () => {
+    actAs(STAFF, westRA);
+    const { status } = await request("POST", "/api/walkthrough-rooms", {
+      body: { walkthroughId: WT_WEST.id, propertyId: "prop-s", buildingAddress: "9 South Rd", name: "Shed", displayOrder: 9 },
+    });
+    expect(status).toBe(200);
+    expect(storageMock.createWalkthroughRoom).toHaveBeenCalledWith(
+      expect.objectContaining({ walkthroughId: WT_WEST.id, propertyId: "prop-w", buildingAddress: "1 Main St" }),
+    );
+  });
+
+  it("refuses an edit to a room in another region's walkthrough even when its loose propertyId names the caller's house", async () => {
+    actAs(STAFF, westRA);
+    expect((await request("PATCH", `/api/walkthrough-rooms/${ROOM_SOUTH.id}`, { body: { standingNote: "x" } })).status).toBe(403);
+    expect(storageMock.updateWalkthroughRoom).not.toHaveBeenCalled();
+  });
+
+  it("never moves a room to another walkthrough through an edit", async () => {
+    actAs(STAFF, westRA);
+    await request("PATCH", `/api/walkthrough-rooms/${ROOM_WEST.id}`, {
+      body: { walkthroughId: WT_SOUTH.id, propertyId: "prop-s", buildingAddress: "9 South Rd", standingNote: "x" },
+    });
+    // The rest of the edit goes through, so this is not passing on a refusal.
+    expect(storageMock.updateWalkthroughRoom).toHaveBeenCalledTimes(1);
+    for (const [, patch] of storageMock.updateWalkthroughRoom.mock.calls) {
+      expect(patch).not.toHaveProperty("walkthroughId");
+      expect(patch).not.toHaveProperty("propertyId");
+      expect(patch).not.toHaveProperty("buildingAddress");
+    }
+  });
+
+  it("edits a room's standing note in the caller's region -- the positive control", async () => {
+    actAs(STAFF, westRA);
+    expect((await request("PATCH", `/api/walkthrough-rooms/${ROOM_WEST.id}`, { body: { standingNote: "Photograph the crack." } })).status).toBe(200);
+    expect(storageMock.updateWalkthroughRoom).toHaveBeenCalledWith(ROOM_WEST.id, expect.objectContaining({ standingNote: "Photograph the crack." }));
+  });
+
+  it("refuses deleting a room in another region's walkthrough even when its loose propertyId names the caller's house", async () => {
+    actAs(STAFF, westRA);
+    expect((await request("DELETE", `/api/walkthrough-rooms/${ROOM_SOUTH.id}`)).status).toBe(403);
+    expect(storageMock.deleteWalkthroughRoom).not.toHaveBeenCalled();
+  });
+
+  it("deletes a room in the caller's region -- the positive control", async () => {
+    actAs(STAFF, westRA);
+    storageMock.deleteWalkthroughRoom.mockResolvedValue([]);
+    expect((await request("DELETE", `/api/walkthrough-rooms/${ROOM_WEST.id}`)).status).toBe(200);
+    expect(storageMock.deleteWalkthroughRoom).toHaveBeenCalledWith(ROOM_WEST.id);
+  });
+
+  // -- photos ------------------------------------------------------------------
+
+  it("refuses a photo in another region's room whatever region the body names, and writes nothing", async () => {
+    actAs(STAFF, westRA);
+    expect((await request("POST", "/api/walkthrough-photos", { body: photoBody(ROOM_SOUTH.id) })).status).toBe(403);
+    expect(storageMock.createWalkthroughPhoto).not.toHaveBeenCalled();
+  });
+
+  it("refuses a photo for a room that does not exist, and writes nothing", async () => {
+    actAs(STAFF, westRA);
+    expect((await request("POST", "/api/walkthrough-photos", { body: photoBody("room-nope") })).status).toBe(404);
+    expect(storageMock.createWalkthroughPhoto).not.toHaveBeenCalled();
+  });
+
+  it("stores a photo in the caller's region with the region and house of its walkthrough, not the body's", async () => {
+    actAs(STAFF, westRA);
+    const { status } = await request("POST", "/api/walkthrough-photos", {
+      body: { ...photoBody(ROOM_WEST.id), region: "Southwest", buildingAddress: "9 South Rd" },
+    });
+    expect(status).toBe(200);
+    expect(storageMock.createWalkthroughPhoto).toHaveBeenCalledWith(
+      expect.objectContaining({ roomId: ROOM_WEST.id, region: "West Central", buildingAddress: "1 Main St" }),
+    );
+  });
+
+  it("never moves a photo to another room through an edit", async () => {
+    actAs(STAFF, westRA);
+    await request("PATCH", `/api/walkthrough-photos/${PHOTO_WEST.id}`, { body: { roomId: ROOM_SOUTH.id, buildingAddress: "9 South Rd", notes: "x" } });
+    expect(storageMock.updateWalkthroughPhoto).toHaveBeenCalledTimes(1);
+    for (const [, patch] of storageMock.updateWalkthroughPhoto.mock.calls) {
+      expect(patch).not.toHaveProperty("roomId");
+      expect(patch).not.toHaveProperty("region");
+      expect(patch).not.toHaveProperty("buildingAddress");
+    }
+  });
+
+  it("refuses an edit to a photo in another region's room even when the photo's own region says otherwise", async () => {
+    actAs(STAFF, westRA);
+    expect((await request("PATCH", `/api/walkthrough-photos/${PHOTO_IN_SOUTH.id}`, { body: { notes: "x" } })).status).toBe(403);
+    expect(storageMock.updateWalkthroughPhoto).not.toHaveBeenCalled();
+  });
+
+  it("edits a photo's notes in the caller's region -- the positive control", async () => {
+    actAs(STAFF, westRA);
+    expect((await request("PATCH", `/api/walkthrough-photos/${PHOTO_WEST.id}`, { body: { notes: "Crack by the window." } })).status).toBe(200);
+    expect(storageMock.updateWalkthroughPhoto).toHaveBeenCalledWith(PHOTO_WEST.id, expect.objectContaining({ notes: "Crack by the window." }));
   });
 });
 
