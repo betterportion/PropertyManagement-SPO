@@ -4573,11 +4573,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const ctx = await requireActiveUser(req, res);
       if (!ctx) return;
       if (!requireStaff(res, ctx)) return;
+      const visibility = {
+        maintenance: canSeeActionItemSource(ctx, "maintenance"),
+        schedule: canSeeActionItemSource(ctx, "schedule"),
+        lease: canSeeActionItemSource(ctx, "lease"),
+        rent: canSeeActionItemSource(ctx, "rent"),
+      };
       const [requests, schedules, properties, rentPayments, tasks, users, permissions] = await Promise.all([
-        canSeeActionItemSource(ctx, "maintenance") ? storage.getAllMaintenanceRequests() : [],
-        canSeeActionItemSource(ctx, "schedule") ? storage.getAllMaintenanceSchedules() : [],
-        canSeeActionItemSource(ctx, "lease") ? storage.getAllProperties() : [],
-        canSeeActionItemSource(ctx, "rent") ? storage.getAllRentPayments() : [],
+        visibility.maintenance ? storage.getAllMaintenanceRequests() : [],
+        visibility.schedule ? storage.getAllMaintenanceSchedules() : [],
+        visibility.lease ? storage.getAllProperties() : [],
+        visibility.rent ? storage.getAllRentPayments() : [],
         storage.getAllTasks(),
         storage.getAllUsers(),
         storage.getAllUserPermissions(),
@@ -4607,6 +4613,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           // flag on top of region, exactly like `/api/tasks` (#170).
           tasks: tasks.filter((t) => canSeeTask(ctx, t)),
           staff,
+          visibility,
         },
         regions,
       );

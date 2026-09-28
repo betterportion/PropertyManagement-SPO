@@ -12,6 +12,7 @@ export interface RegionSummary {
   leaseRenewalsDue: number;
   unpaidRent: { count: number; amount: string };
   attentionScore: number;
+  hidden: string[];
 }
 
 function Metric({ label, value }: { label: string; value: number }) {
@@ -30,10 +31,15 @@ function Metric({ label, value }: { label: string; value: number }) {
  * One region's health at a glance for the leadership overview: who runs it and
  * the three operational counts that make up its attention score. Rendered as a
  * button so it is keyboard-focusable and drills into that region on click.
+ *
+ * "All clear" is shown only when every source is visible and the score is
+ * zero -- a source hidden by a missing permission reads as a plain-language
+ * note instead, never as clear.
  */
 export default function RegionCard({ summary, onSelect }: { summary: RegionSummary; onSelect: () => void }) {
   const leads = summary.admins.map((a) => a.name).join(", ");
   const needsAttention = summary.attentionScore > 0;
+  const hasHiddenSources = summary.hidden.length > 0;
 
   return (
     <button
@@ -54,7 +60,7 @@ export default function RegionCard({ summary, onSelect }: { summary: RegionSumma
             </div>
             {needsAttention ? (
               <Badge variant="warning">Needs attention</Badge>
-            ) : (
+            ) : hasHiddenSources ? null : (
               <Badge variant="secondary">All clear</Badge>
             )}
           </div>
@@ -68,6 +74,12 @@ export default function RegionCard({ summary, onSelect }: { summary: RegionSumma
           {summary.unpaidRent.count > 0 && (
             <p className="text-xs text-muted-foreground">
               {summary.unpaidRent.count} behind on HH fees · {formatCurrency(summary.unpaidRent.amount)} outstanding
+            </p>
+          )}
+
+          {hasHiddenSources && (
+            <p className="text-xs text-muted-foreground">
+              Some counts are hidden — you don't have permission to see all of this region's data.
             </p>
           )}
         </CardContent>

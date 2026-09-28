@@ -22,7 +22,16 @@ function safetyTask(over: Partial<Task>): Task {
   return { id: "t1", region: "Northwest", category: "safety", status: "open", ...over } as Task;
 }
 
-const empty: RegionSummaryInputs = { requests: [], schedules: [], properties: [], rentPayments: [], tasks: [], staff: [] };
+const allVisible = { maintenance: true, schedule: true, lease: true, rent: true };
+const empty: RegionSummaryInputs = {
+  requests: [],
+  schedules: [],
+  properties: [],
+  rentPayments: [],
+  tasks: [],
+  staff: [],
+  visibility: allVisible,
+};
 
 describe("buildRegionSummaries", () => {
   it("counts each region's open requests, due schedules and renewals", () => {
@@ -159,5 +168,64 @@ describe("buildRegionSummaries", () => {
       NOW,
     );
     expect(summaries.map((s) => s.region)).toEqual(["East Central", "Northwest", "Southwest"]);
+  });
+
+  // Re-do after verifier FAIL (#171): the prior diff masked the response
+  // counts but computed attentionScore from the raw, unmasked locals, so a
+  // hidden source's real magnitude still moved the score. These assert the
+  // gate happens inside buildRegionSummaries itself, from data passed in
+  // directly -- not by relying on the route to have pre-emptied the arrays.
+  it("gates a hidden source's count to 0 even when real, large data is passed in -- and marks it hidden", () => {
+    const [summary] = buildRegionSummaries(
+      {
+        ...empty,
+        requests: Array.from({ length: 50 }, (_, i) => request({ id: `r${i}`, status: "pending" })),
+        visibility: { ...allVisible, maintenance: false },
+      },
+      ["Northwest"],
+      NOW,
+    );
+    expect(summary.openRequests).toBe(0);
+    expect(summary.openRepairs).toBe(0);
+    expect(summary.openJobs).toBe(0);
+    expect(summary.attentionScore).toBe(0); // the hidden 50 requests move the score by exactly 0
+    expect(summary.hidden).toEqual(["maintenance"]);
+  });
+
+  it("gates schedule and lease sources the same way, independently", () => {
+    const [summary] = buildRegionSummaries(
+      {
+        ...empty,
+        schedules: [schedule({ nextDueDate: days(5) as any })],
+        properties: [property({ leaseRenewalDate: days(20) as any })],
+        rentPayments: [rent({ amount: "9999" })],
+        visibility: { maintenance: true, schedule: false, lease: false, rent: false },
+      },
+      ["Northwest"],
+      NOW,
+    );
+    expect(summary.safetyPreventiveDue).toBe(0);
+    expect(summary.leaseRenewalsDue).toBe(0);
+    expect(summary.unpaidRent).toEqual({ count: 0, amount: "0.00" });
+    expect(summary.attentionScore).toBe(0);
+    expect(summary.hidden.sort()).toEqual(["lease", "rent", "schedule"]);
+  });
+
+  it("marks nothing hidden and keeps counts unchanged when every source is visible -- the positive control", () => {
+    const [summary] = buildRegionSummaries(
+      {
+        ...empty,
+        requests: [request({ status: "pending" })],
+        schedules: [schedule({ nextDueDate: days(5) as any })],
+        properties: [property({ leaseRenewalDate: days(20) as any })],
+      },
+      ["Northwest"],
+      NOW,
+    );
+    expect(summary.hidden).toEqual([]);
+    expect(summary.openRequests).toBe(1);
+    expect(summary.safetyPreventiveDue).toBe(1);
+    expect(summary.leaseRenewalsDue).toBe(1);
+    expect(summary.attentionScore).toBe(3);
   });
 });
