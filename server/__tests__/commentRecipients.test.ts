@@ -144,8 +144,15 @@ describe("who a comment is emailed to", () => {
 
   it("requires the maintenance permission of a regional administrator who has not posted", () => {
     expect(recipientsOf(BY_SARAH)).not.toContain("vic@example.com");
-    // Having posted in the thread is enough on its own.
-    expect(recipientsOf(BY_SARAH, { participantIds: [...PARTICIPANTS, "u-vic"] })).toContain("vic@example.com");
+  });
+
+  it("does not follow a participant who has since lost the maintenance permission", () => {
+    // The read rule needs the flag, so somebody who posted and then lost
+    // maintenance access cannot open the comment and is not emailed it --
+    // the same reasoning as a participant who has lost the region.
+    expect(recipientsOf(BY_SARAH, { participantIds: [...PARTICIPANTS, "u-vic"] })).not.toContain("vic@example.com");
+    // Positive control: TOM holds the flag and is emailed.
+    expect(recipientsOf(BY_SARAH, { participantIds: [...PARTICIPANTS, "u-vic"] })).toContain("tom@example.com");
   });
 
   it("does not follow a participant out of the region they have since lost", () => {

@@ -6,6 +6,7 @@ import {
   loadAuthContext,
   requireActiveUser,
   requirePermission,
+  hasPermission,
   requireStaff,
   requireAdmin,
   requireRegion,
@@ -931,9 +932,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "Forbidden" });
       }
       // A resident may remove only photos they added; staff may remove any on a
-      // request in their region.
+      // request in their region, if they may manage maintenance -- reading a
+      // request is not permission to take its photos off it.
       const isUploader = photo.uploadedBy === (ctx.user.email || "");
-      if (ctx.isResident && !isUploader) {
+      if (ctx.isResident ? !isUploader : !hasPermission(ctx, "canManageMaintenance")) {
         return res.status(403).json({ message: "Forbidden" });
       }
       await removeDeletedRecordFiles(await storage.deleteMaintenanceRequestPhoto(req.params.id));
