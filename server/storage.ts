@@ -156,7 +156,12 @@ export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
   upsertUser(user: UpsertUser): Promise<User>;
   getAllUsers(): Promise<User[]>;
-  updateUserRole(id: string, role: "admin" | "regional_administrator" | "resident"): Promise<User>;
+  /** Sets the role and, when given, replaces the permissions row in the same transaction. */
+  updateUserRole(
+    id: string,
+    role: "admin" | "regional_administrator" | "resident",
+    permissions: InsertUserPermissions | null,
+  ): Promise<User>;
   updateUserActiveStatus(id: string, isActive: boolean): Promise<User>;
   updateUserProperty(id: string, propertyId: string | null): Promise<User>;
   /** The comment email off switch. A preference, so it is not audited. */
@@ -647,24 +652,24 @@ export class DatabaseStorage implements IStorage {
     return user;
   }
 
-  async updateUserRole(id: string, role: "admin" | "regional_administrator" | "resident"): Promise<User> {
-    const [user] = await db
-      .update(users)
-      .set({ role, updatedAt: new Date() })
-      .where(eq(users.id, id))
-      .returning();
-    
-    const existingPermissions = await this.getUserPermissions(id);
-    const newDefaultPermissions = computeDefaultPermissions(id, role);
-    
-    await this.upsertUserPermissions({
-      ...newDefaultPermissions,
-      allowedRegions: role === "admin"
-        ? [...REGIONS]
-        : (existingPermissions?.allowedRegions || []),
+  // What the permissions row becomes is decided by permissionsAfterRoleChange
+  // in server/roleChange.ts; this only writes it. One transaction, so a role
+  // never lands without the reset that goes with it.
+  async updateUserRole(
+    id: string,
+    role: "admin" | "regional_administrator" | "resident",
+    permissions: InsertUserPermissions | null,
+  ): Promise<User> {
+    return db.transaction(async (tx) => {
+      const [user] = await tx.update(users).set({ role, updatedAt: new Date() }).where(eq(users.id, id)).returning();
+      if (permissions) {
+        await tx
+          .insert(userPermissions)
+          .values(permissions)
+          .onConflictDoUpdate({ target: userPermissions.userId, set: { ...permissions, updatedAt: new Date() } });
+      }
+      return user;
     });
-    
-    return user;
   }
 
   async updateUserActiveStatus(id: string, isActive: boolean): Promise<User> {

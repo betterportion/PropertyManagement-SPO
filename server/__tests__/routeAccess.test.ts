@@ -2888,7 +2888,10 @@ describe("what reaches the audit log", () => {
     const { status } = await patch("/api/users/u-alice/role", { role: "regional_administrator" });
 
     expect(status).toBe(200);
-    expect(recordedEvent()).toMatchObject({
+    // A change of role also resets the permissions row and records that
+    // separately; this test is about the role event.
+    const roleEvent = storageMock.createAuditEvent.mock.calls.map((c) => c[0]).find((e) => e.action === "user.role_changed");
+    expect(roleEvent).toMatchObject({
       action: "user.role_changed",
       entityType: "user",
       entityId: "u-alice",
@@ -2896,6 +2899,64 @@ describe("what reaches the audit log", () => {
       actorEmail: ADMIN.email,
       details: { from: "resident", to: "regional_administrator" },
     });
+  });
+
+  // A role change is an access change twice over: the role, and the
+  // permissions row it resets. Both are recorded, and the reset is decided
+  // from the roles alone, so a spell as admin leaves nothing behind.
+  it("resets a demoted admin to no flags and no regions, and records both changes", async () => {
+    actAs(ADMIN);
+    const exAdmin = { ...STAFF, id: "u-ex", email: "ex@example.com", role: "admin" };
+    storageMock.getUser.mockResolvedValueOnce(ADMIN).mockResolvedValue(exAdmin);
+    storageMock.getUserPermissions.mockResolvedValueOnce(undefined).mockResolvedValue({
+      userId: "u-ex",
+      canManageFinancials: true,
+      canManageBilling: true,
+      allowedRegions: ["West Central", "East Central", "National"],
+    });
+    storageMock.updateUserRole.mockResolvedValue({ ...exAdmin, role: "regional_administrator" });
+
+    const { status } = await patch("/api/users/u-ex/role", { role: "regional_administrator" });
+
+    expect(status).toBe(200);
+    expect(storageMock.updateUserRole).toHaveBeenCalledWith(
+      "u-ex",
+      "regional_administrator",
+      expect.objectContaining({ userId: "u-ex", allowedRegions: [], canManageFinancials: false, canManageBilling: false, canViewMaintenance: false }),
+    );
+    const actions = storageMock.createAuditEvent.mock.calls.map((c) => c[0].action);
+    expect(actions).toEqual(expect.arrayContaining(["user.role_changed", "user.permissions_changed"]));
+    const permissionsEvent = storageMock.createAuditEvent.mock.calls.find((c) => c[0].action === "user.permissions_changed")![0];
+    expect(permissionsEvent.details.changed).toEqual(expect.arrayContaining(["canManageFinancials", "allowedRegions"]));
+  });
+
+  it("changes nothing and records nothing when the role is the one they already have", async () => {
+    actAs(ADMIN);
+    storageMock.getUser.mockResolvedValueOnce(ADMIN).mockResolvedValue({ ...STAFF });
+    const { status } = await patch("/api/users/u-staff/role", { role: "regional_administrator" });
+    expect(status).toBe(200);
+    expect(storageMock.updateUserRole).not.toHaveBeenCalled();
+    expect(storageMock.upsertUserPermissions).not.toHaveBeenCalled();
+    expect(storageMock.createAuditEvent).not.toHaveBeenCalled();
+  });
+
+  it("leaves the permissions row alone on a promotion to admin, and records only the role", async () => {
+    actAs(ADMIN);
+    storageMock.getUser.mockResolvedValueOnce(ADMIN).mockResolvedValue({ ...STAFF });
+    storageMock.updateUserRole.mockResolvedValue({ ...STAFF, role: "admin" });
+    const { status } = await patch("/api/users/u-staff/role", { role: "admin" });
+    expect(status).toBe(200);
+    expect(storageMock.updateUserRole).toHaveBeenCalledWith("u-staff", "admin", null);
+    expect(storageMock.createAuditEvent.mock.calls.map((c) => c[0].action)).toEqual(["user.role_changed"]);
+  });
+
+  it("answers 404 for a role change on an account that does not exist, and records nothing", async () => {
+    actAs(ADMIN);
+    storageMock.getUser.mockResolvedValueOnce(ADMIN).mockResolvedValue(undefined);
+    const { status } = await patch("/api/users/u-nobody/role", { role: "admin" });
+    expect(status).toBe(404);
+    expect(storageMock.updateUserRole).not.toHaveBeenCalled();
+    expect(storageMock.createAuditEvent).not.toHaveBeenCalled();
   });
 
   it("records a deactivation", async () => {
@@ -2977,20 +3038,19 @@ describe("what reaches the audit log", () => {
     expect(storageMock.createAuditEvent).not.toHaveBeenCalled();
   });
 
-  it("still performs the change when the lookup done for the log fails", async () => {
+  // The account lookup used to be for the log's summary only. It now decides
+  // what the permissions row becomes, so a failed lookup refuses the change
+  // rather than guessing at the previous role.
+  it("refuses a role change when the account cannot be looked up, and writes nothing", async () => {
     const logged = vi.spyOn(console, "error").mockImplementation(() => {});
     actAs(ADMIN);
-    // The second getUser call is the one made purely to put an email in the
-    // summary. It must not be able to stop the role change from happening.
     storageMock.getUser.mockResolvedValueOnce(ADMIN).mockRejectedValue(new Error("connection reset"));
-    storageMock.updateUserRole.mockResolvedValue({ ...ALICE, role: "admin" });
 
     const { status } = await patch("/api/users/u-alice/role", { role: "admin" });
 
-    expect(status).toBe(200);
-    expect(storageMock.updateUserRole).toHaveBeenCalledWith("u-alice", "admin");
-    // Still recorded, just without the email it could not load.
-    expect(recordedEvent()).toMatchObject({ action: "user.role_changed", entityId: "u-alice" });
+    expect(status).toBe(500);
+    expect(storageMock.updateUserRole).not.toHaveBeenCalled();
+    expect(storageMock.createAuditEvent).not.toHaveBeenCalled();
     logged.mockRestore();
   });
 

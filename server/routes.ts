@@ -30,6 +30,7 @@ import {
 } from "./authz";
 import { z } from "zod";
 import { sendError, logError, HttpError } from "./errors";
+import { permissionsAfterRoleChange } from "./roleChange";
 import { recordAuditEvent, auditLookup, changedFields, AUDIT_ACTIONS } from "./audit";
 import { AUDIT_ACTION_VALUES } from "@shared/audit";
 import multer from "multer";
@@ -412,16 +413,44 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!requireAdmin(res, ctx)) return;
 
       const validatedData = roleUpdateSchema.parse(req.body);
-      const previous = await auditLookup(() => storage.getUser(req.params.id));
-      const user = await storage.updateUserRole(req.params.id, validatedData.role);
+      // Looked up for real, not through auditLookup: the previous role decides
+      // what the permissions row becomes, and user.role_changed is kept
+      // indefinitely, so an event about an account that does not exist would
+      // sit in the log for good.
+      const previous = await storage.getUser(req.params.id);
+      if (!previous) {
+        return res.status(404).json({ message: "User not found" });
+      }
+      // The Settings select never sends the current role, but the API can; a
+      // no-op must not reset the row the way the old code did.
+      if (previous.role === validatedData.role) return res.json(previous);
 
+      const nextPermissions = permissionsAfterRoleChange(req.params.id, previous.role, validatedData.role);
+      const existingPermissions = nextPermissions ? await storage.getUserPermissions(req.params.id) : undefined;
+      const user = await storage.updateUserRole(req.params.id, validatedData.role, nextPermissions);
+
+      const who = previous.email ?? req.params.id;
       recordAuditEvent(ctx, {
         action: AUDIT_ACTIONS.USER_ROLE_CHANGED,
         entityType: "user",
         entityId: req.params.id,
-        summary: `Changed ${previous?.email ?? req.params.id} from ${previous?.role ?? "unknown"} to ${validatedData.role}`,
-        details: { from: previous?.role ?? null, to: validatedData.role },
+        summary: `Changed ${who} from ${previous.role} to ${validatedData.role}`,
+        details: { from: previous.role, to: validatedData.role },
       });
+      // The reset is a permissions change in its own right, and the access
+      // history has to show it, not only the role that caused it.
+      if (nextPermissions) {
+        recordAuditEvent(ctx, {
+          action: AUDIT_ACTIONS.USER_PERMISSIONS_CHANGED,
+          entityType: "user",
+          entityId: req.params.id,
+          summary: `Reset permissions for ${who} on a role change to ${validatedData.role}`,
+          details: {
+            changed: changedFields(existingPermissions as Record<string, unknown> | undefined, nextPermissions),
+            allowedRegions: nextPermissions.allowedRegions ?? [],
+          },
+        });
+      }
 
       res.json(user);
     } catch (error) {
