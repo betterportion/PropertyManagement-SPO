@@ -70,7 +70,7 @@ export default function MaintenanceAggregates() {
           {issues.length === 0 ? (
             <EmptyState
               title="Nothing has come back twice"
-              description="Once the same room and kind of problem is reported more than once in a house, it appears here — with how many times and when it was last seen."
+              description="Once the same room and kind of problem is reported more than once in a house, it appears here — with how many times and when it was last seen. Repairs only: scheduled upkeep and projects are left out."
             />
           ) : (
             <ul className="divide-y divide-border">

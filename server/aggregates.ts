@@ -12,7 +12,7 @@
  * entitled to, so a rollup never widens what somebody can see — a link to a
  * request the caller cannot read contributes nothing, not even a count.
  */
-import { foldName, type MaintenanceRequest } from "@shared/schema";
+import { SCHEDULED_REQUEST_SUBMITTER, foldName, type MaintenanceRequest } from "@shared/schema";
 
 /**
  * Separates the parts of a grouping key.
@@ -35,8 +35,18 @@ const KEY_SEPARATOR = "\u0001";
  *
  * The house is part of the key and always will be: "these blinds have broken
  * every year" is a claim about *these* blinds.
+ *
+ * Only a repair somebody reported can be a repeat of a problem. Scheduled
+ * upkeep lands as "Whole house" in one of two categories, so two different
+ * checks would read as one failure twice; and a project or capital project is
+ * a decision, not the thing breaking again. Both have no key, which keeps
+ * them out of the recurring list and out of the callback count while leaving
+ * them in a contractor's total -- they are still work, only not a repeat.
  */
-function issueKey(request: Pick<MaintenanceRequest, "buildingAddress" | "location" | "category">): string | null {
+function issueKey(
+  request: Pick<MaintenanceRequest, "buildingAddress" | "location" | "category" | "type" | "submittedBy">,
+): string | null {
+  if (request.type !== "request" || request.submittedBy === SCHEDULED_REQUEST_SUBMITTER) return null;
   const location = foldName(request.location);
   // No room recorded means no issue to group. Grouping on "" would invent an
   // issue called nothing, in every house.

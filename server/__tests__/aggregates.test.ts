@@ -23,6 +23,8 @@ function request(over: Partial<MaintenanceRequest>): MaintenanceRequest {
     buildingAddress: "1 Main St",
     region: "West Central",
     status: "completed",
+    type: "request",
+    submittedBy: "resident@example.org",
     submittedDate: daysAgo(30),
     ...over,
   } as MaintenanceRequest;
@@ -95,6 +97,66 @@ describe("what keeps going wrong in a house", () => {
       request({ id: "b", location: "   " }),
     ]);
     expect(issues).toEqual([]);
+  });
+});
+
+describe("what does not count as something going wrong again (#160)", () => {
+  // Written as the literal the schedule job stores, not through the constant,
+  // so a rename on one side cannot keep this passing.
+  const scheduled = { submittedBy: "Preventive schedule", location: "Whole house", category: "Safety Equipment" };
+
+  it("does not count scheduled upkeep as a recurring issue", () => {
+    // A detector test and an extinguisher check both land as "Whole house /
+    // Safety Equipment". That is the calendar, not a failure.
+    const issues = recurringIssues([
+      request({ id: "a", ...scheduled, title: "Test smoke and CO detectors" }),
+      request({ id: "b", ...scheduled, title: "Check fire extinguishers" }),
+      request({ id: "c", ...scheduled, title: "Test smoke and CO detectors" }),
+    ]);
+    expect(issues).toEqual([]);
+  });
+
+  it("does not count projects or capital projects as a recurring issue", () => {
+    // A planned re-roof is a decision, not the roof failing again.
+    const issues = recurringIssues([
+      request({ id: "a", location: "Roof", type: "request" }),
+      request({ id: "b", location: "Roof", type: "project" }),
+      request({ id: "c", location: "Roof", type: "capex" }),
+    ]);
+    expect(issues).toEqual([]);
+  });
+
+  it("still counts the repairs among them, and only the repairs", () => {
+    const issues = recurringIssues([
+      request({ id: "a", location: "Roof", type: "request" }),
+      request({ id: "b", location: "Roof", type: "request" }),
+      request({ id: "c", location: "Roof", type: "capex" }),
+    ]);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].count).toBe(2);
+  });
+
+  it("gives a contractor no callback for doing its scheduled job", () => {
+    const load = contractorLoad(
+      [
+        { contactId: "hvac", requestId: "a" },
+        { contactId: "hvac", requestId: "b" },
+        { contactId: "roofer", requestId: "c" },
+        { contactId: "roofer", requestId: "d" },
+      ],
+      [
+        request({ id: "a", ...scheduled, category: "General Maintenance", title: "Replace furnace filter" }),
+        request({ id: "b", ...scheduled, category: "General Maintenance", title: "Replace furnace filter" }),
+        request({ id: "c", location: "Roof", type: "request" }),
+        request({ id: "d", location: "Roof", type: "project" }),
+      ],
+    );
+    const byId = Object.fromEntries(load.map((row) => [row.contactId, row]));
+    expect(byId.hvac.callbacks).toBe(0);
+    expect(byId.roofer.callbacks).toBe(0);
+    // The work still counts as work: it is only not a repeat.
+    expect(byId.hvac.total).toBe(2);
+    expect(byId.roofer.total).toBe(2);
   });
 });
 
