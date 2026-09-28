@@ -10,8 +10,8 @@ import { resizeImageForUpload } from "@/lib/resizeImage";
  * The file goes up the moment it is chosen, through the request's own
  * attachment route, and what comes back -- where it went and what it was
  * called -- is held here until Post. Removing it before posting forgets the
- * pair; the file itself stays in storage, as it does after a delete (known
- * issue 1). A second file is a second comment, so there is one slot.
+ * pair; the file itself stays in storage. A second file is a second
+ * comment, so there is one slot.
  *
  * A bid's quote is the same shape with a different route, so `endpoint` and
  * `hint` can be overridden; the route decides who may upload either way.

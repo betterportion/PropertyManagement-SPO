@@ -1238,7 +1238,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "Forbidden" });
       }
 
-      await storage.deleteMaintenanceRequestComment(comment.id);
+      await removeDeletedRecordFiles(await storage.deleteMaintenanceRequestComment(comment.id));
       res.json({ success: true });
     } catch (error) {
       sendError(res, error, "Failed to delete the comment");
@@ -1253,9 +1253,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // under the maintenance permission, region-checked through the request, and
   // refused outright on a repair. A resident never reaches a bid because they
   // never reach its parent, and the upload-reference rule in authz.ts refuses
-  // them by name besides. Delete is a hard delete; the file stays in storage
-  // (known issue 1), and the screen says so -- until that copy changes, this
-  // route does not pass its delete through removeDeletedRecordFiles.
+  // them by name besides. Delete is a hard delete and takes the quote with it
+  // (removeDeletedRecordFiles), unless another record still points at the file.
   // ---------------------------------------------------------------------------
 
   /**
@@ -1389,8 +1388,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const found = await bidAndParent(res, ctx, req.params.id);
       if (!found) return;
 
-      // The row goes; the quote stays in storage (known issue 1).
-      await storage.deleteMaintenanceRequestBid(found.bid.id);
+      await removeDeletedRecordFiles(await storage.deleteMaintenanceRequestBid(found.bid.id));
       res.json({ success: true });
     } catch (error) {
       sendError(res, error, "Failed to remove the bid");

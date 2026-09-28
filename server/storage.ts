@@ -375,7 +375,7 @@ export interface IStorage {
       authorName: string | null;
     },
   ): Promise<MaintenanceRequestComment>;
-  deleteMaintenanceRequestComment(id: string): Promise<void>;
+  deleteMaintenanceRequestComment(id: string): Promise<string[]>;
 
   // Bids on a project
   /** Every bid on a request, oldest first, so the list reads in the order they came in. */
@@ -383,7 +383,7 @@ export interface IStorage {
   getMaintenanceRequestBid(id: string): Promise<MaintenanceRequestBid | undefined>;
   createMaintenanceRequestBid(bid: InsertMaintenanceRequestBid & { requestId: string }): Promise<MaintenanceRequestBid>;
   updateMaintenanceRequestBid(id: string, data: Partial<InsertMaintenanceRequestBid>): Promise<MaintenanceRequestBid>;
-  deleteMaintenanceRequestBid(id: string): Promise<void>;
+  deleteMaintenanceRequestBid(id: string): Promise<string[]>;
   /**
    * Marks one bid accepted and every other bid on the request not, in one
    * transaction -- "at most one accepted bid" is enforced here, not by the
@@ -1902,8 +1902,12 @@ export class DatabaseStorage implements IStorage {
     return row;
   }
 
-  async deleteMaintenanceRequestComment(id: string): Promise<void> {
-    await db.delete(maintenanceRequestComments).where(eq(maintenanceRequestComments.id, id));
+  async deleteMaintenanceRequestComment(id: string): Promise<string[]> {
+    const deleted = await db
+      .delete(maintenanceRequestComments)
+      .where(eq(maintenanceRequestComments.id, id))
+      .returning({ url: maintenanceRequestComments.attachmentUrl });
+    return fileUrls(deleted);
   }
 
   // Bids Implementation
@@ -1934,8 +1938,12 @@ export class DatabaseStorage implements IStorage {
     return row;
   }
 
-  async deleteMaintenanceRequestBid(id: string): Promise<void> {
-    await db.delete(maintenanceRequestBids).where(eq(maintenanceRequestBids.id, id));
+  async deleteMaintenanceRequestBid(id: string): Promise<string[]> {
+    const deleted = await db
+      .delete(maintenanceRequestBids)
+      .where(eq(maintenanceRequestBids.id, id))
+      .returning({ url: maintenanceRequestBids.documentUrl });
+    return fileUrls(deleted);
   }
 
   async acceptMaintenanceRequestBid(requestId: string, bidId: string): Promise<MaintenanceRequestBid | undefined> {

@@ -30,8 +30,8 @@ import type { MaintenanceContact, MaintenanceRequestBid } from "@shared/schema";
  * Staff only, on a project only -- the page decides that and the server
  * refuses everything here on a repair. Exactly one bid can be accepted,
  * enforced on the server: accepting one un-accepts the others, and the
- * confirmation says so. Removing a bid removes the record and not the file
- * (known issue 1); the confirmation says that too.
+ * confirmation says so. Removing a bid deletes its quote too, and the
+ * confirmation says that as well.
  */
 
 interface RequestBidsProps {
@@ -225,7 +225,7 @@ export function RequestBids({ requestId, canEdit }: RequestBidsProps) {
             <AlertDialogTitle>Remove this bid?</AlertDialogTitle>
             <AlertDialogDescription data-testid="text-delete-bid-explainer">
               {pendingDelete?.documentUrl
-                ? `This removes the bid, not the file. ${pendingDelete.documentName || "The quote"} stays in storage.`
+                ? `This removes the bid and deletes ${pendingDelete.documentName || "the quote"} too.`
                 : "This removes the bid from the project's record. It cannot be undone."}
             </AlertDialogDescription>
           </AlertDialogHeader>

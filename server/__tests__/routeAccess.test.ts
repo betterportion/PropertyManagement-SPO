@@ -1617,23 +1617,40 @@ describe("a file on a comment", () => {
 
   // -- deleting -----------------------------------------------------------------
 
-  it("removes the comment and leaves its file in storage", async () => {
-    // Known issue 1, deliberately: the row goes, the object stays. The screen
-    // says so.
+  const COMMENT_WITH_FILE = {
+    id: "c-file",
+    requestId: OWN_HOUSE_OPEN.id,
+    body: "His quote is attached.",
+    isInternal: true,
+    authorUserId: STAFF.id,
+    attachmentUrl: UPLOAD_URL,
+    attachmentName: "quote.pdf",
+  };
+
+  it("removes the comment and its file", async () => {
+    // Known issue 1, closed for comments (JR, 2026-09-28): the confirmation
+    // says the file goes too.
     actAs(STAFF, westOnly);
-    storageMock.getMaintenanceRequestComment.mockResolvedValue({
-      id: "c-file",
-      requestId: OWN_HOUSE_OPEN.id,
-      body: "His quote is attached.",
-      isInternal: true,
-      authorUserId: STAFF.id,
-      attachmentUrl: UPLOAD_URL,
-      attachmentName: "quote.pdf",
-    });
+    storageMock.getMaintenanceRequestComment.mockResolvedValue(COMMENT_WITH_FILE);
     storageMock.getMaintenanceRequest.mockResolvedValue(OWN_HOUSE_OPEN);
+    storageMock.deleteMaintenanceRequestComment.mockResolvedValue([UPLOAD_URL]);
     expect((await del("/api/maintenance-request-comments/c-file")).status).toBe(200);
     expect(storageMock.deleteMaintenanceRequestComment).toHaveBeenCalledWith("c-file");
+    expect(fileStoreMock.removeUpload).toHaveBeenCalledWith(KEY);
+    expect(storageMock.deleteUpload).toHaveBeenCalledWith(KEY);
+  });
+
+  it("removes the comment and keeps a file another record still points at", async () => {
+    actAs(STAFF, westOnly);
+    storageMock.getMaintenanceRequestComment.mockResolvedValue(COMMENT_WITH_FILE);
+    storageMock.getMaintenanceRequest.mockResolvedValue(OWN_HOUSE_OPEN);
+    storageMock.deleteMaintenanceRequestComment.mockResolvedValue([UPLOAD_URL]);
+    storageMock.findUploadReferences.mockResolvedValue([{ kind: "maintenanceRequest", record: OWN_HOUSE_OPEN }]);
+    expect((await del("/api/maintenance-request-comments/c-file")).status).toBe(200);
+    expect(storageMock.deleteMaintenanceRequestComment).toHaveBeenCalledWith("c-file");
+    expect(storageMock.findUploadReferences).toHaveBeenCalledWith(UPLOAD_URL);
     expect(fileStoreMock.removeUpload).not.toHaveBeenCalled();
+    expect(storageMock.deleteUpload).not.toHaveBeenCalled();
   });
 });
 
@@ -2226,14 +2243,28 @@ describe("project fields and bids", () => {
 
   // -- deleting --------------------------------------------------------------------
 
-  it("removes the bid and leaves its document in storage", async () => {
-    // Known issue 1, deliberately: the row goes, the object stays. The
-    // screen says so.
+  it("removes the bid and its document", async () => {
+    // Known issue 1, closed for bids (JR, 2026-09-28): the confirmation says
+    // the document goes too.
     actAs(STAFF, westOnly);
     storageMock.getMaintenanceRequestBid.mockResolvedValue({ ...BID_B, documentUrl: UPLOAD_URL, documentName: "quote.pdf" });
+    storageMock.deleteMaintenanceRequestBid.mockResolvedValue([UPLOAD_URL]);
     expect((await del(BID("bid-b"))).status).toBe(200);
     expect(storageMock.deleteMaintenanceRequestBid).toHaveBeenCalledWith("bid-b");
+    expect(fileStoreMock.removeUpload).toHaveBeenCalledWith(KEY);
+    expect(storageMock.deleteUpload).toHaveBeenCalledWith(KEY);
+  });
+
+  it("removes the bid and keeps a document another record still points at", async () => {
+    actAs(STAFF, westOnly);
+    storageMock.getMaintenanceRequestBid.mockResolvedValue({ ...BID_B, documentUrl: UPLOAD_URL, documentName: "quote.pdf" });
+    storageMock.deleteMaintenanceRequestBid.mockResolvedValue([UPLOAD_URL]);
+    storageMock.findUploadReferences.mockResolvedValue([{ kind: "maintenanceRequestBid", record: BID_A }]);
+    expect((await del(BID("bid-b"))).status).toBe(200);
+    expect(storageMock.deleteMaintenanceRequestBid).toHaveBeenCalledWith("bid-b");
+    expect(storageMock.findUploadReferences).toHaveBeenCalledWith(UPLOAD_URL);
     expect(fileStoreMock.removeUpload).not.toHaveBeenCalled();
+    expect(storageMock.deleteUpload).not.toHaveBeenCalled();
   });
 
   it("refuses a household leader a delete, and removes nothing", async () => {
