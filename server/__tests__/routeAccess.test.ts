@@ -2462,6 +2462,34 @@ describe("submitting a maintenance request", () => {
     expect(created.type).not.toBe("capex");
   });
 
+  // A resident reports a problem; whether it is in hand or done is staff's
+  // call. A request filed already closed would never show as open work.
+  it("files a resident's request as pending whatever status the body claims, with no close date", async () => {
+    actAs(ALICE, ALL_MAINTENANCE);
+    storageMock.getActiveResidentByEmail.mockResolvedValue({ region: "West Central", buildingAddress: "1 Main St" });
+    storageMock.createMaintenanceRequest.mockImplementation(async (data: Record<string, unknown>) => ({ id: "new", ...data }));
+
+    for (const status of ["completed", "in_progress", "cancelled"]) {
+      expect((await request("POST", "/api/maintenance-requests", { body: { ...body, status } })).status, status).toBe(200);
+    }
+    for (const [created] of storageMock.createMaintenanceRequest.mock.calls) {
+      expect(created.status).toBe("pending");
+      expect(created.completedDate).toBeUndefined();
+    }
+    expect(storageMock.createMaintenanceRequest).toHaveBeenCalledTimes(3);
+  });
+
+  it("stores a closed status when staff file a request already resolved -- the positive control", async () => {
+    actAs(ADMIN);
+    storageMock.getPropertyByAddress.mockResolvedValue({ id: "prop-1", region: "West Central", address: "1 Main St" });
+    storageMock.createMaintenanceRequest.mockImplementation(async (data: Record<string, unknown>) => ({ id: "new", ...data }));
+    const { status } = await request("POST", "/api/maintenance-requests", {
+      body: { ...body, region: "West Central", buildingAddress: "1 Main St", status: "completed" },
+    });
+    expect(status).toBe(200);
+    expect(storageMock.createMaintenanceRequest).toHaveBeenCalledWith(expect.objectContaining({ status: "completed", completedDate: expect.any(Date) }));
+  });
+
   it("files a resident's request as a repair when the body says nothing about type", async () => {
     actAs(ALICE, ALL_MAINTENANCE);
     storageMock.getActiveResidentByEmail.mockResolvedValue({ region: "West Central", buildingAddress: "1 Main St" });
@@ -4013,6 +4041,42 @@ describe("residents completing their own house's walkthrough", () => {
     });
     expect(status).toBe(200);
     expect(storageMock.updateWalkthroughItem).toHaveBeenCalledWith("item-a", expect.objectContaining({ standingNote: "Photograph this each year" }));
+  });
+
+  // ── What else on an item a leader may write ─────────────────────────────
+  //
+  // A leader records condition and notes, and nothing else. The label and the
+  // order carry forward into next year's walkthrough, the move-out comparison
+  // and the damages worksheet, so a renamed item is a change to the house's
+  // record, which is staff work. Refused rather than dropped, like the
+  // standing note, so a client mistake is visible.
+
+  it.each([
+    ["label", { label: "Renamed sink" }],
+    ["displayOrder", { displayOrder: 7 }],
+    ["label alongside a condition", { condition: "good", label: "Renamed sink" }],
+  ])("refuses a leader writing %s on an item, and writes nothing", async (_name, body) => {
+    leaderOfHouseA();
+    ownHouse();
+    expect((await request("PATCH", "/api/walkthrough-items/item-a", { body })).status).toBe(403);
+    expect(storageMock.updateWalkthroughItem).not.toHaveBeenCalled();
+  });
+
+  it("records a leader's condition and notes -- the positive control", async () => {
+    leaderOfHouseA();
+    ownHouse();
+    storageMock.updateWalkthroughItem.mockResolvedValue({ ...ITEM_A, condition: "damaged", notes: "Hole by the door" });
+    const { status } = await request("PATCH", "/api/walkthrough-items/item-a", { body: { condition: "damaged", notes: "Hole by the door" } });
+    expect(status).toBe(200);
+    expect(storageMock.updateWalkthroughItem).toHaveBeenCalledWith("item-a", { condition: "damaged", notes: "Hole by the door" });
+  });
+
+  it("lets staff rename an item -- the control that proves the label reaches storage", async () => {
+    actAs(STAFF, { canViewWalkthroughs: true, canManageWalkthroughs: true, allowedRegions: ["West Central"] });
+    ownHouse();
+    storageMock.updateWalkthroughItem.mockResolvedValue({ ...ITEM_A, label: "Kitchen sink" });
+    expect((await request("PATCH", "/api/walkthrough-items/item-a", { body: { label: "Kitchen sink" } })).status).toBe(200);
+    expect(storageMock.updateWalkthroughItem).toHaveBeenCalledWith("item-a", expect.objectContaining({ label: "Kitchen sink" }));
   });
 
   // ── Submitting and reviewing (2026-09 RA review, 7.1) ────────────────────
