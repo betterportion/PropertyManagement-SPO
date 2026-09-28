@@ -18,6 +18,30 @@ test.describe("authentication", () => {
     await context.close();
   });
 
+  test("a signed-out visitor can read the privacy notice without signing in", async ({ browser }) => {
+    const context = await browser.newContext({ storageState: { cookies: [], origins: [] } });
+    const page = await context.newPage();
+    // Reached from the landing page's link, and directly.
+    await page.goto("/");
+    await page.getByTestId("link-privacy").click();
+    await expect(page).toHaveURL(/\/privacy$/);
+    await expect(page.getByRole("heading", { name: "SPO Admin Portal Privacy Notice" })).toBeVisible();
+    await page.goto("/privacy");
+    await expect(page.getByRole("heading", { name: "SPO Admin Portal Privacy Notice" })).toBeVisible();
+    await expect(page.getByTestId("text-privacy-notice")).toContainText("hr@spo.org");
+    await expect(page.getByTestId("button-login")).toHaveCount(0);
+    await context.close();
+  });
+
+  test("a deactivated account can still read the privacy notice", async ({ browser }) => {
+    const context = await browser.newContext({ storageState: "e2e/.auth/inactive.json" });
+    const page = await context.newPage();
+    await page.goto("/privacy");
+    await expect(page.getByRole("heading", { name: "SPO Admin Portal Privacy Notice" })).toBeVisible();
+    await expect(page.getByTestId("text-account-inactive")).toHaveCount(0);
+    await context.close();
+  });
+
   test("a deactivated account is told so, instead of seeing the staff screens", async ({ browser }) => {
     const context = await browser.newContext({ storageState: "e2e/.auth/inactive.json" });
     const page = await context.newPage();

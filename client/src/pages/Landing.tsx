@@ -3,6 +3,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Building2, Wrench, Camera, Package, Users } from "lucide-react";
 import spoLogo from "@assets/SPO Logo under 600x600px_SPO Vertical - Ocean_1763138801065.png";
 import { Section, Container, PageStack } from "@/components/layout/page";
+import { Link } from "wouter";
+import { PRIVACY_PATH } from "@/lib/publicPages";
 
 const features = [
   {
@@ -78,6 +80,14 @@ export default function Landing() {
               </div>
             </CardContent>
           </Card>
+
+          <Link
+            href={PRIVACY_PATH}
+            className="rounded-md text-sm text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            data-testid="link-privacy"
+          >
+            Privacy
+          </Link>
         </PageStack>
       </Container></Section>
     </div>

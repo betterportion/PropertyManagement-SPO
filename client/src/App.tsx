@@ -13,6 +13,8 @@ import { canFillInWalkthroughs, canSeeResourceHub, type WalkthroughUser } from "
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import NotFound from "@/pages/not-found";
 import Landing from "@/pages/Landing";
+import PrivacyNotice from "@/pages/PrivacyNotice";
+import { isPublicPage } from "@/lib/publicPages";
 import AccountInactive from "@/pages/AccountInactive";
 import AdminDashboard from "@/pages/AdminDashboard";
 import Maintenance from "@/pages/Maintenance";
@@ -136,6 +138,12 @@ function AppContent() {
     "--sidebar-width": "16rem",
     "--sidebar-width-icon": "3rem",
   };
+
+  // Before the sign-in and account checks: readable signed out, signed in or
+  // deactivated, and never inside the sidebar (lib/publicPages.ts).
+  if (isPublicPage(location)) {
+    return <PrivacyNotice />;
+  }
 
   if (isLoading || !isAuthenticated) {
     return (
