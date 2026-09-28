@@ -212,9 +212,16 @@ export function assetLifecycle(asset: LifecycleAsset, now: Date = new Date()): L
   const snoozed = snoozedUntil !== null && !hasBegunEverywhere(new Date(snoozedUntil), now);
 
   if (due === null) {
+    // Two different reasons, and the label names the right one: a dated asset
+    // is unrated only because its category has no default lifespan (Artwork,
+    // Musical Instruments), and telling somebody the date is missing beside a
+    // detail page that shows it sends them hunting for nothing.
+    const hasDate = time(asset.acquisitionDate) !== null;
     return {
       status: "unrated",
-      label: "Unrated — no acquisition date",
+      label: hasDate
+        ? "Unrated — no standard lifespan for this category"
+        : "Unrated — no acquisition date",
       dueDate: null,
       snoozed,
     };

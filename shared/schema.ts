@@ -3,6 +3,7 @@ import { pgTable, text, varchar, timestamp, jsonb, index, uniqueIndex, boolean, 
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import { RESOURCE_HUB_SLOT_KEYS } from "./resourceHubSlots";
+import { ASSET_CATEGORIES } from "./assetLifecycle";
 
 /**
  * Field builders that reconcile three views of the same value: what a JSON
@@ -648,6 +649,10 @@ export const insertAssetSchema = createInsertSchema(assets)
     snoozedAt: true,
   })
   .extend({
+    // The column is plain varchar; the list is what gives a category its
+    // default lifespan and its fixed/movable answer. Anything else stored
+    // silently reads as unrated forever.
+    category: z.enum(ASSET_CATEGORIES, { errorMap: () => ({ message: "Choose a category from the list" }) }),
     ageInYears: nonNegativeInt,
     purchasePrice: nonNegativeAmount.nullish(),
     currentValue: nonNegativeAmount.nullish(),

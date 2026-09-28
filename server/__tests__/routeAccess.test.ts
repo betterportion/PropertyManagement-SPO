@@ -5334,6 +5334,21 @@ describe("snoozing an asset an RA is confident about", () => {
     expect(patch).not.toHaveProperty("snoozeReason");
   });
 
+  it("refuses an asset PATCH that sets a category not on the list (#161)", async () => {
+    westLead();
+    const { status } = await request("PATCH", "/api/assets/asset-west", { body: { category: "Vehicle" } });
+    expect(status).toBe(400);
+    expect(storageMock.updateAsset).not.toHaveBeenCalled();
+  });
+
+  it("takes an asset PATCH that sets a category on the list (#161)", async () => {
+    // The positive control for the refusal above.
+    westLead();
+    const { status } = await request("PATCH", "/api/assets/asset-west", { body: { category: "Tools" } });
+    expect(status).toBe(200);
+    expect(storageMock.updateAsset.mock.calls[0][1].category).toBe("Tools");
+  });
+
   it("still lets the ordinary PATCH edit the replacement date", async () => {
     // The positive control, and the distinction that matters: editing the date
     // is the permanent correction and belongs on the asset form. Snoozing is
@@ -5402,7 +5417,7 @@ describe("snoozing an asset an RA is confident about", () => {
 describe("asset creation input validation", () => {
   const baseAsset = {
     name: "Fridge",
-    category: "Appliance",
+    category: "Appliances - Large",
     type: "movable",
     ageInYears: 2,
     region: "West Central",
@@ -5452,6 +5467,15 @@ describe("asset creation input validation", () => {
   it("rejects a non-numeric purchasePrice", async () => {
     actAs(ADMIN);
     const { status } = await request("POST", "/api/assets", { body: { ...baseAsset, purchasePrice: "abc" } });
+    expect(status).toBe(400);
+    expect(storageMock.createAsset).not.toHaveBeenCalled();
+  });
+
+  it("rejects a category that is not on the list (#161)", async () => {
+    // A category outside ASSET_CATEGORIES has no lifespan and no fixed/movable
+    // answer, so every such asset silently reads as unrated.
+    actAs(ADMIN);
+    const { status } = await request("POST", "/api/assets", { body: { ...baseAsset, category: "Appliance" } });
     expect(status).toBe(400);
     expect(storageMock.createAsset).not.toHaveBeenCalled();
   });

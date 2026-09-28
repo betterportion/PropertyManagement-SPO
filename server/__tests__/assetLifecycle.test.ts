@@ -120,6 +120,30 @@ describe("how loudly to say an asset is due", () => {
     expect(state.label).toMatch(/unrated|no acquisition date/i);
   });
 
+  it("says the category has no lifespan, not that the date is missing, for a dated asset (#161)", () => {
+    // A piano with a purchase date is unrated because pianos do not wear out
+    // on a schedule. Saying "no acquisition date" beside a detail page that
+    // shows one sends somebody hunting for a date that is already there.
+    const state = assetLifecycle(asset({ category: "Artwork", acquisitionDate: new Date("2020-01-01T00:00:00Z") }), NOW);
+    expect(state.status).toBe("unrated");
+    expect(state.label).toBe("Unrated — no standard lifespan for this category");
+  });
+
+  it("keeps 'no acquisition date' for an asset that has none (#161)", () => {
+    const state = assetLifecycle(asset({ category: "Water Heater", acquisitionDate: null }), NOW);
+    expect(state.label).toBe("Unrated — no acquisition date");
+  });
+
+  it("uses the category's own lifespan once the asset carries one of its own (#161)", () => {
+    // The per-asset override rates an Artwork row; the label must not claim
+    // otherwise once it does.
+    const state = assetLifecycle(
+      asset({ category: "Artwork", acquisitionDate: new Date("2020-01-01T00:00:00Z"), expectedLifespanYears: 50 }),
+      NOW,
+    );
+    expect(state.status).toBe("ok");
+  });
+
   it("is fine when replacement is further out than the warning threshold", () => {
     const state = assetLifecycle(asset({ replacementDueDate: yearsAway(LIFECYCLE_WARN_YEARS + 1) }), NOW);
     expect(state.status).toBe("ok");
