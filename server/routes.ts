@@ -257,6 +257,33 @@ const auditLogQuerySchema = z.object({
 });
 
 /**
+ * Where a walkthrough room sits: its walkthrough's region, house and property.
+ * Read off the walkthrough, never off a request body or the room's loose
+ * propertyId, either of which a hand-made request could name freely. A legacy
+ * room with no walkthrough falls back to its property. Undefined when the
+ * room, its walkthrough or its property is missing -- the caller refuses.
+ */
+async function roomScope(
+  roomId: string | null | undefined,
+): Promise<{ region: string; buildingAddress: string; propertyId: string } | undefined> {
+  const room = roomId ? await storage.getWalkthroughRoom(roomId) : undefined;
+  if (!room) return undefined;
+  return walkthroughScope(room.walkthroughId, room.propertyId);
+}
+
+async function walkthroughScope(
+  walkthroughId: string | null | undefined,
+  legacyPropertyId?: string | null,
+): Promise<{ region: string; buildingAddress: string; propertyId: string } | undefined> {
+  if (walkthroughId) {
+    const walkthrough = await storage.getWalkthrough(walkthroughId);
+    return walkthrough && { region: walkthrough.region, buildingAddress: walkthrough.buildingAddress, propertyId: walkthrough.propertyId };
+  }
+  const property = legacyPropertyId ? await storage.getProperty(legacyPropertyId) : undefined;
+  return property && { region: property.region, buildingAddress: property.address, propertyId: property.id };
+}
+
+/**
  * Shared guard for linking and unlinking a vendor contact on a maintenance
  * request. Both sides of the relationship are checked: it is not enough to
  * reach the request if the contact belongs to another region, because linking
@@ -264,28 +291,6 @@ const auditLogQuerySchema = z.object({
  *
  * Returns false having already sent a response when access is denied.
  */
-/**
- * Region guard for a walkthrough room, whose region comes from the property it
- * belongs to rather than from the room itself.
- *
- * Fails closed for non-admins when the region cannot be resolved -- an
- * unattached room, or one pointing at a property that no longer exists. This
- * matches how the room list filters, so a room that a user cannot see in the
- * list is also one they cannot edit or delete by ID.
- */
-async function requireRoomRegion(
-  res: import("express").Response,
-  ctx: AuthContext,
-  propertyId: string | null | undefined,
-): Promise<boolean> {
-  if (ctx.isAdmin) return true;
-
-  const property = propertyId ? await storage.getProperty(propertyId) : undefined;
-  // requireRegion rejects an undefined region, which is the behaviour we want
-  // here, and keeps the denial message consistent with every other route.
-  return requireRegion(res, ctx, property?.region);
-}
-
 async function resolveContactLink(
   res: import("express").Response,
   ctx: AuthContext,
@@ -2322,15 +2327,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const validatedData = insertWalkthroughRoomSchema.parse(req.body);
 
-      if (validatedData.propertyId) {
-        const property = await storage.getProperty(validatedData.propertyId);
-        if (!property) {
-          return res.status(404).json({ message: "Property not found" });
-        }
-        if (!requireRegion(res, ctx, property.region, "Forbidden - Cannot create in this region")) return;
+      // A room belongs to a walkthrough, and the walkthrough carries the
+      // region. The house and property come from it, never from the body.
+      if (!validatedData.walkthroughId) {
+        return res.status(400).json({ message: "A room belongs to a walkthrough. Choose the walkthrough to add it to." });
       }
+      const scope = await walkthroughScope(validatedData.walkthroughId);
+      if (!scope) {
+        return res.status(404).json({ message: "Walkthrough not found" });
+      }
+      if (!requireRegion(res, ctx, scope.region, "Forbidden - Cannot create in this region")) return;
 
-      const room = await storage.createWalkthroughRoom(validatedData);
+      const room = await storage.createWalkthroughRoom({
+        ...validatedData,
+        propertyId: scope.propertyId,
+        buildingAddress: scope.buildingAddress,
+      });
       res.json(room);
     } catch (error) {
       sendError(res, error, "Failed to create walkthrough room");
@@ -2349,17 +2361,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Walkthrough room not found" });
       }
 
-      if (!(await requireRoomRegion(res, ctx, existingRoom.propertyId))) return;
+      const scope = await walkthroughScope(existingRoom.walkthroughId, existingRoom.propertyId);
+      if (!requireRegion(res, ctx, scope?.region)) return;
 
-      const validatedData = insertWalkthroughRoomSchema.partial().parse(req.body);
-
-      if (validatedData.propertyId && validatedData.propertyId !== existingRoom.propertyId) {
-        const targetProperty = await storage.getProperty(validatedData.propertyId);
-        if (!targetProperty) {
-          return res.status(404).json({ message: "Property not found" });
-        }
-        if (!requireRegion(res, ctx, targetProperty.region, "Forbidden - Cannot move to this region")) return;
-      }
+      // A room stays in the walkthrough it was made for: the fields that say
+      // where it is are not editable here, so an edit cannot move it into
+      // somebody else's region.
+      const validatedData = insertWalkthroughRoomSchema
+        .omit({ walkthroughId: true, propertyId: true, buildingAddress: true })
+        .partial()
+        .parse(req.body);
 
       const room = await storage.updateWalkthroughRoom(req.params.id, validatedData);
       res.json(room);
@@ -2380,7 +2391,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Walkthrough room not found" });
       }
 
-      if (!(await requireRoomRegion(res, ctx, existingRoom.propertyId))) return;
+      if (!requireRegion(res, ctx, (await walkthroughScope(existingRoom.walkthroughId, existingRoom.propertyId))?.region)) return;
 
       await removeDeletedRecordFiles(await storage.deleteWalkthroughRoom(req.params.id));
       res.json({ success: true });
@@ -2427,13 +2438,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const validatedData = insertWalkthroughPhotoSchema.parse(req.body);
 
-      if (!requireRegion(res, ctx, validatedData.region, "Forbidden - Cannot create in this region")) return;
+      // The room's walkthrough decides the region and the house; the body's
+      // copies are overwritten, because the photo's own region is what every
+      // later read of it trusts.
+      const scope = await roomScope(validatedData.roomId);
+      if (!scope) {
+        return res.status(404).json({ message: "Walkthrough room not found" });
+      }
+      if (!requireRegion(res, ctx, scope.region, "Forbidden - Cannot create in this region")) return;
       await requireOwnUploads(ctx, validatedData, ["imageUrl"]);
 
       // Attribution comes from the session, never the body, so a caller cannot
       // credit a photo to someone else (matches submittedBy on requests).
       const photo = await storage.createWalkthroughPhoto({
         ...validatedData,
+        region: scope.region,
+        buildingAddress: scope.buildingAddress,
         uploadedBy: ctx.user.email || "Unknown",
       });
       res.json(photo);
@@ -2454,9 +2474,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Walkthrough photo not found" });
       }
 
-      const validatedData = insertWalkthroughPhotoSchema.partial().parse(req.body);
+      if (!requireRegion(res, ctx, (await roomScope(existingPhoto.roomId))?.region)) return;
 
-      if (!requireRegionMove(res, ctx, existingPhoto.region, validatedData.region)) return;
+      // A photo stays in its room, and its region and house follow the room.
+      const validatedData = insertWalkthroughPhotoSchema
+        .omit({ roomId: true, region: true, buildingAddress: true })
+        .partial()
+        .parse(req.body);
       await requireOwnUploads(ctx, validatedData, ["imageUrl"], existingPhoto);
 
       const photo = await storage.updateWalkthroughPhoto(req.params.id, validatedData);
