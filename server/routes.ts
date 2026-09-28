@@ -71,6 +71,7 @@ import {
   insertMaintenanceScheduleSchema,
   insertResidentSchema,
   insertRentPaymentSchema,
+  RENT_PERIOD_PATTERN,
   insertSecurityDepositSchema,
   insertDepositDeductionSchema,
   insertTaskSchema,
@@ -98,11 +99,11 @@ import { buildActionItems } from "./actionItems";
 import { closedDateChange } from "./maintenanceStatus";
 import { commentBodyFromClient } from "./comments";
 import { planFromTemplate, planFromPreviousWalkthrough, templateRoomItems } from "./walkthroughTemplate";
-import { parseResidentCsv, buildImportPreview } from "./residentImport";
+import { parseResidentCsv, buildImportPreview, checkImportRow } from "./residentImport";
 import { SETUP_ITEMS, setupItemsFor } from "@shared/propertySetup";
 import { RESIDENT_DOCUMENTS, isKnownResidentDocument } from "@shared/residentDocuments";
 import { buildRegionSummaries, type RegionStaff } from "./regionSummary";
-import { fromCents, splitEvenly, toCents } from "@shared/depositLedger";
+import { fromCents, returnedExceedsHeld, splitEvenly, toCents } from "@shared/depositLedger";
 import { hasBegunEverywhere } from "@shared/dueDates";
 import { randomUUID } from "crypto";
 import { contractorLoad, recurringIssues } from "./aggregates";
@@ -320,6 +321,8 @@ const CLEARED_PROJECT_FIELDS = { contractUrl: null, estimatedCost: null, actualC
 
 const NOT_A_HOUSE_MESSAGE = "Choose one of the portal's houses for this request.";
 
+const RETURNED_OVER_HELD = "The amount returned cannot be more than the amount held.";
+
 function projectFieldsProblem(
   nextType: string,
   patch: Partial<InsertMaintenanceRequest>,
@@ -423,14 +426,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!requireAdmin(res, ctx)) return;
 
       const { isActive } = statusUpdateSchema.parse(req.body);
-      const previous = await auditLookup(() => storage.getUser(req.params.id));
+      // Looked up for real, not through auditLookup: user.status_changed is
+      // kept indefinitely, and an event about an account that does not exist
+      // would sit in the log for good.
+      const previous = await storage.getUser(req.params.id);
+      if (!previous) {
+        return res.status(404).json({ message: "User not found" });
+      }
       const user = await storage.updateUserActiveStatus(req.params.id, isActive);
 
       recordAuditEvent(ctx, {
         action: AUDIT_ACTIONS.USER_STATUS_CHANGED,
         entityType: "user",
         entityId: req.params.id,
-        summary: `${isActive ? "Reactivated" : "Deactivated"} ${previous?.email ?? req.params.id}`,
+        summary: `${isActive ? "Reactivated" : "Deactivated"} ${previous.email ?? req.params.id}`,
         details: { isActive },
       });
 
@@ -1343,6 +1352,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!found) return;
 
       const parsed = insertMaintenanceRequestBidSchema.partial().parse(req.body);
+      // The schema strips what an edit may not touch (accepted, the request,
+      // the id); a body of only those leaves nothing for the database to set.
+      if (Object.keys(parsed).length === 0) {
+        return res.status(400).json({ message: "There is nothing to change on this bid" });
+      }
       // The vendor rule holds over the row as it will be, not the patch alone:
       // an edit that clears the name on a bid with no contact leaves nobody.
       if (!bidNamesAVendor({ ...found.bid, ...parsed })) return res.status(400).json({ message: NO_VENDOR });
@@ -3341,16 +3355,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // The confirm step re-derives everything rather than trusting what the
         // preview said. The roster can have moved on between the two requests,
         // and the rows arrive from a client that could have edited them.
+        // The row checks run again too, so a date the preview would have
+        // refused is refused here rather than rolled into the next month.
         const existing = await storage.getResidentsByProperty(property.id);
         const preview = buildImportPreview(
-          { rows: rows.map((row, index) => ({ ...row, rowNumber: index + 1, errors: [] })), fileErrors: [] },
+          { rows: rows.map((row, index) => checkImportRow(index + 1, row)), fileErrors: [] },
           existing.map((resident) => resident.email),
         );
+        const unusable = preview.outcomes.find((outcome) => outcome.kind === "error");
+        if (unusable) {
+          return res.status(400).json({ message: `Row ${unusable.row.rowNumber}: ${unusable.reason}` });
+        }
 
-        const created = [];
-        for (const outcome of preview.outcomes) {
-          if (outcome.kind !== "create") continue;
-          const validated = insertResidentSchema.parse({
+        // Every row is validated before any is written, and all of them go
+        // in one insert, so a failure leaves the roster as it was rather than
+        // half-imported.
+        const toCreate = preview.outcomes
+          .filter((outcome) => outcome.kind === "create")
+          .map((outcome) => insertResidentSchema.parse({
             propertyId: property.id,
             firstName: outcome.row.firstName,
             lastName: outcome.row.lastName,
@@ -3361,13 +3383,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
             moveInDate: outcome.row.moveInDate,
             region: property.region,
             buildingAddress: property.address,
-          });
-          created.push(await storage.createResident(validated));
-        }
+          }));
+        const created = toCreate.length > 0 ? await storage.createResidents(toCreate) : [];
 
         res.json({
           created: created.length,
-          skipped: preview.counts.duplicate + preview.counts.error,
+          skipped: preview.counts.duplicate,
           residents: created,
         });
       } catch (error) {
@@ -3569,7 +3590,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!requirePermission(res, ctx, "canManageFinancials")) return;
 
       const { propertyId, period } = req.body ?? {};
-      if (!/^\d{4}-\d{2}$/.test(period ?? "")) {
+      if (!RENT_PERIOD_PATTERN.test(period ?? "")) {
         return res.status(400).json({ message: "Use a YYYY-MM month" });
       }
       const property = await storage.getProperty(propertyId);
@@ -3719,6 +3740,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         region: resident.region,
         buildingAddress: resident.buildingAddress,
       });
+      if (returnedExceedsHeld(validatedData.amountHeld, validatedData.amountReturned)) {
+        return res.status(400).json({ message: RETURNED_OVER_HELD });
+      }
       const deposit = await storage.createSecurityDeposit(validatedData);
 
       recordAuditEvent(ctx, {
@@ -3750,6 +3774,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const { residentId: _r, propertyId: _p, region: _re, buildingAddress: _b, ...editable } = req.body ?? {};
       const validatedData = insertSecurityDepositSchema.partial().parse(editable);
+      const held = validatedData.amountHeld !== undefined ? validatedData.amountHeld : existing.amountHeld;
+      const returned = validatedData.amountReturned !== undefined ? validatedData.amountReturned : existing.amountReturned;
+      if (returnedExceedsHeld(held, returned)) {
+        return res.status(400).json({ message: RETURNED_OVER_HELD });
+      }
       const deposit = await storage.updateSecurityDeposit(req.params.id, validatedData);
 
       recordAuditEvent(ctx, {
@@ -3919,7 +3948,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
             .max(300, "Keep the description under 300 characters"),
           amount: z.coerce.number().finite().min(0, "Must be 0 or greater").refine(isWholeCents, WHOLE_CENTS_MESSAGE),
           chargeDate: z.coerce.date(),
-          residentIds: z.array(z.string().min(1)).min(1, "Choose at least one person to split this across"),
+          residentIds: z
+            .array(z.string().min(1))
+            .min(1, "Choose at least one person to split this across")
+            // A name twice is two shares of one charge on one person.
+            .refine((ids) => new Set(ids).size === ids.length, "Each person can be in a split only once"),
           // The same loose links the single-deduction route accepts, so a
           // split raised from the move-out worksheet stays traceable to the
           // walkthrough item that found the damage.

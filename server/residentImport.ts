@@ -140,6 +140,47 @@ export function parseImportDate(value: string): { date: string | null; error?: s
   return { date: `${year}-${pad(month)}-${pad(day)}` };
 }
 
+/** One row's cells, as a CSV record or as the confirm step's body sends them. */
+export type ImportRowFields = Partial<Record<
+  "firstName" | "lastName" | "email" | "phone" | "roomName" | "notes" | "moveInDate",
+  string | null
+>>;
+
+/**
+ * Cleans one row and says what is wrong with it.
+ *
+ * The one rule for a usable row. The preview runs it over the file and the
+ * confirm step runs it again over what the client sends back, because the
+ * rows arrive from a client that could have edited them -- a confirm that
+ * skipped it stored 2026-02-30 as March 2.
+ */
+export function checkImportRow(rowNumber: number, record: ImportRowFields): ParsedResidentRow {
+  const errors: string[] = [];
+
+  const firstName = cleanCell(record.firstName);
+  const lastName = cleanCell(record.lastName);
+  const email = cleanCell(record.email);
+  if (!firstName) errors.push("First name is missing");
+  if (!lastName) errors.push("Last name is missing");
+  if (!email) errors.push("Email is missing");
+  else if (!EMAIL_SHAPE.test(email)) errors.push(`"${email}" is not a valid email address`);
+
+  const { date: moveInDate, error: dateError } = parseImportDate(cleanCell(record.moveInDate));
+  if (dateError) errors.push(dateError);
+
+  return {
+    rowNumber,
+    firstName,
+    lastName,
+    email,
+    phone: cleanCell(record.phone) || null,
+    roomName: cleanCell(record.roomName) || null,
+    notes: cleanCell(record.notes) || null,
+    moveInDate,
+    errors,
+  };
+}
+
 /**
  * Parses a roster CSV into rows, each carrying its own errors.
  *
@@ -170,32 +211,7 @@ export function parseResidentCsv(text: string): ParsedResidentCsv {
     };
   }
 
-  const rows = (parsed.data ?? []).map((record, index): ParsedResidentRow => {
-    const errors: string[] = [];
-
-    const firstName = cleanCell(record.firstName);
-    const lastName = cleanCell(record.lastName);
-    const email = cleanCell(record.email);
-    if (!firstName) errors.push("First name is missing");
-    if (!lastName) errors.push("Last name is missing");
-    if (!email) errors.push("Email is missing");
-    else if (!EMAIL_SHAPE.test(email)) errors.push(`"${email}" is not a valid email address`);
-
-    const { date: moveInDate, error: dateError } = parseImportDate(cleanCell(record.moveInDate));
-    if (dateError) errors.push(dateError);
-
-    return {
-      rowNumber: index + 1,
-      firstName,
-      lastName,
-      email,
-      phone: cleanCell(record.phone) || null,
-      roomName: cleanCell(record.roomName) || null,
-      notes: cleanCell(record.notes) || null,
-      moveInDate,
-      errors,
-    };
-  });
+  const rows = (parsed.data ?? []).map((record, index) => checkImportRow(index + 1, record));
 
   return { rows, fileErrors: rows.length === 0 ? ["The file has a header but no rows"] : [] };
 }

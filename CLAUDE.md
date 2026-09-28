@@ -370,6 +370,7 @@ The route (`emailThreadAbout` in `routes.ts`) saves the comment first, then reso
 
 - **A split is stored as individual per-person line items, never a shared charge with a divisor.** This is the important part: a later edit must not silently re-divide somebody's already-settled balance. `splitGroupId` exists for provenance and display and **nothing ever recomputes from it**. The whole split is written in one `createDepositDeductions` call, so a house is never half-charged.
 - **The remainder is spread a cent at a time from the top**, so nobody pays more than a cent above anybody else. $100 across 3 is 33.34/33.33/33.33; $250 across 7 is three of 35.72 then four of 35.71. Those worked examples are in the tests as hand-computed literals, never recomputed the way the code does.
+- **A deposit never records more returned than held.** `returnedExceedsHeld` checks it in cents over the row as it will be (an edit sends only what changed), on create and edit alike.
 - **A balance may go negative and says so.** Damage can exceed a deposit, and clamping to zero would hide the shortfall from the person who has to decide about it.
 - **The legacy `deductionsNotes` is displayed as history and never parsed into rows.** It is free text written by people, and a migration that guessed would be wrong in ways nobody notices until a deposit is short.
 
@@ -489,7 +490,7 @@ Any new upload route should go through `guardedUpload()` too, and its permission
 
 - **The property is in the URL, not a form field**, so the multipart request still carries one part and no text fields — the property the other upload routes rely on to bound what a request can cost.
 - **The CSV is never stored.** It is decoded, parsed and dropped. That is also why there is no magic-byte check here: a CSV has no signature, and nothing reaches a bucket for a disguised file to sit in.
-- **The confirm step re-derives everything** — it re-reads the roster, re-runs the duplicate check, and takes `propertyId`, `region` and `buildingAddress` from the property rather than from the body. The rows arrive from a client that could have edited them, and the roster can have moved on between the two calls.
+- **The confirm step re-derives everything** — it re-reads the roster, re-runs the duplicate check **and the row checks** (`checkImportRow`, the same rule the preview runs, so a date like 2026-02-30 is refused rather than rolled into March), and takes `propertyId`, `region` and `buildingAddress` from the property rather than from the body. Any unusable row refuses the whole confirm with a 400, and the rows go in with one `createResidents` insert, so a failure never leaves a roster half-imported. The rows arrive from a client that could have edited them, and the roster can have moved on between the two calls.
 
 **Any URL the portal stores and later renders into an `href` is scheme-checked at the API boundary**, by `httpUrlFromClient` in `shared/schema.ts` — http and https only. `new URL()` on its own accepts `javascript:`, and the property page renders `leaseDocumentUrl` and `maintenancePortalUrl` as clickable links, so a form-only check would leave the API accepting whatever it was sent. An empty string means "cleared" and normalises to null, because an untouched input sends one. Changing either link, or the photo, records `property.documents_changed`.
 
