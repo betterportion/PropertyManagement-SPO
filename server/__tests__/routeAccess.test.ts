@@ -6019,6 +6019,54 @@ describe("moving a resident out", () => {
   });
 });
 
+describe("deleting a resident", () => {
+  const ALL_PROPERTIES = { canViewProperties: true, canManageProperties: true };
+  const WEST_RESIDENT = {
+    id: "res-1",
+    propertyId: "prop-1",
+    firstName: "Maria",
+    lastName: "Gonzalez",
+    email: "maria@spo.org",
+    phone: "555-0100",
+    region: "West Central",
+    buildingAddress: "1 Main St",
+    isActive: true,
+  };
+
+  it("records who was removed from which house, and nothing more personal", async () => {
+    actAs(STAFF, { ...ALL_PROPERTIES, allowedRegions: ["West Central"] });
+    storageMock.getResident.mockResolvedValue(WEST_RESIDENT);
+
+    const { status } = await request("DELETE", "/api/residents/res-1");
+
+    expect(status).toBe(200);
+    expect(storageMock.deleteResident).toHaveBeenCalledWith("res-1");
+    expect(storageMock.createAuditEvent).toHaveBeenCalledTimes(1);
+    const event = storageMock.createAuditEvent.mock.calls[0][0];
+    expect(event).toMatchObject({
+      action: "resident.deleted",
+      actorId: STAFF.id,
+      entityType: "resident",
+      entityId: "res-1",
+      summary: "Removed Maria Gonzalez from the roster at 1 Main St",
+    });
+    // The contact details went with the row; the log must not keep them.
+    expect(JSON.stringify(event)).not.toContain("maria@spo.org");
+    expect(JSON.stringify(event)).not.toContain("555-0100");
+  });
+
+  it("records nothing when the delete is refused", async () => {
+    actAs(STAFF, { ...ALL_PROPERTIES, allowedRegions: ["East Central"] });
+    storageMock.getResident.mockResolvedValue(WEST_RESIDENT);
+
+    const { status } = await request("DELETE", "/api/residents/res-1");
+
+    expect(status).toBe(403);
+    expect(storageMock.deleteResident).not.toHaveBeenCalled();
+    expect(storageMock.createAuditEvent).not.toHaveBeenCalled();
+  });
+});
+
 describe("deleting a record removes the files it held", () => {
   const WEST_PHOTO = { id: "wp-1", roomId: "room-1", imageUrl: "/uploads/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.jpg", region: "West Central" };
   const WEST_PROPERTY_ROW = { id: "prop-1", name: "Cleveland House", address: "1 Main St", region: "West Central" };

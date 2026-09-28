@@ -3522,6 +3522,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!requireRegion(res, ctx, existing.region)) return;
 
       await storage.deleteResident(req.params.id);
+
+      // The roster row goes and its HH fee charges, deposits and paperwork go
+      // with it by cascade, so this is the only record left that the person
+      // was ever on it.
+      recordAuditEvent(ctx, {
+        action: AUDIT_ACTIONS.RESIDENT_DELETED,
+        entityType: "resident",
+        entityId: existing.id,
+        summary: `Removed ${existing.firstName} ${existing.lastName} from the roster at ${existing.buildingAddress}`,
+        details: { propertyId: existing.propertyId, isActive: existing.isActive, region: existing.region },
+      });
+
       res.json({ success: true });
     } catch (error) {
       sendError(res, error, "Failed to remove resident");
