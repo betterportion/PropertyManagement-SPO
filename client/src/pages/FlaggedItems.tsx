@@ -71,6 +71,8 @@ export default function FlaggedItems() {
     },
     onSuccess: (request) => {
       queryClient.invalidateQueries({ queryKey: ["/api/maintenance-requests"] });
+      // The Patterns tab rolls up requests and contractor links; nothing refetches on its own.
+      queryClient.invalidateQueries({ queryKey: ["/api/maintenance-aggregates"] });
       queryClient.invalidateQueries({ queryKey: ["/api/maintenance-request-photos"] });
       setSending(null);
       navigate(`/maintenance/${request.id}`);

@@ -24,6 +24,7 @@ import { EmptyState, ErrorState, LoadingState } from "@/components/states";
 import { CommentAttachmentField, type PendingAttachment } from "@/components/CommentAttachmentField";
 import { useToast } from "@/hooks/use-toast";
 import { formatDateTime } from "@/lib/format";
+import { serverMessage } from "@/lib/serverMessage";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { MaintenanceContact, MaintenanceRequestComment } from "@shared/schema";
 
@@ -117,7 +118,7 @@ export default function RequestThread({ requestId, commentsQuery, isStaff, isAdm
       setIsInternal(true);
     },
     onError: (error: Error) => {
-      toast({ title: "The comment was not posted", description: error.message, variant: "destructive" });
+      toast({ title: "The comment was not posted", description: serverMessage(error) ?? "Please try again.", variant: "destructive" });
     },
   });
 
@@ -125,7 +126,7 @@ export default function RequestThread({ requestId, commentsQuery, isStaff, isAdm
     mutationFn: async (commentId: string) => apiRequest("DELETE", `/api/maintenance-request-comments/${commentId}`),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: commentsKey }),
     onError: (error: Error) => {
-      toast({ title: "The comment was not deleted", description: error.message, variant: "destructive" });
+      toast({ title: "The comment was not deleted", description: serverMessage(error) ?? "Please try again.", variant: "destructive" });
     },
   });
 

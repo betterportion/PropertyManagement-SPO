@@ -3,6 +3,7 @@ import { useMutation } from "@tanstack/react-query";
 import { AlertTriangle, CheckCircle2, Download, FileUp, Loader2 } from "lucide-react";
 import type { Property } from "@shared/schema";
 import { apiRequest } from "@/lib/queryClient";
+import { serverMessage } from "@/lib/serverMessage";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import {
@@ -63,7 +64,8 @@ const OUTCOME_STYLES: Record<RowOutcomeKind, { label: string; className: string 
   // Every one of these carries a word as well as a colour: status is never
   // conveyed by colour alone.
   create: { label: "Will be added", className: "bg-emerald-100 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-100" },
-  duplicate: { label: "Already on roster", className: "bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-100" },
+  // The row's reason says which: on the roster already, or twice in the file.
+  duplicate: { label: "Duplicate", className: "bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-100" },
   error: { label: "Needs fixing", className: "bg-red-100 text-red-900 dark:bg-red-950 dark:text-red-100" },
 };
 
@@ -152,7 +154,7 @@ export function RosterImportDialog({
       });
     },
     onError: (error: Error) => {
-      toast({ title: "Import failed", description: error.message, variant: "destructive" });
+      toast({ title: "Import failed", description: serverMessage(error) ?? "Nothing was added. Please try again.", variant: "destructive" });
     },
   });
 
@@ -274,7 +276,7 @@ export function RosterImportDialog({
                 </Badge>
                 {preview.counts.duplicate > 0 && (
                   <Badge className={OUTCOME_STYLES.duplicate.className}>
-                    {preview.counts.duplicate} already on the roster
+                    {preview.counts.duplicate} {preview.counts.duplicate === 1 ? "duplicate" : "duplicates"}
                   </Badge>
                 )}
                 {preview.counts.error > 0 && (

@@ -11,7 +11,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { DataTable } from "@/components/data-table";
 import { Container, PageHeader, PageStack, Section } from "@/components/layout/page";
-import { EmptyState, LoadingState } from "@/components/states";
+import { AccessDeniedState, EmptyState, LoadingState } from "@/components/states";
+import { isForbiddenError } from "@/lib/authUtils";
 import PropertySetupChecklist from "@/components/PropertySetupChecklist";
 import ResidentPaperwork from "@/components/ResidentPaperwork";
 import PropertyBudgetCard from "@/components/PropertyBudgetCard";
@@ -253,6 +254,22 @@ export default function PropertyDetail() {
       <Section size="compact">
         <Container>
           <LoadingState message="Loading this property..." />
+        </Container>
+      </Section>
+    );
+  }
+
+  // The house comes out of the property list, so an account that may not read
+  // it -- one holding only the setup flag, say -- would otherwise be told the
+  // house does not exist. Say what is missing instead.
+  if (propertiesQuery.error && isForbiddenError(propertiesQuery.error as Error)) {
+    return (
+      <Section size="compact">
+        <Container>
+          <PageStack>
+            <BackLink />
+            <AccessDeniedState description="Opening a house needs permission to view properties. Ask an admin to add it to your account in Settings." />
+          </PageStack>
         </Container>
       </Section>
     );

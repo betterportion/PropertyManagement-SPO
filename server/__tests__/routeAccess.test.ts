@@ -5492,6 +5492,41 @@ describe("snoozing an asset an RA is confident about", () => {
   });
 });
 
+describe("who holds an asset, by name (#164)", () => {
+  // "Who has what" exists for staff departures, and /api/users is admin-only,
+  // so the asset list carries the holder's name itself -- and nothing more.
+  beforeEach(() => {
+    storageMock.getAllAssets.mockResolvedValue([
+      { id: "a-lent", name: "iPad", region: "West Central", assignedUserId: "u-lent" },
+      { id: "a-free", name: "Guitar", region: "West Central", assignedUserId: null },
+      { id: "a-east", name: "Laptop", region: "East Central", assignedUserId: "u-east" },
+    ]);
+    storageMock.getAllUsers.mockResolvedValue([
+      { id: "u-lent", firstName: "Sam", lastName: "O'Connor", email: "sam@spo.org", role: "regional_administrator" },
+      { id: "u-east", firstName: "Eve", lastName: "East", email: "eve@spo.org", role: "regional_administrator" },
+    ]);
+  });
+
+  it("names the staff account an asset is lent to, for a regional administrator", async () => {
+    actAs(STAFF, { canViewAssets: true, allowedRegions: ["West Central"] });
+    const { status, body } = await get("/api/assets");
+    expect(status).toBe(200);
+    const lent = body.find((asset: { id: string }) => asset.id === "a-lent");
+    expect(lent.assignedUserName).toBe("Sam O'Connor");
+    expect(body.find((asset: { id: string }) => asset.id === "a-free").assignedUserName).toBeNull();
+  });
+
+  it("carries the name only, never the rest of the account", async () => {
+    actAs(STAFF, { canViewAssets: true, allowedRegions: ["West Central"] });
+    const { body } = await get("/api/assets");
+    const text = JSON.stringify(body);
+    expect(text).not.toContain("sam@spo.org");
+    expect(text).not.toContain("regional_administrator");
+    // An asset outside the caller's regions stays out, holder and all.
+    expect(text).not.toContain("Eve");
+  });
+});
+
 describe("asset creation input validation", () => {
   const baseAsset = {
     name: "Fridge",
@@ -6366,6 +6401,25 @@ describe("the resource hub", () => {
     });
     expect(status).toBe(200);
     expect(storageMock.createResourceLink).toHaveBeenCalled();
+  });
+
+  it("refuses a region that is not one of SPO's, without storing it (#164)", async () => {
+    // A link saved as "northwest" was shown to nobody in Northwest.
+    actAs(ADMIN);
+    const { status } = await request("POST", "/api/resource-links", {
+      body: { title: "x", url: "https://example.com", category: "General", region: "northwest" },
+    });
+    expect(status).toBe(400);
+    expect(storageMock.createResourceLink).not.toHaveBeenCalled();
+  });
+
+  it("takes a region spelled as the list spells it (#164)", async () => {
+    actAs(ADMIN);
+    const { status } = await request("POST", "/api/resource-links", {
+      body: { title: "x", url: "https://example.com", category: "General", region: "Northwest" },
+    });
+    expect(status).toBe(200);
+    expect(storageMock.createResourceLink).toHaveBeenCalledWith(expect.objectContaining({ region: "Northwest" }));
   });
 
   // ── The three named slots (amendment to 8.1) ─────────────────────────────

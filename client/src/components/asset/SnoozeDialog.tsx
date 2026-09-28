@@ -16,7 +16,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { localCalendarDay } from "@/lib/format";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { assetLifecycle } from "@shared/assetLifecycle";
+import { MAX_SNOOZE_DAYS, MAX_SNOOZE_MONTHS, assetLifecycle } from "@shared/assetLifecycle";
+import { serverMessage } from "@/lib/serverMessage";
 import type { Asset } from "@shared/schema";
 
 /**
@@ -32,6 +33,17 @@ import type { Asset } from "@shared/schema";
  * correction and lives on the asset form; this is the temporary one, it has an
  * end, and it returns.
  */
+
+/**
+ * The last day the picker offers. A day inside the server's bound rather than
+ * on it: the server counts from the moment of saving, and the edge day would
+ * be refused or taken depending on the hour.
+ */
+function latestUntil(): string {
+  const date = new Date();
+  date.setDate(date.getDate() + MAX_SNOOZE_DAYS - 1);
+  return localCalendarDay(date);
+}
 
 /** A year out, as "YYYY-MM-DD". The common case is "ask me again next budget". */
 function defaultUntil(): string {
@@ -70,10 +82,10 @@ export default function SnoozeDialog({
       setReason("");
       toast({ title: "Snoozed", description: `${asset?.name} is off the dashboard until then.` });
     },
-    onError: () => {
+    onError: (error: Error) => {
       toast({
         title: "That did not save",
-        description: "The asset was not snoozed. Check the date and reason, then try again.",
+        description: serverMessage(error) ?? "The asset was not snoozed. Check the date and reason, then try again.",
         variant: "destructive",
       });
     },
@@ -130,9 +142,13 @@ export default function SnoozeDialog({
                 id="snooze-until"
                 type="date"
                 value={until}
+                max={latestUntil()}
                 onChange={(event) => setUntil(event.target.value)}
                 data-testid="input-snooze-until"
               />
+              <p className="text-xs text-muted-foreground">
+                Up to {MAX_SNOOZE_MONTHS} months. For longer, edit the replacement date instead.
+              </p>
             </div>
 
             <div className="space-y-2">

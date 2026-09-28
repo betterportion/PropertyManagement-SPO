@@ -20,6 +20,7 @@ import { EmptyState, ErrorState, LoadingState } from "@/components/states";
 import { RequestBidDialog } from "@/components/RequestBidDialog";
 import { useToast } from "@/hooks/use-toast";
 import { formatCurrency, formatDate } from "@/lib/format";
+import { serverMessage } from "@/lib/serverMessage";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { MaintenanceContact, MaintenanceRequestBid } from "@shared/schema";
 
@@ -63,13 +64,13 @@ export function RequestBids({ requestId, canEdit }: RequestBidsProps) {
   const accept = useMutation({
     mutationFn: async (bidId: string) => apiRequest("POST", `/api/maintenance-request-bids/${bidId}/accept`),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: bidsKey }),
-    onError: (error: Error) => toast({ title: "The bid was not accepted", description: error.message, variant: "destructive" }),
+    onError: (error: Error) => toast({ title: "The bid was not accepted", description: serverMessage(error) ?? "Please try again.", variant: "destructive" }),
   });
 
   const remove = useMutation({
     mutationFn: async (bidId: string) => apiRequest("DELETE", `/api/maintenance-request-bids/${bidId}`),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: bidsKey }),
-    onError: (error: Error) => toast({ title: "The bid was not removed", description: error.message, variant: "destructive" }),
+    onError: (error: Error) => toast({ title: "The bid was not removed", description: serverMessage(error) ?? "Please try again.", variant: "destructive" }),
   });
 
   function vendorOf(bid: MaintenanceRequestBid): React.ReactNode {

@@ -14,6 +14,7 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
+import { serverMessage } from "@/lib/serverMessage";
 import { MAINTENANCE_REQUEST_TYPES, isProjectType, type MaintenanceRequest, type MaintenanceContact, type Invoice, type Property } from "@shared/schema";
 import { REQUEST_TYPE } from "@/lib/requestLabels";
 import { DollarSign, Link2, FileText, Plus, Check, X, ImageIcon } from "lucide-react";
@@ -86,6 +87,8 @@ export default function MaintenanceEditDialog({ request, open, onClose }: Mainte
       apiRequest('POST', `/api/maintenance-requests/${request.id}/contacts/${contactId}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/maintenance-requests', request.id, 'contacts'] });
+      // The Patterns tab rolls up requests and contractor links; nothing refetches on its own.
+      queryClient.invalidateQueries({ queryKey: ['/api/maintenance-aggregates'] });
     },
     onError: () => {
       toast({ title: "Failed to link contact", variant: "destructive" });
@@ -97,6 +100,8 @@ export default function MaintenanceEditDialog({ request, open, onClose }: Mainte
       apiRequest('DELETE', `/api/maintenance-requests/${request.id}/contacts/${contactId}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/maintenance-requests', request.id, 'contacts'] });
+      // The Patterns tab rolls up requests and contractor links; nothing refetches on its own.
+      queryClient.invalidateQueries({ queryKey: ['/api/maintenance-aggregates'] });
     },
     onError: () => {
       toast({ title: "Failed to unlink contact", variant: "destructive" });
@@ -149,6 +154,8 @@ export default function MaintenanceEditDialog({ request, open, onClose }: Mainte
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/maintenance-requests'] });
+      // The Patterns tab rolls up requests and contractor links; nothing refetches on its own.
+      queryClient.invalidateQueries({ queryKey: ['/api/maintenance-aggregates'] });
       toast({
         title: "Request updated",
         description: "Maintenance request has been updated successfully",
@@ -158,7 +165,7 @@ export default function MaintenanceEditDialog({ request, open, onClose }: Mainte
     onError: (error: Error) => {
       toast({
         title: "Update failed",
-        description: error.message,
+        description: serverMessage(error) ?? "Check the details and try again.",
         variant: "destructive",
       });
     },

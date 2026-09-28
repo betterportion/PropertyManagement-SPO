@@ -112,6 +112,9 @@ function Router() {
           page is reachable from the app at all. */}
       {canUseResourceHub && <Route path="/resources" component={ResourceHub} />}
       {canCompleteWalkthroughs && <Route path="/walkthroughs" component={MyWalkthroughs} />}
+      {/* The flagged list is staff-only. Without this literal path first, :id
+          would take "flagged" as a walkthrough id and render a broken page. */}
+      {canCompleteWalkthroughs && <Route path="/walkthroughs/flagged" component={NotFound} />}
       {canCompleteWalkthroughs && <Route path="/walkthroughs/:id" component={WalkthroughRun} />}
       <Route component={NotFound} />
     </Switch>

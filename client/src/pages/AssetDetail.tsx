@@ -13,7 +13,7 @@ import SnoozeDialog from "@/components/asset/SnoozeDialog";
 import { useAuth } from "@/hooks/useAuth";
 import { formatCurrency, formatDate, formatValue } from "@/lib/format";
 import { DEFAULT_LIFESPAN_YEARS, assetLifecycle } from "@shared/assetLifecycle";
-import type { Asset, AssetPhoto, MaintenanceContact, Resident, User } from "@shared/schema";
+import type { AssetListRow, AssetPhoto, MaintenanceContact, Resident, User } from "@shared/schema";
 
 /**
  * Everything about one asset.
@@ -45,7 +45,7 @@ export default function AssetDetail() {
 
   const [isSnoozeOpen, setIsSnoozeOpen] = useState(false);
 
-  const assetsQuery = useQuery<Asset[]>({ queryKey: ["/api/assets"] });
+  const assetsQuery = useQuery<AssetListRow[]>({ queryKey: ["/api/assets"] });
   const photosQuery = useQuery<AssetPhoto[]>({ queryKey: ["/api/asset-photos"] });
   const contactsQuery = useQuery<MaintenanceContact[]>({ queryKey: ["/api/contacts"] });
   const residentsQuery = useQuery<Resident[]>({ queryKey: ["/api/residents"] });
@@ -82,6 +82,7 @@ export default function AssetDetail() {
     if (asset.assignedUserId) {
       const person = usersQuery.data?.find((u) => u.id === asset.assignedUserId);
       if (person) return [person.firstName, person.lastName].filter(Boolean).join(" ") || person.email;
+      if (asset.assignedUserName) return asset.assignedUserName;
     }
     return asset.assignedToName ?? null;
   }, [asset, residentsQuery.data, usersQuery.data]);
