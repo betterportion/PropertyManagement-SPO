@@ -19,8 +19,8 @@ import { Label } from "@/components/ui/label";
 import { Container, PageHeader, PageStack, Section } from "@/components/layout/page";
 import { EmptyState, LoadingState } from "@/components/states";
 import { useAuth } from "@/hooks/useAuth";
-import { today, useStartWalkthrough } from "@/hooks/useStartWalkthrough";
-import { formatDate } from "@/lib/format";
+import { useStartWalkthrough } from "@/hooks/useStartWalkthrough";
+import { formatDate, localToday } from "@/lib/format";
 import {
   WALKTHROUGH_STATUS_BADGE,
   WALKTHROUGH_TYPE_LABEL,
@@ -53,7 +53,7 @@ export default function MyWalkthroughs() {
   const { user } = useAuth();
 
   const [isStartOpen, setIsStartOpen] = useState(false);
-  const [newDate, setNewDate] = useState(today());
+  const [newDate, setNewDate] = useState(localToday());
 
   const typedUser = user as WalkthroughUser | null;
 
@@ -103,7 +103,7 @@ export default function MyWalkthroughs() {
           <Button
             variant="primary"
             onClick={() => {
-              setNewDate(today());
+              setNewDate(localToday());
               setIsStartOpen(true);
             }}
             data-testid="button-start-first-walkthrough"
@@ -168,7 +168,7 @@ export default function MyWalkthroughs() {
                 <Button
                   variant="primary"
                   onClick={() => {
-                    setNewDate(today());
+                    setNewDate(localToday());
                     setIsStartOpen(true);
                   }}
                   data-testid="button-start-walkthrough"

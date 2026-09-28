@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { LoadingState } from "@/components/states";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { formatDate } from "@/lib/format";
+import { formatDate, localToday } from "@/lib/format";
 import { RESIDENT_DOCUMENTS, summarizeResidentDocuments } from "@shared/residentDocuments";
 import type { Resident, ResidentDocument } from "@shared/schema";
 
@@ -25,9 +25,6 @@ import type { Resident, ResidentDocument } from "@shared/schema";
  * that anybody signed, which is why clearing the date is always available:
  * correcting a mistake has to be possible.
  */
-
-/** Today as "YYYY-MM-DD"; paperwork is usually recorded the day it comes in. */
-const today = () => new Date().toISOString().slice(0, 10);
 
 export default function ResidentPaperwork({
   resident,
@@ -125,7 +122,7 @@ export default function ResidentPaperwork({
                     size="sm"
                     variant={signed ? "ghost" : "secondary"}
                     onClick={() =>
-                      setDocument.mutate({ key: document.key, signedOn: signed ? null : today() })
+                      setDocument.mutate({ key: document.key, signedOn: signed ? null : localToday() })
                     }
                     data-testid={`button-paperwork-${document.key}`}
                   >

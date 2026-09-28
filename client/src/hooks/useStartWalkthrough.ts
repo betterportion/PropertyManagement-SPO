@@ -19,12 +19,6 @@ import type { Walkthrough } from "@shared/schema";
  * by region for staff and by their own address for a leader.
  */
 
-/** Today as "YYYY-MM-DD", for a date input's default. */
-export function today(): string {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-}
-
 export interface StartWalkthroughInput {
   propertyId: string;
   type: Walkthrough["type"];

@@ -15,7 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { formatCurrency } from "@/lib/format";
+import { formatCurrency, localToday } from "@/lib/format";
 import { fromCents, splitEvenly, toCents } from "@shared/depositLedger";
 import { residentsActiveOn } from "@shared/residents";
 import type { Property, Resident } from "@shared/schema";
@@ -39,11 +39,6 @@ import type { Property, Resident } from "@shared/schema";
  * right tool instead.
  */
 
-/** Today as "YYYY-MM-DD"; most charges are entered the day they are noticed. */
-function today(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
 export default function SplitChargeDialog({
   property,
   residents,
@@ -58,7 +53,7 @@ export default function SplitChargeDialog({
   const { toast } = useToast();
   const [description, setDescription] = useState("");
   const [amount, setAmount] = useState("");
-  const [chargeDate, setChargeDate] = useState(today);
+  const [chargeDate, setChargeDate] = useState(localToday);
   const [excluded, setExcluded] = useState<Set<string>>(new Set());
 
   /**

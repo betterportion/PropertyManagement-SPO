@@ -28,7 +28,7 @@ import { Section, Container, PageHeader, PageStack } from "@/components/layout/p
 import { LoadingState, EmptyState } from "@/components/states";
 import { RosterImportDialog } from "@/components/RosterImportDialog";
 import { useRoomSuggestions } from "@/hooks/useRoomSuggestions";
-import { formatDate, formatCurrency } from "@/lib/format";
+import { formatDate, formatCurrency, localToday } from "@/lib/format";
 
 const residentFormSchema = z.object({
   propertyId: z.string().min(1, "Choose a house"),
@@ -152,7 +152,7 @@ export default function Residents() {
     : undefined;
 
   const openMoveOut = (resident: Resident) => {
-    setMoveOutDate(new Date().toISOString().slice(0, 10));
+    setMoveOutDate(localToday());
     setDeactivateAccount(true);
     setMovingOut(resident);
   };

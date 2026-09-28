@@ -11,6 +11,7 @@
 // One definition, shared with the server. Keeping a second copy here is what
 // let the `setup` and `asset` sources reach this switch without a case.
 import type { ActionItemCategory, ActionItemSource } from "@shared/actionItems";
+import { localToday } from "./format";
 
 export type { ActionItemCategory, ActionItemSource };
 
@@ -44,11 +45,6 @@ export interface ResolveRequest {
   invalidate?: string[];
 }
 
-/** Today as "YYYY-MM-DD", the shape the date columns accept from a form. */
-function today(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
 const ACTION_ITEMS_KEY = "/api/action-items";
 
 export function resolveRequest(item: ActionItem): ResolveRequest {
@@ -64,7 +60,7 @@ export function resolveRequest(item: ActionItem): ResolveRequest {
       return {
         method: "PATCH",
         path: `/api/rent-payments/${item.id}`,
-        body: { status: "paid", paidDate: today() },
+        body: { status: "paid", paidDate: localToday() },
         actionLabel: "Mark paid",
         confirm: {
           title: "Mark these HH fees as paid?",
@@ -81,7 +77,7 @@ export function resolveRequest(item: ActionItem): ResolveRequest {
       return {
         method: "PATCH",
         path: `/api/security-deposits/${item.id}`,
-        body: { status: "returned", amountReturned: item.amount, returnedDate: today() },
+        body: { status: "returned", amountReturned: item.amount, returnedDate: localToday() },
         actionLabel: "Mark returned",
         confirm: {
           title: "Mark this deposit as returned?",
