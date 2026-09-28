@@ -13,6 +13,7 @@ import { RequestBids } from "@/components/RequestBids";
 import { RequestProjectCard } from "@/components/RequestProjectCard";
 import RequestThread from "@/components/RequestThread";
 import { useAuth } from "@/hooks/useAuth";
+import { requestRefusalMessage, type RequestAccessUser } from "@/lib/requestAccess";
 import { isForbiddenError } from "@/lib/authUtils";
 import { formatDate, formatValue } from "@/lib/format";
 import { REQUEST_PRIORITY, REQUEST_STATUS, REQUEST_TYPE } from "@/lib/requestLabels";
@@ -142,13 +143,7 @@ export default function RequestDetail() {
     body = <LoadingState message="Loading this request..." />;
   } else if (forbidden) {
     body = (
-      <AccessDeniedState
-        description={
-          isStaff
-            ? "This request belongs to a region you do not cover."
-            : "This request belongs to another house, or it was closed long enough ago that it is no longer shown."
-        }
-      />
+      <AccessDeniedState description={requestRefusalMessage(user as RequestAccessUser | null)} />
     );
   } else if (requestQuery.isError || !request) {
     body = (
