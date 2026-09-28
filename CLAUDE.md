@@ -337,6 +337,7 @@ On the request page these are two cards, `RequestProjectCard` and `RequestBids` 
 
 - **A recurring issue is one house, one room, one category, more than once.** The house is part of the key and always will be: "these blinds have broken every year" is a claim about *these* blinds. Room names are folded for case and whitespace as a backstop for what was typed before the location field started suggesting from the walkthrough vocabulary.
 - **A callback is a repeat visit to the same problem**, which is a different claim from "did a lot of jobs" and the one that belongs in a conversation about whether to keep using somebody.
+- **Only a reported repair can be a repeat** (#160). Scheduled upkeep (`submittedBy` is `SCHEDULED_REQUEST_SUBMITTER`, "Preventive schedule") and projects and capital projects have no grouping key, so they never make a recurring issue or a callback — a detector test and an extinguisher check both land as "Whole house / Safety Equipment", and a planned re-roof is a decision, not the roof failing again. They still count in a contractor's total and open jobs: they are work, only not a repeat.
 
 ### Outbound email
 

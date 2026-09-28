@@ -242,6 +242,15 @@ export function isClosedMaintenanceStatus(status: string | null | undefined): bo
  */
 export const MAINTENANCE_REQUEST_TYPES = ["request", "project", "capex"] as const;
 
+/**
+ * The `submittedBy` of every request the daily schedule job raises
+ * (`server/schedules.ts`). That column otherwise holds an email, so this is
+ * the one way to tell scheduled upkeep from a report somebody made -- which
+ * the maintenance-history rollups need, because upkeep on a calendar is not
+ * something going wrong again.
+ */
+export const SCHEDULED_REQUEST_SUBMITTER = "Preventive schedule";
+
 /** Projects and capital projects carry bids and the project fields; a repair does not. */
 export function isProjectType(type: string | null | undefined): boolean {
   return type === "project" || type === "capex";

@@ -12,7 +12,7 @@
  */
 import { storage } from "./storage";
 import { logError } from "./errors";
-import type { MaintenanceSchedule } from "@shared/schema";
+import { SCHEDULED_REQUEST_SUBMITTER, type MaintenanceSchedule } from "@shared/schema";
 
 export const SCHEDULE_GENERATION_INTERVAL_MS = 24 * 60 * 60 * 1_000;
 
@@ -82,7 +82,7 @@ export function requestFromSchedule(schedule: MaintenanceSchedule) {
     location: "Whole house",
     region: schedule.region,
     buildingAddress: schedule.buildingAddress,
-    submittedBy: "Preventive schedule",
+    submittedBy: SCHEDULED_REQUEST_SUBMITTER,
   };
 }
 

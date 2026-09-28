@@ -6800,10 +6800,10 @@ describe("reading paperwork across a region", () => {
 describe("the maintenance rollups", () => {
   beforeEach(() => {
     storageMock.getAllMaintenanceRequests.mockResolvedValue([
-      { id: "req-west", location: "Kitchen", category: "Plumbing", buildingAddress: "1 Main St", region: "West Central", status: "completed" },
-      { id: "req-west-2", location: "Kitchen", category: "Plumbing", buildingAddress: "1 Main St", region: "West Central", status: "completed" },
-      { id: "req-east", location: "Kitchen", category: "Plumbing", buildingAddress: "9 Elm", region: "East Central", status: "completed" },
-      { id: "req-east-2", location: "Kitchen", category: "Plumbing", buildingAddress: "9 Elm", region: "East Central", status: "completed" },
+      { id: "req-west", location: "Kitchen", category: "Plumbing", buildingAddress: "1 Main St", region: "West Central", status: "completed", type: "request" },
+      { id: "req-west-2", location: "Kitchen", category: "Plumbing", buildingAddress: "1 Main St", region: "West Central", status: "completed", type: "request" },
+      { id: "req-east", location: "Kitchen", category: "Plumbing", buildingAddress: "9 Elm", region: "East Central", status: "completed", type: "request" },
+      { id: "req-east-2", location: "Kitchen", category: "Plumbing", buildingAddress: "9 Elm", region: "East Central", status: "completed", type: "request" },
     ]);
     storageMock.getAllRequestContactLinks.mockResolvedValue([
       { contactId: "c1", requestId: "req-west" },
