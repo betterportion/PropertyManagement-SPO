@@ -320,11 +320,11 @@ async function seed(): Promise<void> {
 
   // ── Assets ────────────────────────────────────────────────────────────────
   const assetRows = [
-    { name: "Whirlpool Refrigerator", category: "Appliance", type: "fixed", ageInYears: 3, serialNumber: "WRF535SWHZ-0417", purchasePrice: "1249.00", assetTagId: "SPO-A-0001", property: cleveland, location: "Kitchen", lastServiced: daysAgo(200) },
+    { name: "Whirlpool Refrigerator", category: "Appliances - Large", type: "fixed", ageInYears: 3, serialNumber: "WRF535SWHZ-0417", purchasePrice: "1249.00", assetTagId: "SPO-A-0001", property: cleveland, location: "Kitchen", lastServiced: daysAgo(200) },
     { name: "Carrier Furnace", category: "HVAC", type: "fixed", ageInYears: 9, serialNumber: "59TP6B-2201", purchasePrice: "3400.00", assetTagId: "SPO-A-0002", property: como, location: "Basement", lastServiced: daysAgo(90) },
-    { name: "LG Washer", category: "Appliance", type: "fixed", ageInYears: 2, serialNumber: "WM3400CW-8812", purchasePrice: "749.00", assetTagId: "SPO-A-0003", property: dinkytown, location: "Laundry Room", lastServiced: null },
-    { name: "Folding Tables (set of 4)", category: "Furniture", type: "movable", ageInYears: 1, serialNumber: null, purchasePrice: "320.00", assetTagId: "SPO-A-0004", property: buckeye, location: "Common Room", lastServiced: null },
-    { name: "Snow Blower", category: "Vehicle", type: "movable", ageInYears: 5, serialNumber: "TORO-721E-3341", purchasePrice: "899.00", assetTagId: "SPO-A-0005", property: aggieland, location: "Garage", lastServiced: daysAgo(365) },
+    { name: "LG Washer", category: "Appliances - Large", type: "fixed", ageInYears: 2, serialNumber: "WM3400CW-8812", purchasePrice: "749.00", assetTagId: "SPO-A-0003", property: dinkytown, location: "Laundry Room", lastServiced: null },
+    { name: "Folding Tables (set of 4)", category: "Furniture - Household", type: "movable", ageInYears: 1, serialNumber: null, purchasePrice: "320.00", assetTagId: "SPO-A-0004", property: buckeye, location: "Common Room", lastServiced: null },
+    { name: "Snow Blower", category: "Outdoor Equipment", type: "movable", ageInYears: 5, serialNumber: "TORO-721E-3341", purchasePrice: "899.00", assetTagId: "SPO-A-0005", property: aggieland, location: "Garage", lastServiced: daysAgo(365) },
   ];
   const assets = [];
   for (const row of assetRows) {

@@ -30,6 +30,10 @@ import { FIXED_CATEGORIES, MOVABLE_CATEGORIES } from "@shared/assetLifecycle";
 // category ends up with no lifespan and nobody notices.
 
 const assetFormSchema = insertAssetSchema.extend({
+  // A string here because an untouched picker holds "" (and the fixed/movable
+  // switch resets it to that); the select only offers ASSET_CATEGORIES, and the
+  // server refuses anything off the list.
+  category: z.string().min(1, "Choose a category from the list"),
   ageInYears: z.coerce.number().min(0, "Age must be 0 or greater"),
   purchasePrice: z.coerce.number({ required_error: "Purchase price is required", invalid_type_error: "Enter a valid amount" }).min(0, "Must be 0 or greater"),
   assetTagId: z.string().optional(),
