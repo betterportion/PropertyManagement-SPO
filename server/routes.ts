@@ -61,6 +61,7 @@ import {
   insertWalkthroughTemplateItemSchema,
   insertWalkthroughPhotoSchema,
   insertAssetSchema,
+  type AssetListRow,
   insertAssetPhotoSchema,
   insertMaintenanceContactSchema,
   insertContactNoteSchema,
@@ -105,6 +106,7 @@ import { RESIDENT_DOCUMENTS, isKnownResidentDocument } from "@shared/residentDoc
 import { buildRegionSummaries, type RegionStaff } from "./regionSummary";
 import { fromCents, returnedExceedsHeld, splitEvenly, toCents } from "@shared/depositLedger";
 import { hasBegunEverywhere } from "@shared/dueDates";
+import { MAX_SNOOZE_DAYS, MAX_SNOOZE_MONTHS } from "@shared/assetLifecycle";
 import { randomUUID } from "crypto";
 import { contractorLoad, recurringIssues } from "./aggregates";
 import { sendEmail } from "./email";
@@ -2462,8 +2464,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!requireStaff(res, ctx)) return;
       if (!requirePermission(res, ctx, "canViewAssets", "canManageAssets")) return;
 
-      const assets = await storage.getAllAssets();
-      res.json(filterByRegion(ctx, assets));
+      const visible = filterByRegion(ctx, await storage.getAllAssets());
+      // The holder's name, for "who has what" -- the list of accounts is
+      // admin-only, and that page exists for a staff departure, where the
+      // name is the point. The name alone: nothing else about the account,
+      // and only for assets the caller can already see.
+      const lentToStaff = visible.some((asset) => asset.assignedUserId);
+      const names = new Map<string, string | null>();
+      if (lentToStaff) {
+        for (const person of await storage.getAllUsers()) {
+          names.set(person.id, [person.firstName, person.lastName].filter(Boolean).join(" ").trim() || null);
+        }
+      }
+      const rows: AssetListRow[] = visible.map((asset) => ({
+        ...asset,
+        assignedUserName: asset.assignedUserId ? names.get(asset.assignedUserId) ?? null : null,
+      }));
+      res.json(rows);
     } catch (error) {
       sendError(res, error, "Failed to fetch assets");
     }
@@ -2486,16 +2503,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       sendError(res, error, "Failed to create asset");
     }
   });
-
-  /**
-   * The longest a snooze may run.
-   *
-   * Two budget cycles. Anything beyond that is not "ask me again later", it is
-   * a different view of how long the thing will last -- which is the
-   * replacement date, and belongs on the asset form where it is visible.
-   */
-  const MAX_SNOOZE_MONTHS = 24;
-  const MAX_SNOOZE_DAYS = MAX_SNOOZE_MONTHS * 30;
 
   // ---------------------------------------------------------------------------
   // Snoozing an asset

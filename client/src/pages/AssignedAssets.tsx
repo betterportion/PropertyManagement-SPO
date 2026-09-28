@@ -9,7 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Container, PageHeader, PageStack, Section } from "@/components/layout/page";
 import { EmptyState, LoadingState } from "@/components/states";
 import { formatDate } from "@/lib/format";
-import type { Asset, Resident, User } from "@shared/schema";
+import type { Asset, AssetListRow, Resident, User } from "@shared/schema";
 import { isPastDue } from "@shared/dueDates";
 
 /**
@@ -43,11 +43,11 @@ function overdueFirst(a: Asset, b: Asset): number {
 }
 
 export default function AssignedAssets() {
-  const assetsQuery = useQuery<Asset[]>({ queryKey: ["/api/assets"] });
+  const assetsQuery = useQuery<AssetListRow[]>({ queryKey: ["/api/assets"] });
   const residentsQuery = useQuery<Resident[]>({ queryKey: ["/api/residents"] });
-  // Only an account holding canManageUsers can read this. Everyone else gets a
-  // staff assignment shown by its stored fallback name rather than a broken
-  // page, which is why the failure is quiet by design.
+  // Only an account holding canManageUsers can read this. Everyone else reads
+  // the holder's name off the asset list, which carries it for this page;
+  // the failure here is quiet by design.
   const usersQuery = useQuery<User[]>({ queryKey: ["/api/users"], retry: false });
 
   const holders = useMemo<Holder[]>(() => {
@@ -72,6 +72,7 @@ export default function AssignedAssets() {
         key = `staff:${asset.assignedUserId}`;
         name =
           (person && ([person.firstName, person.lastName].filter(Boolean).join(" ") || person.email)) ||
+          asset.assignedUserName ||
           asset.assignedToName ||
           "A staff account";
         kind = "staff";

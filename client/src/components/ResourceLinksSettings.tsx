@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { EmptyState, LoadingState } from "@/components/states";
 import { useToast } from "@/hooks/use-toast";
+import { serverMessage } from "@/lib/serverMessage";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { REGIONS } from "@shared/regions";
 import { RESOURCE_HUB_SLOTS, isResourceHubSlotKey } from "@shared/resourceHubSlots";
@@ -33,23 +34,6 @@ const NATIONAL = "__national__";
 
 /** The "no named place" option, for the same reason. */
 const NO_SLOT = "__none__";
-
-/**
- * What the server said, for a toast. A refused slot comes back with a reason
- * a person can act on ("… already holds the … slot"), and that reason is
- * worth more than a generic line.
- */
-function serverMessage(error: unknown): string | undefined {
-  if (!(error instanceof Error)) return undefined;
-  // apiRequest throws "<status>: <body>"; the body is the route's JSON.
-  try {
-    const parsed: unknown = JSON.parse(error.message.replace(/^\d+:\s*/, ""));
-    const message = (parsed as { message?: unknown } | null)?.message;
-    return typeof message === "string" ? message : undefined;
-  } catch {
-    return undefined;
-  }
-}
 
 /** Suggested groupings. Free text underneath, so SPO can add their own. */
 const CATEGORIES = ["General", "Housekeeping", "Safety", "Money", "Paperwork"];

@@ -178,6 +178,17 @@ export function replacementDueAt(asset: LifecycleAsset): Date | null {
   return due;
 }
 
+/**
+ * The longest a snooze may run.
+ *
+ * Two budget cycles. Anything beyond that is not "ask me again later", it is
+ * a different view of how long the thing will last -- which is the
+ * replacement date, and belongs on the asset form where it is visible. Here
+ * rather than in the route so the snooze dialog can offer the same limit.
+ */
+export const MAX_SNOOZE_MONTHS = 24;
+export const MAX_SNOOZE_DAYS = MAX_SNOOZE_MONTHS * 30;
+
 export type LifecycleStatus = "unrated" | "ok" | "due_soon" | "urgent" | "overdue";
 
 export interface LifecycleState {

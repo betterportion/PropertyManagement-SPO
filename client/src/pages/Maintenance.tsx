@@ -216,6 +216,8 @@ export default function Maintenance() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/maintenance-requests'] });
+      // The Patterns tab rolls up requests and contractor links; nothing refetches on its own.
+      queryClient.invalidateQueries({ queryKey: ['/api/maintenance-aggregates'] });
       toast({
         title: "Success",
         description: "Maintenance request created successfully",

@@ -4,6 +4,7 @@ import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import { RESOURCE_HUB_SLOT_KEYS } from "./resourceHubSlots";
 import { ASSET_CATEGORIES } from "./assetLifecycle";
+import { REGIONS } from "./regions";
 
 /**
  * Field builders that reconcile three views of the same value: what a JSON
@@ -675,6 +676,10 @@ export const insertAssetSchema = createInsertSchema(assets)
 
 export type Asset = typeof assets.$inferSelect;
 export type InsertAsset = z.infer<typeof insertAssetSchema>;
+
+/** An asset as the list route sends it: the staff holder's name rides along,
+ *  because the account list it would otherwise come from is admin-only. */
+export type AssetListRow = Asset & { assignedUserName: string | null };
 
 // Asset Photos
 export const assetPhotos = pgTable("asset_photos", {
@@ -1685,6 +1690,9 @@ export const insertResourceLinkSchema = createInsertSchema(resourceLinks)
     // Only a slot the page has a place for; anything else is a 400, not a
     // new slot. Null clears it.
     slotKey: z.enum(RESOURCE_HUB_SLOT_KEYS).nullish(),
+    // One of SPO's regions, spelled as the list spells it, or null for every
+    // region. Free text let "northwest" through, which reaches nobody.
+    region: z.enum(REGIONS, { errorMap: () => ({ message: "Choose one of SPO's regions" }) }).nullish(),
   });
 
 export type ResourceLink = typeof resourceLinks.$inferSelect;

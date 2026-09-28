@@ -253,7 +253,9 @@ export function buildImportPreview(
   parsed: ParsedResidentCsv,
   existingEmailsForProperty: readonly string[],
 ): ImportPreview {
-  const seen = new Set(existingEmailsForProperty.map(emailKey));
+  const onRoster = new Set(existingEmailsForProperty.map(emailKey));
+  // Kept apart from the roster so the reason names the right one.
+  const earlierInFile = new Set<string>();
   const outcomes: RowOutcome[] = [];
 
   for (const row of parsed.rows) {
@@ -262,7 +264,7 @@ export function buildImportPreview(
       continue;
     }
     const key = emailKey(row.email);
-    if (seen.has(key)) {
+    if (onRoster.has(key)) {
       outcomes.push({
         row,
         kind: "duplicate",
@@ -270,7 +272,15 @@ export function buildImportPreview(
       });
       continue;
     }
-    seen.add(key);
+    if (earlierInFile.has(key)) {
+      outcomes.push({
+        row,
+        kind: "duplicate",
+        reason: `${row.email} appears twice in this file; only the first is added`,
+      });
+      continue;
+    }
+    earlierInFile.add(key);
     outcomes.push({ row, kind: "create" });
   }
 

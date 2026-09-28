@@ -49,9 +49,11 @@ export default function PropertySetupChecklist({
   const [openNoteFor, setOpenNoteFor] = useState<string | null>(null);
   const [noteDraft, setNoteDraft] = useState("");
 
-  const { data: rows = [], isLoading } = useQuery<PropertySetupItem[]>({
+  const { data: rows = [], isLoading, isSuccess } = useQuery<PropertySetupItem[]>({
     queryKey: ["/api/properties", property.id, "setup"],
   });
+  // `rows` defaults to empty, and empty is exactly what "not tracked" means;
+  // so the summary only speaks once the rows have actually arrived.
 
   // Rows store a user id; a person reads a name. Only staff can reach this
   // card at all, and only an account holding canManageUsers can read the list
@@ -115,7 +117,7 @@ export default function PropertySetupChecklist({
     <Card>
       <CardHeader className="flex flex-row items-center justify-between gap-3 space-y-0">
         <CardTitle>Setting this house up</CardTitle>
-        {summary.tracked ? (
+        {!isSuccess ? null : summary.tracked ? (
           <Badge
             variant={summary.complete ? "success" : "warning"}
             data-testid="badge-setup-summary"
@@ -132,7 +134,7 @@ export default function PropertySetupChecklist({
       </CardHeader>
 
       <CardContent className="space-y-1">
-        {!summary.tracked && (
+        {isSuccess && !summary.tracked && (
           <p className="pb-3 text-sm text-muted-foreground" data-testid="text-setup-untracked">
             Nothing has been recorded for this house yet — either it predates the checklist, or it
             never got one. Setting any item below starts tracking it; until then it stays off the

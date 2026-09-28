@@ -209,6 +209,17 @@ describe("buildImportPreview", () => {
     expect(preview.counts).toEqual({ create: 1, duplicate: 1, error: 0 });
   });
 
+  it("says a repeat inside the file appears twice, not that it is on the roster (#164)", () => {
+    // The roster is empty here: "already on this house's roster" sent people
+    // looking for a resident who was not there.
+    const preview = buildImportPreview(
+      parse("Ada,Lovelace,ada@spo.org,,,", "Ada,Lovelace,ada@spo.org,,,"),
+      [],
+    );
+    expect(preview.outcomes[1].reason).toMatch(/appears twice in this file/);
+    expect(preview.outcomes[1].reason).not.toMatch(/roster/);
+  });
+
   it("is safe to run twice: the second time creates nothing", () => {
     const file = parse("Ada,Lovelace,ada@spo.org,,,", "Grace,Hopper,grace@spo.org,,,");
     expect(buildImportPreview(file, []).counts.create).toBe(2);
