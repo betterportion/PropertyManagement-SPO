@@ -243,12 +243,31 @@ export function filterByRelatedRegion<T>(
 }
 
 /**
+ * Whether a task's `sourceKey` marks it as generated from lease data (#170).
+ *
+ * `lease-renewal:` and `utilities-lease:` tasks (`server/seasonalTasks.ts`)
+ * are built from a property's lease dates, so seeing one tells a caller
+ * something about that house's lease -- the same fact `canSeeActionItemSource`
+ * gates behind `canViewProperties`/`canManageProperties` for the `lease`
+ * action-item source. This is the one place that prefix pair is spelled out;
+ * every caller goes through this function rather than repeating it.
+ */
+export function isLeaseDerivedTaskSourceKey(sourceKey: string | null | undefined): boolean {
+  if (!sourceKey) return false;
+  return sourceKey.startsWith("lease-renewal:") || sourceKey.startsWith("utilities-lease:");
+}
+
+/**
  * Whether a task is visible to a user.
  *
  * A task is not an ordinary region-scoped record, so it does not go through
  * `filterByRegion`: its region is nullable (an all-regions broadcast), and it
  * can be personal to one user. The rules, in order:
  *   - admins see everything;
+ *   - a lease-derived task (#170) additionally requires the properties flag,
+ *     ahead of the "yours" bypass below -- the lease data it exposes is
+ *     gated by that flag everywhere else, so being the assignee does not
+ *     waive it;
  *   - you always see a task you created or one assigned to you;
  *   - a task assigned to someone else is private to them;
  *   - an all-regions broadcast (region null) is visible to every staff member;
@@ -256,9 +275,17 @@ export function filterByRelatedRegion<T>(
  */
 export function canSeeTask(
   ctx: AuthContext,
-  task: { region: string | null; assignedToUserId: string | null; createdBy: string | null },
+  task: {
+    region: string | null;
+    assignedToUserId: string | null;
+    createdBy: string | null;
+    sourceKey?: string | null;
+  },
 ): boolean {
   if (ctx.isAdmin) return true;
+  if (isLeaseDerivedTaskSourceKey(task.sourceKey) && !hasPermission(ctx, "canViewProperties", "canManageProperties")) {
+    return false;
+  }
   if (task.createdBy === ctx.userId || task.assignedToUserId === ctx.userId) return true;
   if (task.assignedToUserId) return false;
   if (task.region === null) return true;
