@@ -186,6 +186,15 @@ export default function PrivacyNotice() {
                 </section>
 
                 <section className="space-y-4">
+                  <H2>Children</H2>
+                  <p>
+                    SPO households are for adults. The Portal does not knowingly collect, track, or keep information
+                    about anyone under 18. If SPO learns it holds information about someone under 18, it deletes it
+                    promptly.
+                  </p>
+                </section>
+
+                <section className="space-y-4">
                   <H2>Your rights</H2>
                   <p>
                     To see, correct, or ask SPO to delete information the Portal holds about you, email{" "}
