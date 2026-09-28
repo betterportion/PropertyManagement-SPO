@@ -23,6 +23,7 @@ import {
   WALKTHROUGH_CONDITION_LABEL,
   type WalkthroughRoom,
 } from "@shared/schema";
+import { EM_DASH, formatDate } from "./format";
 
 /** What each kind of inspection is called on screen. */
 export const WALKTHROUGH_TYPE_LABEL: Record<Walkthrough["type"], string> = {
@@ -212,18 +213,16 @@ function walkthroughTime(value: Date | string | null | undefined): number | null
  * own date and nowhere else -- nobody tags a photo with a year, so nobody can
  * type one wrong.
  *
- * Parsed the way `formatDate` parses: a date-only string is that calendar
- * day, anything else is a timestamp. The heading and the date shown under it
- * therefore always name the same year. An undated or unreadable date says
- * "Undated" rather than guessing, for the same reason an undated walkthrough
- * sorts last in `comparePhotosByRoom`.
+ * Read by `formatDate` itself, so a calendar day stored as UTC midnight is
+ * that day's year and the heading and the date shown under it always name
+ * the same year. An undated or unreadable date says "Undated" rather than
+ * guessing, for the same reason an undated walkthrough sorts last in
+ * `comparePhotosByRoom`.
  */
 export function walkthroughYearLabel(value: Date | string | null | undefined): string {
   if (!value) return "Undated";
-  const dateOnly = typeof value === "string" ? /^(\d{4})-(\d{2})-(\d{2})$/.exec(value) : null;
-  if (dateOnly) return dateOnly[1];
-  const time = walkthroughTime(value);
-  return time === null ? "Undated" : String(new Date(time).getFullYear());
+  const year = formatDate(value, { year: "numeric" });
+  return year === EM_DASH ? "Undated" : year;
 }
 
 /**

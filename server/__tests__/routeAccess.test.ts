@@ -4991,9 +4991,21 @@ describe("paging and filtering the activity log", () => {
     expect(to.toISOString()).toBe("2026-09-01T00:00:00.000Z");
   });
 
-  it("refuses a date that is not a calendar day", async () => {
+  it("takes the reader's own midnights as exact bounds", async () => {
+    // What the activity page sends from Chicago for Sep 27 to Sep 27: local
+    // midnight to the next local midnight. Read as UTC days instead, an
+    // event at 8pm Central on the 27th (01:00Z on the 28th) fell outside.
+    await get("/api/audit-log?from=2026-09-27T05:00:00.000Z&to=2026-09-28T05:00:00.000Z");
+    const { from, to } = askedFor();
+    expect(from.toISOString()).toBe("2026-09-27T05:00:00.000Z");
+    expect(to.toISOString()).toBe("2026-09-28T05:00:00.000Z");
+  });
+
+  it("refuses a bound that is neither a calendar day nor a timestamp", async () => {
     expect((await get("/api/audit-log?from=last-tuesday")).status).toBe(400);
     expect((await get("/api/audit-log?to=2026-13-45x")).status).toBe(400);
+    expect((await get("/api/audit-log?to=2026-09-28T99:00:00.000Z")).status).toBe(400);
+    expect(storageMock.listAuditEvents).not.toHaveBeenCalled();
   });
 });
 

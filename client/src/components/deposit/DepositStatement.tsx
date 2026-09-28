@@ -15,7 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { formatCurrency, formatDate } from "@/lib/format";
+import { formatCurrency, formatDate, localToday } from "@/lib/format";
 import { fromCents, runningBalance } from "@shared/depositLedger";
 import { shareOfSplit, statementMailto, statementText, type StatementLine } from "@shared/depositStatement";
 import type { DepositDeduction, Resident, SecurityDeposit } from "@shared/schema";
@@ -31,9 +31,6 @@ import type { DepositDeduction, Resident, SecurityDeposit } from "@shared/schema
  * Because delivery happens elsewhere, the date worth recording is the one the
  * RA sets by hand — there is no send action to infer it from.
  */
-
-/** Today as "YYYY-MM-DD". */
-const today = () => new Date().toISOString().slice(0, 10);
 
 /** The worksheet's lines, each split row saying whose share it is. */
 function statementLines(deductions: readonly DepositDeduction[], houseDeductions: readonly DepositDeduction[]): StatementLine[] {
@@ -68,7 +65,7 @@ export default function DepositStatement({
   const [providedOn, setProvidedOn] = useState(
     deposit.statementProvidedOn
       ? new Date(deposit.statementProvidedOn).toISOString().slice(0, 10)
-      : today(),
+      : localToday(),
   );
 
   const balanceCents = runningBalance(deposit.amountHeld, deductions);

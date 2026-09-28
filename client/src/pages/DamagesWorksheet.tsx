@@ -15,7 +15,7 @@ import DepositStatement from "@/components/deposit/DepositStatement";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { formatCurrency, formatDate } from "@/lib/format";
+import { formatCurrency, formatDate, localToday } from "@/lib/format";
 import { CONDITION_LABEL } from "@/lib/walkthrough";
 import { fromCents, runningBalance, splitEvenly, toCents } from "@shared/depositLedger";
 import { residentsActiveOn } from "@shared/residents";
@@ -53,8 +53,6 @@ import {
  */
 
 const FLAGGED = new Set<string>(WALKTHROUGH_FLAGGED_CONDITIONS);
-const today = () => new Date().toISOString().slice(0, 10);
-
 interface RowState {
   amount: string;
   residentIds: string[];
@@ -362,7 +360,7 @@ export default function DamagesWorksheet() {
                                 checked &&
                                 closeOut.mutate({
                                   deposit,
-                                  body: { status: "returned", amountReturned: fromCents(Math.max(balance ?? 0, 0)), returnedDate: today() },
+                                  body: { status: "returned", amountReturned: fromCents(Math.max(balance ?? 0, 0)), returnedDate: localToday() },
                                 })
                               }
                               data-testid={`checkbox-returned-${resident.id}`}

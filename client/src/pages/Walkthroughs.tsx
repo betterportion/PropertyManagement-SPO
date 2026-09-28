@@ -21,8 +21,8 @@ import { Container, PageHeader, PageStack, Section } from "@/components/layout/p
 import { EmptyState, LoadingState } from "@/components/states";
 import PhotoComparison from "@/components/walkthrough/PhotoComparison";
 import { useAuth } from "@/hooks/useAuth";
-import { today, useStartWalkthrough } from "@/hooks/useStartWalkthrough";
-import { formatDate } from "@/lib/format";
+import { useStartWalkthrough } from "@/hooks/useStartWalkthrough";
+import { formatDate, localToday } from "@/lib/format";
 import {
   WALKTHROUGH_STATUS_BADGE,
   WALKTHROUGH_TYPE_LABEL,
@@ -50,7 +50,7 @@ export default function Walkthroughs() {
   const [selectedProperty, setSelectedProperty] = useState<Property | null>(null);
   const [isStartOpen, setIsStartOpen] = useState(false);
   const [newType, setNewType] = useState<Walkthrough["type"]>("move_in");
-  const [newDate, setNewDate] = useState(today());
+  const [newDate, setNewDate] = useState(localToday());
 
   // Computed, not returned on. An early return above the queries below would
   // change the hook count once the auth query resolves, and React throws.
@@ -122,7 +122,7 @@ export default function Walkthroughs() {
                     variant="primary"
                     onClick={() => {
                       setNewType("move_in");
-                      setNewDate(today());
+                      setNewDate(localToday());
                       setIsStartOpen(true);
                     }}
                     data-testid="button-start-walkthrough"
@@ -200,7 +200,7 @@ export default function Walkthroughs() {
                     variant="primary"
                     onClick={() => {
                       setNewType("move_in");
-                      setNewDate(today());
+                      setNewDate(localToday());
                       setIsStartOpen(true);
                     }}
                     data-testid="button-start-first-walkthrough"

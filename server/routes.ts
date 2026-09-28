@@ -213,6 +213,24 @@ function nextUtcDay(day: string): Date {
 }
 
 /**
+ * One end of an activity-log range: a calendar day, read as UTC, or an exact
+ * instant. The activity page sends instants -- the reader's own local
+ * midnights -- because a UTC day starts at 7pm Central the evening before, and
+ * the list shows local times. The bare day stays for anyone reading the API by
+ * hand. A day at the end of a range is meant inclusively, so it becomes the
+ * following midnight; an instant already is that midnight. The storage layer
+ * treats the end as exclusive.
+ */
+const rangeBound = (dayToDate: (day: string) => Date) =>
+  z
+    .string()
+    .refine(
+      (value) => isoDate.safeParse(value).success || z.string().datetime().safeParse(value).success,
+      "Expected a date as YYYY-MM-DD or an ISO timestamp",
+    )
+    .transform((value) => (isoDate.safeParse(value).success ? dayToDate(value) : new Date(value)));
+
+/**
  * Filters for the activity page. Everything is optional except the bounds on
  * the page size, which are not negotiable: the audit table only ever grows, so
  * a request must never be able to ask for all of it.
@@ -228,8 +246,8 @@ const auditLogQuerySchema = z.object({
   /** Part of an email address, matched against the actor as it was recorded. */
   actor: blankAsAbsent(z.string().trim().max(320)),
   action: blankAsAbsent(z.enum(AUDIT_ACTION_VALUES as [string, ...string[]])),
-  from: blankAsAbsent(isoDate),
-  to: blankAsAbsent(isoDate),
+  from: blankAsAbsent(rangeBound(startOfUtcDay)),
+  to: blankAsAbsent(rangeBound(nextUtcDay)),
 });
 
 /**
@@ -609,11 +627,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { events, total } = await storage.listAuditEvents({
         actorEmail: actor,
         action,
-        from: from ? startOfUtcDay(from) : undefined,
-        // The end of the range is a day the reader picked, and they mean it
-        // inclusively -- so the bound sent down is the following midnight,
-        // which the storage layer treats as exclusive.
-        to: to ? nextUtcDay(to) : undefined,
+        from,
+        to,
         limit: pageSize,
         offset: (page - 1) * pageSize,
       });

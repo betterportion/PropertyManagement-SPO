@@ -26,15 +26,13 @@ import { Section, Container, PageHeader, PageStack } from "@/components/layout/p
 import DepositLedger from "@/components/deposit/DepositLedger";
 import SplitChargeDialog from "@/components/deposit/SplitChargeDialog";
 import { LoadingState, EmptyState } from "@/components/states";
-import { formatCurrency, formatDate } from "@/lib/format";
+import { formatCurrency, formatDate, localToday } from "@/lib/format";
 
 /** The current month as "YYYY-MM", read from the calendar parts locally. */
 function currentPeriod(): string {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
 }
-const today = () => new Date().toISOString().slice(0, 10);
-
 const generateFormSchema = z.object({
   propertyId: z.string().min(1, "Choose a house"),
   period: z.string().regex(/^\d{4}-\d{2}$/, "Pick a month"),
@@ -121,7 +119,7 @@ export default function Finances() {
     mutationFn: async ({ id, status }: { id: string; status: RentPayment["status"] }) =>
       apiRequest("PATCH", `/api/rent-payments/${id}`, {
         status,
-        paidDate: status === "paid" ? today() : null,
+        paidDate: status === "paid" ? localToday() : null,
       }),
     onSuccess: () => invalidateRent(),
     onError: () => toast({ title: "Error", description: "Could not update the payment", variant: "destructive" }),

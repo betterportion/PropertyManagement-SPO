@@ -19,7 +19,7 @@ import { EmptyState, LoadingState } from "@/components/states";
 import DepositStatement from "@/components/deposit/DepositStatement";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { formatCurrency, formatDate } from "@/lib/format";
+import { formatCurrency, formatDate, localToday } from "@/lib/format";
 import { fromCents, runningBalance, toCents } from "@shared/depositLedger";
 import type {
   DepositDeduction,
@@ -41,9 +41,6 @@ import type {
  *
  * Admins and the finance team only. Residents never see any of this.
  */
-
-/** Today as "YYYY-MM-DD". */
-const today = () => new Date().toISOString().slice(0, 10);
 
 /**
  * How each status reads on the card.
@@ -85,7 +82,7 @@ export default function DepositLedger({
   const [isStatementOpen, setIsStatementOpen] = useState(false);
   const [description, setDescription] = useState("");
   const [amount, setAmount] = useState("");
-  const [chargeDate, setChargeDate] = useState(today);
+  const [chargeDate, setChargeDate] = useState(localToday);
   const [requestId, setRequestId] = useState<string>(NO_LINK);
   const [walkthroughItemId, setWalkthroughItemId] = useState<string>(NO_LINK);
 

@@ -15,7 +15,7 @@ import {
 import { DataTable } from "@/components/data-table";
 import { EmptyState } from "@/components/states";
 import { ChevronLeft, ChevronRight, History } from "lucide-react";
-import { formatDateTime, formatValue } from "@/lib/format";
+import { formatDateTime, formatValue, localDayStart } from "@/lib/format";
 import { AUDIT_ACTION_VALUES, auditActionLabel } from "@shared/audit";
 import type { AuditEvent } from "@shared/schema";
 
@@ -64,8 +64,10 @@ function isCalendarDay(value: string): boolean {
 
 function buildQuery(filters: Filters, page: number): string {
   const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
-  if (isCalendarDay(filters.from)) params.set("from", filters.from);
-  if (isCalendarDay(filters.to)) params.set("to", filters.to);
+  // The reader's own midnights, so "today" means the day the times in the
+  // list are shown in. The end is the start of the day after, exclusive.
+  if (isCalendarDay(filters.from)) params.set("from", localDayStart(filters.from).toISOString());
+  if (isCalendarDay(filters.to)) params.set("to", localDayStart(filters.to, 1).toISOString());
   if (filters.actor.trim()) params.set("actor", filters.actor.trim());
   if (filters.action !== ANY_ACTION) params.set("action", filters.action);
   return params.toString();

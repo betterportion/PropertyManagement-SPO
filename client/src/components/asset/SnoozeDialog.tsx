@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
+import { localCalendarDay } from "@/lib/format";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { assetLifecycle } from "@shared/assetLifecycle";
 import type { Asset } from "@shared/schema";
@@ -36,7 +37,7 @@ import type { Asset } from "@shared/schema";
 function defaultUntil(): string {
   const date = new Date();
   date.setFullYear(date.getFullYear() + 1);
-  return date.toISOString().slice(0, 10);
+  return localCalendarDay(date);
 }
 
 export default function SnoozeDialog({
