@@ -883,16 +883,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
             actualCost: true,
             targetYear: true,
             targetQuarter: true,
+            // A household reports a problem; whether it is in hand or done is
+            // staff's call. Filed already closed, it would never show as open
+            // work, so every resident request starts pending.
+            status: true,
           })
           .parse(req.body);
         await requireOwnUploads(ctx, validatedData, ["photoUrl"]);
         const request = await storage.createMaintenanceRequest({
           ...validatedData,
           type: "request",
+          status: "pending",
           region: residency.region,
           buildingAddress: residency.buildingAddress,
           submittedBy,
-          ...closedDateChange(undefined, validatedData.status, new Date()),
         });
         await attachRequestPhotos(ctx, request.id, req.body?.photoUrls);
         // One of the things JotForm used to do that the portal should do
@@ -2096,6 +2100,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  const RESIDENT_ITEM_FIELDS = ["condition", "notes"];
+
   app.patch('/api/walkthrough-items/:id', isAuthenticated, async (req: any, res) => {
     try {
       const ctx = await requireActiveUser(req, res);
@@ -2120,6 +2126,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // client mistake is visible.
       if (ctx.isResident && "standingNote" in editable) {
         return res.status(403).json({ message: "Forbidden - Standing notes are written by staff" });
+      }
+      // A leader records condition and notes and nothing else. The label and
+      // the order carry forward to next year and into the move-out comparison
+      // and the damages worksheet, so changing them is staff work. Refused,
+      // not dropped, for the same reason as the standing note.
+      if (ctx.isResident && Object.keys(editable).some((key) => !RESIDENT_ITEM_FIELDS.includes(key))) {
+        return res.status(403).json({ message: "Forbidden - A household records condition and notes only" });
       }
       const validatedData = insertWalkthroughItemSchema.partial().parse(editable);
 
