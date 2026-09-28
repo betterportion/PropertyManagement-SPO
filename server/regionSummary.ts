@@ -10,6 +10,14 @@
  * safety/preventive checks coming due, and lease renewals to decide. Unpaid rent
  * is reported alongside but is NOT part of the health score: it is chased on its
  * own track (a KPI, a flag, and eventually an automated resident email).
+ *
+ * A caller who lacks a source's permission must never read as "all clear" —
+ * that is indistinguishable from a region with nothing outstanding. `visibility`
+ * says which sources this caller may see, and every count derived from a hidden
+ * source is gated to 0 *inside this function*, from the same value the response
+ * uses, so a hidden source's real magnitude can never reach `attentionScore` or
+ * any other field. `hidden` on the result names which sources were gated, so
+ * the caller can tell "clear" from "some of this is not shown to you".
  */
 import { isProjectType, type MaintenanceRequest, type MaintenanceSchedule, type Property, type RentPayment, type Task } from "@shared/schema";
 import { SCHEDULE_LOOKAHEAD_DAYS, LEASE_LOOKAHEAD_DAYS } from "./actionItems";
@@ -23,6 +31,9 @@ export interface RegionStaff {
   regions: string[];
 }
 
+/** The sources behind a region summary that a caller's permissions can hide. */
+export type RegionSummarySource = "maintenance" | "schedule" | "lease" | "rent";
+
 export interface RegionSummaryInputs {
   requests: MaintenanceRequest[];
   schedules: MaintenanceSchedule[];
@@ -31,6 +42,14 @@ export interface RegionSummaryInputs {
   /** Open safety reminders (walkthroughs, utilities) count toward safety load. */
   tasks: Task[];
   staff: RegionStaff[];
+  /**
+   * Whether this caller may see each source, from `canSeeActionItemSource`.
+   * A source marked false is gated to 0 regardless of what `requests` /
+   * `schedules` / `properties` / `rentPayments` actually contain — the route
+   * already avoids reading those tables when the caller cannot see them, but
+   * this function does not trust that and gates again itself.
+   */
+  visibility: Record<RegionSummarySource, boolean>;
 }
 
 export interface RegionSummary {
@@ -47,6 +66,14 @@ export interface RegionSummary {
   unpaidRent: { count: number; amount: string };
   /** openRequests + safetyPreventiveDue + leaseRenewalsDue — drives the sort. */
   attentionScore: number;
+  /**
+   * Sources this caller lacks permission to see, so their counts above are 0
+   * whatever the region actually has. A hidden maintenance, schedule or lease
+   * source means the score is not certified clear, so the client must not
+   * render "All clear"; a hidden `rent` does not, because rent is never part
+   * of the score.
+   */
+  hidden: RegionSummarySource[];
 }
 
 // Region values are canonical by the time they reach here (records store the
@@ -75,14 +102,21 @@ export function buildRegionSummaries(
   const scheduleHorizon = new Date(now.getTime() + SCHEDULE_LOOKAHEAD_DAYS * DAY_MS);
   const leaseHorizon = new Date(now.getTime() + LEASE_LOOKAHEAD_DAYS * DAY_MS);
 
+  const hidden = (Object.keys(inputs.visibility) as RegionSummarySource[]).filter(
+    (source) => !inputs.visibility[source],
+  );
+
   const summaries = regions.map((region) => {
     const admins = inputs.staff
       .filter((s) => s.regions.includes("all") || s.regions.includes(region))
       .map((s) => ({ name: s.name, email: s.email }));
 
-    const open = inputs.requests.filter(
-      (r) => inRegion(r.region, region) && (r.status === "pending" || r.status === "in_progress"),
-    );
+    // Every count below is gated on `inputs.visibility` first, so a source
+    // this caller cannot see contributes exactly 0 -- to its own field and to
+    // attentionScore, which is built from these same gated locals.
+    const open = inputs.visibility.maintenance
+      ? inputs.requests.filter((r) => inRegion(r.region, region) && (r.status === "pending" || r.status === "in_progress"))
+      : [];
     const openRequests = open.length;
     // Repairs and jobs are reported as two numbers on the dashboard. Derived
     // from the type column and nothing else, so an untyped row -- which the
@@ -91,28 +125,35 @@ export function buildRegionSummaries(
     const openRepairs = open.filter((r) => r.type === "request").length;
     const openJobs = open.filter((r) => isProjectType(r.type)).length;
 
-    const schedulesDue = inputs.schedules.filter((s) => {
-      if (!s.isActive || !inRegion(s.region, region)) return false;
-      const due = asDate(s.nextDueDate);
-      return !!due && due <= scheduleHorizon;
-    }).length;
-    // Region-level safety reminders (walkthroughs, utilities) that are still open.
+    const schedulesDue = inputs.visibility.schedule
+      ? inputs.schedules.filter((s) => {
+          if (!s.isActive || !inRegion(s.region, region)) return false;
+          const due = asDate(s.nextDueDate);
+          return !!due && due <= scheduleHorizon;
+        }).length
+      : 0;
+    // Region-level safety reminders (walkthroughs, utilities) that are still
+    // open. Not gated on a source here: the route has already dropped the
+    // tasks this caller cannot see through `canSeeTask` (a lease-derived one
+    // needs the properties flag, #170).
     const safetyTasksOpen = inputs.tasks.filter(
       (t) => t.category === "safety" && t.status === "open" && inRegion(t.region, region),
     ).length;
     const safetyPreventiveDue = schedulesDue + safetyTasksOpen;
 
-    const leaseRenewalsDue = inputs.properties.filter((p) => {
-      if (p.ownership !== "rented" || p.renewalDecision === "not_renewing") return false;
-      if (!inRegion(p.region, region)) return false;
-      const due = asDate(p.leaseRenewalDate);
-      return !!due && due <= leaseHorizon;
-    }).length;
+    const leaseRenewalsDue = inputs.visibility.lease
+      ? inputs.properties.filter((p) => {
+          if (p.ownership !== "rented" || p.renewalDecision === "not_renewing") return false;
+          if (!inRegion(p.region, region)) return false;
+          const due = asDate(p.leaseRenewalDate);
+          return !!due && due <= leaseHorizon;
+        }).length
+      : 0;
 
     // A "failed" (bounced) payment is still owed, so it counts as unpaid here.
-    const unpaid = inputs.rentPayments.filter(
-      (p) => inRegion(p.region, region) && (p.status === "unpaid" || p.status === "failed"),
-    );
+    const unpaid = inputs.visibility.rent
+      ? inputs.rentPayments.filter((p) => inRegion(p.region, region) && (p.status === "unpaid" || p.status === "failed"))
+      : [];
     const unpaidAmount = unpaid.reduce((sum, p) => sum + Number(p.amount ?? 0), 0);
 
     return {
@@ -125,6 +166,7 @@ export function buildRegionSummaries(
       leaseRenewalsDue,
       unpaidRent: { count: unpaid.length, amount: unpaidAmount.toFixed(2) },
       attentionScore: openRequests + safetyPreventiveDue + leaseRenewalsDue,
+      hidden,
     };
   });
 

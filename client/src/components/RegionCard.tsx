@@ -1,6 +1,7 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { formatCurrency } from "@/lib/format";
+import { isAllClear, scoreCountsHidden } from "@/lib/regionCard";
 
 export interface RegionSummary {
   region: string;
@@ -12,6 +13,7 @@ export interface RegionSummary {
   leaseRenewalsDue: number;
   unpaidRent: { count: number; amount: string };
   attentionScore: number;
+  hidden: string[];
 }
 
 function Metric({ label, value }: { label: string; value: number }) {
@@ -30,10 +32,17 @@ function Metric({ label, value }: { label: string; value: number }) {
  * One region's health at a glance for the leadership overview: who runs it and
  * the three operational counts that make up its attention score. Rendered as a
  * button so it is keyboard-focusable and drills into that region on click.
+ *
+ * "All clear" is shown only when the score is zero and none of its sources
+ * is hidden -- a score source hidden by a missing permission reads as a
+ * plain-language note instead, never as clear. Hidden rent does not count:
+ * rent is never part of the score (see `lib/regionCard.ts`).
  */
 export default function RegionCard({ summary, onSelect }: { summary: RegionSummary; onSelect: () => void }) {
   const leads = summary.admins.map((a) => a.name).join(", ");
   const needsAttention = summary.attentionScore > 0;
+  const allClear = isAllClear(summary);
+  const scoreHidden = scoreCountsHidden(summary.hidden);
 
   return (
     <button
@@ -54,9 +63,9 @@ export default function RegionCard({ summary, onSelect }: { summary: RegionSumma
             </div>
             {needsAttention ? (
               <Badge variant="warning">Needs attention</Badge>
-            ) : (
+            ) : allClear ? (
               <Badge variant="secondary">All clear</Badge>
-            )}
+            ) : null}
           </div>
 
           <div className="grid grid-cols-3 gap-2">
@@ -68,6 +77,12 @@ export default function RegionCard({ summary, onSelect }: { summary: RegionSumma
           {summary.unpaidRent.count > 0 && (
             <p className="text-xs text-muted-foreground">
               {summary.unpaidRent.count} behind on HH fees · {formatCurrency(summary.unpaidRent.amount)} outstanding
+            </p>
+          )}
+
+          {scoreHidden && (
+            <p className="text-xs text-muted-foreground" data-testid={`text-region-hidden-${summary.region}`}>
+              Some counts are hidden — you don't have permission to see all of this region's data.
             </p>
           )}
         </CardContent>

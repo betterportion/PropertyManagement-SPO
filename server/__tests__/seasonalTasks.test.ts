@@ -187,7 +187,15 @@ describe("the lease renewal reminder in the region summary (#162)", () => {
     // real safety load. What the renewal task adds on top must be nothing.
     const summarize = (withTasks: Task[]) =>
       buildRegionSummaries(
-        { requests: [], schedules: [], properties: [house], rentPayments: [], tasks: withTasks, staff: [] },
+        {
+          requests: [],
+          schedules: [],
+          properties: [house],
+          rentPayments: [],
+          tasks: withTasks,
+          staff: [],
+          visibility: { maintenance: true, schedule: true, lease: true, rent: true },
+        },
         ["West Central"],
         NOW,
       )[0];

@@ -8251,6 +8251,12 @@ describe("dashboard items follow the flag of the list they come from (#158)", ()
     expect(storageMock.getAllMaintenanceRequests).not.toHaveBeenCalled();
     expect(storageMock.getAllMaintenanceSchedules).not.toHaveBeenCalled();
     expect(storageMock.getAllProperties).not.toHaveBeenCalled();
+    // #171: a caller without canViewMaintenance/canManageMaintenance gets 0
+    // from the region's real open request, the source reads hidden, and that
+    // 0 is what feeds attentionScore -- not a magnitude that got masked only
+    // in the response and not in the score.
+    expect(body[0].hidden.sort()).toEqual(["lease", "maintenance", "rent", "schedule"]);
+    expect(body[0].attentionScore).toBe(1); // the one visible safety task only
   });
 
   it("counts them for staff holding the flags -- the positive control", async () => {
@@ -8258,6 +8264,7 @@ describe("dashboard items follow the flag of the list they come from (#158)", ()
     mockEverySource();
     const { body } = await get("/api/region-summary");
     expect(body[0]).toMatchObject({ region: "West Central", openRequests: 1, openRepairs: 1, leaseRenewalsDue: 1, safetyPreventiveDue: 2 });
+    expect(body[0].hidden.sort()).toEqual(["rent"]); // finance flags not held here
   });
 
   it("excludes a lease-derived task from the region summary's safety count for staff without the properties flag (#170)", async () => {
