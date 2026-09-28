@@ -60,7 +60,7 @@ function signedCookieValue(sid: string): string {
   return encodeURIComponent(`s:${sid}.${sig}`);
 }
 
-async function mintSession(pool: pg.Pool, userId: string, email: string): Promise<string> {
+export async function mintSession(pool: pg.Pool, userId: string, email: string): Promise<string> {
   const sid = randomBytes(24).toString("hex");
   const weekMs = 7 * 24 * 60 * 60 * 1000;
   const expires = new Date(Date.now() + weekMs);
@@ -83,7 +83,7 @@ async function mintSession(pool: pg.Pool, userId: string, email: string): Promis
   return signedCookieValue(sid);
 }
 
-async function saveStorageState(cookieValue: string, path: string) {
+export async function saveStorageState(cookieValue: string, path: string) {
   const browser = await chromium.launch();
   const context = await browser.newContext();
   await context.addCookies([
