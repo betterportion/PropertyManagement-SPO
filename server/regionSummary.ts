@@ -68,8 +68,10 @@ export interface RegionSummary {
   attentionScore: number;
   /**
    * Sources this caller lacks permission to see, so their counts above are 0
-   * whatever the region actually has. Non-empty means this region is not
-   * certified clear — the client must not render "All clear" for it.
+   * whatever the region actually has. A hidden maintenance, schedule or lease
+   * source means the score is not certified clear, so the client must not
+   * render "All clear"; a hidden `rent` does not, because rent is never part
+   * of the score.
    */
   hidden: RegionSummarySource[];
 }
@@ -131,8 +133,9 @@ export function buildRegionSummaries(
         }).length
       : 0;
     // Region-level safety reminders (walkthroughs, utilities) that are still
-    // open. Tasks need only staff (no source to hide), so this half of the
-    // safety count is never gated.
+    // open. Not gated on a source here: the route has already dropped the
+    // tasks this caller cannot see through `canSeeTask` (a lease-derived one
+    // needs the properties flag, #170).
     const safetyTasksOpen = inputs.tasks.filter(
       (t) => t.category === "safety" && t.status === "open" && inRegion(t.region, region),
     ).length;

@@ -1,6 +1,7 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { formatCurrency } from "@/lib/format";
+import { isAllClear, scoreCountsHidden } from "@/lib/regionCard";
 
 export interface RegionSummary {
   region: string;
@@ -32,14 +33,16 @@ function Metric({ label, value }: { label: string; value: number }) {
  * the three operational counts that make up its attention score. Rendered as a
  * button so it is keyboard-focusable and drills into that region on click.
  *
- * "All clear" is shown only when every source is visible and the score is
- * zero -- a source hidden by a missing permission reads as a plain-language
- * note instead, never as clear.
+ * "All clear" is shown only when the score is zero and none of its sources
+ * is hidden -- a score source hidden by a missing permission reads as a
+ * plain-language note instead, never as clear. Hidden rent does not count:
+ * rent is never part of the score (see `lib/regionCard.ts`).
  */
 export default function RegionCard({ summary, onSelect }: { summary: RegionSummary; onSelect: () => void }) {
   const leads = summary.admins.map((a) => a.name).join(", ");
   const needsAttention = summary.attentionScore > 0;
-  const hasHiddenSources = summary.hidden.length > 0;
+  const allClear = isAllClear(summary);
+  const scoreHidden = scoreCountsHidden(summary.hidden);
 
   return (
     <button
@@ -60,9 +63,9 @@ export default function RegionCard({ summary, onSelect }: { summary: RegionSumma
             </div>
             {needsAttention ? (
               <Badge variant="warning">Needs attention</Badge>
-            ) : hasHiddenSources ? null : (
+            ) : allClear ? (
               <Badge variant="secondary">All clear</Badge>
-            )}
+            ) : null}
           </div>
 
           <div className="grid grid-cols-3 gap-2">
@@ -77,8 +80,8 @@ export default function RegionCard({ summary, onSelect }: { summary: RegionSumma
             </p>
           )}
 
-          {hasHiddenSources && (
-            <p className="text-xs text-muted-foreground">
+          {scoreHidden && (
+            <p className="text-xs text-muted-foreground" data-testid={`text-region-hidden-${summary.region}`}>
               Some counts are hidden — you don't have permission to see all of this region's data.
             </p>
           )}
