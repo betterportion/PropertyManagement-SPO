@@ -5369,6 +5369,26 @@ describe("snoozing an asset an RA is confident about", () => {
     expect(storageMock.updateAsset).not.toHaveBeenCalled();
   });
 
+  it("takes tomorrow as an end date after 7pm Central, and refuses today (#168)", async () => {
+    // 01:17Z on Sep 28 is 8:17pm on Sep 27 in Chicago. Tomorrow arrives as
+    // UTC midnight of Sep 28, already past as an instant; it has not begun
+    // everywhere, so it is still in the future. Today (Sep 27) has.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-09-28T01:17:00.000Z"));
+    try {
+      westLead();
+      const today = await snooze("asset-west", { until: "2026-09-27", reason: "Serviced" });
+      expect(today.status).toBe(400);
+      expect(storageMock.updateAsset).not.toHaveBeenCalled();
+
+      const tomorrow = await snooze("asset-west", { until: "2026-09-28", reason: "Serviced" });
+      expect(tomorrow.status).toBe(200);
+      expect(storageMock.updateAsset).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("clears a snooze, keeping the reason as the record of why it was parked", async () => {
     westLead();
     const { status } = await request("DELETE", "/api/assets/asset-west/snooze", {});

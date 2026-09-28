@@ -31,6 +31,7 @@ import {
 import { summarizeSetup, setupRowsByProperty } from "@shared/propertySetup";
 import { assetLifecycle } from "@shared/assetLifecycle";
 import { depositReturnDeadline, fromCents, runningBalance } from "@shared/depositLedger";
+import { isPastDue } from "@shared/dueDates";
 import type { ActionItemCategory, ActionItemSource } from "@shared/actionItems";
 
 /** How far ahead a recurring schedule becomes an action item. */
@@ -127,7 +128,7 @@ export function buildActionItems(inputs: ActionItemInputs, now: Date = new Date(
       title: s.title,
       subtitle: s.buildingAddress,
       dueDate: iso(due),
-      overdue: due < now,
+      overdue: isPastDue(due, now),
       region: s.region,
     });
   }
@@ -149,7 +150,7 @@ export function buildActionItems(inputs: ActionItemInputs, now: Date = new Date(
       title: `Lease renewal — ${p.name}`,
       subtitle: p.address,
       dueDate: iso(due),
-      overdue: due < now,
+      overdue: isPastDue(due, now),
       region: p.region,
     });
   }
@@ -258,7 +259,7 @@ export function buildActionItems(inputs: ActionItemInputs, now: Date = new Date(
       subtitle: p.buildingAddress,
       amount: p.amount,
       dueDate: iso(due),
-      overdue: due ? due < now : false,
+      overdue: isPastDue(due, now),
       region: p.region,
     });
   }
@@ -330,7 +331,7 @@ export function buildActionItems(inputs: ActionItemInputs, now: Date = new Date(
       subtitle: d.buildingAddress,
       amount: fromCents(owed),
       dueDate: iso(dueDate),
-      overdue: deadline !== null ? deadline < now : hasLeft,
+      overdue: deadline !== null ? isPastDue(deadline, now) : hasLeft,
       region: d.region,
     });
   }
@@ -347,7 +348,7 @@ export function buildActionItems(inputs: ActionItemInputs, now: Date = new Date(
       title: t.title,
       subtitle: t.notes ?? "",
       dueDate: iso(due),
-      overdue: due ? due < now : false,
+      overdue: isPastDue(due, now),
       region: t.region,
     });
   }

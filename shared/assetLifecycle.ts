@@ -20,6 +20,8 @@
  * second copy on the client is how they come to disagree.
  */
 
+import { hasBegunEverywhere, isPastDue } from "./dueDates";
+
 /**
  * The categories an asset can be filed under.
  *
@@ -203,8 +205,11 @@ export interface LifecycleState {
 /** Where an asset stands, as of `now`. */
 export function assetLifecycle(asset: LifecycleAsset, now: Date = new Date()): LifecycleState {
   const due = replacementDueAt(asset);
+  // A snooze runs until its end day has begun everywhere (shared/dueDates.ts).
+  // The null check matters: with no end date `hasBegunEverywhere` is false,
+  // which on its own would read as snoozed forever.
   const snoozedUntil = time(asset.snoozedUntil);
-  const snoozed = snoozedUntil !== null && snoozedUntil > now.getTime();
+  const snoozed = snoozedUntil !== null && !hasBegunEverywhere(new Date(snoozedUntil), now);
 
   if (due === null) {
     return {
@@ -217,7 +222,7 @@ export function assetLifecycle(asset: LifecycleAsset, now: Date = new Date()): L
 
   const yearsAway = (due.getTime() - now.getTime()) / YEAR_MS;
 
-  if (yearsAway < 0) {
+  if (isPastDue(due, now)) {
     return { status: "overdue", label: "Replacement overdue", dueDate: due, snoozed };
   }
   if (yearsAway <= LIFECYCLE_URGENT_YEARS) {

@@ -10,6 +10,7 @@ import { Container, PageHeader, PageStack, Section } from "@/components/layout/p
 import { EmptyState, LoadingState } from "@/components/states";
 import { formatDate } from "@/lib/format";
 import type { Asset, Resident, User } from "@shared/schema";
+import { isPastDue } from "@shared/dueDates";
 
 /**
  * Everything SPO has lent out, by the person holding it.
@@ -92,7 +93,6 @@ export default function AssignedAssets() {
   }, [assetsQuery.data, residentsQuery.data, usersQuery.data]);
 
   const isLoading = assetsQuery.isLoading;
-  const today = new Date();
 
   return (
     <Section size="compact">
@@ -140,7 +140,7 @@ export default function AssignedAssets() {
 
                     {holder.assets.map((asset) => {
                       const due = asset.expectedReturnDate ? new Date(asset.expectedReturnDate) : null;
-                      const overdue = due !== null && due < today;
+                      const overdue = isPastDue(due);
                       return (
                         <Link
                           key={asset.id}

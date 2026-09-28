@@ -40,6 +40,7 @@ import type {
   Resident,
   SecurityDeposit,
 } from "@shared/schema";
+import { isPastDue } from "@shared/dueDates";
 
 /**
  * Everything about one house, in one place.
@@ -102,7 +103,7 @@ function scheduleStatus(schedule: MaintenanceSchedule) {
   today.setHours(0, 0, 0, 0);
   const due = new Date(schedule.nextDueDate);
   const days = Math.round((due.getTime() - today.getTime()) / DAY);
-  if (days < 0) return { label: "Overdue", variant: "destructive" as const };
+  if (isPastDue(due)) return { label: "Overdue", variant: "destructive" as const };
   if (days <= 30) return { label: "Due soon", variant: "warning" as const };
   return { label: "Up to date", variant: "success" as const };
 }

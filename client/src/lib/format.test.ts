@@ -12,7 +12,9 @@ beforeAll(() => {
   process.env.TZ = "America/Chicago";
 });
 afterAll(() => {
-  process.env.TZ = originalTz;
+  // Assigning undefined would store the string "undefined", not unset it.
+  if (originalTz === undefined) delete process.env.TZ;
+  else process.env.TZ = originalTz;
 });
 
 describe("formatDate in America/Chicago", () => {
