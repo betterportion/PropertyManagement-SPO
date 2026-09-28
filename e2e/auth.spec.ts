@@ -17,4 +17,19 @@ test.describe("authentication", () => {
     await expect(page.getByRole("heading", { name: "Property Management Portal" })).toBeVisible();
     await context.close();
   });
+
+  test("a deactivated account is told so, instead of seeing the staff screens", async ({ browser }) => {
+    const context = await browser.newContext({ storageState: "e2e/.auth/inactive.json" });
+    const page = await context.newPage();
+    await page.goto("/");
+    await expect(page.getByRole("heading", { name: "Your account has been deactivated" })).toBeVisible();
+    await expect(page.getByTestId("button-inactive-logout")).toBeVisible();
+    // No navigation, and no dashboard claiming there is nothing due.
+    await expect(page.getByRole("heading", { name: "Dashboard" })).toHaveCount(0);
+    await expect(page.getByTestId("button-sidebar-toggle")).toHaveCount(0);
+    // A deep link lands on the same page, not on a staff screen's empty state.
+    await page.goto("/maintenance");
+    await expect(page.getByRole("heading", { name: "Your account has been deactivated" })).toBeVisible();
+    await context.close();
+  });
 });
