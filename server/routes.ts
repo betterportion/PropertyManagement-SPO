@@ -27,6 +27,7 @@ import {
   visibleWalkthroughs,
   canSeeActionItemSource,
   type AuthContext,
+  type PermissionName,
 } from "./authz";
 import { z } from "zod";
 import { sendError, logError, HttpError } from "./errors";
@@ -2756,7 +2757,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Middleware: rejects the request with 403 before multer reads a single byte
   // when the caller is deactivated or lacks a role that legitimately needs
   // file-storage access (residents are not permitted to upload directly).
-  const requireUploadPermission: import("express").RequestHandler = async (req: any, res, next) => {
+  // Being staff is not enough on its own: an account needs a flag for one of
+  // the screens that attaches files through the route, or it has nothing to
+  // attach a file to. Checked here, before multer, like everything else.
+  const requireUploadPermission = (...flags: PermissionName[]): import("express").RequestHandler => async (req: any, res, next) => {
     try {
       const ctx = await loadAuthContext(req);
       if (!ctx) {
@@ -2764,6 +2768,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       if (ctx.isResident) {
         return res.status(403).json({ message: "Residents are not permitted to upload files." });
+      }
+      if (!hasPermission(ctx, ...flags)) {
+        return res.status(403).json({ message: "Forbidden - Your account cannot upload files here" });
       }
       // Handed to the upload handler so it can record who stored the file
       // without resolving the same user a second time.
@@ -2829,7 +2836,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
   }
 
   // File Upload Route (images)
-  app.post('/api/upload', isAuthenticated, uploadRateLimit, requireUploadPermission, ...guardedUpload(upload.single('file'), IMAGE_UPLOAD_MAX_BYTES), async (req: any, res) => {
+  // The request, walkthrough, asset and house photo fields upload here.
+  // Filing a request needs only the view flag, so that flag is enough.
+  const IMAGE_UPLOAD_FLAGS: PermissionName[] = [
+    "canViewMaintenance",
+    "canManageMaintenance",
+    "canManageWalkthroughs",
+    "canManageAssets",
+    "canManageProperties",
+  ];
+
+  app.post('/api/upload', isAuthenticated, uploadRateLimit, requireUploadPermission(...IMAGE_UPLOAD_FLAGS), ...guardedUpload(upload.single('file'), IMAGE_UPLOAD_MAX_BYTES), async (req: any, res) => {
     try {
       if (!req.file) {
         return res.status(400).json({ message: "No file uploaded" });
@@ -2947,7 +2964,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return allowed.includes(detected.ext);
   }
 
-  app.post('/api/upload-doc', isAuthenticated, uploadRateLimit, requireUploadPermission, ...guardedUpload(docUpload.single('file'), DOCUMENT_UPLOAD_MAX_BYTES), async (req: any, res) => {
+  // Only the billing documents (contract, COI, W-9) upload here.
+  app.post('/api/upload-doc', isAuthenticated, uploadRateLimit, requireUploadPermission("canManageBilling"), ...guardedUpload(docUpload.single('file'), DOCUMENT_UPLOAD_MAX_BYTES), async (req: any, res) => {
     try {
       if (!req.file) {
         return res.status(400).json({ message: "No file uploaded" });

@@ -2798,6 +2798,50 @@ describe("who may upload a file", () => {
     expect(multerEntered).not.toHaveBeenCalled();
   });
 
+  // ── Staff need a flag for a screen that uploads through the route ────────
+  //
+  // Being staff is not enough on its own. /api/upload serves the request,
+  // walkthrough, asset and house photo fields; /api/upload-doc serves the
+  // billing documents. An account holding none of the flags behind those
+  // screens has nothing to attach a file to, so it may not store one.
+
+  const unrelatedOnly = { canViewContacts: true, canViewProperties: true, canViewAssets: true, allowedRegions: ["West Central"] };
+
+  it.each(["/api/upload", "/api/upload-doc"])("refuses %s to staff holding no flag that uses it, before reading the body", async (path) => {
+    actAs(STAFF, unrelatedOnly);
+    const { status } = await postFile(path);
+    expect(status).toBe(403);
+    expect(multerEntered).not.toHaveBeenCalled();
+    expect(fileStoreMock.putUpload).not.toHaveBeenCalled();
+  });
+
+  it("refuses the document endpoint to staff who manage maintenance but not billing", async () => {
+    actAs(STAFF, { ...ALL_MAINTENANCE, allowedRegions: ["West Central"] });
+    expect((await postFile("/api/upload-doc")).status).toBe(403);
+    expect(multerEntered).not.toHaveBeenCalled();
+  });
+
+  it.each(["canViewMaintenance", "canManageMaintenance", "canManageWalkthroughs", "canManageAssets", "canManageProperties"])(
+    "lets staff holding %s store an image",
+    async (flag) => {
+      actAs(STAFF, { [flag]: true, allowedRegions: ["West Central"] });
+      expect((await postFile("/api/upload")).status).toBe(200);
+      expect(fileStoreMock.putUpload).toHaveBeenCalled();
+    },
+  );
+
+  it("lets staff who manage billing store a document", async () => {
+    actAs(STAFF, { canManageBilling: true, allowedRegions: ["West Central"] });
+    expect((await postFile("/api/upload-doc")).status).toBe(200);
+    expect(fileStoreMock.putUpload).toHaveBeenCalled();
+  });
+
+  it("lets an admin with no permissions row store either kind", async () => {
+    actAs(ADMIN);
+    expect((await postFile("/api/upload")).status).toBe(200);
+    expect((await postFile("/api/upload-doc")).status).toBe(200);
+  });
+
   it("records who stored the file, taken from the session rather than the body", async () => {
     actAs(STAFF, { ...ALL_MAINTENANCE, allowedRegions: ["West Central"] });
     await postFile("/api/upload");

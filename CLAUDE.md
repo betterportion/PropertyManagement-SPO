@@ -469,8 +469,10 @@ Uploads go through one interface, `server/objectStorage/`, with two drivers chos
 
 Two endpoints store a file, both behind `isAuthenticated` and a permission check, both buffering it in memory with multer and then writing it to the store:
 
-- `POST /api/upload` — images only (jpeg/jpg/png/gif/webp), 10 MB limit.
-- `POST /api/upload-doc` — documents and images (pdf/doc/docx + image types), 20 MB limit.
+- `POST /api/upload` — images only (jpeg/jpg/png/gif/webp), 10 MB limit. Staff holding a flag for a screen that uploads here: `canViewMaintenance` (filing a request), `canManageMaintenance`, `canManageWalkthroughs`, `canManageAssets` or `canManageProperties`.
+- `POST /api/upload-doc` — documents and images (pdf/doc/docx + image types), 20 MB limit. Staff holding `canManageBilling`, since the billing documents are its only caller.
+
+Residents are refused on both, and an admin passes on the bypass. A new screen that uploads through either route needs its flag added to that route's list, or its users will be refused.
 
 Both validate the extension, the MIME type **and the file's actual magic bytes**, so a renamed executable is rejected before anything is stored. Both generate the storage key server-side — the client's filename survives only in the `uploads` table — and both return `{ url: "/uploads/<key>" }`.
 
