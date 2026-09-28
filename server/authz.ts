@@ -28,6 +28,7 @@ import { storage, type UploadReference } from "./storage";
 import { getUserId } from "./auth";
 import { normalizeRegion, normalizeRegions } from "./migrateRegions";
 import { isClosedMaintenanceStatus, type Upload, type User, type UserPermissions } from "@shared/schema";
+import type { ActionItemSource } from "@shared/actionItems";
 
 /** Names of the boolean permission columns on the user_permissions table. */
 export type PermissionName =
@@ -262,6 +263,37 @@ export function canSeeTask(
   if (task.assignedToUserId) return false;
   if (task.region === null) return true;
   return canAccessRegion(ctx, task.region);
+}
+
+/**
+ * The flags whose list each dashboard action item is drawn from (#158).
+ *
+ * `/api/action-items` and `/api/region-summary` are summaries over records that
+ * each have their own list route, and a summary must not be a way round that
+ * route's flag: a staff account holding no flags used to read its region's
+ * schedule titles, lease renewals and open work here while every source list
+ * answered 403. So an item needs exactly what its list needs. Tasks need
+ * nothing beyond staff, like `/api/tasks`.
+ *
+ * A Record rather than a switch, so a new source does not compile until it
+ * says which flags it follows.
+ */
+const ACTION_ITEM_PERMISSIONS: Record<ActionItemSource, readonly PermissionName[] | null> = {
+  schedule: ["canViewMaintenance", "canManageMaintenance"],
+  maintenance: ["canViewMaintenance", "canManageMaintenance"],
+  lease: ["canViewProperties", "canManageProperties"],
+  setup: ["canViewProperties", "canManageProperties", "canManagePropertySetup"],
+  asset: ["canViewAssets", "canManageAssets"],
+  rent: ["canViewFinancials", "canManageFinancials"],
+  deposit: ["canViewFinancials", "canManageFinancials"],
+  task: null,
+};
+
+/** Whether the caller may see dashboard items of this kind. Staff only. */
+export function canSeeActionItemSource(ctx: AuthContext, source: ActionItemSource): boolean {
+  if (ctx.isResident) return false;
+  const flags = ACTION_ITEM_PERMISSIONS[source];
+  return flags === null || hasPermission(ctx, ...flags);
 }
 
 /**
