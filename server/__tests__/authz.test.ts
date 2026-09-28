@@ -542,9 +542,23 @@ describe("canReadMaintenanceRequest", () => {
   });
 
   it("scopes staff by region rather than by ownership", () => {
-    const staff = context({ allowedRegions: ["West Central"] });
+    const staff = context({ allowedRegions: ["West Central"], permissions: { canViewMaintenance: true } });
     expect(canReadMaintenanceRequest(staff, { region: "West Central", submittedBy: "bob@example.com" })).toBe(true);
     expect(canReadMaintenanceRequest(staff, { region: "East Central", submittedBy: "bob@example.com" })).toBe(false);
+  });
+
+  // The region alone is not the grant: a staff account in the right region
+  // without either maintenance flag reads no request, and so no thread, photo
+  // or file that inherits the request rule.
+  it("refuses staff in the region who hold neither maintenance flag", () => {
+    const request = { region: "West Central", submittedBy: "bob@example.com" };
+    expect(canReadMaintenanceRequest(context({ allowedRegions: ["West Central"] }), request)).toBe(false);
+    expect(
+      canReadMaintenanceRequest(context({ allowedRegions: ["West Central"], permissions: { canCompleteWalkthroughs: true } }), request),
+    ).toBe(false);
+    expect(
+      canReadMaintenanceRequest(context({ allowedRegions: ["West Central"], permissions: { canManageMaintenance: true } }), request),
+    ).toBe(true);
   });
 
   it("lets an admin read anything", () => {
@@ -618,7 +632,7 @@ describe("canReadMaintenanceRequest — housemates", () => {
   });
 
   it("does not widen staff access: a house match never overrides region scoping", () => {
-    const staff = context({ allowedRegions: ["West Central"] });
+    const staff = context({ allowedRegions: ["West Central"], permissions: { canViewMaintenance: true } });
     expect(
       canReadMaintenanceRequest(
         staff,
@@ -757,7 +771,7 @@ describe("canReadMaintenanceRequest — the closed-request window on the house p
   });
 
   it("leaves staff alone: full history, however old", () => {
-    const staff = context({ allowedRegions: ["South East"] });
+    const staff = context({ allowedRegions: ["South East"], permissions: { canViewMaintenance: true } });
     expect(
       canReadMaintenanceRequest(
         staff,
@@ -857,7 +871,7 @@ describe("canReadMaintenanceRequest — the type rule (residents see repairs onl
   });
 
   it("leaves staff on the region rule: all three types read", () => {
-    const staff = context({ allowedRegions: ["South East"] });
+    const staff = context({ allowedRegions: ["South East"], permissions: { canViewMaintenance: true } });
     for (const type of ["request", "project", "capex"]) {
       expect(canReadMaintenanceRequest(staff, onOwnHouse({ type }), null)).toBe(true);
     }
@@ -1289,7 +1303,7 @@ describe("canReadComment", () => {
     type: "request",
   };
 
-  const staff = context({ allowedRegions: ["West Central"] });
+  const staff = context({ allowedRegions: ["West Central"], permissions: { canViewMaintenance: true } });
   const household = context({ role: "resident", email: "alice@example.com", propertyId: "prop-a" });
   const unlinked = context({ role: "resident", email: "alice@example.com" });
 
@@ -1366,7 +1380,7 @@ describe("canPostComment", () => {
     type: "request",
   };
 
-  const staff = context({ allowedRegions: ["West Central"] });
+  const staff = context({ allowedRegions: ["West Central"], permissions: { canViewMaintenance: true } });
   const household = context({ role: "resident", email: "alice@example.com", propertyId: "prop-a" });
   const unlinked = context({ role: "resident", email: "alice@example.com" });
 

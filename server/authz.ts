@@ -450,8 +450,8 @@ function isRepair(type: string | null | undefined): boolean {
  *     how the two resident accounts on a property share one repair history —
  *     but on that path, only while the request is open or was closed within
  *     RESIDENT_CLOSED_REQUEST_DAYS;
- *   - everyone else is bound by their allowed regions, with no time limit and
- *     no type limit at all. Staff keep the full history; this narrowing is
+ *   - staff need canViewMaintenance or canManageMaintenance, and are then
+ *     bound by their allowed regions, with no time limit and no type limit. Staff keep the full history; this narrowing is
  *     resident-only.
  *
  * The time dimension is on the HOUSE path alone. Putting it on the ownership
@@ -481,6 +481,11 @@ export function canReadMaintenanceRequest(
     if (!isClosedMaintenanceStatus(request.status)) return true;
     return withinResidentWindow(request.completedDate, now);
   }
+  // Staff need a maintenance flag as well as the region. The thread, the
+  // photos and every file on a request inherit this rule, so a flag checked
+  // only on the request route would leave all of them open to somebody whose
+  // maintenance access was taken away.
+  if (!hasPermission(ctx, "canViewMaintenance", "canManageMaintenance")) return false;
   return canAccessRegion(ctx, request.region);
 }
 

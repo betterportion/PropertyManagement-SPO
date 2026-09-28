@@ -8561,6 +8561,135 @@ describe("maintenance request photos", () => {
 });
 
 // ---------------------------------------------------------------------------
+// A request's thread, photos and files need the maintenance permission
+// ---------------------------------------------------------------------------
+
+/**
+ * Staff reach a request by region AND a maintenance flag. The request page
+ * always checked the flag; everything hanging off the request -- its thread,
+ * its photos, a comment's attachment and the file behind it -- inherits the
+ * request rule, so the flag has to be in that rule or taking maintenance
+ * access away from somebody leaves the internal thread, costs and all, open to
+ * them. Every refusal is paired with the work never happening, and each has a
+ * positive control holding the flag.
+ */
+describe("a request's thread, photos and files need the maintenance permission for staff", () => {
+  const REQ = { ...WEST_REQUEST, buildingAddress: "1 Main St" };
+  const INTERNAL = { id: "c-1", requestId: REQ.id, body: "He quoted $4,200.", isInternal: true, authorUserId: "u-other" };
+  const PHOTO = { id: "ph-1", requestId: REQ.id, imageUrl: "/uploads/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.jpg", uploadedBy: "other@example.com" };
+  const KEY = "0123456789abcdef0123456789abcdef.pdf";
+  const noFlag = { canCompleteWalkthroughs: true, allowedRegions: ["West Central"] };
+  const viewOnly = { canViewMaintenance: true, allowedRegions: ["West Central"] };
+  const manage = { ...ALL_MAINTENANCE, allowedRegions: ["West Central"] };
+
+  beforeEach(() => {
+    storageMock.getMaintenanceRequest.mockResolvedValue(REQ);
+    storageMock.getMaintenanceRequestComments.mockResolvedValue([INTERNAL]);
+    storageMock.createMaintenanceRequestComment.mockImplementation(async (c: unknown) => ({ id: "c-new", ...(c as object) }));
+    storageMock.getAllMaintenanceRequests.mockResolvedValue([REQ]);
+    storageMock.getAllMaintenanceRequestPhotos.mockResolvedValue([PHOTO]);
+    storageMock.getMaintenanceRequestPhoto.mockResolvedValue(PHOTO);
+    storageMock.deleteMaintenanceRequestPhoto.mockResolvedValue([]);
+    storageMock.findUploadReferences.mockResolvedValue([
+      { kind: "maintenanceRequestComment", record: { ...INTERNAL, attachmentUrl: `/uploads/${KEY}` } },
+    ]);
+  });
+
+  const aFile = () => {
+    const form = new FormData();
+    form.append("file", new Blob([new TextEncoder().encode("%PDF-1.4\n%quote\n")], { type: "application/pdf" }), "quote.pdf");
+    return form;
+  };
+
+  it("refuses the thread to staff without the flag, and never reads it", async () => {
+    actAs(STAFF, noFlag);
+    expect((await get(`/api/maintenance-requests/${REQ.id}/comments`)).status).toBe(403);
+    expect(storageMock.getMaintenanceRequestComments).not.toHaveBeenCalled();
+  });
+
+  it("refuses an internal post from staff without the flag, and writes nothing", async () => {
+    actAs(STAFF, noFlag);
+    const { status } = await request("POST", `/api/maintenance-requests/${REQ.id}/comments`, { body: { body: "Noted.", isInternal: true } });
+    expect(status).toBe(403);
+    expect(storageMock.createMaintenanceRequestComment).not.toHaveBeenCalled();
+  });
+
+  it("lists no request photos to staff without the flag", async () => {
+    actAs(STAFF, noFlag);
+    const { status, body } = await get("/api/maintenance-request-photos");
+    expect(status).toBe(200);
+    expect(body).toEqual([]);
+  });
+
+  it("refuses a photo delete from staff without the flag, and deletes nothing", async () => {
+    actAs(STAFF, noFlag);
+    expect((await request("DELETE", `/api/maintenance-request-photos/${PHOTO.id}`)).status).toBe(403);
+    expect(storageMock.deleteMaintenanceRequestPhoto).not.toHaveBeenCalled();
+  });
+
+  it("refuses a photo delete from view-only staff, and deletes nothing", async () => {
+    actAs(STAFF, viewOnly);
+    expect((await request("DELETE", `/api/maintenance-request-photos/${PHOTO.id}`)).status).toBe(403);
+    expect(storageMock.deleteMaintenanceRequestPhoto).not.toHaveBeenCalled();
+  });
+
+  it("refuses an attachment upload from staff without the flag before reading the body", async () => {
+    actAs(STAFF, noFlag);
+    const res = await fetch(`${baseUrl}/api/maintenance-requests/${REQ.id}/attachments`, { method: "POST", body: aFile() });
+    expect(res.status).toBe(403);
+    expect(multerEntered).not.toHaveBeenCalled();
+    expect(fileStoreMock.putUpload).not.toHaveBeenCalled();
+  });
+
+  it("refuses an internal comment's file to staff without the flag, and never opens it", async () => {
+    actAs(STAFF, noFlag);
+    expect((await get(`/uploads/${KEY}`)).status).toBe(403);
+    expect(fileStoreMock.openUploadStream).not.toHaveBeenCalled();
+  });
+
+  // -- positive controls: the same calls holding the flag ----------------------
+
+  it("reads the thread, including the internal comment, for staff with the view flag", async () => {
+    actAs(STAFF, viewOnly);
+    const { status, body } = await get(`/api/maintenance-requests/${REQ.id}/comments`);
+    expect(status).toBe(200);
+    expect(body).toHaveLength(1);
+  });
+
+  it("posts an internal comment for staff with the view flag", async () => {
+    actAs(STAFF, viewOnly);
+    const { status } = await request("POST", `/api/maintenance-requests/${REQ.id}/comments`, { body: { body: "Noted.", isInternal: true } });
+    expect(status).toBe(201);
+    expect(storageMock.createMaintenanceRequestComment).toHaveBeenCalled();
+  });
+
+  it("lists the photo for staff with the view flag", async () => {
+    actAs(STAFF, viewOnly);
+    expect((await get("/api/maintenance-request-photos")).body).toHaveLength(1);
+  });
+
+  it("deletes a photo for staff with the manage flag", async () => {
+    actAs(STAFF, manage);
+    expect((await request("DELETE", `/api/maintenance-request-photos/${PHOTO.id}`)).status).toBe(200);
+    expect(storageMock.deleteMaintenanceRequestPhoto).toHaveBeenCalledWith(PHOTO.id);
+  });
+
+  it("stores an attachment for staff with the view flag", async () => {
+    actAs(STAFF, viewOnly);
+    storageMock.createUpload.mockImplementation(async (u: unknown) => ({ id: "upload-1", ...(u as object) }));
+    const res = await fetch(`${baseUrl}/api/maintenance-requests/${REQ.id}/attachments`, { method: "POST", body: aFile() });
+    expect(res.status).toBe(200);
+    expect(multerEntered).toHaveBeenCalled();
+  });
+
+  it("serves the internal comment's file to staff with the view flag", async () => {
+    actAs(STAFF, viewOnly);
+    expect((await get(`/uploads/${KEY}`)).status).toBe(200);
+    expect(fileStoreMock.openUploadStream).toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Every permission flag can actually be granted
 // ---------------------------------------------------------------------------
 
