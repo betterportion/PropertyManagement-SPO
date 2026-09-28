@@ -58,6 +58,13 @@ export interface SeasonalInputs {
 
 export interface SeasonalTaskSpec {
   sourceKey: string;
+  /**
+   * Safety for the walkthrough and utilities reminders, which the region
+   * summary counts as safety load. The renew-or-leave decision is property
+   * work: the summary already counts it as a renewal off the house itself,
+   * so filing it as safety counted one decision twice (#162).
+   */
+  category: "safety" | "property";
   title: string;
   notes: string;
   region: string;
@@ -93,6 +100,7 @@ export function dueSeasonalTasks(inputs: SeasonalInputs, now: Date): SeasonalTas
       if (inCreateWindow(w.appear, now)) {
         specs.push({
           sourceKey: `walkthrough:${w.key}:${region}:${year}`,
+          category: "safety",
           title: `Household walkthroughs due — ${region}`,
           notes: "Time to plan and execute household walkthroughs. Check this off once your region's houses are done.",
           region,
@@ -103,6 +111,7 @@ export function dueSeasonalTasks(inputs: SeasonalInputs, now: Date): SeasonalTas
     if (inCreateWindow(summerUtilitiesAppear, now)) {
       specs.push({
         sourceKey: `utilities-summer:${region}:${year}`,
+        category: "safety",
         title: `Turn off utilities for summer — ${region}`,
         notes: "Shut off utilities at your region's houses ahead of the summer break.",
         region,
@@ -126,6 +135,7 @@ export function dueSeasonalTasks(inputs: SeasonalInputs, now: Date): SeasonalTas
     if (inCreateWindow(appear, now)) {
       specs.push({
         sourceKey: `lease-renewal:${lease.propertyId}:${isoDay(decisionBy)}`,
+        category: "property",
         title: `Renew or leave? — ${lease.name}`,
         notes:
           "This house's lease renewal decision is due. Record the decision on the property so this reminder clears.",
@@ -141,6 +151,7 @@ export function dueSeasonalTasks(inputs: SeasonalInputs, now: Date): SeasonalTas
     if (inCreateWindow(appear, now)) {
       specs.push({
         sourceKey: `utilities-lease:${lease.propertyId}:${isoDay(lease.leaseEndDate)}`,
+        category: "safety",
         title: `Turn off utilities — ${lease.name} lease ending`,
         notes: "This house's lease is ending soon; arrange to shut off the utilities.",
         region: lease.region,
@@ -173,7 +184,7 @@ export async function generateSeasonalTasks(now: Date): Promise<number> {
     await storage.createTask({
       title: spec.title,
       notes: spec.notes,
-      category: "safety",
+      category: spec.category,
       status: "open",
       dueDate: spec.dueDate,
       region: spec.region,

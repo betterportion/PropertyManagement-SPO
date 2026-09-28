@@ -5,7 +5,10 @@ import { describe, it, expect, vi } from "vitest";
 // connection string, exactly as region.test.ts does.
 vi.mock("../db", () => ({ db: {}, pool: {} }));
 
-import { dueSeasonalTasks, type SeasonalInputs } from "../seasonalTasks";
+import { dueSeasonalTasks, generateSeasonalTasks, type SeasonalInputs } from "../seasonalTasks";
+import { buildRegionSummaries } from "../regionSummary";
+import { storage } from "../storage";
+import type { Property, Task } from "@shared/schema";
 
 const utc = (y: number, m: number, d: number) => new Date(Date.UTC(y, m - 1, d));
 
@@ -143,5 +146,61 @@ describe("the lease renewal reminder", () => {
   it("keys on the house and the date, so re-running never duplicates it", () => {
     const specs = renewalSpecs(renewalOn("2026-09-15T00:00:00Z"));
     expect(specs[0].sourceKey).toBe("lease-renewal:p1:2026-09-15");
+  });
+});
+
+describe("the lease renewal reminder in the region summary (#162)", () => {
+  // Built from what the generator actually writes, not a hand-picked category,
+  // so the test fails if the reminder is filed as safety again.
+  const NOW = new Date("2026-08-15T00:00:00Z");
+  const house = {
+    id: "p1",
+    name: "Cleveland House",
+    region: "West Central",
+    ownership: "rented",
+    renewalDecision: "undecided",
+    leaseEndDate: new Date("2027-06-30T00:00:00Z"),
+    leaseRenewalDate: new Date("2026-09-15T00:00:00Z"),
+  } as unknown as Property;
+
+  async function generatedTasks(): Promise<Task[]> {
+    vi.spyOn(storage, "getAllProperties").mockResolvedValue([house]);
+    vi.spyOn(storage, "getTaskBySourceKey").mockResolvedValue(undefined);
+    const created: Task[] = [];
+    vi.spyOn(storage, "createTask").mockImplementation(async (task) => {
+      const row = { id: `t${created.length}`, ...task } as Task;
+      created.push(row);
+      return row;
+    });
+    await generateSeasonalTasks(NOW);
+    vi.restoreAllMocks();
+    return created;
+  }
+
+  it("counts the renewal once, under renewals, and not again as safety", async () => {
+    const tasks = await generatedTasks();
+    const renewal = tasks.find((t) => t.sourceKey?.startsWith("lease-renewal:"));
+    expect(renewal).toBeDefined(); // positive control: the reminder was raised
+    expect(renewal!.category).toBe("property");
+
+    // The generator raises the region's walkthrough reminder too, which is
+    // real safety load. What the renewal task adds on top must be nothing.
+    const summarize = (withTasks: Task[]) =>
+      buildRegionSummaries(
+        { requests: [], schedules: [], properties: [house], rentPayments: [], tasks: withTasks, staff: [] },
+        ["West Central"],
+        NOW,
+      )[0];
+    const withRenewal = summarize(tasks);
+    const withoutRenewal = summarize(tasks.filter((t) => t !== renewal));
+    expect(withRenewal.leaseRenewalsDue).toBe(1);
+    expect(withRenewal.safetyPreventiveDue).toBe(withoutRenewal.safetyPreventiveDue);
+    expect(withRenewal.attentionScore).toBe(withoutRenewal.attentionScore);
+  });
+
+  it("still files the utilities reminders as safety", () => {
+    const specs = dueSeasonalTasks(regionsOnly, utc(2026, 5, 1));
+    const summer = specs.find((s) => s.sourceKey.startsWith("utilities-summer:"));
+    expect(summer?.category).toBe("safety");
   });
 });
