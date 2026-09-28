@@ -52,6 +52,7 @@ import {
   CSV_IMPORT_MAX_BYTES,
 } from "./uploadLimits";
 import { uploadRateLimit } from "./security";
+import { removeDeletedRecordFiles } from "./uploadCleanup";
 import {
   insertMaintenanceRequestSchema,
   insertWalkthroughRoomSchema,
@@ -935,7 +936,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (ctx.isResident && !isUploader) {
         return res.status(403).json({ message: "Forbidden" });
       }
-      await storage.deleteMaintenanceRequestPhoto(req.params.id);
+      await removeDeletedRecordFiles(await storage.deleteMaintenanceRequestPhoto(req.params.id));
       res.json({ success: true });
     } catch (error) {
       sendError(res, error, "Failed to delete request photo");
@@ -1036,7 +1037,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       if (!requireRegion(res, ctx, existingRequest.region)) return;
 
-      await storage.deleteMaintenanceRequest(req.params.id);
+      await removeDeletedRecordFiles(await storage.deleteMaintenanceRequest(req.params.id));
       res.json({ success: true });
     } catch (error) {
       sendError(res, error, "Failed to delete maintenance request");
@@ -1253,7 +1254,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // refused outright on a repair. A resident never reaches a bid because they
   // never reach its parent, and the upload-reference rule in authz.ts refuses
   // them by name besides. Delete is a hard delete; the file stays in storage
-  // (known issue 1), and the screen says so.
+  // (known issue 1), and the screen says so -- until that copy changes, this
+  // route does not pass its delete through removeDeletedRecordFiles.
   // ---------------------------------------------------------------------------
 
   /**
@@ -1934,7 +1936,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       if (!requireRegion(res, ctx, existing.region)) return;
 
-      await storage.deleteWalkthrough(req.params.id);
+      await removeDeletedRecordFiles(await storage.deleteWalkthrough(req.params.id));
       res.json({ success: true });
     } catch (error) {
       sendError(res, error, "Failed to delete walkthrough");
@@ -2353,7 +2355,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       if (!(await requireRoomRegion(res, ctx, existingRoom.propertyId))) return;
 
-      await storage.deleteWalkthroughRoom(req.params.id);
+      await removeDeletedRecordFiles(await storage.deleteWalkthroughRoom(req.params.id));
       res.json({ success: true });
     } catch (error) {
       sendError(res, error, "Failed to delete walkthrough room");
@@ -2449,7 +2451,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       if (!requireRegion(res, ctx, existingPhoto.region)) return;
 
-      await storage.deleteWalkthroughPhoto(req.params.id);
+      await removeDeletedRecordFiles(await storage.deleteWalkthroughPhoto(req.params.id));
       res.json({ success: true });
     } catch (error) {
       sendError(res, error, "Failed to delete walkthrough photo");
@@ -2637,7 +2639,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       if (!requireRegion(res, ctx, existingAsset.region)) return;
 
-      await storage.deleteAsset(req.params.id);
+      await removeDeletedRecordFiles(await storage.deleteAsset(req.params.id));
       res.json({ success: true });
     } catch (error) {
       sendError(res, error, "Failed to delete asset");
@@ -3037,7 +3039,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       if (!requireRegion(res, ctx, parentAsset.region)) return;
 
-      await storage.deleteAssetPhoto(req.params.id);
+      await removeDeletedRecordFiles(await storage.deleteAssetPhoto(req.params.id));
       res.json({ success: true });
     } catch (error) {
       sendError(res, error, "Failed to delete asset photo");
@@ -5106,7 +5108,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       if (!requireRegion(res, ctx, existingRecord.region)) return;
 
-      await storage.deleteBillingRecord(req.params.id);
+      await removeDeletedRecordFiles(await storage.deleteBillingRecord(req.params.id));
 
       recordAuditEvent(ctx, {
         action: AUDIT_ACTIONS.BILLING_RECORD_DELETED,
@@ -5246,7 +5248,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       if (!requireRegion(res, ctx, existingProperty.region)) return;
 
-      await storage.deleteProperty(req.params.id);
+      await removeDeletedRecordFiles(await storage.deleteProperty(req.params.id));
       res.json({ success: true });
     } catch (error) {
       sendError(res, error, "Failed to delete property");

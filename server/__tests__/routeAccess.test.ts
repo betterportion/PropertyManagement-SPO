@@ -6019,6 +6019,62 @@ describe("moving a resident out", () => {
   });
 });
 
+describe("deleting a record removes the files it held", () => {
+  const WEST_PHOTO = { id: "wp-1", roomId: "room-1", imageUrl: "/uploads/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.jpg", region: "West Central" };
+  const WEST_PROPERTY_ROW = { id: "prop-1", name: "Cleveland House", address: "1 Main St", region: "West Central" };
+
+  it("removes a deleted walkthrough photo's file and its upload record", async () => {
+    actAs(ADMIN);
+    storageMock.getWalkthroughPhoto.mockResolvedValue(WEST_PHOTO);
+    storageMock.deleteWalkthroughPhoto.mockResolvedValue([WEST_PHOTO.imageUrl]);
+
+    expect((await request("DELETE", "/api/walkthrough-photos/wp-1")).status).toBe(200);
+    expect(fileStoreMock.removeUpload).toHaveBeenCalledWith("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.jpg");
+    expect(storageMock.deleteUpload).toHaveBeenCalledWith("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.jpg");
+  });
+
+  it("removes every file a deleted house takes with it", async () => {
+    actAs(ADMIN);
+    storageMock.getProperty.mockResolvedValue(WEST_PROPERTY_ROW);
+    storageMock.deleteProperty.mockResolvedValue([
+      "/uploads/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.jpg",
+      "/uploads/cccccccccccccccccccccccccccccccc.jpg",
+    ]);
+
+    expect((await request("DELETE", "/api/properties/prop-1")).status).toBe(200);
+    expect(fileStoreMock.removeUpload.mock.calls.map((call) => call[0])).toEqual([
+      "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.jpg",
+      "cccccccccccccccccccccccccccccccc.jpg",
+    ]);
+  });
+
+  it("still answers 200 when the file store fails, because the row is already gone", async () => {
+    actAs(ADMIN);
+    storageMock.getWalkthroughPhoto.mockResolvedValue(WEST_PHOTO);
+    storageMock.deleteWalkthroughPhoto.mockResolvedValue([WEST_PHOTO.imageUrl]);
+    fileStoreMock.removeUpload.mockRejectedValue(new Error("bucket unreachable"));
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    try {
+      expect((await request("DELETE", "/api/walkthrough-photos/wp-1")).status).toBe(200);
+      expect(storageMock.deleteWalkthroughPhoto).toHaveBeenCalledWith("wp-1");
+      // The object is still there, so its record of what it is stays too.
+      expect(storageMock.deleteUpload).not.toHaveBeenCalled();
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  it("removes nothing when the delete is refused", async () => {
+    actAs(STAFF, { canManageWalkthroughs: true, allowedRegions: ["East Central"] });
+    storageMock.getWalkthroughPhoto.mockResolvedValue(WEST_PHOTO);
+
+    expect((await request("DELETE", "/api/walkthrough-photos/wp-1")).status).toBe(403);
+    expect(storageMock.deleteWalkthroughPhoto).not.toHaveBeenCalled();
+    expect(fileStoreMock.removeUpload).not.toHaveBeenCalled();
+  });
+});
+
 describe("resident finances (regional leads only)", () => {
   const WEST_PROPERTY = { id: "prop-west", name: "Cleveland House", region: "West Central", address: "1 Main St" };
   const WEST_RESIDENT = { id: "res-w", propertyId: "prop-west", region: "West Central", buildingAddress: "1 Main St", firstName: "Maria", lastName: "Diaz", isActive: true };
