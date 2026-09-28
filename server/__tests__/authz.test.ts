@@ -60,6 +60,7 @@ import {
   isCurrentWalkthrough,
   requireCurrentWalkthrough,
   visibleWalkthroughs,
+  canSeeActionItemSource,
   type AuthContext,
   type PermissionName,
 } from "../authz";
@@ -1455,5 +1456,44 @@ describe("canDeleteComment", () => {
 
   it("refuses a resident deleting somebody else's comment", () => {
     expect(canDeleteComment(context({ role: "resident" }), somebodyElses)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Dashboard action items follow the flag of the list they come from (#158)
+// ---------------------------------------------------------------------------
+
+describe("canSeeActionItemSource", () => {
+  const sees = (ctx: AuthContext) =>
+    (["schedule", "maintenance", "lease", "setup", "asset", "rent", "deposit", "task"] as const).filter((source) =>
+      canSeeActionItemSource(ctx, source),
+    );
+
+  it("gives staff with no flags their tasks and nothing else", () => {
+    // The account the sweep found: staff tier, holding only a resident-tier grant.
+    expect(sees(context({ permissions: { canCompleteWalkthroughs: true } }))).toEqual(["task"]);
+  });
+
+  it("gives each item to the flag its own list asks for", () => {
+    expect(sees(context({ permissions: { canViewMaintenance: true } }))).toEqual(["schedule", "maintenance", "task"]);
+    expect(sees(context({ permissions: { canManageMaintenance: true } }))).toEqual(["schedule", "maintenance", "task"]);
+    expect(sees(context({ permissions: { canViewProperties: true } }))).toEqual(["lease", "setup", "task"]);
+    expect(sees(context({ permissions: { canManagePropertySetup: true } }))).toEqual(["setup", "task"]);
+    expect(sees(context({ permissions: { canViewAssets: true } }))).toEqual(["asset", "task"]);
+    expect(sees(context({ permissions: { canViewFinancials: true } }))).toEqual(["rent", "deposit", "task"]);
+  });
+
+  it("gives an admin every item, with or without a permissions row", () => {
+    expect(sees(context({ role: "admin", permissions: undefined }))).toEqual([
+      "schedule", "maintenance", "lease", "setup", "asset", "rent", "deposit", "task",
+    ]);
+  });
+
+  it("gives a resident nothing, even holding every staff flag", () => {
+    // The route is requireStaff already; the rule does not lean on that.
+    const everything = {
+      canViewMaintenance: true, canViewProperties: true, canViewAssets: true, canViewFinancials: true,
+    };
+    expect(sees(context({ role: "resident", permissions: everything }))).toEqual([]);
   });
 });

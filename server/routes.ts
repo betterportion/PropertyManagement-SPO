@@ -5,7 +5,6 @@ import { setupAuth, isAuthenticated, getUserId } from "./auth";
 import {
   loadAuthContext,
   requireActiveUser,
-  hasPermission,
   requirePermission,
   requireStaff,
   requireAdmin,
@@ -25,6 +24,7 @@ import {
   requireWalkthroughAccess,
   requireCurrentWalkthrough,
   visibleWalkthroughs,
+  canSeeActionItemSource,
   type AuthContext,
 } from "./authz";
 import { z } from "zod";
@@ -4462,16 +4462,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // "Action items" are the dashboard's derived list -- unpaid rent, deposits to
   // return, maintenance coming due -- plus the open manual tasks the caller can
   // see. Nothing here creates finance data; resolving a derived item happens on
-  // its own (already-audited) endpoint. The surface itself is regional-leads-
-  // only (requireStaff); the finance-derived items additionally follow the
-  // finance flags, so revoking someone's finance access also empties their
-  // dashboard of rent and deposit items rather than leaking them here.
+  // its own (already-audited) endpoint. The surface is staff only, and every
+  // item follows the flag of the list it comes from (`canSeeActionItemSource`),
+  // so this is never a way round a list route's 403 (#158). Finance records
+  // are not even read without the finance flags.
   app.get('/api/action-items', isAuthenticated, async (req: any, res) => {
     try {
       const ctx = await requireActiveUser(req, res);
       if (!ctx) return;
       if (!requireStaff(res, ctx)) return;
-      const seesFinance = hasPermission(ctx, "canViewFinancials", "canManageFinancials");
+      const seesFinance = canSeeActionItemSource(ctx, "rent");
 
       const [schedules, rentPayments, deposits, deductions, residents, allTasks, properties, setupItems, assets, requests] = await Promise.all([
         storage.getAllMaintenanceSchedules(),
@@ -4506,29 +4506,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // rule -- and it fails closed on an empty region list.
         requests: filterByRegion(ctx, requests),
       });
-      res.json(items);
+      res.json(items.filter((item) => canSeeActionItemSource(ctx, item.source)));
     } catch (error) {
       sendError(res, error, "Failed to load action items");
     }
   });
 
   // Per-region rollup for the leadership dashboard. An admin sees every region;
-  // a regional admin sees only the region(s) they are assigned. Regional-leads
-  // only, same audience as the action-items route.
+  // a regional admin sees only the region(s) they are assigned. Staff only, and
+  // each count follows the same flag as the action items it summarises (#158):
+  // a record the caller could not list is not read, so it counts as nothing.
   app.get('/api/region-summary', isAuthenticated, async (req: any, res) => {
     try {
       const ctx = await requireActiveUser(req, res);
       if (!ctx) return;
       if (!requireStaff(res, ctx)) return;
-      // Same rule as action items: the rollup is staff-wide, but its rent
-      // figures follow the finance flags.
-      const seesFinance = hasPermission(ctx, "canViewFinancials", "canManageFinancials");
-
       const [requests, schedules, properties, rentPayments, tasks, users, permissions] = await Promise.all([
-        storage.getAllMaintenanceRequests(),
-        storage.getAllMaintenanceSchedules(),
-        storage.getAllProperties(),
-        seesFinance ? storage.getAllRentPayments() : [],
+        canSeeActionItemSource(ctx, "maintenance") ? storage.getAllMaintenanceRequests() : [],
+        canSeeActionItemSource(ctx, "schedule") ? storage.getAllMaintenanceSchedules() : [],
+        canSeeActionItemSource(ctx, "lease") ? storage.getAllProperties() : [],
+        canSeeActionItemSource(ctx, "rent") ? storage.getAllRentPayments() : [],
         storage.getAllTasks(),
         storage.getAllUsers(),
         storage.getAllUserPermissions(),

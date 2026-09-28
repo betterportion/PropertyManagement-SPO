@@ -7720,7 +7720,7 @@ describe("tasks & action items (regional leads only)", () => {
   }
 
   it("raises an RA's own region's open work by house, and never another region's", async () => {
-    actAs(STAFF, WEST);
+    actAs(STAFF, { ...WEST, canViewMaintenance: true });
     mockOpenWork();
     const { status, body } = await get("/api/action-items");
     expect(status).toBe(200);
@@ -7731,7 +7731,8 @@ describe("tasks & action items (regional leads only)", () => {
   });
 
   it("raises no open work at all for an RA with no regions -- fails closed, not open", async () => {
-    actAs(STAFF, { allowedRegions: [] });
+    // Holding the flag, so it is the empty region list refusing, not #158's flag rule.
+    actAs(STAFF, { allowedRegions: [], canViewMaintenance: true });
     mockOpenWork();
     const { status, body } = await get("/api/action-items");
     expect(status).toBe(200);
@@ -7747,7 +7748,7 @@ describe("tasks & action items (regional leads only)", () => {
   });
 
   it("shows an RA a lease renewal in their region but not another region's", async () => {
-    actAs(STAFF, WEST);
+    actAs(STAFF, { ...WEST, canViewProperties: true });
     storageMock.getAllMaintenanceRequests.mockResolvedValue([]);
     storageMock.getAllMaintenanceSchedules.mockResolvedValue([]);
     storageMock.getAllRentPayments.mockResolvedValue([]);
@@ -7768,6 +7769,91 @@ describe("tasks & action items (regional leads only)", () => {
   });
 });
 
+describe("dashboard items follow the flag of the list they come from (#158)", () => {
+  const WEST = { allowedRegions: ["West Central"] };
+  const soon = () => new Date(Date.now() + 10 * 24 * 60 * 60 * 1000);
+
+  // One West-Central record behind every non-finance source, plus a task.
+  function mockEverySource() {
+    storageMock.getAllRentPayments.mockResolvedValue([]);
+    storageMock.getAllSecurityDeposits.mockResolvedValue([]);
+    storageMock.getAllDepositDeductions.mockResolvedValue([]);
+    storageMock.getAllResidents.mockResolvedValue([]);
+    storageMock.getAllMaintenanceSchedules.mockResolvedValue([
+      { id: "sched-w", title: "Furnace service", isActive: true, nextDueDate: soon(), buildingAddress: "1 Main St", region: "West Central" },
+    ]);
+    storageMock.getAllProperties.mockResolvedValue([
+      { id: "prop-w", name: "Cleveland House", address: "1 Main St", region: "West Central", ownership: "rented", leaseRenewalDate: soon(), renewalDecision: "undecided" },
+    ]);
+    storageMock.getAllPropertySetupItems.mockResolvedValue([{ propertyId: "prop-w", itemKey: "electric", status: "open" }]);
+    storageMock.getAllAssets.mockResolvedValue([
+      { id: "asset-w", name: "Boiler", category: "Water Heater", replacementDueDate: soon(), buildingAddress: "1 Main St", region: "West Central" },
+    ]);
+    storageMock.getAllMaintenanceRequests.mockResolvedValue([
+      { id: "rq-w", title: "Blinds", region: "West Central", buildingAddress: "1 Main St", status: "pending", type: "request", priority: "medium" },
+    ]);
+    // A safety task, so the region summary's safety count has a task half to test.
+    storageMock.getAllTasks.mockResolvedValue([
+      { id: "task-w", title: "Walkthrough season", category: "safety", region: "West Central", assignedToUserId: null, createdBy: ADMIN.id, status: "open" },
+    ]);
+    storageMock.getAllUsers.mockResolvedValue([]);
+    storageMock.getAllUserPermissions.mockResolvedValue([]);
+  }
+
+  const sources = (body: { source: string }[]) => Array.from(new Set(body.map((i) => i.source))).sort();
+
+  it("gives staff holding no flags their tasks and nothing from a list they cannot open", async () => {
+    // The sweep's account: staff tier, holding only the resident-tier walkthrough grant.
+    actAs(STAFF, { ...WEST, canCompleteWalkthroughs: true });
+    mockEverySource();
+    const { status, body } = await get("/api/action-items");
+    expect(status).toBe(200);
+    expect(sources(body)).toEqual(["task"]);
+    for (const hidden of ["Furnace service", "Cleveland House", "Boiler", "1 Main St"]) {
+      expect(JSON.stringify(body)).not.toContain(hidden);
+    }
+  });
+
+  it("gives each source to the flag its own list asks for", async () => {
+    actAs(STAFF, { ...WEST, canViewMaintenance: true });
+    mockEverySource();
+    expect(sources((await get("/api/action-items")).body)).toEqual(["maintenance", "schedule", "task"]);
+
+    actAs(STAFF, { ...WEST, canViewProperties: true });
+    mockEverySource();
+    expect(sources((await get("/api/action-items")).body)).toEqual(["lease", "setup", "task"]);
+
+    actAs(STAFF, { ...WEST, canViewAssets: true });
+    mockEverySource();
+    expect(sources((await get("/api/action-items")).body)).toEqual(["asset", "task"]);
+  });
+
+  it("gives every source to staff holding every flag -- the positive control", async () => {
+    actAs(STAFF, { ...WEST, canViewMaintenance: true, canViewProperties: true, canViewAssets: true });
+    mockEverySource();
+    expect(sources((await get("/api/action-items")).body)).toEqual(["asset", "lease", "maintenance", "schedule", "setup", "task"]);
+  });
+
+  it("does not read the requests, schedules or houses for a region summary the caller cannot open", async () => {
+    actAs(STAFF, { ...WEST, canCompleteWalkthroughs: true });
+    mockEverySource();
+    const { status, body } = await get("/api/region-summary");
+    expect(status).toBe(200);
+    // The safety task still counts: tasks need only staff. The schedule does not.
+    expect(body[0]).toMatchObject({ region: "West Central", openRequests: 0, openRepairs: 0, leaseRenewalsDue: 0, safetyPreventiveDue: 1 });
+    expect(storageMock.getAllMaintenanceRequests).not.toHaveBeenCalled();
+    expect(storageMock.getAllMaintenanceSchedules).not.toHaveBeenCalled();
+    expect(storageMock.getAllProperties).not.toHaveBeenCalled();
+  });
+
+  it("counts them for staff holding the flags -- the positive control", async () => {
+    actAs(STAFF, { ...WEST, canViewMaintenance: true, canViewProperties: true });
+    mockEverySource();
+    const { body } = await get("/api/region-summary");
+    expect(body[0]).toMatchObject({ region: "West Central", openRequests: 1, openRepairs: 1, leaseRenewalsDue: 1, safetyPreventiveDue: 2 });
+  });
+});
+
 describe("region summary (leadership rollup)", () => {
   function mockEmptyData() {
     storageMock.getAllMaintenanceRequests.mockResolvedValue([]);
@@ -7785,7 +7871,7 @@ describe("region summary (leadership rollup)", () => {
   });
 
   it("gives a regional admin only their region, named with its lead", async () => {
-    actAs(STAFF, { canViewFinancials: true, canManageFinancials: true, allowedRegions: ["West Central"] });
+    actAs(STAFF, { canViewFinancials: true, canManageFinancials: true, canViewMaintenance: true, allowedRegions: ["West Central"] });
     mockEmptyData();
     storageMock.getAllUsers.mockResolvedValue([STAFF]);
     storageMock.getAllUserPermissions.mockResolvedValue([{ userId: STAFF.id, allowedRegions: ["West Central"] }]);
