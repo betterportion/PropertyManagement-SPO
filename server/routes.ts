@@ -1262,6 +1262,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // After the post rule, so a refused caller learns nothing about which
       // storage keys exist.
       const attachment = await ownUploadFromClient(ctx, parsed.attachmentUrl, parsed.attachmentName);
+      // A relayed contractor is linked like any contact: it must exist and be
+      // in a region the caller can reach. Residents never relay.
+      const relayContactId = ctx.isResident ? null : parsed.relayContactId || null;
+      if (relayContactId) {
+        const contact = await storage.getMaintenanceContact(relayContactId);
+        if (!contact) {
+          return res.status(400).json({ message: "That contractor is not on file. Pick one from the list or leave it blank." });
+        }
+        if (!requireRegion(res, ctx, contact.region)) return;
+      }
 
       // The author is the session, never the body. The name is stored beside
       // the id so the thread still says who wrote it after the account goes.
@@ -1274,7 +1284,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Relaying is a staff act -- an RA passing on a contractor's words.
         // A resident's comment is their own, whatever the body claims.
         relaySource: ctx.isResident ? null : parsed.relaySource || null,
-        relayContactId: ctx.isResident ? null : parsed.relayContactId || null,
+        relayContactId,
         requestId: request.id,
         authorUserId: ctx.userId,
         authorEmail: ctx.user.email ?? null,
@@ -5025,6 +5035,51 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  /**
+   * An invoice points at a contact, a request and a house, and each must be
+   * one the caller can reach -- the rule resolveContactLink applies when a
+   * contact is linked to a request. Otherwise an invoice created in the
+   * caller's region could tie together records from regions they cannot see.
+   * A value the invoice already holds is not a new reference and passes, so
+   * an edit that resends it is not refused. Sends the response and returns
+   * false on a refusal.
+   */
+  async function requireInvoiceReferences(
+    res: Response,
+    ctx: AuthContext,
+    incoming: { contactId?: string | null; maintenanceRequestId?: string | null; buildingAddress?: string },
+    existing?: { contactId: string | null; maintenanceRequestId: string | null; buildingAddress: string },
+  ): Promise<boolean> {
+    const isNew = <K extends keyof typeof incoming>(key: K) =>
+      !!incoming[key] && (!existing || incoming[key] !== existing[key]);
+
+    if (isNew("contactId")) {
+      const contact = await storage.getMaintenanceContact(incoming.contactId!);
+      if (!contact) {
+        res.status(400).json({ message: "That contact is not on file." });
+        return false;
+      }
+      if (!requireRegion(res, ctx, contact.region)) return false;
+    }
+    if (isNew("maintenanceRequestId")) {
+      const request = await storage.getMaintenanceRequest(incoming.maintenanceRequestId!);
+      if (!request) {
+        res.status(400).json({ message: "That maintenance request does not exist." });
+        return false;
+      }
+      if (!requireRegion(res, ctx, request.region)) return false;
+    }
+    if (isNew("buildingAddress")) {
+      const house = await storage.getPropertyByAddress(incoming.buildingAddress!);
+      if (!house) {
+        res.status(400).json({ message: "Choose one of the portal's houses for this invoice." });
+        return false;
+      }
+      if (!requireRegion(res, ctx, house.region)) return false;
+    }
+    return true;
+  }
+
   app.post('/api/invoices', isAuthenticated, async (req: any, res) => {
     try {
       const ctx = await requireActiveUser(req, res);
@@ -5035,6 +5090,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const validatedData = insertInvoiceSchema.parse(req.body);
 
       if (!requireRegion(res, ctx, validatedData.region, "Forbidden - Cannot create in this region")) return;
+      if (!(await requireInvoiceReferences(res, ctx, validatedData))) return;
 
       const invoice = await storage.createInvoice(validatedData);
 
@@ -5067,6 +5123,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const validatedData = insertInvoiceSchema.partial().parse(req.body);
 
       if (!requireRegionMove(res, ctx, existingInvoice.region, validatedData.region)) return;
+      if (!(await requireInvoiceReferences(res, ctx, validatedData, existingInvoice))) return;
 
       const invoice = await storage.updateInvoice(req.params.id, validatedData);
 

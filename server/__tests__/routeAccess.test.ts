@@ -846,6 +846,8 @@ describe("the thread on a request", () => {
     actAs(STAFF, westOnly);
     storageMock.getMaintenanceRequest.mockResolvedValue(OWN_HOUSE_OPEN);
     storageMock.createMaintenanceRequestComment.mockImplementation(async (c: unknown) => ({ id: "c-new", ...(c as object) }));
+    // The relayed contractor is on file, in the caller's region.
+    storageMock.getMaintenanceContact.mockResolvedValue({ id: "contact-dave", name: "Dave", region: "West Central" });
     const { status } = await post("/api/maintenance-requests/req-own-open/comments", {
       body: "Coming Thursday at 9.",
       isInternal: false,
@@ -2417,6 +2419,111 @@ describe("project fields and bids", () => {
     leaderOfHouseA();
     expect((await patch(`/api/maintenance-requests/req-project`, { estimatedCost: 1 })).status).toBe(403);
     expect(storageMock.updateMaintenanceRequest).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * A record that points at another record must not point somewhere the caller
+ * cannot reach. Linking a contact to a request already checks both sides
+ * (resolveContactLink); an invoice's contact, request and house, and a
+ * comment's relayed contractor, now do too. Each refusal is paired with the
+ * write never happening and a positive control in the caller's own region.
+ */
+describe("a reference to another record is checked against the caller's regions", () => {
+  const westBilling = { canViewBilling: true, canManageBilling: true, allowedRegions: ["West Central"] };
+  const WEST_CONTACT = { id: "ct-west", name: "Dave", region: "West Central" };
+  const EAST_CONTACT = { id: "ct-east", name: "Eve", region: "East Central" };
+  const WEST_REQ = { ...WEST_REQUEST, id: "req-w", buildingAddress: "1 Main St" };
+  const EAST_REQ = { ...EAST_REQUEST, id: "req-e", buildingAddress: "5 East St" };
+  const HOUSES: Record<string, unknown> = {
+    "1 Main St": { id: "prop-w", region: "West Central", address: "1 Main St" },
+    "5 East St": { id: "prop-e", region: "East Central", address: "5 East St" },
+  };
+  const INVOICE = {
+    invoiceNumber: "INV-1",
+    service: "Plumbing",
+    amount: "120.00",
+    dueDate: "2026-10-01",
+    status: "pending",
+    region: "West Central",
+    buildingAddress: "1 Main St",
+  };
+  const EXISTING_INVOICE = { id: "inv-1", ...INVOICE, contactId: EAST_CONTACT.id, maintenanceRequestId: null };
+
+  beforeEach(() => {
+    const contacts: Record<string, unknown> = { [WEST_CONTACT.id]: WEST_CONTACT, [EAST_CONTACT.id]: EAST_CONTACT };
+    const requests: Record<string, unknown> = { [WEST_REQ.id]: WEST_REQ, [EAST_REQ.id]: EAST_REQ };
+    storageMock.getMaintenanceContact.mockImplementation(async (id: string) => contacts[id]);
+    storageMock.getMaintenanceRequest.mockImplementation(async (id: string) => requests[id]);
+    storageMock.getPropertyByAddress.mockImplementation(async (address: string) => HOUSES[address]);
+    storageMock.createInvoice.mockImplementation(async (i: unknown) => ({ id: "inv-new", ...(i as object) }));
+    storageMock.getInvoice.mockResolvedValue(EXISTING_INVOICE);
+    storageMock.updateInvoice.mockImplementation(async (_id: string, i: unknown) => ({ ...EXISTING_INVOICE, ...(i as object) }));
+    storageMock.createMaintenanceRequestComment.mockImplementation(async (c: unknown) => ({ id: "c-new", ...(c as object) }));
+  });
+
+  it.each([
+    ["a contact in another region", { contactId: EAST_CONTACT.id }, 403],
+    ["a request in another region", { maintenanceRequestId: EAST_REQ.id }, 403],
+    ["a house in another region", { buildingAddress: "5 East St" }, 403],
+    ["a contact that does not exist", { contactId: "ct-nope" }, 400],
+    ["a request that does not exist", { maintenanceRequestId: "req-nope" }, 400],
+    ["an address that is not a house", { buildingAddress: "9 Nowhere Ln" }, 400],
+  ])("refuses an invoice naming %s, and writes nothing", async (_name, reference, expected) => {
+    actAs(STAFF, westBilling);
+    expect((await request("POST", "/api/invoices", { body: { ...INVOICE, ...reference } })).status).toBe(expected);
+    expect(storageMock.createInvoice).not.toHaveBeenCalled();
+  });
+
+  it("stores an invoice whose contact, request and house are in the caller's region -- the positive control", async () => {
+    actAs(STAFF, westBilling);
+    const { status } = await request("POST", "/api/invoices", {
+      body: { ...INVOICE, contactId: WEST_CONTACT.id, maintenanceRequestId: WEST_REQ.id },
+    });
+    expect(status).toBe(200);
+    expect(storageMock.createInvoice).toHaveBeenCalledWith(expect.objectContaining({ contactId: WEST_CONTACT.id, maintenanceRequestId: WEST_REQ.id }));
+  });
+
+  it("refuses an invoice edit that repoints it at another region's request, and writes nothing", async () => {
+    actAs(STAFF, westBilling);
+    expect((await request("PATCH", "/api/invoices/inv-1", { body: { maintenanceRequestId: EAST_REQ.id } })).status).toBe(403);
+    expect(storageMock.updateInvoice).not.toHaveBeenCalled();
+  });
+
+  // The existing invoice already names an East contact (an admin may have
+  // linked it). Resending that unchanged value is not a new reference.
+  it("lets an invoice edit resend the contact it already names, and change its status", async () => {
+    actAs(STAFF, westBilling);
+    const { status } = await request("PATCH", "/api/invoices/inv-1", { body: { contactId: EAST_CONTACT.id, status: "paid" } });
+    expect(status).toBe(200);
+    expect(storageMock.updateInvoice).toHaveBeenCalledWith("inv-1", expect.objectContaining({ status: "paid" }));
+  });
+
+  it("refuses a comment relaying a contractor from another region, and writes nothing", async () => {
+    actAs(STAFF, { ...ALL_MAINTENANCE, allowedRegions: ["West Central"] });
+    const { status } = await request("POST", `/api/maintenance-requests/${WEST_REQ.id}/comments`, {
+      body: { body: "He says Thursday.", relaySource: "Eve", relayContactId: EAST_CONTACT.id },
+    });
+    expect(status).toBe(403);
+    expect(storageMock.createMaintenanceRequestComment).not.toHaveBeenCalled();
+  });
+
+  it("refuses a comment relaying a contractor that does not exist, and writes nothing", async () => {
+    actAs(STAFF, { ...ALL_MAINTENANCE, allowedRegions: ["West Central"] });
+    const { status } = await request("POST", `/api/maintenance-requests/${WEST_REQ.id}/comments`, {
+      body: { body: "He says Thursday.", relaySource: "Eve", relayContactId: "ct-nope" },
+    });
+    expect(status).toBe(400);
+    expect(storageMock.createMaintenanceRequestComment).not.toHaveBeenCalled();
+  });
+
+  it("stores a comment relaying a contractor in the caller's region -- the positive control", async () => {
+    actAs(STAFF, { ...ALL_MAINTENANCE, allowedRegions: ["West Central"] });
+    const { status } = await request("POST", `/api/maintenance-requests/${WEST_REQ.id}/comments`, {
+      body: { body: "He says Thursday.", relaySource: "Dave", relayContactId: WEST_CONTACT.id },
+    });
+    expect(status).toBe(201);
+    expect(storageMock.createMaintenanceRequestComment).toHaveBeenCalledWith(expect.objectContaining({ relayContactId: WEST_CONTACT.id }));
   });
 });
 
