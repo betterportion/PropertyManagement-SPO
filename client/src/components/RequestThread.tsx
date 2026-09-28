@@ -364,15 +364,14 @@ export default function RequestThread({ requestId, commentsQuery, isStaff, isAdm
       </CardContent>
 
       {/* Deleting is not undoable, and when the comment carries a file the
-          person deleting should know the file is not what goes (known issue
-          1: the row is removed, the object stays). */}
+          person deleting should know the file goes with it. */}
       <AlertDialog open={!!pendingDelete} onOpenChange={(open) => !open && setPendingDelete(null)}>
         <AlertDialogContent data-testid="dialog-delete-comment">
           <AlertDialogHeader>
             <AlertDialogTitle>Delete this comment?</AlertDialogTitle>
             <AlertDialogDescription data-testid="text-delete-comment-explainer">
               {pendingDelete?.attachmentUrl
-                ? `This removes the comment, not the file. ${pendingDelete.attachmentName || "The attached file"} stays in storage.`
+                ? `This removes the comment and deletes ${pendingDelete.attachmentName || "the attached file"} too.`
                 : "It will be gone from the thread for everybody who can read it."}
             </AlertDialogDescription>
           </AlertDialogHeader>

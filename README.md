@@ -338,7 +338,7 @@ Two things to know about running more than one instance:
 
 ## Known issues
 
-- **Deleting a photo or document leaves the file in storage.** The record disappears from the app, but the file stays in the bucket and keeps costing space.
+- **Replacing a photo or document leaves the old file in storage.** Deleting a record removes its files, but swapping one file for another on an edit (a new house photo, a new W-9) leaves the old one in the bucket, where it keeps costing space.
 - **Files uploaded before the current storage layout are unreachable.** Their links no longer resolve. Nothing in the app depends on them.
 - **A record outside your regions answers 403, not 404**, which confirms it exists. Knowingly accepted: the people using this portal all work for the same organisation.
 - **Maintenance requests closed before the close date was recorded have none.** The portal only started writing a close date recently, and there is no way to work out when an older request was closed. They are deliberately not backfilled, because a guessed date is worse than none once a resident's view depends on it.

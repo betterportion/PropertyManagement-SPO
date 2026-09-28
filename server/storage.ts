@@ -190,14 +190,17 @@ export interface IStorage {
     id: string,
     data: Partial<InsertMaintenanceRequest> & { completedDate?: Date | null },
   ): Promise<MaintenanceRequest>;
-  deleteMaintenanceRequest(id: string): Promise<void>;
+  // A delete that can take a stored file with it -- directly or through a
+  // cascade -- returns the file URLs the removed rows held, so the route can
+  // remove the objects too (server/uploadCleanup.ts).
+  deleteMaintenanceRequest(id: string): Promise<string[]>;
 
   // Maintenance Request Photos
   createMaintenanceRequestPhoto(photo: InsertMaintenanceRequestPhoto & { uploadedBy: string }): Promise<MaintenanceRequestPhoto>;
   getMaintenanceRequestPhoto(id: string): Promise<MaintenanceRequestPhoto | undefined>;
   getMaintenanceRequestPhotosByRequest(requestId: string): Promise<MaintenanceRequestPhoto[]>;
   getAllMaintenanceRequestPhotos(): Promise<MaintenanceRequestPhoto[]>;
-  deleteMaintenanceRequestPhoto(id: string): Promise<void>;
+  deleteMaintenanceRequestPhoto(id: string): Promise<string[]>;
 
   // Walkthrough template (national)
   getAllWalkthroughTemplateRooms(): Promise<WalkthroughTemplateRoom[]>;
@@ -217,7 +220,7 @@ export interface IStorage {
   getAllWalkthroughs(): Promise<Walkthrough[]>;
   getWalkthroughsByProperty(propertyId: string): Promise<Walkthrough[]>;
   updateWalkthrough(id: string, data: Partial<InsertWalkthrough>): Promise<Walkthrough>;
-  deleteWalkthrough(id: string): Promise<void>;
+  deleteWalkthrough(id: string): Promise<string[]>;
 
   // Walkthrough Items
   createWalkthroughItem(item: InsertWalkthroughItem): Promise<WalkthroughItem>;
@@ -239,7 +242,7 @@ export interface IStorage {
   getAllWalkthroughRooms(): Promise<WalkthroughRoom[]>;
   getWalkthroughRoomsByBuilding(buildingAddress: string): Promise<WalkthroughRoom[]>;
   updateWalkthroughRoom(id: string, data: Partial<InsertWalkthroughRoom>): Promise<WalkthroughRoom>;
-  deleteWalkthroughRoom(id: string): Promise<void>;
+  deleteWalkthroughRoom(id: string): Promise<string[]>;
 
   // Walkthrough Photos
   createWalkthroughPhoto(photo: InsertWalkthroughPhoto): Promise<WalkthroughPhoto>;
@@ -247,7 +250,7 @@ export interface IStorage {
   getAllWalkthroughPhotos(): Promise<WalkthroughPhoto[]>;
   getWalkthroughPhotosByRoom(roomId: string): Promise<WalkthroughPhoto[]>;
   updateWalkthroughPhoto(id: string, data: Partial<InsertWalkthroughPhoto>): Promise<WalkthroughPhoto>;
-  deleteWalkthroughPhoto(id: string): Promise<void>;
+  deleteWalkthroughPhoto(id: string): Promise<string[]>;
 
   // Assets
   createAsset(asset: InsertAsset): Promise<Asset>;
@@ -266,14 +269,14 @@ export interface IStorage {
       snoozedAt?: Date | null;
     },
   ): Promise<Asset>;
-  deleteAsset(id: string): Promise<void>;
+  deleteAsset(id: string): Promise<string[]>;
 
   // Asset Photos
   createAssetPhoto(photo: InsertAssetPhoto): Promise<AssetPhoto>;
   getAssetPhoto(id: string): Promise<AssetPhoto | undefined>;
   getAssetPhotosByAsset(assetId: string): Promise<AssetPhoto[]>;
   getAllAssetPhotos(): Promise<AssetPhoto[]>;
-  deleteAssetPhoto(id: string): Promise<void>;
+  deleteAssetPhoto(id: string): Promise<string[]>;
 
   // Maintenance Schedules
   createMaintenanceSchedule(schedule: InsertMaintenanceSchedule): Promise<MaintenanceSchedule>;
@@ -372,7 +375,7 @@ export interface IStorage {
       authorName: string | null;
     },
   ): Promise<MaintenanceRequestComment>;
-  deleteMaintenanceRequestComment(id: string): Promise<void>;
+  deleteMaintenanceRequestComment(id: string): Promise<string[]>;
 
   // Bids on a project
   /** Every bid on a request, oldest first, so the list reads in the order they came in. */
@@ -380,7 +383,7 @@ export interface IStorage {
   getMaintenanceRequestBid(id: string): Promise<MaintenanceRequestBid | undefined>;
   createMaintenanceRequestBid(bid: InsertMaintenanceRequestBid & { requestId: string }): Promise<MaintenanceRequestBid>;
   updateMaintenanceRequestBid(id: string, data: Partial<InsertMaintenanceRequestBid>): Promise<MaintenanceRequestBid>;
-  deleteMaintenanceRequestBid(id: string): Promise<void>;
+  deleteMaintenanceRequestBid(id: string): Promise<string[]>;
   /**
    * Marks one bid accepted and every other bid on the request not, in one
    * transaction -- "at most one accepted bid" is enforced here, not by the
@@ -400,7 +403,7 @@ export interface IStorage {
   getBillingRecord(id: string): Promise<BillingRecord | undefined>;
   getAllBillingRecords(): Promise<BillingRecord[]>;
   updateBillingRecord(id: string, data: Partial<InsertBillingRecord>): Promise<BillingRecord>;
-  deleteBillingRecord(id: string): Promise<void>;
+  deleteBillingRecord(id: string): Promise<string[]>;
 
   // Properties
   createProperty(property: InsertPropertyWithAddress): Promise<Property>;
@@ -427,7 +430,7 @@ export interface IStorage {
   linkContactToRequest(requestId: string, contactId: string): Promise<void>;
   unlinkContactFromRequest(requestId: string, contactId: string): Promise<void>;
   updateProperty(id: string, data: Partial<InsertPropertyWithAddress>): Promise<Property>;
-  deleteProperty(id: string): Promise<void>;
+  deleteProperty(id: string): Promise<string[]>;
 
   // Resource hub
   getAllResourceLinks(): Promise<ResourceLink[]>;
@@ -480,6 +483,7 @@ export interface IStorage {
   createUpload(upload: InsertUpload): Promise<Upload>;
   getUploadByStorageKey(storageKey: string): Promise<Upload | undefined>;
   findUploadReferences(url: string): Promise<UploadReference[]>;
+  deleteUpload(storageKey: string): Promise<void>;
 }
 
 /**
@@ -758,8 +762,28 @@ export class DatabaseStorage implements IStorage {
     return request;
   }
 
-  async deleteMaintenanceRequest(id: string): Promise<void> {
-    await db.delete(maintenanceRequests).where(eq(maintenanceRequests.id, id));
+  async deleteMaintenanceRequest(id: string): Promise<string[]> {
+    // The photos, comments and bids go with the request by cascade, so their
+    // files are read first, in the same transaction as the delete.
+    return await db.transaction(async (tx) => {
+      const photos = await tx
+        .select({ url: maintenanceRequestPhotos.imageUrl })
+        .from(maintenanceRequestPhotos)
+        .where(eq(maintenanceRequestPhotos.requestId, id));
+      const comments = await tx
+        .select({ url: maintenanceRequestComments.attachmentUrl })
+        .from(maintenanceRequestComments)
+        .where(eq(maintenanceRequestComments.requestId, id));
+      const bids = await tx
+        .select({ url: maintenanceRequestBids.documentUrl })
+        .from(maintenanceRequestBids)
+        .where(eq(maintenanceRequestBids.requestId, id));
+      const deleted = await tx
+        .delete(maintenanceRequests)
+        .where(eq(maintenanceRequests.id, id))
+        .returning({ url: maintenanceRequests.photoUrl });
+      return fileUrls([...photos, ...comments, ...bids, ...deleted]);
+    });
   }
 
   // Maintenance Request Photos Implementation
@@ -785,8 +809,12 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(maintenanceRequestPhotos).orderBy(desc(maintenanceRequestPhotos.uploadedDate));
   }
 
-  async deleteMaintenanceRequestPhoto(id: string): Promise<void> {
-    await db.delete(maintenanceRequestPhotos).where(eq(maintenanceRequestPhotos.id, id));
+  async deleteMaintenanceRequestPhoto(id: string): Promise<string[]> {
+    const deleted = await db
+      .delete(maintenanceRequestPhotos)
+      .where(eq(maintenanceRequestPhotos.id, id))
+      .returning({ url: maintenanceRequestPhotos.imageUrl });
+    return fileUrls(deleted);
   }
 
   // Walkthrough template Implementation
@@ -876,8 +904,17 @@ export class DatabaseStorage implements IStorage {
     return row;
   }
 
-  async deleteWalkthrough(id: string): Promise<void> {
-    await db.delete(walkthroughs).where(eq(walkthroughs.id, id));
+  async deleteWalkthrough(id: string): Promise<string[]> {
+    // Rooms go with the walkthrough, and photos with the rooms, by cascade.
+    return await db.transaction(async (tx) => {
+      const photos = await tx
+        .select({ url: walkthroughPhotos.imageUrl })
+        .from(walkthroughPhotos)
+        .innerJoin(walkthroughRooms, eq(walkthroughPhotos.roomId, walkthroughRooms.id))
+        .where(eq(walkthroughRooms.walkthroughId, id));
+      await tx.delete(walkthroughs).where(eq(walkthroughs.id, id));
+      return fileUrls(photos);
+    });
   }
 
   // Walkthrough Items Implementation
@@ -1019,8 +1056,15 @@ export class DatabaseStorage implements IStorage {
     return room;
   }
 
-  async deleteWalkthroughRoom(id: string): Promise<void> {
-    await db.delete(walkthroughRooms).where(eq(walkthroughRooms.id, id));
+  async deleteWalkthroughRoom(id: string): Promise<string[]> {
+    return await db.transaction(async (tx) => {
+      const photos = await tx
+        .select({ url: walkthroughPhotos.imageUrl })
+        .from(walkthroughPhotos)
+        .where(eq(walkthroughPhotos.roomId, id));
+      await tx.delete(walkthroughRooms).where(eq(walkthroughRooms.id, id));
+      return fileUrls(photos);
+    });
   }
 
   // Walkthrough Photos Implementation
@@ -1055,8 +1099,12 @@ export class DatabaseStorage implements IStorage {
     return photo;
   }
 
-  async deleteWalkthroughPhoto(id: string): Promise<void> {
-    await db.delete(walkthroughPhotos).where(eq(walkthroughPhotos.id, id));
+  async deleteWalkthroughPhoto(id: string): Promise<string[]> {
+    const deleted = await db
+      .delete(walkthroughPhotos)
+      .where(eq(walkthroughPhotos.id, id))
+      .returning({ url: walkthroughPhotos.imageUrl });
+    return fileUrls(deleted);
   }
 
   // Assets Implementation
@@ -1091,8 +1139,15 @@ export class DatabaseStorage implements IStorage {
     return asset;
   }
 
-  async deleteAsset(id: string): Promise<void> {
-    await db.delete(assets).where(eq(assets.id, id));
+  async deleteAsset(id: string): Promise<string[]> {
+    return await db.transaction(async (tx) => {
+      const photos = await tx
+        .select({ url: assetPhotos.imageUrl })
+        .from(assetPhotos)
+        .where(eq(assetPhotos.assetId, id));
+      await tx.delete(assets).where(eq(assets.id, id));
+      return fileUrls(photos);
+    });
   }
 
   // Maintenance Schedules Implementation
@@ -1357,8 +1412,12 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(assetPhotos).orderBy(desc(assetPhotos.uploadedDate));
   }
 
-  async deleteAssetPhoto(id: string): Promise<void> {
-    await db.delete(assetPhotos).where(eq(assetPhotos.id, id));
+  async deleteAssetPhoto(id: string): Promise<string[]> {
+    const deleted = await db
+      .delete(assetPhotos)
+      .where(eq(assetPhotos.id, id))
+      .returning({ url: assetPhotos.imageUrl });
+    return fileUrls(deleted);
   }
 
   // Maintenance Contacts Implementation
@@ -1441,8 +1500,18 @@ export class DatabaseStorage implements IStorage {
     return record;
   }
 
-  async deleteBillingRecord(id: string): Promise<void> {
-    await db.delete(billingRecords).where(eq(billingRecords.id, id));
+  async deleteBillingRecord(id: string): Promise<string[]> {
+    const deleted = await db
+      .delete(billingRecords)
+      .where(eq(billingRecords.id, id))
+      .returning({
+        contractInvoiceUrl: billingRecords.contractInvoiceUrl,
+        coiUrl: billingRecords.coiUrl,
+        w9Url: billingRecords.w9Url,
+      });
+    return fileUrls(
+      deleted.flatMap((row) => [{ url: row.contractInvoiceUrl }, { url: row.coiUrl }, { url: row.w9Url }]),
+    );
   }
 
   // Properties Implementation
@@ -1474,8 +1543,23 @@ export class DatabaseStorage implements IStorage {
     return property;
   }
 
-  async deleteProperty(id: string): Promise<void> {
-    await db.delete(properties).where(eq(properties.id, id));
+  async deleteProperty(id: string): Promise<string[]> {
+    // The house's walkthroughs go with it by cascade, and their rooms' photos
+    // with them. Assets and requests are not cascaded, so their files stay
+    // with the rows that still point at them.
+    return await db.transaction(async (tx) => {
+      const photos = await tx
+        .select({ url: walkthroughPhotos.imageUrl })
+        .from(walkthroughPhotos)
+        .innerJoin(walkthroughRooms, eq(walkthroughPhotos.roomId, walkthroughRooms.id))
+        .innerJoin(walkthroughs, eq(walkthroughRooms.walkthroughId, walkthroughs.id))
+        .where(eq(walkthroughs.propertyId, id));
+      const deleted = await tx
+        .delete(properties)
+        .where(eq(properties.id, id))
+        .returning({ url: properties.photoUrl });
+      return fileUrls([...photos, ...deleted]);
+    });
   }
 
   async getRequestContacts(requestId: string): Promise<MaintenanceContact[]> {
@@ -1572,6 +1656,10 @@ export class DatabaseStorage implements IStorage {
   async createUpload(upload: InsertUpload): Promise<Upload> {
     const [created] = await db.insert(uploads).values(upload).returning();
     return created;
+  }
+
+  async deleteUpload(storageKey: string): Promise<void> {
+    await db.delete(uploads).where(eq(uploads.storageKey, storageKey));
   }
 
   async getUploadByStorageKey(storageKey: string): Promise<Upload | undefined> {
@@ -1814,8 +1902,12 @@ export class DatabaseStorage implements IStorage {
     return row;
   }
 
-  async deleteMaintenanceRequestComment(id: string): Promise<void> {
-    await db.delete(maintenanceRequestComments).where(eq(maintenanceRequestComments.id, id));
+  async deleteMaintenanceRequestComment(id: string): Promise<string[]> {
+    const deleted = await db
+      .delete(maintenanceRequestComments)
+      .where(eq(maintenanceRequestComments.id, id))
+      .returning({ url: maintenanceRequestComments.attachmentUrl });
+    return fileUrls(deleted);
   }
 
   // Bids Implementation
@@ -1846,8 +1938,12 @@ export class DatabaseStorage implements IStorage {
     return row;
   }
 
-  async deleteMaintenanceRequestBid(id: string): Promise<void> {
-    await db.delete(maintenanceRequestBids).where(eq(maintenanceRequestBids.id, id));
+  async deleteMaintenanceRequestBid(id: string): Promise<string[]> {
+    const deleted = await db
+      .delete(maintenanceRequestBids)
+      .where(eq(maintenanceRequestBids.id, id))
+      .returning({ url: maintenanceRequestBids.documentUrl });
+    return fileUrls(deleted);
   }
 
   async acceptMaintenanceRequestBid(requestId: string, bidId: string): Promise<MaintenanceRequestBid | undefined> {
@@ -1967,6 +2063,11 @@ export class DatabaseStorage implements IStorage {
       ...property.map((record) => ({ kind: "property" as const, record })),
     ];
   }
+}
+
+/** The non-empty URLs out of a set of selected `{ url }` rows. */
+function fileUrls(rows: { url: string | null }[]): string[] {
+  return rows.map((row) => row.url).filter((url): url is string => !!url);
 }
 
 export const storage = new DatabaseStorage();
