@@ -471,6 +471,8 @@ Both validate the extension, the MIME type **and the file's actual magic bytes**
 
 Three more store a file for a particular record rather than under the general upload permission: `POST /api/maintenance-request-photos/upload` (images, resident-reachable), `POST /api/maintenance-requests/:id/attachments` (the document set, for a comment on that request — see "Request threads") and `POST /api/maintenance-requests/:id/bid-documents` (the document set, for a bid on a project — staff only, see "Projects and bids"). All three apply the same checks and go through the same `storeUploadedFile`.
 
+**Naming a stored file is checked as strictly as storing one.** A file is served to anyone who can read a record pointing at it, so every column that holds an `/uploads/<key>` reference takes a new value only when the `uploads` row says this caller stored it: comment attachments and bid documents through `ownUploadFromClient`, request `photoUrls` through `attachRequestPhotos`, and every other column (request and house `photoUrl`, walkthrough and asset photo `imageUrl`, the three billing documents) through `requireOwnUploads`, which also refuses anything not in the `/uploads/<key>` shape. An edit that resends the value the row already holds passes, so editing a colleague's record is not refused over their file. A new writer of a file column goes through one of these, with a `routeAccess.test.ts` case.
+
 A further kind of route takes a file without storing one: the roster CSV import, below. It goes through `guardedUpload()` like the others, but it parses the bytes and discards them, so none of the storage-key or magic-byte rules apply to it.
 
 ### Upload limits

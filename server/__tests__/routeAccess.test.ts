@@ -5764,6 +5764,8 @@ describe("photo attribution is taken from the session, not the body", () => {
     actAs(ADMIN);
     storageMock.getAsset.mockResolvedValue({ id: "asset-1", region: "West Central" });
     storageMock.createAssetPhoto.mockImplementation(async (data: Record<string, unknown>) => ({ id: "photo-1", ...data }));
+    // The file itself must be the caller's own upload; attribution is what this tests.
+    storageMock.getUploadByStorageKey.mockResolvedValue({ storageKey: "x.png", uploadedBy: ADMIN.id });
 
     const { status } = await request("POST", "/api/asset-photos", {
       body: { assetId: "asset-1", imageUrl: "/uploads/x.png", uploadedBy: "victim@example.com" },
@@ -5781,6 +5783,8 @@ describe("photo attribution is taken from the session, not the body", () => {
   it("stores a walkthrough photo under the signed-in user, ignoring a spoofed uploadedBy", async () => {
     actAs(ADMIN);
     storageMock.createWalkthroughPhoto.mockImplementation(async (data: Record<string, unknown>) => ({ id: "photo-1", ...data }));
+    // The file itself must be the caller's own upload; attribution is what this tests.
+    storageMock.getUploadByStorageKey.mockResolvedValue({ storageKey: "x.png", uploadedBy: ADMIN.id });
 
     const { status } = await request("POST", "/api/walkthrough-photos", {
       body: {
@@ -8421,5 +8425,226 @@ describe("granting every permission flag", () => {
     expect(status).toBe(200);
     expect(storageMock.upsertUserPermissions).toHaveBeenCalledWith(expect.objectContaining({ userId: "u-alice", [flag]: true }));
     expect(body[flag]).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Every field that names a stored file checks who stored it
+// ---------------------------------------------------------------------------
+
+/**
+ * A file is served to anyone who can read a record that points at it, so a
+ * body naming somebody else's upload -- a vendor's W-9 in a repair's photo
+ * field -- hands that file to everyone who can read the record. Comment
+ * attachments, bid documents and request photoUrls already refuse that; this
+ * holds every other writer to the same rule. An edit that resends the value
+ * the record already holds is not a new reference and passes, so editing a
+ * colleague's record does not fail over a file they attached.
+ */
+describe("every field that names a stored file checks the caller stored it", () => {
+  const KEY = "0123456789abcdef0123456789abcdef.pdf";
+  const FILE = `/uploads/${KEY}`;
+  const uploadRow = (uploadedBy: string) => ({
+    id: "upload-1",
+    storageKey: KEY,
+    originalName: "w9.pdf",
+    contentType: "application/pdf",
+    sizeBytes: 1024,
+    uploadedBy,
+  });
+  const HOUSE = { id: "prop-1", name: "Cleveland House", address: "1 Main St", region: "West Central", ownership: "owned", photoUrl: null };
+  const REQUEST_BODY = { title: "Leaky tap", description: "Drips overnight.", category: "plumbing", priority: "medium", location: "Kitchen" };
+  const HOUSE_BODY = {
+    name: "New House",
+    streetAddress: "9 Oak Ave",
+    city: "St Paul",
+    state: "MN",
+    zipCode: "55104",
+    region: "West Central",
+    chapter: "St Paul",
+    ownership: "owned",
+  };
+  const BILLING = { id: "bill-1", companyName: "Acme", email: "a@acme.test", phone: "555", invoiceCost: "10.00", region: "West Central" };
+  const echo = async (...args: unknown[]) => ({ id: "new", ...(args[args.length - 1] as object) });
+
+  interface Writer {
+    name: string;
+    actor: typeof ADMIN;
+    method: "POST" | "PATCH";
+    path: string;
+    field: string;
+    body: (url: string) => Record<string, unknown>;
+    write: keyof typeof storageMock;
+    /** The stored row for an edit, with the field set to `value`. */
+    existing?: (value: string | null) => void;
+    setup?: () => void;
+  }
+
+  const writers: Writer[] = [
+    {
+      name: "a resident's new request, photoUrl",
+      actor: ALICE,
+      method: "POST",
+      path: "/api/maintenance-requests",
+      field: "photoUrl",
+      body: (url) => ({ ...REQUEST_BODY, photoUrl: url }),
+      write: "createMaintenanceRequest",
+      setup: () => storageMock.getActiveResidentByEmail.mockResolvedValue({ region: "West Central", buildingAddress: "1 Main St" }),
+    },
+    {
+      name: "a staff request, photoUrl",
+      actor: ADMIN,
+      method: "POST",
+      path: "/api/maintenance-requests",
+      field: "photoUrl",
+      body: (url) => ({ ...REQUEST_BODY, region: "West Central", buildingAddress: "1 Main St", photoUrl: url }),
+      write: "createMaintenanceRequest",
+      setup: () => storageMock.getPropertyByAddress.mockResolvedValue(HOUSE),
+    },
+    {
+      name: "a request edit, photoUrl",
+      actor: ADMIN,
+      method: "PATCH",
+      path: "/api/maintenance-requests/req-west",
+      field: "photoUrl",
+      body: (url) => ({ photoUrl: url }),
+      write: "updateMaintenanceRequest",
+      existing: (value) => storageMock.getMaintenanceRequest.mockResolvedValue({ ...WEST_REQUEST, buildingAddress: "1 Main St", photoUrl: value }),
+    },
+    {
+      name: "a walkthrough photo, imageUrl",
+      actor: ADMIN,
+      method: "POST",
+      path: "/api/walkthrough-photos",
+      field: "imageUrl",
+      body: (url) => ({ roomId: "room-1", imageUrl: url, region: "West Central", buildingAddress: "1 Main St", location: "Kitchen", uploadedBy: "x" }),
+      write: "createWalkthroughPhoto",
+      // The photo's room and walkthrough, for the routes that scope by them.
+      setup: () => {
+        storageMock.getWalkthroughRoom.mockResolvedValue({ id: "room-1", walkthroughId: "wt-1" });
+        storageMock.getWalkthrough.mockResolvedValue({ id: "wt-1", region: "West Central", buildingAddress: "1 Main St", propertyId: "prop-1" });
+      },
+    },
+    {
+      name: "a walkthrough photo edit, imageUrl",
+      actor: ADMIN,
+      method: "PATCH",
+      path: "/api/walkthrough-photos/wp-1",
+      field: "imageUrl",
+      body: (url) => ({ imageUrl: url }),
+      write: "updateWalkthroughPhoto",
+      existing: (value) =>
+        storageMock.getWalkthroughPhoto.mockResolvedValue({ id: "wp-1", roomId: "room-1", imageUrl: value, region: "West Central" }),
+    },
+    {
+      name: "an asset photo, imageUrl",
+      actor: ADMIN,
+      method: "POST",
+      path: "/api/asset-photos",
+      field: "imageUrl",
+      body: (url) => ({ assetId: "asset-1", imageUrl: url, uploadedBy: "x" }),
+      write: "createAssetPhoto",
+      setup: () => storageMock.getAsset.mockResolvedValue({ id: "asset-1", region: "West Central" }),
+    },
+    {
+      name: "a new house, photoUrl",
+      actor: ADMIN,
+      method: "POST",
+      path: "/api/properties",
+      field: "photoUrl",
+      body: (url) => ({ ...HOUSE_BODY, photoUrl: url }),
+      write: "createProperty",
+      setup: () => storageMock.createPropertySetupItems.mockResolvedValue([]),
+    },
+    {
+      name: "a house edit, photoUrl",
+      actor: ADMIN,
+      method: "PATCH",
+      path: "/api/properties/prop-1",
+      field: "photoUrl",
+      body: (url) => ({ photoUrl: url }),
+      write: "updateProperty",
+      existing: (value) => storageMock.getProperty.mockResolvedValue({ ...HOUSE, photoUrl: value }),
+    },
+    ...(["contractInvoiceUrl", "coiUrl", "w9Url"] as const).flatMap((field): Writer[] => [
+      {
+        name: `a billing record, ${field}`,
+        actor: ADMIN,
+        method: "POST",
+        path: "/api/billing",
+        field,
+        body: (url) => ({ ...BILLING, id: undefined, [field]: url }),
+        write: "createBillingRecord",
+      },
+      {
+        name: `a billing record edit, ${field}`,
+        actor: ADMIN,
+        method: "PATCH",
+        path: "/api/billing/bill-1",
+        field,
+        body: (url) => ({ [field]: url }),
+        write: "updateBillingRecord",
+        existing: (value) => storageMock.getBillingRecord.mockResolvedValue({ ...BILLING, [field]: value }),
+      },
+    ]),
+  ];
+
+  const send = (w: Writer, url: string) => request(w.method, w.path, { body: w.body(url) });
+  const arrange = (w: Writer, existingValue: string | null = null) => {
+    actAs(w.actor, w.actor === ALICE ? ALL_MAINTENANCE : undefined);
+    storageMock[w.write].mockImplementation(echo);
+    w.setup?.();
+    w.existing?.(existingValue);
+  };
+
+  it.each(writers)("$name: refuses a file somebody else stored, and writes nothing", async (w) => {
+    arrange(w);
+    storageMock.getUploadByStorageKey.mockResolvedValue(uploadRow("u-somebody-else"));
+    const { status } = await send(w, FILE);
+    expect(status).toBe(400);
+    expect(storageMock.getUploadByStorageKey).toHaveBeenCalledWith(KEY);
+    expect(storageMock[w.write]).not.toHaveBeenCalled();
+  });
+
+  it.each(writers)("$name: refuses a file that was never stored, and writes nothing", async (w) => {
+    arrange(w);
+    const { status } = await send(w, FILE);
+    expect(status).toBe(400);
+    expect(storageMock[w.write]).not.toHaveBeenCalled();
+  });
+
+  it.each(writers)("$name: refuses a value that is not an uploaded file, and writes nothing", async (w) => {
+    arrange(w);
+    for (const url of ["javascript:alert(1)", "https://evil.example/w9.pdf", "/uploads/../etc/passwd"]) {
+      expect((await send(w, url)).status, url).toBe(400);
+    }
+    expect(storageMock[w.write]).not.toHaveBeenCalled();
+  });
+
+  // Positive control: the same request naming the caller's own upload is
+  // written, so every refusal above is the ownership check and not a broken
+  // fixture.
+  it.each(writers)("$name: stores a file the caller uploaded", async (w) => {
+    arrange(w);
+    storageMock.getUploadByStorageKey.mockResolvedValue(uploadRow(w.actor.id));
+    const { status } = await send(w, FILE);
+    expect(status).toBe(200);
+    expect(storageMock[w.write]).toHaveBeenCalledWith(...(w.method === "PATCH" ? [expect.anything()] : []), expect.objectContaining({ [w.field]: FILE }));
+  });
+
+  it.each(writers.filter((w) => w.existing))("$name: passes the file the record already holds, whoever stored it", async (w) => {
+    arrange(w, FILE);
+    storageMock.getUploadByStorageKey.mockResolvedValue(uploadRow("u-somebody-else"));
+    const { status } = await send(w, FILE);
+    expect(status).toBe(200);
+    expect(storageMock[w.write]).toHaveBeenCalled();
+  });
+
+  // A photo's imageUrl is required, so only the optional document fields clear.
+  it.each(writers.filter((w) => w.existing && w.field !== "imageUrl"))("$name: clears the file with null", async (w) => {
+    arrange(w, FILE);
+    const { status } = await request(w.method, w.path, { body: { [w.field]: null } });
+    expect(status).toBe(200);
+    expect(storageMock.getUploadByStorageKey).not.toHaveBeenCalled();
   });
 });

@@ -93,6 +93,7 @@ import {
   type MaintenanceRequest,
   type MaintenanceRequestComment,
   WALKTHROUGH_CONDITION_LABEL,
+  UPLOAD_URL_PATTERN,
 } from "@shared/schema";
 import { hubSlotProblem } from "@shared/resourceHubSlots";
 import { STANDARD_SCHEDULE_TEMPLATES, addMonths } from "./schedules";
@@ -849,6 +850,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             targetQuarter: true,
           })
           .parse(req.body);
+        await requireOwnUploads(ctx, validatedData, ["photoUrl"]);
         const request = await storage.createMaintenanceRequest({
           ...validatedData,
           type: "request",
@@ -868,6 +870,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Staff file into a region they can reach. submittedBy is still the
       // session, so it is omitted from the body here too.
       const parsed = insertMaintenanceRequestSchema.omit({ submittedBy: true }).parse(req.body);
+      await requireOwnUploads(ctx, parsed, ["photoUrl"]);
       // The region is the house's, never the body's: a request tagged with one
       // region but filed against a house in another is hidden from that
       // house's RA while its household can still read it.
@@ -956,6 +959,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const validatedData = insertMaintenanceRequestSchema.partial().parse(req.body);
+      await requireOwnUploads(ctx, validatedData, ["photoUrl"], existingRequest);
 
       // As on create, a region follows the house. A new address must be a
       // house; an older request whose address no longer matches one keeps the
@@ -1153,6 +1157,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
       throw new HttpError(400, "That file is not one you uploaded. Upload it again and try saving.");
     }
     return { url, name: name || upload.originalName };
+  }
+
+  /**
+   * The same rule for a record's plain file columns -- a request or house
+   * photo, a walkthrough or asset photo, a billing record's three documents.
+   * Every new value must be an upload the caller stored. A value the stored
+   * row already holds is not a new reference and passes, so an edit that
+   * resends a colleague's photo is not refused; null clears. Runs before any
+   * write, so a refusal leaves nothing behind.
+   */
+  async function requireOwnUploads(
+    ctx: AuthContext,
+    incoming: Record<string, unknown>,
+    fields: readonly string[],
+    existing?: Record<string, unknown>,
+  ): Promise<void> {
+    for (const field of fields) {
+      const url = incoming[field];
+      if (url === undefined || url === null || url === "") continue;
+      if (existing && url === existing[field]) continue;
+      if (typeof url !== "string" || !UPLOAD_URL_PATTERN.test(url)) {
+        throw new HttpError(400, "That is not an uploaded file. Upload it again and try saving.");
+      }
+      await ownUploadFromClient(ctx, url, null);
+    }
   }
 
   app.get('/api/maintenance-requests/:id/comments', isAuthenticated, async (req: any, res) => {
@@ -2399,6 +2428,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const validatedData = insertWalkthroughPhotoSchema.parse(req.body);
 
       if (!requireRegion(res, ctx, validatedData.region, "Forbidden - Cannot create in this region")) return;
+      await requireOwnUploads(ctx, validatedData, ["imageUrl"]);
 
       // Attribution comes from the session, never the body, so a caller cannot
       // credit a photo to someone else (matches submittedBy on requests).
@@ -2427,6 +2457,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const validatedData = insertWalkthroughPhotoSchema.partial().parse(req.body);
 
       if (!requireRegionMove(res, ctx, existingPhoto.region, validatedData.region)) return;
+      await requireOwnUploads(ctx, validatedData, ["imageUrl"], existingPhoto);
 
       const photo = await storage.updateWalkthroughPhoto(req.params.id, validatedData);
       res.json(photo);
@@ -3006,6 +3037,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Asset not found" });
       }
       if (!requireRegion(res, ctx, parentAsset.region, "Forbidden - Cannot create in this region")) return;
+      await requireOwnUploads(ctx, validatedData, ["imageUrl"]);
 
       // Attribution comes from the session, never the body, so a caller cannot
       // credit a photo to someone else (matches submittedBy on requests).
@@ -5033,6 +5065,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  const BILLING_DOCUMENT_FIELDS = ["contractInvoiceUrl", "coiUrl", "w9Url"] as const;
+
   app.post('/api/billing', isAuthenticated, async (req: any, res) => {
     try {
       const ctx = await requireActiveUser(req, res);
@@ -5044,6 +5078,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const validatedData = insertBillingRecordSchema.parse(rest);
 
       if (!requireRegion(res, ctx, validatedData.region, "Forbidden - Cannot create in this region")) return;
+      await requireOwnUploads(ctx, validatedData, BILLING_DOCUMENT_FIELDS);
 
       // If createContact is true and no contactId, create a new contact from the billing info
       if (createContact && !validatedData.contactId) {
@@ -5093,6 +5128,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const validatedData = insertBillingRecordSchema.partial().parse(req.body);
 
       if (!requireRegionMove(res, ctx, existingRecord.region, validatedData.region)) return;
+      await requireOwnUploads(ctx, validatedData, BILLING_DOCUMENT_FIELDS, existingRecord);
 
       const record = await storage.updateBillingRecord(req.params.id, validatedData);
 
@@ -5168,6 +5204,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const validatedData = insertPropertySchema.parse(req.body);
 
       if (!requireRegion(res, ctx, validatedData.region, "Forbidden - Cannot create in this region")) return;
+      await requireOwnUploads(ctx, validatedData, ["photoUrl"]);
 
       // Compute full address from components
       const address = `${validatedData.streetAddress}, ${validatedData.city}, ${validatedData.state} ${validatedData.zipCode}`;
@@ -5215,6 +5252,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const validatedData = insertPropertySchema.partial().parse(req.body);
 
       if (!requireRegionMove(res, ctx, existingProperty.region, validatedData.region)) return;
+      await requireOwnUploads(ctx, validatedData, ["photoUrl"], existingProperty);
 
       // If address components are being updated, recompute the full address
       const updateData: Partial<InsertPropertyWithAddress> = { ...validatedData };
