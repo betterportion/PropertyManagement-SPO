@@ -61,6 +61,8 @@ import {
   requireCurrentWalkthrough,
   visibleWalkthroughs,
   canSeeActionItemSource,
+  canSeeTask,
+  isLeaseDerivedTaskSourceKey,
   type AuthContext,
   type PermissionName,
 } from "../authz";
@@ -1495,5 +1497,69 @@ describe("canSeeActionItemSource", () => {
       canViewMaintenance: true, canViewProperties: true, canViewAssets: true, canViewFinancials: true,
     };
     expect(sees(context({ role: "resident", permissions: everything }))).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A lease-derived task additionally needs the properties flag (#170)
+// ---------------------------------------------------------------------------
+
+describe("isLeaseDerivedTaskSourceKey", () => {
+  it("is true only for the two lease-derived prefixes", () => {
+    expect(isLeaseDerivedTaskSourceKey("lease-renewal:prop-1:2026-10-01")).toBe(true);
+    expect(isLeaseDerivedTaskSourceKey("utilities-lease:prop-1:2026-10-01")).toBe(true);
+  });
+
+  it("is false for null, other prefixes, and an unrelated string", () => {
+    expect(isLeaseDerivedTaskSourceKey(null)).toBe(false);
+    expect(isLeaseDerivedTaskSourceKey(undefined)).toBe(false);
+    expect(isLeaseDerivedTaskSourceKey("walkthrough:apr:West Central:2026")).toBe(false);
+    expect(isLeaseDerivedTaskSourceKey("utilities-summer:West Central:2026")).toBe(false);
+    expect(isLeaseDerivedTaskSourceKey("something-else")).toBe(false);
+  });
+});
+
+describe("canSeeTask", () => {
+  const leaseTask = (overrides: Partial<{
+    region: string | null;
+    assignedToUserId: string | null;
+    createdBy: string | null;
+    sourceKey: string | null;
+  }> = {}) => ({
+    region: "West Central",
+    assignedToUserId: null,
+    createdBy: null,
+    sourceKey: "lease-renewal:prop-1:2026-10-01",
+    ...overrides,
+  });
+
+  it("hides a lease-derived task from staff without the properties flag, even in their own region", () => {
+    const ctx = context({ allowedRegions: ["West Central"], permissions: { canViewMaintenance: true } });
+    expect(canSeeTask(ctx, leaseTask())).toBe(false);
+  });
+
+  it("hides a lease-derived task from its own assignee when the flag is missing -- the rule is the rule", () => {
+    const ctx = context({ allowedRegions: ["West Central"], permissions: {} });
+    expect(canSeeTask(ctx, leaseTask({ assignedToUserId: "user-1", createdBy: "user-1" }))).toBe(false);
+  });
+
+  it("shows a lease-derived task to staff holding canViewProperties or canManageProperties", () => {
+    const viewer = context({ allowedRegions: ["West Central"], permissions: { canViewProperties: true } });
+    expect(canSeeTask(viewer, leaseTask())).toBe(true);
+
+    const manager = context({ allowedRegions: ["West Central"], permissions: { canManageProperties: true } });
+    expect(canSeeTask(manager, leaseTask())).toBe(true);
+  });
+
+  it("shows a lease-derived task to an admin with no permissions row at all", () => {
+    const ctx = context({ role: "admin", permissions: undefined });
+    expect(canSeeTask(ctx, leaseTask())).toBe(true);
+  });
+
+  it("leaves an ordinary task's visibility unaffected -- no sourceKey, or a walkthrough/utilities-summer one", () => {
+    const ctx = context({ allowedRegions: ["West Central"], permissions: {} });
+    expect(canSeeTask(ctx, leaseTask({ sourceKey: null }))).toBe(true);
+    expect(canSeeTask(ctx, leaseTask({ sourceKey: "walkthrough:apr:West Central:2026" }))).toBe(true);
+    expect(canSeeTask(ctx, leaseTask({ sourceKey: "utilities-summer:West Central:2026" }))).toBe(true);
   });
 });

@@ -4603,7 +4603,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           schedules: filterByRegion(ctx, schedules),
           properties: filterByRegion(ctx, properties),
           rentPayments: filterByRegion(ctx, rentPayments),
-          tasks: filterByRegion(ctx, tasks),
+          // Not `filterByRegion`: a lease-derived task needs the properties
+          // flag on top of region, exactly like `/api/tasks` (#170).
+          tasks: tasks.filter((t) => canSeeTask(ctx, t)),
           staff,
         },
         regions,

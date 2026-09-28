@@ -7969,6 +7969,28 @@ describe("tasks & action items (regional leads only)", () => {
     expect(body.map((t: { id: string }) => t.id).sort()).toEqual(["all", "mine", "orphan", "west"]);
   });
 
+  it("hides a lease-derived task from an RA without the properties flag, but not an ordinary task in the same response (#170)", async () => {
+    actAs(STAFF, WEST);
+    storageMock.getAllTasks.mockResolvedValue([
+      { id: "ordinary", region: "West Central", assignedToUserId: null, createdBy: ADMIN.id, status: "open", sourceKey: "walkthrough:apr:West Central:2026" },
+      { id: "renewal", region: "West Central", assignedToUserId: null, createdBy: ADMIN.id, status: "open", sourceKey: "lease-renewal:prop-1:2026-10-01" },
+      { id: "shutoff", region: "West Central", assignedToUserId: null, createdBy: ADMIN.id, status: "open", sourceKey: "utilities-lease:prop-1:2026-10-01" },
+    ]);
+    const { status, body } = await get("/api/tasks");
+    expect(status).toBe(200);
+    expect(body.map((t: { id: string }) => t.id)).toEqual(["ordinary"]);
+  });
+
+  it("shows a lease-derived task to an RA holding canViewProperties -- the positive control", async () => {
+    actAs(STAFF, { ...WEST, canViewProperties: true });
+    storageMock.getAllTasks.mockResolvedValue([
+      { id: "renewal", region: "West Central", assignedToUserId: null, createdBy: ADMIN.id, status: "open", sourceKey: "lease-renewal:prop-1:2026-10-01" },
+    ]);
+    const { status, body } = await get("/api/tasks");
+    expect(status).toBe(200);
+    expect(body.map((t: { id: string }) => t.id)).toEqual(["renewal"]);
+  });
+
   it("lets an RA broadcast a task to their own region", async () => {
     actAs(STAFF, WEST);
     storageMock.createTask.mockImplementation(async (data: Record<string, unknown>) => ({ id: "t-1", ...data }));
@@ -8236,6 +8258,34 @@ describe("dashboard items follow the flag of the list they come from (#158)", ()
     mockEverySource();
     const { body } = await get("/api/region-summary");
     expect(body[0]).toMatchObject({ region: "West Central", openRequests: 1, openRepairs: 1, leaseRenewalsDue: 1, safetyPreventiveDue: 2 });
+  });
+
+  it("excludes a lease-derived task from the region summary's safety count for staff without the properties flag (#170)", async () => {
+    actAs(STAFF, { ...WEST, canViewMaintenance: true });
+    mockEverySource();
+    // Alongside mockEverySource's ordinary safety task, a lease-derived one.
+    storageMock.getAllTasks.mockResolvedValue([
+      { id: "task-w", title: "Walkthrough season", category: "safety", region: "West Central", assignedToUserId: null, createdBy: ADMIN.id, status: "open", sourceKey: "walkthrough:apr:West Central:2026" },
+      { id: "task-lease", title: "Turn off utilities — lease ending", category: "safety", region: "West Central", assignedToUserId: null, createdBy: ADMIN.id, status: "open", sourceKey: "utilities-lease:prop-1:2026-10-01" },
+    ]);
+    const { status, body } = await get("/api/region-summary");
+    expect(status).toBe(200);
+    // schedulesDue(1, canViewMaintenance) + the ordinary safety task(1); the
+    // lease-derived one is hidden.
+    expect(body[0]).toMatchObject({ region: "West Central", safetyPreventiveDue: 2 });
+  });
+
+  it("includes a lease-derived task in the safety count for staff holding canViewProperties -- the positive control", async () => {
+    actAs(STAFF, { ...WEST, canViewMaintenance: true, canViewProperties: true });
+    mockEverySource();
+    storageMock.getAllTasks.mockResolvedValue([
+      { id: "task-w", title: "Walkthrough season", category: "safety", region: "West Central", assignedToUserId: null, createdBy: ADMIN.id, status: "open", sourceKey: "walkthrough:apr:West Central:2026" },
+      { id: "task-lease", title: "Turn off utilities — lease ending", category: "safety", region: "West Central", assignedToUserId: null, createdBy: ADMIN.id, status: "open", sourceKey: "utilities-lease:prop-1:2026-10-01" },
+    ]);
+    const { status, body } = await get("/api/region-summary");
+    expect(status).toBe(200);
+    // schedulesDue(1) + both safety tasks(2), now that the flag is held.
+    expect(body[0]).toMatchObject({ region: "West Central", safetyPreventiveDue: 3 });
   });
 });
 
