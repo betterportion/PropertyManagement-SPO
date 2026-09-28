@@ -176,12 +176,27 @@ describe("snoozing an asset an RA is confident about", () => {
     expect(state.snoozed).toBe(false);
   });
 
-  it("treats a snooze ending exactly now as over", () => {
-    const state = assetLifecycle(
-      asset({ replacementDueDate: yearsAway(-1), snoozedUntil: NOW }),
-      NOW,
-    );
-    expect(state.snoozed).toBe(false);
+  it("treats a snooze as over once its end day has begun everywhere (#168)", () => {
+    // Snoozed until Sep 28, stored as UTC midnight. The old `until > now`
+    // brought it back at 7pm Central on Sep 27; it now returns when Sep 28 has
+    // begun in the last timezone to reach it (UTC-12), 7am Central on the 28th.
+    const snoozedToSep28 = asset({ replacementDueDate: yearsAway(-1), snoozedUntil: new Date("2026-09-28T00:00:00.000Z") });
+    expect(assetLifecycle(snoozedToSep28, new Date("2026-09-28T01:17:00.000Z")).snoozed).toBe(true);
+    expect(assetLifecycle(snoozedToSep28, new Date("2026-09-28T11:59:59.999Z")).snoozed).toBe(true);
+    expect(assetLifecycle(snoozedToSep28, new Date("2026-09-28T12:00:00.000Z")).snoozed).toBe(false);
+  });
+});
+
+describe("when a replacement date turns overdue (#168)", () => {
+  const dueSep28 = asset({ replacementDueDate: new Date("2026-09-28T00:00:00.000Z") });
+
+  it("is not overdue the evening before, or on the day itself", () => {
+    expect(assetLifecycle(dueSep28, new Date("2026-09-28T01:17:00.000Z")).status).toBe("urgent");
+    expect(assetLifecycle(dueSep28, new Date("2026-09-28T20:00:00.000Z")).status).toBe("urgent");
+  });
+
+  it("is overdue once the day is over everywhere", () => {
+    expect(assetLifecycle(dueSep28, new Date("2026-09-29T12:00:00.000Z")).status).toBe("overdue");
   });
 });
 

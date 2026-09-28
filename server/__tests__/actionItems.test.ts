@@ -562,3 +562,45 @@ describe("open work on the dashboard", () => {
     ]);
   });
 });
+
+describe("when a dated item turns overdue (#168)", () => {
+  // Every dated source, due Sep 28 as a picked day is stored: UTC midnight.
+  const DUE = new Date("2026-09-28T00:00:00.000Z");
+  // 8:17pm Central on Sep 27, when the old `due < now` already said overdue.
+  const EVENING_BEFORE = new Date("2026-09-28T01:17:00.000Z");
+  // Sep 28 has ended in the last timezone to reach it (UTC-12): 7am Central on the 29th.
+  const DAY_OVER_EVERYWHERE = new Date("2026-09-29T12:00:00.000Z");
+
+  const inputs = (): ActionItemInputs => ({
+    ...empty,
+    schedules: [schedule({ id: "schedule", nextDueDate: DUE })],
+    properties: [
+      property({ id: "lease", ownership: "rented", renewalDecision: "undecided", leaseRenewalDate: DUE }),
+      property({ id: "p1", ownership: "owned", leaseRenewalDate: null, depositReturnDays: 21 }),
+    ],
+    // Sep 2026's fees fall due on Sep 30; checked separately below.
+    tasks: [task({ id: "task", status: "open", dueDate: DUE })],
+    deposits: [deposit({ id: "deposit", propertyId: "p1" })],
+    // Moved out Sep 7, 21 days to return: due Sep 28.
+    residents: [resident({ id: "res-gone", propertyId: "p1", isActive: false, moveOutDate: new Date("2026-09-07T00:00:00.000Z") })],
+  });
+
+  it("is not overdue the evening before, for any source", () => {
+    const items = buildActionItems(inputs(), EVENING_BEFORE);
+    expect(items.map((i) => i.id).sort()).toEqual(["deposit", "lease", "schedule", "task"]);
+    for (const item of items) expect({ id: item.id, overdue: item.overdue }).toEqual({ id: item.id, overdue: false });
+  });
+
+  it("is overdue once the due day is over everywhere, for every source", () => {
+    const items = buildActionItems(inputs(), DAY_OVER_EVERYWHERE);
+    expect(items.map((i) => i.id).sort()).toEqual(["deposit", "lease", "schedule", "task"]);
+    for (const item of items) expect({ id: item.id, overdue: item.overdue }).toEqual({ id: item.id, overdue: true });
+  });
+
+  it("does not call a month's fees overdue on its last evening", () => {
+    const fees = { ...empty, rentPayments: [rent({ id: "u", status: "unpaid", period: "2026-09" })] };
+    // 8pm Central on Sep 30, and then 7am Central on Oct 1.
+    expect(buildActionItems(fees, new Date("2026-10-01T01:00:00.000Z"))[0].overdue).toBe(false);
+    expect(buildActionItems(fees, new Date("2026-10-01T12:00:00.000Z"))[0].overdue).toBe(true);
+  });
+});

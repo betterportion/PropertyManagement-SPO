@@ -20,6 +20,7 @@ import { Plus, MoreVertical, CheckCircle2, ShieldCheck, Wrench, ClipboardList } 
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { type MaintenanceSchedule, type Property } from "@shared/schema";
+import { isPastDue } from "@shared/dueDates";
 import { z } from "zod";
 import { Section, Container, PageHeader, PageStack } from "@/components/layout/page";
 import { LoadingState, EmptyState } from "@/components/states";
@@ -43,7 +44,7 @@ function statusOf(schedule: MaintenanceSchedule) {
   today.setHours(0, 0, 0, 0);
   const due = new Date(schedule.nextDueDate);
   const days = Math.round((due.getTime() - today.getTime()) / DAY);
-  if (days < 0) return { label: "Overdue", variant: "destructive" as const, ok: false };
+  if (isPastDue(due)) return { label: "Overdue", variant: "destructive" as const, ok: false };
   if (days <= 30) return { label: "Due soon", variant: "secondary" as const, ok: false };
   return { label: "Up to date", variant: "outline" as const, ok: true };
 }

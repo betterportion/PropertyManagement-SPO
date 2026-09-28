@@ -14,6 +14,7 @@ import ResidentEditDialog from "@/components/ResidentEditDialog";
 import { useAuth } from "@/hooks/useAuth";
 import { formatDate, formatValue } from "@/lib/format";
 import type { Asset, Property, Resident, SecurityDeposit } from "@shared/schema";
+import { isPastDue } from "@shared/dueDates";
 
 /**
  * Everything about one person on a roster, in one place.
@@ -239,7 +240,7 @@ export default function ResidentDetail() {
                       {asset.expectedReturnDate && (
                         <Badge
                           variant={
-                            new Date(asset.expectedReturnDate) < new Date() ? "destructive" : "secondary"
+                            isPastDue(asset.expectedReturnDate) ? "destructive" : "secondary"
                           }
                         >
                           Back {formatDate(asset.expectedReturnDate)}

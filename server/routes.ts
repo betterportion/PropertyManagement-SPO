@@ -103,6 +103,7 @@ import { SETUP_ITEMS, setupItemsFor } from "@shared/propertySetup";
 import { RESIDENT_DOCUMENTS, isKnownResidentDocument } from "@shared/residentDocuments";
 import { buildRegionSummaries, type RegionStaff } from "./regionSummary";
 import { fromCents, splitEvenly, toCents } from "@shared/depositLedger";
+import { hasBegunEverywhere } from "@shared/dueDates";
 import { randomUUID } from "crypto";
 import { contractorLoad, recurringIssues } from "./aggregates";
 import { sendEmail } from "./email";
@@ -2528,7 +2529,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           // date, and an unbounded end date erases it.
           until: z.coerce
             .date()
-            .refine((date: Date) => date.getTime() > Date.now(), "Pick a date in the future")
+            // In the future by the same rule the snooze ends by, so tomorrow
+            // is still tomorrow after 7pm Central (shared/dueDates.ts).
+            .refine((date: Date) => !hasBegunEverywhere(date), "Pick a date in the future")
             .refine(
               (date: Date) => date.getTime() <= Date.now() + MAX_SNOOZE_DAYS * 24 * 60 * 60 * 1000,
               `A snooze can run at most ${MAX_SNOOZE_MONTHS} months. To park it for longer, correct the replacement date instead.`,
