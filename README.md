@@ -238,6 +238,7 @@ server/                 Express backend
   houseFacts.ts         What a house's facts row becomes on a save, and which codes moved (pure)
   walkthroughTemplate.ts What a new walkthrough starts out containing (pure)
   residentImport.ts     Roster CSV parsing, validation and duplicates (pure)
+  roleChange.ts         What a permissions row becomes on a role change (pure)
   regionSummary.ts      The per-region rollup for a national admin (pure)
   aggregates.ts         Recurring issues and contractor callbacks (pure)
   schedules.ts          Preventive/safety schedules and their daily generator
@@ -252,6 +253,7 @@ server/                 Express backend
   config.ts             Boot-time configuration checks and OIDC settings
   security.ts           Security headers and rate limits
   uploadLimits.ts       Per-file size limits and the in-flight memory ceiling
+  uploadCleanup.ts      Removes a deleted record's files once nothing else points at them
   health.ts             GET /api/health for the hosting platform
   objectStorage/        Where uploaded files are kept (local or Supabase)
   static.ts             Serves the built client in production
@@ -265,9 +267,13 @@ shared/
   actionItems.ts        Types the dashboard and the server both read
   assetLifecycle.ts     Lifespans, thresholds and the replacement status
   depositLedger.ts      Deposit arithmetic and splits, in whole cents
+  depositStatement.ts   The per-resident deposit statement text and its mailto link
+  dueDates.ts           When a calendar day has begun or ended, for "Overdue" and snoozes
   houseFacts.ts         The house-facts field vocabulary and the access codes
   propertySetup.ts      The per-property setup checklist and its states
   residentDocuments.ts  The fixed list of documents a resident signs
+  residentImportTemplate.ts The blank roster CSV template's headers and example row
+  residents.ts          Who was living in a house on a given date
   resourceHubSlots.ts   The three named links on the resource hub, and the rules for binding one
 migrations/             Committed SQL migrations, applied with db:migrate
 scripts/                One-off maintenance scripts
@@ -292,7 +298,7 @@ Worth understanding before changing anything server-side.
 
 ### Audit log
 
-The `audit_log` table records the actions somebody may have to account for later: user, permission and house-link changes, maintenance status changes, invoice and billing changes, HH fee (rent) charge and security-deposit changes, and document uploads and downloads. Photo views are deliberately not recorded — there are far too many of them and they would bury everything else.
+The `audit_log` table records the actions somebody may have to account for later: user, permission and house-link changes, maintenance status changes, invoice and billing changes, HH fee (rent) charge and security-deposit changes, a resident being removed from the roster, and document uploads and downloads. Photo views are deliberately not recorded — there are far too many of them and they would bury everything else.
 
 Admins can read it in the app: Settings shows the activity trail, backed by
 `GET /api/audit-log`. It can also be read directly with SQL:
