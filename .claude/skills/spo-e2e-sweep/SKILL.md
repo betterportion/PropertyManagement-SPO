@@ -8,7 +8,7 @@ disable-model-invocation: true
 
 Two halves. The **suite** is the existing Playwright run in `e2e/`: one worker, one database, what CI runs. The **sweep** is exploratory: one subagent per **lane**, each with its own database, server and personas, driving the app to find what the suite does not test. The subagents earn their cost only in the sweep: lanes are independent, so they run in parallel, and a **finding** is only reported once a different agent has reproduced it by a **second route**.
 
-The rules a lane tests against are `CLAUDE.md`. This skill points at its sections and never restates them, so it cannot drift from them.
+The rules a lane tests against are `CLAUDE.md` and the feature notes in `.claude/rules/` (CLAUDE.md's "Feature notes" table says which file holds which section). This skill points at its sections and never restates them, so it cannot drift from them.
 
 ## Guardrails
 
@@ -75,7 +75,7 @@ Done when every finding carries one verdict: **confirmed**, **not reproduced**, 
 Write `$RUN/report.md`:
 
 1. **First line**: suite counts, then confirmed findings by severity (CRITICAL/HIGH/MEDIUM/LOW, the code-review scale). An authorization finding is at least HIGH.
-2. **Confirmed findings**, most severe first: persona, steps, expected (with the `CLAUDE.md` section), observed, evidence path, verifier's second route.
+2. **Confirmed findings**, most severe first: persona, steps, expected (with the section and the file it is in), observed, evidence path, verifier's second route.
 3. **Not reproduced**: one line each.
 4. **Coverage**: per lane, what was exercised and what was not, with the reason. What nobody tested is stated as untested.
 

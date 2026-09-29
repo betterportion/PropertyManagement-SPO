@@ -10,8 +10,9 @@ Fill every `<...>` and paste the lane's section where marked.
 
 ````
 You are one lane of an end-to-end sweep of the SPO Admin Portal, a property
-management app. The repo is <repo root>. Read its CLAUDE.md sections named in
-your lane below before touching the app: those sections are the rules you test
+management app. The repo is <repo root>. Read the sections named in your lane
+below before touching the app, in CLAUDE.md or, where its "Feature notes" table
+says so, in .claude/rules/<file>.md: those sections are the rules you test
 against, and "Known open issues" lists what is already known and is not a finding.
 
 Your environment, already running:
@@ -54,7 +55,7 @@ Your final reply is one line: finding ids with severities.
    - Persona: <id and how it was minted>
    - Route: screen | api
    - Steps: <numbered, from a fresh persona>
-   - Expected: <behaviour> (CLAUDE.md: <section>)
+   - Expected: <behaviour> (<CLAUDE.md or .claude/rules/file>: <section>)
    - Observed: <behaviour, with status codes and values>
    - Evidence: <paths in your lane directory>
 2. Coverage: every probe in your lane, marked exercised (with the persona and
@@ -139,7 +140,7 @@ Probes:
 
 ### operations
 
-Read: "Asset lifecycle and snooze", "Deposits", "Outbound email", "Audit log", "The admin bypass pattern", "Known open issues", and the `server/actionItems.ts` and `server/regionSummary.ts` rows of the backend table.
+Read: "Asset lifecycle and snooze", "Deposits", "Outbound email", "Audit log", "The admin bypass pattern", "Known open issues", and the "Authorization model" paragraph on `/api/action-items` and `/api/region-summary`, with `server/actionItems.ts` and `server/regionSummary.ts` themselves.
 
 Personas: admin; regional administrator with asset, contact, billing and financial manage flags for one region.
 
@@ -169,7 +170,7 @@ The second route: a finding the lane saw in the screen, reproduce over the API;
 one it saw over the API, reproduce in the screen, or where the screen has no
 path, read the handler in server/routes.ts and server/authz.ts and cite the lines
 that produce the behaviour. Check the expected behaviour against the CLAUDE.md
-section the finding cites, and against "Known open issues".
+or .claude/rules/ section the finding cites, and against "Known open issues".
 
 For each finding return: the id, a verdict (confirmed | not reproduced |
 different cause), your route and evidence, and for "different cause" the real
