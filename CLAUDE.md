@@ -52,7 +52,7 @@ Three conventions in that suite, all of which exist because of a real miss:
 |---|---|
 | `index.ts` | Entry point. Validates configuration before anything else loads, sets `trust proxy`, security headers, JSON body parsing, API request logging, graceful shutdown, listens on `PORT`. |
 | `config.ts` | Every environment variable the server cannot run without, checked once at boot and reported together. Also owns the OIDC provider settings, the email settings and `APP_URL` — the portal's public address, optional, read by `readAppUrlFromEnv` for the links in comment email and never a boot failure when unset. |
-| `routes.ts` | Every API endpoint. One large file, ~147 handlers. |
+| `routes.ts` | Every API endpoint. One large file, ~153 handlers. |
 | `auth.ts` | OpenID Connect login and the session store. Reads its provider settings from `config.ts`. |
 | `authz.ts` | Who may do what: `requireActiveUser`, `requirePermission`, the region helpers, upload and maintenance ownership. |
 | `audit.ts` | Records the actions somebody may have to account for later. See "Audit log" below. |
@@ -75,6 +75,7 @@ Three conventions in that suite, all of which exist because of a real miss:
 | `db.ts` | Drizzle over the standard `pg` pool, plus `pingDatabase` and `closeDatabase`. Throws at import time if `DATABASE_URL` is missing. |
 | `objectStorage/` | File storage behind a `FileStore` interface: `local.ts` for development, `supabase.ts` for production. The only code that talks to a bucket. |
 | `uploadLimits.ts` | Per-file size limits and the in-flight memory ceiling. |
+| `uploadCleanup.ts` | `removeDeletedRecordFiles`: after a delete, removes each file the deleted rows held, object first and then its `uploads` row, unless `findUploadReferences` says another record still points at it. Never fails the request: a storage error is logged by storage key only. |
 | `notifications.ts` | The message builders — pure, a record in and a message out. Every builder returns `null` when there is nothing to send, so a caller never has to tell "no message" from a failed one. |
 | `commentRecipients.ts` | Who a comment is emailed to. One pure function over the request, the comment and the candidate accounts, deciding through the real `canReadComment` rule; it decides nothing about delivery. |
 | `email.ts` | The only code that talks to the email provider (Resend). `sendEmail` never throws — unconfigured and failed sends return a result — and email is off until `RESEND_API_KEY` + `EMAIL_FROM` are both set. |
