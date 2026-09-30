@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { serverMessage } from "@/lib/serverMessage";
+import { BANKING_DETAILS_HELP } from "@shared/bankingDetails";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import RegionSelector from "@/components/RegionSelector";
@@ -248,7 +250,7 @@ export default function Finances() {
     mutationFn: async ({ id, data }: { id: string; data: Record<string, unknown> }) =>
       apiRequest("PATCH", `/api/security-deposits/${id}`, data),
     onSuccess: () => { invalidateDeposits(); setEditingDeposit(null); toast({ title: "Deposit updated" }); },
-    onError: () => toast({ title: "Error", description: "Could not update the deposit", variant: "destructive" }),
+    onError: (error) => toast({ title: "Error", description: serverMessage(error) ?? "Could not update the deposit", variant: "destructive" }),
   });
 
   const deleteDepositMutation = useMutation({
@@ -765,7 +767,7 @@ function DepositEditDialog({
               <FormItem>
                 <FormLabel>QuickBooks / Ramp reference <span className="text-muted-foreground text-xs">(optional)</span></FormLabel>
                 <FormControl><Input {...field} placeholder="e.g. QB bill 4471" data-testid="input-deposit-reference" /></FormControl>
-                <p className="text-xs text-muted-foreground">A reference the transaction can be found by. Never an account or card number.</p>
+                <p className="text-xs text-muted-foreground" data-testid="text-help-deposit-reference">{BANKING_DETAILS_HELP}</p>
                 <FormMessage />
               </FormItem>
             )} />
@@ -773,6 +775,7 @@ function DepositEditDialog({
               <FormItem>
                 <FormLabel>Earlier notes <span className="text-muted-foreground text-xs">(legacy — deductions are itemised now)</span></FormLabel>
                 <FormControl><Textarea {...field} rows={3} placeholder="e.g. $75 held back for wall repair in the kitchen." data-testid="input-deposit-notes" /></FormControl>
+                <p className="text-xs text-muted-foreground" data-testid="text-help-deposit-notes">{BANKING_DETAILS_HELP}</p>
                 <FormMessage />
               </FormItem>
             )} />

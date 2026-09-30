@@ -12,7 +12,9 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-const { upsertUser } = vi.hoisted(() => ({ upsertUser: vi.fn() }));
+const { upsertUser } = vi.hoisted(() => ({
+  upsertUser: vi.fn(),
+}));
 
 vi.mock("../db", () => ({ db: {}, pool: {} }));
 vi.mock("../storage", () => ({ storage: { upsertUser } }));
@@ -31,12 +33,15 @@ const claims = (extra: Record<string, unknown>) => ({
   sub: "google-sub-1",
   email: "jane@spo.org",
   given_name: "Jane",
+  // Verified, so every refusal below is the domain check's alone
+  // (signInRelink.test.ts covers the email_verified check).
+  email_verified: true,
   ...extra,
 });
 
 beforeEach(() => {
   upsertUser.mockReset();
-  upsertUser.mockResolvedValue({});
+  upsertUser.mockResolvedValue({ user: {} });
 });
 
 afterEach(() => {

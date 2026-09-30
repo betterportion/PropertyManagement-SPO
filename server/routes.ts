@@ -17,6 +17,7 @@ import {
   canPostComment,
   canDeleteComment,
   residentHouseAddress,
+  rosterRowSpeaksFor,
   canReadUpload,
   filterByRegion,
   filterByRelatedRegion,
@@ -79,6 +80,7 @@ import {
   RENT_PERIOD_PATTERN,
   insertSecurityDepositSchema,
   insertDepositDeductionSchema,
+  financeText,
   insertTaskSchema,
   insertResourceLinkSchema,
   insertResidentDocumentSchema,
@@ -644,18 +646,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!requireAdmin(res, ctx)) return;
 
       const validatedData = insertUserSchema.parse(req.body);
-      const user = await storage.upsertUser({
+      const { user, relinkedFrom } = await storage.upsertUser({
         id: req.body.id || undefined,
         ...validatedData,
       });
 
-      recordAuditEvent(ctx, {
-        action: AUDIT_ACTIONS.USER_CREATED,
-        entityType: "user",
-        entityId: user.id,
-        summary: `Created account ${user.email ?? user.id} with role ${user.role ?? "resident"}`,
-        details: { role: user.role ?? null, isActive: user.isActive ?? null },
-      });
+      // An email that already had an account moves that account to the new id
+      // rather than creating one, so the trail says so, as a sign-in re-link does.
+      recordAuditEvent(
+        ctx,
+        relinkedFrom
+          ? {
+              action: AUDIT_ACTIONS.USER_RELINKED,
+              entityType: "user",
+              entityId: user.id,
+              summary: `Linked the ${relinkedFrom.role} account for ${relinkedFrom.email} to a new sign-in ID`,
+              details: { previousUserId: relinkedFrom.id, role: relinkedFrom.role },
+            }
+          : {
+              action: AUDIT_ACTIONS.USER_CREATED,
+              entityType: "user",
+              entityId: user.id,
+              summary: `Created account ${user.email ?? user.id} with role ${user.role ?? "resident"}`,
+              details: { role: user.role ?? null, isActive: user.isActive ?? null },
+            },
+      );
 
       res.json(user);
     } catch (error) {
@@ -3591,11 +3606,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // The portal login a roster row speaks for: an active resident login with
   // the row's exact email (case aside) that is linked to the row's own house.
   // A login elsewhere is not this row's to report on or switch off, even if a
-  // roster email was typed to match it.
+  // roster email was typed to match it. /api/my-property applies the same
+  // rule the other way round before it hands a login the house's codes.
   async function loginForRosterRow(resident: { email: string; propertyId: string | null }) {
     const account = await storage.getActiveResidentAccountByEmail(resident.email);
-    if (!account || !resident.propertyId || account.propertyId !== resident.propertyId) return undefined;
-    if (account.email?.toLowerCase() !== resident.email.toLowerCase()) return undefined;
+    if (!account || !rosterRowSpeaksFor(resident, account)) return undefined;
     return account;
   }
 
@@ -3660,7 +3675,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (deactivateAccount) {
         const account = await loginForRosterRow(resident);
         if (account) {
-          await storage.updateUserActiveStatus(account.id, false);
+          // The house link is what reaches the house's requests, walkthroughs
+          // and codes, so it goes with the login, in the same write:
+          // reactivating the account later must not hand the old house back.
+          await storage.deactivateAndUnlinkUser(account.id);
           accountDeactivated = true;
           recordAuditEvent(ctx, {
             action: AUDIT_ACTIONS.USER_STATUS_CHANGED,
@@ -3668,6 +3686,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
             entityId: account.id,
             summary: `Deactivated ${account.email ?? account.id}'s login while moving them out of ${resident.buildingAddress}`,
             details: { isActive: false, reason: "move_out", residentId: resident.id },
+          });
+          recordAuditEvent(ctx, {
+            action: AUDIT_ACTIONS.USER_PROPERTY_CHANGED,
+            entityType: "user",
+            entityId: account.id,
+            summary: `Unlinked ${account.email ?? account.id} from their house while moving them out of ${resident.buildingAddress}`,
+            details: { from: account.propertyId ?? null, to: null, reason: "move_out", residentId: resident.id },
           });
         }
       }
@@ -4136,7 +4161,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
             .string()
             .trim()
             .min(1, "Say what the charge is for")
-            .max(300, "Keep the description under 300 characters"),
+            .max(300, "Keep the description under 300 characters")
+            // The financial-data rule, as on a single deduction (#51).
+            .pipe(financeText),
           amount: z.coerce.number().finite().min(0, "Must be 0 or greater").refine(isWholeCents, WHOLE_CENTS_MESSAGE),
           chargeDate: z.coerce.date(),
           residentIds: z
@@ -4354,12 +4381,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const property = await storage.getProperty(ctx.user.propertyId);
       if (!property) return res.json(null);
 
+      // The codes go to the household, and the household is the house's
+      // roster today: an active row at this house with this login's exact
+      // email (the move-out rule). The house link alone is not enough -- a
+      // login linked and never rostered, removed from the roster, or moved
+      // out without its login switched off keeps the rest of this card but
+      // not the codes.
+      const onRoster = (await storage.getResidentsByProperty(property.id)).some(
+        (row) => row.isActive && rosterRowSpeaksFor(row, ctx.user),
+      );
+
       // The house facts (ADR-0002) reach the household through this projection
       // and nothing else: named fields again, so `notes` -- the staff-only
       // remarks -- can never ride along. Who to call and the portal come from
       // the property's own columns, and only for a house SPO does not own.
       const [facts, landlord] = await Promise.all([
-        storage.getPropertyFacts(property.id),
+        onRoster ? storage.getPropertyFacts(property.id) : undefined,
         property.ownership === "rented" && property.rentalCompanyContactId
           ? storage.getMaintenanceContact(property.rentalCompanyContactId)
           : undefined,

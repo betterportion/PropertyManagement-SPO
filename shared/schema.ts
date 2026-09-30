@@ -5,6 +5,7 @@ import { z } from "zod";
 import { RESOURCE_HUB_SLOT_KEYS } from "./resourceHubSlots";
 import { ASSET_CATEGORIES } from "./assetLifecycle";
 import { REGIONS } from "./regions";
+import { BANKING_DETAILS_MESSAGE, containsBankingDetails } from "./bankingDetails";
 
 /**
  * Field builders that reconcile three views of the same value: what a JSON
@@ -72,6 +73,15 @@ const httpUrlFromClient = z
       return false;
     }
   }, "Enter a full web address starting with http:// or https://");
+
+/**
+ * Free text on a finance record: refuses a card number or a labelled bank
+ * number (see shared/bankingDetails.ts, #51). Applied field by field, so a
+ * `.partial()` edit schema carries it exactly as the create schema does.
+ */
+export const financeText = z
+  .string()
+  .refine((value: string) => !containsBankingDetails(value), BANKING_DETAILS_MESSAGE);
 
 export const sessions = pgTable(
   "sessions",
@@ -1390,6 +1400,8 @@ export const insertRentPaymentSchema = createInsertSchema(rentPayments)
     period: z.string().regex(RENT_PERIOD_PATTERN, "Use a YYYY-MM month"),
     amount: nonNegativeAmount,
     paidDate: dateFromClient.nullish(),
+    reference: financeText.nullish(),
+    notes: financeText.nullish(),
   });
 
 export type RentPayment = typeof rentPayments.$inferSelect;
@@ -1450,6 +1462,8 @@ export const insertSecurityDepositSchema = createInsertSchema(securityDeposits)
     amountReturned: nonNegativeAmount.nullish(),
     returnedDate: dateFromClient.nullish(),
     statementProvidedOn: dateFromClient.nullish(),
+    closeoutReference: financeText.nullish(),
+    deductionsNotes: financeText.nullish(),
   });
 
 /**
@@ -1520,7 +1534,8 @@ export const insertDepositDeductionSchema = createInsertSchema(depositDeductions
       .string()
       .trim()
       .min(1, "Say what the deduction is for")
-      .max(300, "Keep the description under 300 characters"),
+      .max(300, "Keep the description under 300 characters")
+      .pipe(financeText),
     amount: nonNegativeAmount,
     chargeDate: dateFromClient,
   });

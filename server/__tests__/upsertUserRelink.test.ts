@@ -19,8 +19,10 @@ import { is } from "drizzle-orm";
 import { PgTable, getTableConfig } from "drizzle-orm/pg-core";
 import * as schema from "@shared/schema";
 
-const { dbMock, selectQueue, inserted, deleted, updated } = vi.hoisted(() => {
+const { dbMock, selectQueue, updateReturnQueue, inserted, deleted, updated } = vi.hoisted(() => {
   const selectQueue: unknown[][] = [];
+  // What the next UPDATE ... RETURNING hands back; empty means the row written.
+  const updateReturnQueue: unknown[][] = [];
   const inserted: Record<string, unknown>[] = [];
   const deleted: unknown[] = [];
   const updated: Record<string, unknown>[] = [];
@@ -34,7 +36,7 @@ const { dbMock, selectQueue, inserted, deleted, updated } = vi.hoisted(() => {
     update: () => ({
       set: (row: Record<string, unknown>) => {
         updated.push(row);
-        return { where: () => ({ returning: async () => [row] }) };
+        return { where: () => ({ returning: async () => updateReturnQueue.shift() ?? [row] }) };
       },
     }),
     insert: () => ({
@@ -47,7 +49,7 @@ const { dbMock, selectQueue, inserted, deleted, updated } = vi.hoisted(() => {
       },
     }),
   };
-  return { dbMock, selectQueue, inserted, deleted, updated };
+  return { dbMock, selectQueue, updateReturnQueue, inserted, deleted, updated };
 });
 
 vi.mock("../db", () => ({ db: dbMock, pool: {} }));
@@ -76,6 +78,7 @@ const PERMISSIONS_ROW = {
 
 beforeEach(() => {
   selectQueue.length = 0;
+  updateReturnQueue.length = 0;
   inserted.length = 0;
   deleted.length = 0;
   updated.length = 0;
@@ -86,7 +89,7 @@ describe("upsertUser email re-linking", () => {
     // 1st select: the account found by email; 2nd: its permissions row.
     selectQueue.push([PRE_CREATED], [PERMISSIONS_ROW]);
 
-    const user = await storage.upsertUser({
+    const { user, relinkedFrom } = await storage.upsertUser({
       id: "oidc-sub-123",
       email: "steward@example.com",
       firstName: "Real",
@@ -106,6 +109,31 @@ describe("upsertUser email re-linking", () => {
       commentEmailsEnabled: false,
     });
     expect(user.propertyId).toBe("prop-west");
+    // What the sign-in records as user.relinked comes from here.
+    expect(relinkedFrom).toEqual({ id: "u-precreated", email: "steward@example.com", role: "resident" });
+  });
+
+  it("reports no re-link when the account found by email already has this id", async () => {
+    selectQueue.push([{ ...PRE_CREATED, id: "oidc-sub-123" }], [PERMISSIONS_ROW]);
+
+    const { user, relinkedFrom } = await storage.upsertUser({ id: "oidc-sub-123", email: "steward@example.com" });
+
+    expect(relinkedFrom).toBeUndefined();
+    expect(user.id).toBe("oidc-sub-123");
+  });
+
+  it("reports no re-link when a concurrent sign-in moved the account first", async () => {
+    // The lookup still sees the old id, but by the time the UPDATE runs another
+    // sign-in has renamed the row, so it matches nothing. That other sign-in
+    // made the re-link and records it; this one falls through to the upsert.
+    selectQueue.push([PRE_CREATED], [PERMISSIONS_ROW]);
+    updateReturnQueue.push([]);
+
+    const { user, relinkedFrom } = await storage.upsertUser({ id: "oidc-sub-123", email: "steward@example.com" });
+
+    expect(relinkedFrom).toBeUndefined();
+    expect(user.id).toBe("oidc-sub-123");
+    expect(inserted).toContainEqual(expect.objectContaining({ id: "oidc-sub-123", email: "steward@example.com" }));
   });
 
   it("lets an explicit propertyId in the upsert win over the old row's", async () => {

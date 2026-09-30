@@ -130,8 +130,9 @@ describe.skipIf(!TEST_DATABASE_URL)("sign-in re-link against PostgreSQL", () => 
   });
 
   it("moves the account to the new identity with its permissions and every reference", async () => {
-    const user = await storage.upsertUser({ id: NEW_ID, email: EMAIL, firstName: "Real" });
+    const { user, relinkedFrom } = await storage.upsertUser({ id: NEW_ID, email: EMAIL, firstName: "Real" });
 
+    expect(relinkedFrom).toEqual({ id: OLD_ID, email: EMAIL, role: "regional_administrator" });
     expect(user).toMatchObject({
       id: NEW_ID,
       email: EMAIL,
@@ -180,8 +181,11 @@ describe.skipIf(!TEST_DATABASE_URL)("sign-in re-link against PostgreSQL", () => 
   it("still re-links once the failure has gone (positive control for the trigger)", async () => {
     // The same account and the same call as above, with no trigger: proves the
     // refusal above came from the forced failure and not from the setup.
-    const user = await storage.upsertUser({ id: NEW_ID, email: EMAIL });
+    const { user } = await storage.upsertUser({ id: NEW_ID, email: EMAIL });
     expect(user.id).toBe(NEW_ID);
     expect(await taskOwners()).toEqual({ assignedToUserId: NEW_ID, createdBy: NEW_ID });
+
+    // The same sign-in again finds the account already under its id.
+    expect((await storage.upsertUser({ id: NEW_ID, email: EMAIL })).relinkedFrom).toBeUndefined();
   });
 });

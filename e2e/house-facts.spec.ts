@@ -22,7 +22,8 @@ test.describe("house facts", () => {
   }) => {
     test.skip(!fixtures.propertyId, "no seeded property");
 
-    // global-setup gives the resident an account and a roster row, but not a
+    // global-setup gives the resident an account and a roster row at this
+    // house (the codes follow the roster), but not a
     // house link on the account or the hub grant. Both are ordinary admin
     // actions, done here through the same routes the Settings screen uses.
     const linked = await request.patch("/api/users/e2e-resident/property", {

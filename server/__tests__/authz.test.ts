@@ -50,6 +50,7 @@ import {
   RESIDENT_CLOSED_REQUEST_DAYS,
   requireMaintenanceRequestAccess,
   residentHouseAddress,
+  rosterRowSpeaksFor,
   canReadComment,
   canPostComment,
   canDeleteComment,
@@ -910,6 +911,30 @@ describe("residentHouseAddress", () => {
     getProperty.mockResolvedValue(undefined);
     const ctx = context({ role: "resident", propertyId: "prop-gone" });
     expect(await residentHouseAddress(ctx)).toBeNull();
+  });
+});
+
+describe("rosterRowSpeaksFor", () => {
+  const ROW = { email: "maria@spo.org", propertyId: "prop-1" };
+  const LOGIN = { email: "maria@spo.org", propertyId: "prop-1" };
+
+  it("matches a login linked to the row's house with the row's email, case aside", () => {
+    expect(rosterRowSpeaksFor(ROW, LOGIN)).toBe(true);
+    expect(rosterRowSpeaksFor(ROW, { ...LOGIN, email: "Maria@SPO.org" })).toBe(true);
+  });
+
+  it("refuses a login linked to another house, or to none", () => {
+    expect(rosterRowSpeaksFor(ROW, { ...LOGIN, propertyId: "prop-2" })).toBe(false);
+    expect(rosterRowSpeaksFor(ROW, { ...LOGIN, propertyId: null })).toBe(false);
+  });
+
+  it("refuses a row with no house, even against a login with no house", () => {
+    expect(rosterRowSpeaksFor({ ...ROW, propertyId: null }, { ...LOGIN, propertyId: null })).toBe(false);
+  });
+
+  it("refuses an email that differs by more than case, or a login with no email", () => {
+    expect(rosterRowSpeaksFor(ROW, { ...LOGIN, email: "maria.g@spo.org" })).toBe(false);
+    expect(rosterRowSpeaksFor(ROW, { ...LOGIN, email: null })).toBe(false);
   });
 });
 

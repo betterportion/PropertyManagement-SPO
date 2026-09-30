@@ -15,8 +15,10 @@ import DepositStatement from "@/components/deposit/DepositStatement";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { serverMessage } from "@/lib/serverMessage";
 import { formatCurrency, formatDate, localToday } from "@/lib/format";
 import { CONDITION_LABEL } from "@/lib/walkthrough";
+import { BANKING_DETAILS_HELP } from "@shared/bankingDetails";
 import { fromCents, runningBalance, splitEvenly, toCents } from "@shared/depositLedger";
 import { residentsActiveOn } from "@shared/residents";
 import {
@@ -130,11 +132,14 @@ export default function DamagesWorksheet() {
 
   const save = useMutation({
     mutationFn: async () => {
-      if (!walkthrough) return { saved: 0, failed: 0, attempted: 0 };
+      if (!walkthrough) return { saved: 0, failed: 0, attempted: 0, reason: undefined };
       const chargeDate = new Date(walkthrough.walkthroughDate).toISOString().slice(0, 10);
       let saved = 0;
       let failed = 0;
       let attempted = 0;
+      // The first refusal's own words, so a row refused for a card or bank
+      // number (#51) says why rather than only that it failed.
+      let reason: string | undefined;
       for (const { item, room } of rows) {
         if (alreadyCharged(item.id).length > 0) continue;
         const state = stateFor(item, room);
@@ -162,13 +167,14 @@ export default function DamagesWorksheet() {
             });
           }
           saved += 1;
-        } catch {
+        } catch (error) {
           failed += 1;
+          reason ??= serverMessage(error);
         }
       }
-      return { saved, failed, attempted };
+      return { saved, failed, attempted, reason };
     },
-    onSuccess: ({ saved, failed, attempted }) => {
+    onSuccess: ({ saved, failed, attempted, reason }) => {
       queryClient.invalidateQueries({ queryKey: ["/api/deposit-deductions"] });
       queryClient.invalidateQueries({ queryKey: ["/api/action-items"] });
       if (attempted === 0) {
@@ -176,7 +182,7 @@ export default function DamagesWorksheet() {
       } else if (failed === 0) {
         toast({ title: `Saved ${saved} charge${saved === 1 ? "" : "s"}`, description: "Each person's line is on their deposit ledger." });
       } else {
-        toast({ title: `Saved ${saved} of ${attempted}`, description: `${failed} row${failed === 1 ? "" : "s"} did not save. The rest are recorded; try those again.`, variant: "destructive" });
+        toast({ title: `Saved ${saved} of ${attempted}`, description: `${failed} row${failed === 1 ? "" : "s"} did not save. The rest are recorded; try those again.${reason ? ` ${reason}` : ""}`, variant: "destructive" });
       }
     },
   });
@@ -188,7 +194,7 @@ export default function DamagesWorksheet() {
       queryClient.invalidateQueries({ queryKey: ["/api/security-deposits"] });
       queryClient.invalidateQueries({ queryKey: ["/api/action-items"] });
     },
-    onError: () => toast({ title: "That did not save", variant: "destructive" }),
+    onError: (error) => toast({ title: "That did not save", description: serverMessage(error), variant: "destructive" }),
   });
 
   let body: React.ReactNode;
@@ -325,6 +331,7 @@ export default function DamagesWorksheet() {
         <Card>
           <CardHeader>
             <CardTitle>Close-out</CardTitle>
+            <p className="text-sm text-muted-foreground" data-testid="text-help-closeout-reference">{BANKING_DETAILS_HELP}</p>
           </CardHeader>
           <CardContent>
             {activeResidents.length === 0 ? (

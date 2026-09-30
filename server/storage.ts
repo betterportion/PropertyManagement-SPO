@@ -163,10 +163,23 @@ export interface PropertyDeleteBlockers {
   deductions: number;
 }
 
+/**
+ * What `upsertUser` wrote, and whose account it was when the write was an
+ * email re-link. `relinkedFrom` is set only when this call's own UPDATE moved
+ * the row, so a sign-in racing another on the same email never reports the
+ * other one's re-link.
+ */
+export interface UpsertUserResult {
+  user: User;
+  relinkedFrom?: Pick<User, "id" | "email" | "role">;
+}
+
 export interface IStorage {
   // User Management
   getUser(id: string): Promise<User | undefined>;
-  upsertUser(user: UpsertUser): Promise<User>;
+  /** The account holding exactly this email, the same match the sign-in re-link uses. */
+  getUserByEmail(email: string): Promise<User | undefined>;
+  upsertUser(user: UpsertUser): Promise<UpsertUserResult>;
   getAllUsers(): Promise<User[]>;
   /** Sets the role and, when given, replaces the permissions row in the same transaction. */
   updateUserRole(
@@ -176,6 +189,7 @@ export interface IStorage {
   ): Promise<User>;
   updateUserActiveStatus(id: string, isActive: boolean): Promise<User>;
   updateUserProperty(id: string, propertyId: string | null): Promise<User>;
+  deactivateAndUnlinkUser(id: string): Promise<User>;
   /** The comment email off switch. A preference, so it is not audited. */
   updateUserCommentEmails(id: string, enabled: boolean): Promise<User>;
   getActiveResidentAccountByEmail(email: string): Promise<User | undefined>;
@@ -573,6 +587,11 @@ export class DatabaseStorage implements IStorage {
     return user;
   }
 
+  async getUserByEmail(email: string): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.email, email));
+    return user;
+  }
+
   /**
    * Handles an account an admin pre-created by email under a different ID (or
    * one kept from a previous login provider): when its owner signs in, the
@@ -583,15 +602,13 @@ export class DatabaseStorage implements IStorage {
    * with it inside the same statement. A failure leaves the old account
    * exactly as it was.
    *
-   * Returns undefined when there is nothing to re-link.
+   * Returns undefined when there is nothing to re-link, including when a
+   * concurrent sign-in renamed the account between the lookup and the UPDATE.
    */
-  private async relinkByEmail(userData: UpsertUser): Promise<User | undefined> {
+  private async relinkByEmail(userData: UpsertUser): Promise<UpsertUserResult | undefined> {
     if (!userData.email || !userData.id) return undefined;
 
-    const [existingByEmail] = await db
-      .select()
-      .from(users)
-      .where(eq(users.email, userData.email));
+    const existingByEmail = await this.getUserByEmail(userData.email);
     if (!existingByEmail || existingByEmail.id === userData.id) return undefined;
 
     // Role, active status, the property link (a pre-created resident account
@@ -611,12 +628,15 @@ export class DatabaseStorage implements IStorage {
       })
       .where(eq(users.id, existingByEmail.id))
       .returning();
-    return relinked;
+    if (!relinked) return undefined;
+    const { id, email, role } = existingByEmail;
+    return { user: relinked, relinkedFrom: { id, email, role } };
   }
 
-  async upsertUser(userData: UpsertUser): Promise<User> {
+  async upsertUser(userData: UpsertUser): Promise<UpsertUserResult> {
+    const relink = await this.relinkByEmail(userData);
     const user =
-      (await this.relinkByEmail(userData)) ??
+      relink?.user ??
       (
         await db
           .insert(users)
@@ -636,8 +656,8 @@ export class DatabaseStorage implements IStorage {
       const defaultPermissions = computeDefaultPermissions(user.id, user.role);
       await this.upsertUserPermissions(defaultPermissions);
     }
-    
-    return user;
+
+    return { user, relinkedFrom: relink?.relinkedFrom };
   }
 
   async getAllUsers(): Promise<User[]> {
@@ -686,6 +706,18 @@ export class DatabaseStorage implements IStorage {
       }
       return user;
     });
+  }
+
+  // Move-out switches a login off and unlinks it from its house in one
+  // statement: done as two, a failure between them would leave an inactive
+  // login still linked, which a retry cannot find to repair.
+  async deactivateAndUnlinkUser(id: string): Promise<User> {
+    const [user] = await db
+      .update(users)
+      .set({ isActive: false, propertyId: null, updatedAt: new Date() })
+      .where(eq(users.id, id))
+      .returning();
+    return user;
   }
 
   async updateUserActiveStatus(id: string, isActive: boolean): Promise<User> {

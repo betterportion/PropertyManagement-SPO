@@ -18,6 +18,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { EmptyState, LoadingState } from "@/components/states";
 import DepositStatement from "@/components/deposit/DepositStatement";
 import { useToast } from "@/hooks/use-toast";
+import { serverMessage } from "@/lib/serverMessage";
+import { BANKING_DETAILS_HELP } from "@shared/bankingDetails";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { formatCurrency, formatDate, localToday } from "@/lib/format";
 import { fromCents, runningBalance, toCents } from "@shared/depositLedger";
@@ -140,10 +142,10 @@ export default function DepositLedger({
       setRequestId(NO_LINK);
       setWalkthroughItemId(NO_LINK);
     },
-    onError: () => {
+    onError: (error) => {
       toast({
         title: "That did not save",
-        description: "Nothing was deducted. Check the amount and try again.",
+        description: serverMessage(error) ?? "Nothing was deducted. Check the amount and try again.",
         variant: "destructive",
       });
     },
@@ -352,6 +354,7 @@ export default function DepositLedger({
                 onChange={(event) => setDescription(event.target.value)}
                 data-testid="input-deduction-description"
               />
+              <p className="text-xs text-muted-foreground" data-testid="text-help-deduction-description">{BANKING_DETAILS_HELP}</p>
             </div>
 
             <div className="grid grid-cols-2 gap-4">

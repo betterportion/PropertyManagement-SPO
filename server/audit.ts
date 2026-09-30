@@ -28,6 +28,9 @@ export const AUDIT_ACTIONS_KEPT_INDEFINITELY = [
   // house's walkthroughs it can write. That is access history like the
   // entries above, so it is kept for as long as they are.
   "user.property_changed",
+  // An existing account handed to a new login identity by the email re-link:
+  // who holds an account is access history too.
+  "user.relinked",
 ] as const;
 
 /**

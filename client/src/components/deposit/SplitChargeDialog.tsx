@@ -14,6 +14,8 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
+import { serverMessage } from "@/lib/serverMessage";
+import { BANKING_DETAILS_HELP } from "@shared/bankingDetails";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { formatCurrency, localToday } from "@/lib/format";
 import { fromCents, splitEvenly, toCents } from "@shared/depositLedger";
@@ -94,10 +96,10 @@ export default function SplitChargeDialog({
         description: `${formatCurrency(amount)} divided across ${chosen.length} people.`,
       });
     },
-    onError: () => {
+    onError: (error) => {
       toast({
         title: "That did not save",
-        description: "Nothing was charged. Check the amount and who is on the split.",
+        description: serverMessage(error) ?? "Nothing was charged. Check the amount and who is on the split.",
         variant: "destructive",
       });
     },
@@ -137,6 +139,7 @@ export default function SplitChargeDialog({
               onChange={(event) => setDescription(event.target.value)}
               data-testid="input-split-description"
             />
+            <p className="text-xs text-muted-foreground" data-testid="text-help-split-description">{BANKING_DETAILS_HELP}</p>
           </div>
 
           <div className="grid grid-cols-2 gap-4">

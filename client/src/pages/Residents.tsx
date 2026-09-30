@@ -557,7 +557,8 @@ export default function Residents() {
                   <Label htmlFor="deactivate-account">Also switch off their portal login</Label>
                   <p className="text-xs text-muted-foreground">
                     Their login can see the whole house's maintenance requests. Leave this checked
-                    unless they are staying involved; an admin can reactivate it from Settings.
+                    unless they are staying involved. Switching it off also unlinks it from this house;
+                    an admin can reactivate it and link a house again from Settings.
                   </p>
                 </div>
               </div>

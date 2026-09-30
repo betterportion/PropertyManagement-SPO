@@ -9,6 +9,7 @@ import { pool } from "./db";
 import { storage } from "./storage";
 import { authProvider, isProduction } from "./config";
 import { HttpError } from "./errors";
+import { recordAuditEvent, AUDIT_ACTIONS } from "./audit";
 
 /**
  * Login is standard OpenID Connect. Which provider is in use is decided
@@ -141,6 +142,14 @@ function updateUserSession(
  * one of the listed domains. Only Google Workspace accounts carry `hd`; the
  * email address is no evidence, since a personal Google account can be
  * registered under any address.
+ *
+ * A sign-in that carries an email is refused, again before anything is
+ * written, unless the ID token's `email_verified` claim is exactly `true`
+ * (absent counts as unverified). The email decides which account a sign-in
+ * takes over through the re-link in `upsertUser`, and which requests a
+ * resident owns (`ownsRecord`, case-insensitive), so an address the provider
+ * has not checked must not reach either. When the re-link does hand an
+ * existing account to the new identity, it is recorded as `user.relinked`.
  */
 export async function recordSignIn(
   claims: any,
@@ -156,13 +165,35 @@ export async function recordSignIn(
     }
   }
 
-  await storage.upsertUser({
+  const email: string | undefined = claims["email"];
+  if (email && claims["email_verified"] !== true) {
+    throw new HttpError(
+      403,
+      "Your sign-in provider has not confirmed your email address. Verify it with them, then sign in again.",
+    );
+  }
+
+  const { user, relinkedFrom } = await storage.upsertUser({
     id: claims["sub"],
-    email: claims["email"],
+    email,
     firstName: claims["first_name"] ?? claims["given_name"],
     lastName: claims["last_name"] ?? claims["family_name"],
     profileImageUrl: claims["profile_image_url"] ?? claims["picture"],
   });
+
+  // From what upsertUser did, not a lookup beforehand: two sign-ins racing on
+  // one email would otherwise both see the old account.
+  if (relinkedFrom) {
+    // No session exists yet, so the actor is recorded as the system; the
+    // summary says whose account moved.
+    recordAuditEvent(null, {
+      action: AUDIT_ACTIONS.USER_RELINKED,
+      entityType: "user",
+      entityId: user.id,
+      summary: `The ${relinkedFrom.role} account for ${relinkedFrom.email} was linked to a new sign-in`,
+      details: { previousUserId: relinkedFrom.id, role: relinkedFrom.role },
+    });
+  }
 }
 
 export async function setupAuth(app: Express) {

@@ -344,6 +344,21 @@ export function ownsRecord(ctx: AuthContext, submittedBy: string | null | undefi
 }
 
 /**
+ * Whether a roster row and a login are the same household member: the login
+ * is linked to the row's own house and carries the row's exact email, case
+ * aside. Move-out uses it to find the login it may switch off, and the house
+ * codes use it to decide who is on the household. A row with no house, or a
+ * login with no email, is nobody's.
+ */
+export function rosterRowSpeaksFor(
+  row: { email: string; propertyId: string | null },
+  login: { email: string | null; propertyId: string | null },
+): boolean {
+  if (!row.propertyId || login.propertyId !== row.propertyId) return false;
+  return !!login.email && login.email.toLowerCase() === row.email.toLowerCase();
+}
+
+/**
  * The address of the house a resident's account is linked to, or null when
  * there is nothing to resolve: a staff account, an account nobody has linked
  * to a property yet, or a link whose property has since been deleted. Every
