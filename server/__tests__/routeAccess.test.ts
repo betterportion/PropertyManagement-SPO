@@ -9217,3 +9217,85 @@ describe("every field that names a stored file checks the caller stored it", () 
     expect(storageMock.getUploadByStorageKey).not.toHaveBeenCalled();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Guards on deletes and lists that no other test names
+//
+// Each of these guards could be removed with the whole suite still green
+// (pilot-readiness audit, 2026-09-29). Every refusal asserts the write never
+// happened, and every refusal is paired with an accepted request proving the
+// same spy fires, so a broken fixture cannot pass as a refusal.
+// ---------------------------------------------------------------------------
+
+describe("guards on deletes and lists", () => {
+  describe("deleting an account is admin work", () => {
+    it.each([
+      ["a regional administrator holding every region", STAFF, { canManageUsers: true, allowedRegions: ["all"] }],
+      ["a resident", ALICE, ALL_MAINTENANCE],
+    ])("refuses %s, and deletes nothing", async (_who, user, permissions) => {
+      actAs(user, permissions);
+      const { status } = await request("DELETE", `/api/users/${BOB.id}`);
+      expect(status).toBe(403);
+      expect(storageMock.deleteUser).not.toHaveBeenCalled();
+    });
+
+    it("lets an admin with no permissions row delete the account", async () => {
+      actAs(ADMIN);
+      const { status } = await request("DELETE", `/api/users/${BOB.id}`);
+      expect(status).toBe(200);
+      expect(storageMock.deleteUser).toHaveBeenCalledWith(BOB.id);
+    });
+  });
+
+  describe("region scoping on deletes", () => {
+    const rows = [
+      { name: "an asset", path: "/api/assets/rec-1", flag: "canManageAssets", load: "getAsset", write: "deleteAsset" },
+      { name: "a maintenance schedule", path: "/api/maintenance-schedules/rec-1", flag: "canManageMaintenance", load: "getMaintenanceSchedule", write: "deleteMaintenanceSchedule" },
+      { name: "an HH-fee payment", path: "/api/rent-payments/rec-1", flag: "canManageFinancials", load: "getRentPayment", write: "deleteRentPayment" },
+      { name: "a security deposit", path: "/api/security-deposits/rec-1", flag: "canManageFinancials", load: "getSecurityDeposit", write: "deleteSecurityDeposit" },
+      { name: "a contact", path: "/api/contacts/rec-1", flag: "canManageContacts", load: "getMaintenanceContact", write: "deleteMaintenanceContact" },
+    ];
+
+    const arrange = (row: (typeof rows)[number], recordRegion: string) => {
+      actAs(STAFF, { [row.flag]: true, allowedRegions: ["West Central"] });
+      storageMock[row.load].mockResolvedValue({ id: "rec-1", region: recordRegion, buildingAddress: "1 Main St" });
+      // deleteAsset hands back the file URLs its rows held.
+      storageMock[row.write].mockResolvedValue([]);
+    };
+
+    it.each(rows)("$name: refuses staff outside the record's region, and deletes nothing", async (row) => {
+      arrange(row, "East Central");
+      const { status } = await request("DELETE", row.path);
+      expect(status).toBe(403);
+      expect(storageMock[row.write]).not.toHaveBeenCalled();
+    });
+
+    it.each(rows)("$name: deletes for staff in the record's region", async (row) => {
+      arrange(row, "West Central");
+      const { status } = await request("DELETE", row.path);
+      expect(status).toBe(200);
+      expect(storageMock[row.write]).toHaveBeenCalledWith("rec-1");
+    });
+  });
+
+  describe("the resident roster is scoped by region", () => {
+    const WEST_RESIDENT = { id: "res-west", firstName: "Ann", region: "West Central", buildingAddress: "1 Main St" };
+    const EAST_RESIDENT = { id: "res-east", firstName: "Ben", region: "East Central", buildingAddress: "2 River Rd" };
+
+    it("gives West-only staff the West rows and none of the East ones", async () => {
+      actAs(STAFF, { canViewProperties: true, allowedRegions: ["West Central"] });
+      storageMock.getAllResidents.mockResolvedValue([WEST_RESIDENT, EAST_RESIDENT]);
+      const { status, body } = await get("/api/residents");
+      expect(status).toBe(200);
+      expect(body.map((r: { id: string }) => r.id)).toEqual(["res-west"]);
+    });
+
+    it("gives staff with no regions an empty roster, never everything", async () => {
+      actAs(STAFF, { canViewProperties: true, allowedRegions: [] });
+      storageMock.getAllResidents.mockResolvedValue([WEST_RESIDENT, EAST_RESIDENT]);
+      const { status, body } = await get("/api/residents");
+      expect(status).toBe(200);
+      expect(body).toEqual([]);
+    });
+  });
+});
