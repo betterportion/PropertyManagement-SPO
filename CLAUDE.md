@@ -23,7 +23,7 @@ It is a single Express server that serves both the REST API and the React fronte
 | `npm run start` | Run the production build |
 | `npm run lint` | ESLint. **Must stay at zero errors**; warnings are allowed |
 | `npm run check` | TypeScript check. **Must stay at zero errors** |
-| `npm test` | Vitest. Needs no database, no bucket, no secrets. `auditRetention.integration.test.ts` is the one test that uses a real database, and skips unless `TEST_DATABASE_URL` or `DATABASE_URL` is set |
+| `npm test` | Vitest. Needs no database, no bucket, no secrets. Two tests use a real database: `auditRetention.integration.test.ts`, which skips unless `TEST_DATABASE_URL` or `DATABASE_URL` is set, and `upsertUserRelink.integration.test.ts`, which writes to the real tables and so runs only with `TEST_DATABASE_URL` pointed at a throwaway, migrated database |
 | `npm run test:e2e` | Playwright, in a real browser. Unlike `npm test` these need a database and a browser: `npx playwright install chromium` once, then `npm run db:migrate && npm run db:seed` against a throwaway Postgres |
 | `npm run db:generate` | Write a migration from a `shared/schema.ts` change |
 | `npm run db:migrate` | Apply pending migrations |
@@ -183,7 +183,8 @@ Standard OpenID Connect via Passport, configured entirely through `OIDC_*` envir
 Things to preserve if you touch it:
 
 - **Claim mapping leaves absent fields `undefined`, never `null`.** Drizzle's conflict-update filters `undefined` out but writes `null` through, so using `null` would blank stored names and avatars for any provider that omits them.
-- **`upsertUser` in `storage.ts` contains email-based account re-linking.** When a sign-in's email matches an existing account under a different ID, it migrates that account, preserving role, active status and permissions. This is what lets an admin pre-create an account before someone's first login, and it is what makes a provider swap survivable. Do not simplify it away.
+- **`upsertUser` in `storage.ts` contains email-based account re-linking.** When a sign-in's email matches an existing account under a different ID, it migrates that account, preserving role, active status and permissions. The migration is one UPDATE of the row's id, and every foreign key to `users.id` is `ON UPDATE CASCADE`, so the permissions row and every reference move with it or nothing changes; a new foreign key to `users.id` needs `onUpdate: "cascade"` too (`upsertUserRelink.test.ts` fails without it). This is what lets an admin pre-create an account before someone's first login, and it is what makes a provider swap survivable. Do not simplify it away.
+- **`OIDC_ALLOWED_DOMAINS` (optional, comma-separated) limits sign-in to those Google Workspace domains.** `recordSignIn` in `auth.ts` checks Google's `hd` claim and refuses with a 403 *before* `upsertUser` runs, so a refused sign-in creates or changes no account; never check the email domain instead, since a personal Google account can hold any address. Unset keeps the old behaviour, where the Google consent screen being "Internal" is the only restriction. `server/__tests__/signInDomain.test.ts` covers it.
 - **The OAuth callback URL is hard-coded to https except for genuine localhost.** Do not derive it from `req.protocol` — behind a proxy, a request without forwarded-proto headers yields `http`, and because strategies are cached per-domain that wrong callback sticks for the life of the process.
 - **A session with no refresh token ends at token expiry with a 401.** That is the correct behaviour, but it means `OIDC_SCOPES` matters: dropping `offline_access` (which Google Workspace requires you to do — it rejects the scope) means staff sign in again when their token expires.
 

@@ -107,7 +107,7 @@ export const users = pgTable("users", {
 
 export const userPermissions = pgTable("user_permissions", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  userId: varchar("user_id").notNull().unique().references(() => users.id, { onDelete: "cascade" }),
+  userId: varchar("user_id").notNull().unique().references(() => users.id, { onDelete: "cascade", onUpdate: "cascade" }),
   canViewMaintenance: boolean("can_view_maintenance").notNull().default(true),
   canManageMaintenance: boolean("can_manage_maintenance").notNull().default(false),
   canViewWalkthroughs: boolean("can_view_walkthroughs").notNull().default(false),
@@ -499,7 +499,7 @@ export const walkthroughItems = pgTable("walkthrough_items", {
   // inventing an assessment. Clearing keeps the reason (2026-09 RA review).
   dismissedAt: timestamp("dismissed_at"),
   dismissReason: text("dismiss_reason"),
-  dismissedByUserId: varchar("dismissed_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  dismissedByUserId: varchar("dismissed_by_user_id").references(() => users.id, { onDelete: "set null", onUpdate: "cascade" }),
   // The item-level standing note; see walkthrough_rooms.standingNote.
   standingNote: text("standing_note"),
   createdAt: timestamp("created_at").defaultNow(),
@@ -609,7 +609,7 @@ export const assets = pgTable("assets", {
   // conversation possible.
   snoozedUntil: timestamp("snoozed_until"),
   snoozeReason: text("snooze_reason"),
-  snoozedByUserId: varchar("snoozed_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  snoozedByUserId: varchar("snoozed_by_user_id").references(() => users.id, { onDelete: "set null", onUpdate: "cascade" }),
   snoozedAt: timestamp("snoozed_at"),
   // ── Value ────────────────────────────────────────────────────────────────
   // Alongside purchasePrice, never replacing it: used equipment can be worth
@@ -623,7 +623,7 @@ export const assets = pgTable("assets", {
   // The use case is a staff departure: collect the iPad, the guitar and the
   // laptop before he leaves.
   assignedResidentId: varchar("assigned_resident_id").references(() => residents.id, { onDelete: "set null" }),
-  assignedUserId: varchar("assigned_user_id").references(() => users.id, { onDelete: "set null" }),
+  assignedUserId: varchar("assigned_user_id").references(() => users.id, { onDelete: "set null", onUpdate: "cascade" }),
   assignedToName: varchar("assigned_to_name"),
   expectedReturnDate: timestamp("expected_return_date"),
   // ── Provenance ───────────────────────────────────────────────────────────
@@ -751,7 +751,7 @@ export const maintenanceRequestComments = pgTable("maintenance_request_comments"
   isInternal: boolean("is_internal").notNull().default(true),
   // Set null rather than restrict, as contact notes do: the comment outlives
   // the account, and the name and email kept alongside still say who wrote it.
-  authorUserId: varchar("author_user_id").references(() => users.id, { onDelete: "set null" }),
+  authorUserId: varchar("author_user_id").references(() => users.id, { onDelete: "set null", onUpdate: "cascade" }),
   authorEmail: varchar("author_email"),
   authorName: varchar("author_name"),
   relaySource: varchar("relay_source"),
@@ -918,7 +918,7 @@ export const contactNotes = pgTable("contact_notes", {
   body: text("body").notNull(),
   // Set null rather than restrict: the note outlives the RA who wrote it, and
   // deleting a user must never be blocked.
-  authorUserId: varchar("author_user_id").references(() => users.id, { onDelete: "set null" }),
+  authorUserId: varchar("author_user_id").references(() => users.id, { onDelete: "set null", onUpdate: "cascade" }),
   /** Kept alongside the id so a deleted account's note still says who wrote it. */
   authorEmail: varchar("author_email"),
   region: varchar("region").notNull(),
@@ -1142,7 +1142,7 @@ export const propertySetupItems = pgTable(
     note: text("note"),
     // Set null rather than restrict: the checklist outlives the RA who filled
     // it in, and deleting a user must never be blocked.
-    setByUserId: varchar("set_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    setByUserId: varchar("set_by_user_id").references(() => users.id, { onDelete: "set null", onUpdate: "cascade" }),
     setAt: timestamp("set_at"),
     region: varchar("region").notNull(),
     createdAt: timestamp("created_at").defaultNow(),
@@ -1481,7 +1481,7 @@ export const depositDeductions = pgTable("deposit_deductions", {
   // Who recorded it. The email is kept alongside the id so a deduction still
   // says who entered it after that account is gone -- this is money, and the
   // question gets asked.
-  recordedByUserId: varchar("recorded_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  recordedByUserId: varchar("recorded_by_user_id").references(() => users.id, { onDelete: "set null", onUpdate: "cascade" }),
   recordedByEmail: varchar("recorded_by_email"),
   // Where the charge came from, where there is something to point at. Loose
   // references rather than hard FKs, matching how rooms and assets point at
@@ -1604,16 +1604,17 @@ export const tasks = pgTable("tasks", {
   status: varchar("status", { enum: ["open", "done"] }).notNull().default("open"),
   dueDate: timestamp("due_date"),
   region: varchar("region"),
-  assignedToUserId: varchar("assigned_to_user_id").references(() => users.id, { onDelete: "set null" }),
+  assignedToUserId: varchar("assigned_to_user_id").references(() => users.id, { onDelete: "set null", onUpdate: "cascade" }),
   // Set on auto-generated recurring tasks (walkthrough / utilities reminders) to
   // keep the daily generator idempotent -- one row per cadence, region and cycle.
   // Null for hand-created tasks. Unique so a re-run never duplicates a reminder.
   sourceKey: varchar("source_key").unique(),
   // Set null rather than restrict on delete: a task (especially a broadcast)
-  // can outlive its author, and deleting a user must never be blocked -- the
-  // account-linking flow deletes and re-creates a user row on first sign-in.
-  createdBy: varchar("created_by").references(() => users.id, { onDelete: "set null" }),
-  completedBy: varchar("completed_by").references(() => users.id, { onDelete: "set null" }),
+  // can outlive its author, and deleting a user must never be blocked. Every
+  // foreign key to users.id cascades on update: the account-linking flow
+  // renames a user row's id on first sign-in, and the task follows it.
+  createdBy: varchar("created_by").references(() => users.id, { onDelete: "set null", onUpdate: "cascade" }),
+  completedBy: varchar("completed_by").references(() => users.id, { onDelete: "set null", onUpdate: "cascade" }),
   completedAt: timestamp("completed_at"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
@@ -1714,7 +1715,7 @@ export const residentDocuments = pgTable(
     /** When it was signed. Null means it has not been. */
     signedOn: timestamp("signed_on"),
     notes: text("notes"),
-    recordedByUserId: varchar("recorded_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    recordedByUserId: varchar("recorded_by_user_id").references(() => users.id, { onDelete: "set null", onUpdate: "cascade" }),
     recordedByEmail: varchar("recorded_by_email"),
     region: varchar("region").notNull(),
     createdAt: timestamp("created_at").defaultNow(),

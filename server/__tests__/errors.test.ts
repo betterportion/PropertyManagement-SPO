@@ -3,6 +3,8 @@ import express from "express";
 import type { AddressInfo } from "net";
 import type { Server } from "http";
 import { z } from "zod";
+import { format, inspect } from "util";
+import pg from "pg";
 import { DrizzleQueryError } from "drizzle-orm/errors";
 import {
   HttpError,
@@ -10,6 +12,8 @@ import {
   asyncHandler,
   classifyError,
   errorHandler,
+  logError,
+  sendError,
 } from "../errors";
 
 /**
@@ -131,6 +135,109 @@ describe("classifyError", () => {
 
     expect(serialised).not.toContain("at ");
     expect(serialised).not.toContain(".ts:");
+  });
+});
+
+describe("what a database failure writes to the server log", () => {
+  // A value a query carried, such as a house's door code. It must never reach
+  // the log, however the failure is reported.
+  const SECRET = "4321-DOOR";
+
+  /** A real driver error, as the Postgres driver builds it. */
+  function driverError(code: string, message: string): pg.DatabaseError {
+    return Object.assign(new pg.DatabaseError(message, message.length, "error"), {
+      code,
+      // Postgres's own detail line echoes the offending values.
+      detail: `Key (door_code)=(${SECRET}) already exists.`,
+      table: "properties",
+      constraint: "properties_door_code_key",
+    });
+  }
+
+  /** A real DrizzleQueryError: its message is the query text plus every parameter. */
+  function queryError(code: string, message: string): DrizzleQueryError {
+    return new DrizzleQueryError(
+      'update "properties" set "door_code" = $1 where "id" = $2',
+      [SECRET, "prop-1"],
+      driverError(code, message),
+    );
+  }
+
+  /** Everything written to the console, as the console would render it and fully expanded. */
+  function captureLogs(run: () => void): string {
+    // mockClear: console.error is already spied on for the whole file, and a
+    // reused spy would still hold other tests' calls.
+    const spies = (["error", "warn", "log", "info"] as const).map((level) =>
+      vi.spyOn(console, level).mockImplementation(() => {}).mockClear(),
+    );
+    try {
+      run();
+      return spies
+        .flatMap((spy) => spy.mock.calls)
+        .map((args) => `${format(...args)}\n${inspect(args, { depth: Infinity })}`)
+        .join("\n");
+    } finally {
+      for (const spy of spies) spy.mockRestore();
+      vi.spyOn(console, "error").mockImplementation(() => {});
+    }
+  }
+
+  const fakeResponse = () =>
+    ({
+      headersSent: false,
+      status() {
+        return this;
+      },
+      json() {
+        return this;
+      },
+    }) as any;
+
+  const TIMEOUT = "canceling statement due to statement timeout";
+
+  it("logs the Postgres code and message but no query parameter, through logError", () => {
+    const logged = captureLogs(() => logError("Failed to save the house", queryError("57014", TIMEOUT)));
+
+    expect(logged).not.toContain(SECRET);
+    expect(logged).toContain("Failed to save the house");
+    expect(logged).toContain("57014");
+    expect(logged).toContain(TIMEOUT);
+  });
+
+  it("logs no query parameter through sendError or the final error handler", () => {
+    const logged = captureLogs(() => {
+      sendError(fakeResponse(), queryError("57014", TIMEOUT), "Failed to save the house");
+      errorHandler(
+        queryError("57014", TIMEOUT),
+        { method: "PATCH", path: "/api/properties/prop-1" } as any,
+        fakeResponse(),
+        () => {},
+      );
+    });
+
+    expect(logged).not.toContain(SECRET);
+    expect(logged).toContain("PATCH /api/properties/prop-1");
+    expect(logged).toContain("57014");
+  });
+
+  it("drops the values Postgres echoes in its detail, wrapped or not", () => {
+    const logged = captureLogs(() => {
+      logError("Failed to save the house", queryError("23505", "duplicate key value violates unique constraint"));
+      logError("Failed to save the house", driverError("23505", "duplicate key value violates unique constraint"));
+    });
+
+    expect(logged).not.toContain(SECRET);
+    // What identifies the failure without carrying data stays.
+    expect(logged).toContain("23505");
+    expect(logged).toContain("properties_door_code_key");
+  });
+
+  it("still logs any other error in full, stack included (positive control)", () => {
+    const logged = captureLogs(() => logError("Failed to save the house", new Error(`boom ${SECRET}`)));
+
+    // The capture does see what is logged: an ordinary error is not filtered.
+    expect(logged).toContain(`boom ${SECRET}`);
+    expect(logged).toContain("errors.test.ts");
   });
 });
 
