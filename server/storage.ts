@@ -163,12 +163,23 @@ export interface PropertyDeleteBlockers {
   deductions: number;
 }
 
+/**
+ * What `upsertUser` wrote, and whose account it was when the write was an
+ * email re-link. `relinkedFrom` is set only when this call's own UPDATE moved
+ * the row, so a sign-in racing another on the same email never reports the
+ * other one's re-link.
+ */
+export interface UpsertUserResult {
+  user: User;
+  relinkedFrom?: Pick<User, "id" | "email" | "role">;
+}
+
 export interface IStorage {
   // User Management
   getUser(id: string): Promise<User | undefined>;
   /** The account holding exactly this email, the same match the sign-in re-link uses. */
   getUserByEmail(email: string): Promise<User | undefined>;
-  upsertUser(user: UpsertUser): Promise<User>;
+  upsertUser(user: UpsertUser): Promise<UpsertUserResult>;
   getAllUsers(): Promise<User[]>;
   /** Sets the role and, when given, replaces the permissions row in the same transaction. */
   updateUserRole(
@@ -591,9 +602,10 @@ export class DatabaseStorage implements IStorage {
    * with it inside the same statement. A failure leaves the old account
    * exactly as it was.
    *
-   * Returns undefined when there is nothing to re-link.
+   * Returns undefined when there is nothing to re-link, including when a
+   * concurrent sign-in renamed the account between the lookup and the UPDATE.
    */
-  private async relinkByEmail(userData: UpsertUser): Promise<User | undefined> {
+  private async relinkByEmail(userData: UpsertUser): Promise<UpsertUserResult | undefined> {
     if (!userData.email || !userData.id) return undefined;
 
     const existingByEmail = await this.getUserByEmail(userData.email);
@@ -616,12 +628,15 @@ export class DatabaseStorage implements IStorage {
       })
       .where(eq(users.id, existingByEmail.id))
       .returning();
-    return relinked;
+    if (!relinked) return undefined;
+    const { id, email, role } = existingByEmail;
+    return { user: relinked, relinkedFrom: { id, email, role } };
   }
 
-  async upsertUser(userData: UpsertUser): Promise<User> {
+  async upsertUser(userData: UpsertUser): Promise<UpsertUserResult> {
+    const relink = await this.relinkByEmail(userData);
     const user =
-      (await this.relinkByEmail(userData)) ??
+      relink?.user ??
       (
         await db
           .insert(users)
@@ -641,8 +656,8 @@ export class DatabaseStorage implements IStorage {
       const defaultPermissions = computeDefaultPermissions(user.id, user.role);
       await this.upsertUserPermissions(defaultPermissions);
     }
-    
-    return user;
+
+    return { user, relinkedFrom: relink?.relinkedFrom };
   }
 
   async getAllUsers(): Promise<User[]> {

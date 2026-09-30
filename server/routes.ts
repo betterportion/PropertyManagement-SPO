@@ -646,7 +646,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!requireAdmin(res, ctx)) return;
 
       const validatedData = insertUserSchema.parse(req.body);
-      const user = await storage.upsertUser({
+      const { user } = await storage.upsertUser({
         id: req.body.id || undefined,
         ...validatedData,
       });

@@ -7,20 +7,23 @@
  * keyed on (`ownsRecord`), so an unverified one is refused even when no
  * account holds it yet.
  *
- * Every re-link is recorded in the audit log as `user.relinked`. The storage
- * layer is replaced so a refusal can be shown to write nothing; the audit log
- * is the real one, writing through the replaced `createAuditEvent`.
+ * Every re-link is recorded in the audit log as `user.relinked`, from what
+ * `upsertUser` reports it did rather than from a lookup of its own beforehand:
+ * two sign-ins racing on one email could otherwise record a re-link that the
+ * other one made, or none at all. The storage layer is replaced so a refusal
+ * can be shown to write nothing; the audit log is the real one, writing
+ * through the replaced `createAuditEvent`.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { upsertUser, getUserByEmail, createAuditEvent } = vi.hoisted(() => ({
+const { upsertUser, createAuditEvent } = vi.hoisted(() => ({
   upsertUser: vi.fn(),
-  getUserByEmail: vi.fn(),
   createAuditEvent: vi.fn(),
 }));
 
 vi.mock("../db", () => ({ db: {}, pool: {} }));
-vi.mock("../storage", () => ({ storage: { upsertUser, getUserByEmail, createAuditEvent } }));
+// No getUserByEmail: the sign-in looks nothing up before upsertUser.
+vi.mock("../storage", () => ({ storage: { upsertUser, createAuditEvent } }));
 
 import { recordSignIn } from "../auth";
 import { AUDIT_ACTIONS_KEPT_INDEFINITELY } from "../audit";
@@ -39,14 +42,20 @@ const claims = (extra: Record<string, unknown>) => ({
   ...extra,
 });
 
+/** What upsertUser reports when it moved EXISTING_ADMIN to the new identity. */
+const relinked = async (data: { id: string }) => ({
+  user: { ...EXISTING_ADMIN, ...data },
+  relinkedFrom: { id: EXISTING_ADMIN.id, email: EXISTING_ADMIN.email, role: EXISTING_ADMIN.role },
+});
+/** What upsertUser reports when it wrote the account under the sign-in's own id. */
+const notRelinked = async (data: { id: string }) => ({ user: { ...EXISTING_ADMIN, ...data } });
+
 const relinkEvents = () =>
   createAuditEvent.mock.calls.map(([row]) => row).filter((row) => row.action === "user.relinked");
 
 beforeEach(() => {
   upsertUser.mockReset();
-  upsertUser.mockImplementation(async (data: { id: string }) => ({ ...EXISTING_ADMIN, ...data }));
-  getUserByEmail.mockReset();
-  getUserByEmail.mockResolvedValue(EXISTING_ADMIN);
+  upsertUser.mockImplementation(relinked);
   createAuditEvent.mockReset();
   createAuditEvent.mockResolvedValue({});
 });
@@ -89,7 +98,7 @@ describe("sign-in re-links an existing account only for a verified email", () =>
   it("refuses an unverified email even when no account holds it yet", async () => {
     // The email is the key resident ownership reads (case-insensitively), so an
     // unverified one must not become a portal identity at all.
-    getUserByEmail.mockResolvedValue(undefined);
+    upsertUser.mockImplementation(notRelinked);
 
     await expect(recordSignIn(claims({ email_verified: false }), [])).rejects.toMatchObject({ status: 403 });
 
@@ -97,7 +106,7 @@ describe("sign-in re-links an existing account only for a verified email", () =>
   });
 
   it("lets a returning sign-in under the same id through, with no re-link recorded", async () => {
-    getUserByEmail.mockResolvedValue({ ...EXISTING_ADMIN, id: "google-sub-new" });
+    upsertUser.mockImplementation(notRelinked);
 
     await recordSignIn(claims({ email_verified: true }), []);
 
@@ -106,7 +115,7 @@ describe("sign-in re-links an existing account only for a verified email", () =>
   });
 
   it("lets a first verified sign-in create its account, with no re-link recorded", async () => {
-    getUserByEmail.mockResolvedValue(undefined);
+    upsertUser.mockImplementation(notRelinked);
 
     await recordSignIn(claims({ email_verified: true }), []);
 

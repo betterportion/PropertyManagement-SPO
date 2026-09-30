@@ -173,8 +173,7 @@ export async function recordSignIn(
     );
   }
 
-  const existingByEmail = email ? await storage.getUserByEmail(email) : undefined;
-  const user = await storage.upsertUser({
+  const { user, relinkedFrom } = await storage.upsertUser({
     id: claims["sub"],
     email,
     firstName: claims["first_name"] ?? claims["given_name"],
@@ -182,15 +181,17 @@ export async function recordSignIn(
     profileImageUrl: claims["profile_image_url"] ?? claims["picture"],
   });
 
-  if (existingByEmail && existingByEmail.id !== user.id) {
+  // From what upsertUser did, not a lookup beforehand: two sign-ins racing on
+  // one email would otherwise both see the old account.
+  if (relinkedFrom) {
     // No session exists yet, so the actor is recorded as the system; the
     // summary says whose account moved.
     recordAuditEvent(null, {
       action: AUDIT_ACTIONS.USER_RELINKED,
       entityType: "user",
       entityId: user.id,
-      summary: `The ${existingByEmail.role} account for ${existingByEmail.email} was linked to a new sign-in`,
-      details: { previousUserId: existingByEmail.id, role: existingByEmail.role },
+      summary: `The ${relinkedFrom.role} account for ${relinkedFrom.email} was linked to a new sign-in`,
+      details: { previousUserId: relinkedFrom.id, role: relinkedFrom.role },
     });
   }
 }

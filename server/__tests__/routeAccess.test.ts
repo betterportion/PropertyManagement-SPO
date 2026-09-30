@@ -8610,7 +8610,7 @@ describe("resident finances require the finance permission", () => {
 describe("linking a resident account to a property", () => {
   it("carries propertyId through account creation", async () => {
     actAs(ADMIN);
-    storageMock.upsertUser.mockImplementation(async (data: Record<string, unknown>) => ({ id: "u-new", ...data }));
+    storageMock.upsertUser.mockImplementation(async (data: Record<string, unknown>) => ({ user: { id: "u-new", ...data } }));
 
     const { status } = await request("POST", "/api/users", {
       body: { email: "steward@example.com", role: "resident", propertyId: "prop-west" },

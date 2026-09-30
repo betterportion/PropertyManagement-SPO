@@ -539,7 +539,7 @@ async function seed(): Promise<void> {
     { id: "seed-ra-se", email: "diego.ramos@spo.org", firstName: "Diego", lastName: "Ramos", region: "Southeast" },
   ];
   for (const lead of regionalLeads) {
-    const user = await storage.upsertUser({ id: lead.id, email: lead.email, firstName: lead.firstName, lastName: lead.lastName });
+    const { user } = await storage.upsertUser({ id: lead.id, email: lead.email, firstName: lead.firstName, lastName: lead.lastName });
     await storage.updateUserRole(user.id, "regional_administrator");
     // updateUserRole gives a regional admin its default permissions with no
     // regions; assign the one they lead (the on-conflict update touches only
@@ -579,7 +579,7 @@ async function seed(): Promise<void> {
   // ── Optional pre-created admin ────────────────────────────────────────────
   const adminEmail = process.env.SEED_ADMIN_EMAIL?.trim();
   if (adminEmail) {
-    const admin = await storage.upsertUser({
+    const { user: admin } = await storage.upsertUser({
       id: "seed-admin",
       email: adminEmail,
       firstName: "Pre-created",

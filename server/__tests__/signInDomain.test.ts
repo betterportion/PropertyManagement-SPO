@@ -12,13 +12,12 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-const { upsertUser, getUserByEmail } = vi.hoisted(() => ({
+const { upsertUser } = vi.hoisted(() => ({
   upsertUser: vi.fn(),
-  getUserByEmail: vi.fn(),
 }));
 
 vi.mock("../db", () => ({ db: {}, pool: {} }));
-vi.mock("../storage", () => ({ storage: { upsertUser, getUserByEmail } }));
+vi.mock("../storage", () => ({ storage: { upsertUser } }));
 
 async function loadAuth(allowedDomains: string | undefined) {
   if (allowedDomains === undefined) {
@@ -42,9 +41,7 @@ const claims = (extra: Record<string, unknown>) => ({
 
 beforeEach(() => {
   upsertUser.mockReset();
-  upsertUser.mockResolvedValue({});
-  getUserByEmail.mockReset();
-  getUserByEmail.mockResolvedValue(undefined);
+  upsertUser.mockResolvedValue({ user: {} });
 });
 
 afterEach(() => {
