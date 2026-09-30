@@ -5,8 +5,9 @@
  * number (CLAUDE.md, "Financial data"). The free text on HH fees and deposits
  * is where one could be typed, so the API refuses two narrow shapes there:
  *
- *   1. A card number: 13 to 19 digits, spaces or dashes allowed between them,
- *      that passes the Luhn check.
+ *   1. A card number: typed the way a card is (one unbroken run of 13 to 19
+ *      digits, four groups of four, or Amex's 4-6-5), starting with an
+ *      issuer's digit (2 to 6), and passing the Luhn check.
  *   2. A banking word -- routing, acct, account # / account no, ABA -- right
  *      next to a run of 6 or more digits.
  *
@@ -48,19 +49,30 @@ function passesLuhn(digits: string): boolean {
 }
 
 /**
- * True when some whole groups of a digit run make a 13-19 digit, Luhn-valid
- * number. Whole groups only, so "4111 1111 1111 1111 2026" is still a card,
- * while one unbroken 22-digit processor number is never cut into windows
- * that pass the checksum by chance.
+ * The ways a card number is typed: one unbroken run, four groups of four
+ * (with a short fifth group on a 17-19 digit card), or Amex's 4-6-5.
+ */
+const CARD_SHAPES = [/^\d{13,19}$/, /^\d{4}(?:[ -]\d{4}){3}(?:[ -]\d{1,3})?$/, /^\d{4}[ -]\d{6}[ -]\d{5}$/];
+
+function looksLikeCard(candidate: string): boolean {
+  const digits = candidate.replace(/[ -]/g, "");
+  return CARD_SHAPES.some((shape) => shape.test(candidate)) && /^[2-6]/.test(digits) && passesLuhn(digits);
+}
+
+/**
+ * True when some whole groups of a digit run are a card number. Whole groups
+ * only, so "4111 1111 1111 1111 2026" is still a card, while one unbroken
+ * 22-digit processor number is never cut into windows that pass the checksum
+ * by chance. The shape and the issuer's digit are what keep a list of check
+ * numbers ("checks 1041 1042 1043 1044") from counting as one.
  */
 function runHoldsCardNumber(run: string): boolean {
-  const groups = run.split(/[ -]/);
+  const groups = run.match(/[ -]?\d+/g) ?? [];
   for (let start = 0; start < groups.length; start++) {
-    let digits = "";
-    for (let end = start; end < groups.length; end++) {
-      digits += groups[end];
-      if (digits.length > 19) break;
-      if (digits.length >= 13 && passesLuhn(digits)) return true;
+    for (let end = start + 1; end <= groups.length; end++) {
+      const candidate = groups.slice(start, end).join("").replace(/^[ -]/, "");
+      if (candidate.replace(/[ -]/g, "").length > 19) break;
+      if (looksLikeCard(candidate)) return true;
     }
   }
   return false;

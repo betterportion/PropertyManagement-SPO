@@ -25,6 +25,7 @@ describe("a card number", () => {
     "5500-0000-0000-0004",
     "paid by card 4111 1111 1111 1111 on the 3rd",
     "378282246310005", // 15-digit Amex test number
+    "3782 822463 10005", // the same Amex number, grouped 4-6-5 as printed
   ])("is refused: %s", (text) => {
     expect(containsBankingDetails(text)).toBe(true);
   });
@@ -51,6 +52,11 @@ describe("a processor or check reference", () => {
     "QuickBooks 482930175612", // 12 digits
     "check 1000234567",
     "Ramp 20260930123456789012", // 22 digits, longer than any card
+    // Four check numbers in a row: 16 digits that pass the checksum, but no
+    // card starts with a 1 and no card is typed as a list of short numbers.
+    "checks 1041 1042 1043 1044",
+    "checks 1004 1005 1006 1007",
+    "411 1111 1111 1111 1", // a card's digits, but not grouped the way a card is
   ])("passes: %s", (text) => {
     expect(containsBankingDetails(text)).toBe(false);
   });
