@@ -8621,6 +8621,38 @@ describe("linking a resident account to a property", () => {
     );
   });
 
+  it("records a re-link, not a new account, when the email already had an account", async () => {
+    actAs(ADMIN);
+    storageMock.upsertUser.mockImplementation(async (data: Record<string, unknown>) => ({
+      user: { id: "u-new", ...data },
+      relinkedFrom: { id: "u-old", email: "steward@example.com", role: "regional_administrator" },
+    }));
+
+    const { status } = await request("POST", "/api/users", {
+      body: { id: "u-new", email: "steward@example.com", role: "resident" },
+    });
+    expect(status).toBe(200);
+    expect(storageMock.createAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "user.relinked",
+        entityId: "u-new",
+        actorId: ADMIN.id,
+        details: expect.objectContaining({ previousUserId: "u-old" }),
+      }),
+    );
+    expect(storageMock.createAuditEvent).not.toHaveBeenCalledWith(expect.objectContaining({ action: "user.created" }));
+  });
+
+  it("records a new account as created, with no re-link -- the positive control", async () => {
+    actAs(ADMIN);
+    storageMock.upsertUser.mockImplementation(async (data: Record<string, unknown>) => ({ user: { id: "u-new", ...data } }));
+
+    const { status } = await request("POST", "/api/users", { body: { email: "new@example.com", role: "resident" } });
+    expect(status).toBe(200);
+    expect(storageMock.createAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ action: "user.created" }));
+    expect(storageMock.createAuditEvent).not.toHaveBeenCalledWith(expect.objectContaining({ action: "user.relinked" }));
+  });
+
   it("lets an admin move an existing resident account to a house", async () => {
     actAs(ADMIN);
     storageMock.getUser.mockImplementation(async (id: string) =>

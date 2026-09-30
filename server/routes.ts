@@ -646,18 +646,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!requireAdmin(res, ctx)) return;
 
       const validatedData = insertUserSchema.parse(req.body);
-      const { user } = await storage.upsertUser({
+      const { user, relinkedFrom } = await storage.upsertUser({
         id: req.body.id || undefined,
         ...validatedData,
       });
 
-      recordAuditEvent(ctx, {
-        action: AUDIT_ACTIONS.USER_CREATED,
-        entityType: "user",
-        entityId: user.id,
-        summary: `Created account ${user.email ?? user.id} with role ${user.role ?? "resident"}`,
-        details: { role: user.role ?? null, isActive: user.isActive ?? null },
-      });
+      // An email that already had an account moves that account to the new id
+      // rather than creating one, so the trail says so, as a sign-in re-link does.
+      recordAuditEvent(
+        ctx,
+        relinkedFrom
+          ? {
+              action: AUDIT_ACTIONS.USER_RELINKED,
+              entityType: "user",
+              entityId: user.id,
+              summary: `Linked the ${relinkedFrom.role} account for ${relinkedFrom.email} to a new sign-in ID`,
+              details: { previousUserId: relinkedFrom.id, role: relinkedFrom.role },
+            }
+          : {
+              action: AUDIT_ACTIONS.USER_CREATED,
+              entityType: "user",
+              entityId: user.id,
+              summary: `Created account ${user.email ?? user.id} with role ${user.role ?? "resident"}`,
+              details: { role: user.role ?? null, isActive: user.isActive ?? null },
+            },
+      );
 
       res.json(user);
     } catch (error) {
