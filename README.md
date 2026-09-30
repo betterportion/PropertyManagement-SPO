@@ -272,10 +272,12 @@ shared/
   audit.ts              The audit action vocabulary
   actionItems.ts        Types the dashboard and the server both read
   assetLifecycle.ts     Lifespans, thresholds and the replacement status
+  bankingDetails.ts     The card- and bank-number check the finance free text refuses
   depositLedger.ts      Deposit arithmetic and splits, in whole cents
   depositStatement.ts   The per-resident deposit statement text and its mailto link
   dueDates.ts           When a calendar day has begun or ended, for "Overdue" and snoozes
   houseFacts.ts         The house-facts field vocabulary and the access codes
+  permissions.ts        Which permission flags a resident account may hold
   propertySetup.ts      The per-property setup checklist and its states
   residentDocuments.ts  The fixed list of documents a resident signs
   residentImportTemplate.ts The blank roster CSV template's headers and example row
