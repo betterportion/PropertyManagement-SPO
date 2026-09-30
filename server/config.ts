@@ -50,6 +50,17 @@ export const authProvider = {
   scopes: (process.env.OIDC_SCOPES ?? "openid email profile")
     .split(/\s+/)
     .filter(Boolean),
+
+  /**
+   * Google Workspace domains allowed to sign in, comma-separated, e.g.
+   * "spo.org". Empty (the default) allows anyone the provider accepts, which
+   * on Google leaves the restriction to the consent screen being "Internal".
+   * Checked against Google's `hd` claim in server/auth.ts.
+   */
+  allowedDomains: (process.env.OIDC_ALLOWED_DOMAINS ?? "")
+    .split(",")
+    .map((domain) => domain.trim().toLowerCase())
+    .filter(Boolean),
 };
 
 function checkDatabase(problems: string[]): void {

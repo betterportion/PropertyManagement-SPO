@@ -8,6 +8,7 @@ import connectPg from "connect-pg-simple";
 import { pool } from "./db";
 import { storage } from "./storage";
 import { authProvider, isProduction } from "./config";
+import { HttpError } from "./errors";
 
 /**
  * Login is standard OpenID Connect. Which provider is in use is decided
@@ -134,8 +135,27 @@ function updateUserSession(
  *
  * Values stay `undefined` when absent (never null) so that a provider which
  * omits a field does not overwrite data already stored for that user.
+ *
+ * When OIDC_ALLOWED_DOMAINS is set, the sign-in is refused -- before any user
+ * row is created or changed -- unless Google's `hd` (hosted domain) claim is
+ * one of the listed domains. Only Google Workspace accounts carry `hd`; the
+ * email address is no evidence, since a personal Google account can be
+ * registered under any address.
  */
-async function upsertUser(claims: any) {
+export async function recordSignIn(
+  claims: any,
+  allowedDomains: readonly string[] = authProvider.allowedDomains,
+): Promise<void> {
+  if (allowedDomains.length > 0) {
+    const hostedDomain = typeof claims["hd"] === "string" ? claims["hd"].toLowerCase() : "";
+    if (!allowedDomains.includes(hostedDomain)) {
+      throw new HttpError(
+        403,
+        "This portal only accepts SPO accounts. Sign out of Google and sign in with your SPO account.",
+      );
+    }
+  }
+
   await storage.upsertUser({
     id: claims["sub"],
     email: claims["email"],
@@ -165,7 +185,7 @@ export async function setupAuth(app: Express) {
     try {
       const user = {};
       updateUserSession(user, tokens);
-      await upsertUser(tokens.claims());
+      await recordSignIn(tokens.claims());
       verified(null, user);
     } catch (error) {
       verified(error instanceof Error ? error : new Error(String(error)));
