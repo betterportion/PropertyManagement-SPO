@@ -108,7 +108,13 @@ export default async function globalSetup() {
     await ensureUser(pool, { id: "e2e-admin", email: "e2e-admin@test.local", role: "admin" });
     await ensureUser(pool, { id: "e2e-resident", email: "e2e-resident@test.local", role: "resident" });
 
-    const homeProperty = (await pool.query(`SELECT id, region, address FROM properties LIMIT 1`)).rows[0];
+    // The resident's house is the fixture house below (`propertyId`), chosen by
+    // the same order, so a spec that links the resident to the fixture house
+    // links them to the house they are rostered at. The house codes follow the
+    // roster, not the link alone.
+    const homeProperty = (
+      await pool.query(`SELECT id, region, address FROM properties ORDER BY (chapter IS NULL), id LIMIT 1`)
+    ).rows[0];
 
     // Put the resident on a house roster, so the in-app submit flow (which
     // attaches region/house from the roster by email) has something to match.
@@ -151,7 +157,7 @@ export default async function globalSetup() {
     await saveStorageState(inactiveCookie, "e2e/.auth/inactive.json");
 
     // A few real IDs so specs navigate deterministically instead of guessing.
-    const property = (await pool.query(`SELECT id, region, chapter FROM properties WHERE chapter IS NOT NULL LIMIT 1`)).rows[0];
+    const property = (await pool.query(`SELECT id, region, chapter FROM properties WHERE chapter IS NOT NULL ORDER BY id LIMIT 1`)).rows[0];
     const assetWithPhoto = (await pool.query(
       `SELECT a.id FROM assets a JOIN asset_photos p ON p.asset_id = a.id LIMIT 1`,
     )).rows[0];

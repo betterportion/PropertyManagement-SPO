@@ -6254,6 +6254,7 @@ describe("moving a resident out", () => {
       expect.objectContaining({ isActive: false, moveOutDate: new Date("2026-05-15") }),
     );
     expect(storageMock.updateUserActiveStatus).not.toHaveBeenCalled();
+    expect(storageMock.updateUserProperty).not.toHaveBeenCalled();
   });
 
   it("deactivates a matching resident login when asked to", async () => {
@@ -6271,6 +6272,34 @@ describe("moving a resident out", () => {
     expect(storageMock.getActiveResidentAccountByEmail).toHaveBeenCalledWith("maria@spo.org");
     expect(storageMock.updateUserActiveStatus).toHaveBeenCalledWith("u-maria", false);
     expect((body as { accountDeactivated: boolean }).accountDeactivated).toBe(true);
+  });
+
+  it("unlinks the login it switches off from the house, and records the unlink", async () => {
+    // The house link is what reaches the house's requests, walkthroughs and
+    // codes. Left in place, an admin reactivating the login later would hand
+    // all of that back to somebody who no longer lives there.
+    actAs(STAFF, { ...ALL_PROPERTIES, allowedRegions: ["West Central"] });
+    storageMock.getResident.mockResolvedValue(WEST_RESIDENT);
+    storageMock.updateResident.mockImplementation(async (id: string, patch: Record<string, unknown>) => ({ ...WEST_RESIDENT, ...patch }));
+    storageMock.getActiveResidentAccountByEmail.mockResolvedValue(MARIA_LOGIN);
+    storageMock.updateUserActiveStatus.mockResolvedValue({ ...MARIA_LOGIN, isActive: false });
+    storageMock.updateUserProperty.mockResolvedValue({ ...MARIA_LOGIN, isActive: false, propertyId: null });
+
+    const { status } = await request("POST", "/api/residents/res-1/move-out", {
+      body: { moveOutDate: "2026-05-15", deactivateAccount: true },
+    });
+
+    expect(status).toBe(200);
+    expect(storageMock.updateUserProperty).toHaveBeenCalledWith("u-maria", null);
+    const events = storageMock.createAuditEvent.mock.calls.map((call) => call[0]);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        action: "user.property_changed",
+        entityId: "u-maria",
+        details: expect.objectContaining({ from: "prop-1", to: null }),
+      }),
+    );
+    expect(events).toContainEqual(expect.objectContaining({ action: "user.status_changed", entityId: "u-maria" }));
   });
 
   // The roster row speaks only for a login with its exact email that is linked
@@ -6292,6 +6321,7 @@ describe("moving a resident out", () => {
 
     expect(status).toBe(200);
     expect(storageMock.updateUserActiveStatus).not.toHaveBeenCalled();
+    expect(storageMock.updateUserProperty).not.toHaveBeenCalled();
     expect((body as { accountDeactivated: boolean }).accountDeactivated).toBe(false);
   });
 
@@ -6300,6 +6330,7 @@ describe("moving a resident out", () => {
 
     expect(status).toBe(200);
     expect(storageMock.updateUserActiveStatus).not.toHaveBeenCalled();
+    expect(storageMock.updateUserProperty).not.toHaveBeenCalled();
   });
 
   it("leaves a login whose email is not the roster email untouched, even in the same house", async () => {
@@ -6310,6 +6341,7 @@ describe("moving a resident out", () => {
 
     expect(status).toBe(200);
     expect(storageMock.updateUserActiveStatus).not.toHaveBeenCalled();
+    expect(storageMock.updateUserProperty).not.toHaveBeenCalled();
     expect((body as { accountDeactivated: boolean }).accountDeactivated).toBe(false);
   });
 
@@ -6333,6 +6365,7 @@ describe("moving a resident out", () => {
 
     expect(status).toBe(200);
     expect(storageMock.updateUserActiveStatus).not.toHaveBeenCalled();
+    expect(storageMock.updateUserProperty).not.toHaveBeenCalled();
     expect((body as { accountDeactivated: boolean }).accountDeactivated).toBe(false);
   });
 
@@ -6347,6 +6380,7 @@ describe("moving a resident out", () => {
     expect(status).toBe(403);
     expect(storageMock.updateResident).not.toHaveBeenCalled();
     expect(storageMock.updateUserActiveStatus).not.toHaveBeenCalled();
+    expect(storageMock.updateUserProperty).not.toHaveBeenCalled();
   });
 
   it("refuses a resident, changing nothing", async () => {
@@ -6359,6 +6393,7 @@ describe("moving a resident out", () => {
     expect(status).toBe(403);
     expect(storageMock.updateResident).not.toHaveBeenCalled();
     expect(storageMock.updateUserActiveStatus).not.toHaveBeenCalled();
+    expect(storageMock.updateUserProperty).not.toHaveBeenCalled();
   });
 
   it("tells staff in region whether the resident has an active login", async () => {
@@ -7340,6 +7375,7 @@ describe("a resident reading their own house", () => {
 
   beforeEach(() => {
     storageMock.getProperty.mockResolvedValue(WEST);
+    storageMock.getResidentsByProperty.mockResolvedValue([]);
   });
 
   it("refuses an anonymous caller", async () => {
@@ -7465,7 +7501,17 @@ describe("house facts and access codes", () => {
       propertyId,
       ...facts,
     }));
+    rosterIs([ALICE_ON_WEST_ROSTER]);
   });
+
+  // The household is whoever is on the house's roster today. Storage answers
+  // the roster by house, so the mock does too.
+  const ALICE_ON_WEST_ROSTER = { id: "res-alice", propertyId: "prop-west", email: "alice@example.com", isActive: true };
+  function rosterIs(rows: Array<{ propertyId: string; email: string; isActive: boolean }>) {
+    storageMock.getResidentsByProperty.mockImplementation(async (propertyId: string) =>
+      rows.filter((row) => row.propertyId === propertyId),
+    );
+  }
 
   // ── Who may read ─────────────────────────────────────────────────────────
 
@@ -7529,6 +7575,53 @@ describe("house facts and access codes", () => {
       doNots: null,
       rubbishDay: "Tuesday",
       otherNotes: null,
+    });
+  });
+
+  // The house link on the account is not enough for the codes: the login
+  // has to be on the house's roster today, by the same exact email rule that
+  // move-out uses. A linked login off the roster still gets the rest of the
+  // hub's house card, just not the facts.
+  describe("the codes follow the roster, not only the house link", () => {
+    const LINKED_ALICE = { ...ALICE, propertyId: "prop-west" } as typeof ALICE;
+
+    async function expectNoFacts() {
+      actAs(LINKED_ALICE, { canViewResourceHub: true });
+      const { status, body } = await get("/api/my-property");
+      expect(status).toBe(200);
+      expect(body.id).toBe("prop-west");
+      expect(body.facts).toBeNull();
+      expect(JSON.stringify(body)).not.toContain("4321");
+      expect(storageMock.getPropertyFacts).not.toHaveBeenCalled();
+    }
+
+    it("withholds them from a linked login with no roster row (never rostered, or removed from it)", async () => {
+      rosterIs([]);
+      await expectNoFacts();
+    });
+
+    it("withholds them from a linked login whose roster row is moved out", async () => {
+      rosterIs([{ ...ALICE_ON_WEST_ROSTER, isActive: false }]);
+      await expectNoFacts();
+    });
+
+    it("withholds them from a linked login rostered at another house", async () => {
+      rosterIs([{ ...ALICE_ON_WEST_ROSTER, propertyId: "prop-east" }]);
+      await expectNoFacts();
+    });
+
+    it("withholds them when the house's roster row carries a different email", async () => {
+      rosterIs([{ ...ALICE_ON_WEST_ROSTER, email: "alice.k@example.com" }]);
+      await expectNoFacts();
+    });
+
+    it("gives them to a login on the house's active roster, email case aside", async () => {
+      rosterIs([{ ...ALICE_ON_WEST_ROSTER, email: "Alice@Example.com" }]);
+      actAs(LINKED_ALICE, { canViewResourceHub: true });
+      const { status, body } = await get("/api/my-property");
+      expect(status).toBe(200);
+      expect(body.facts.doorCode).toBe("4321");
+      expect(storageMock.getPropertyFacts).toHaveBeenCalledWith("prop-west");
     });
   });
 
