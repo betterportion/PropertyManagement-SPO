@@ -23,7 +23,7 @@ It is a single Express server that serves both the REST API and the React fronte
 | `npm run start` | Run the production build |
 | `npm run lint` | ESLint. **Must stay at zero errors**; warnings are allowed |
 | `npm run check` | TypeScript check. **Must stay at zero errors** |
-| `npm test` | Vitest. Needs no database, no bucket, no secrets. `auditRetention.integration.test.ts` is the one test that uses a real database, and skips unless `TEST_DATABASE_URL` or `DATABASE_URL` is set |
+| `npm test` | Vitest. Needs no database, no bucket, no secrets. `auditRetention.integration.test.ts` and `properties.integration.test.ts` are the tests that use a real database, and skip unless `TEST_DATABASE_URL` or `DATABASE_URL` is set |
 | `npm run test:e2e` | Playwright, in a real browser. Unlike `npm test` these need a database and a browser: `npx playwright install chromium` once, then `npm run db:migrate && npm run db:seed` against a throwaway Postgres |
 | `npm run db:generate` | Write a migration from a `shared/schema.ts` change |
 | `npm run db:migrate` | Apply pending migrations |
@@ -150,6 +150,8 @@ Non-admins only see records in their `allowedRegions`.
 
 **A reference to another record is checked like a link.** An invoice's `contactId`, `maintenanceRequestId` and `buildingAddress` must each exist (the address as a house) and be in a region the caller can reach (`requireInvoiceReferences` in `routes.ts`, the rule `resolveContactLink` applies to request contacts); a value the invoice already holds passes unchanged on an edit.
 
+**Moving a house to another region moves every copy of its region.** `storage.updateProperty` rewrites the region on the house's residents, HH fees, deposits, deductions, resident paperwork, walkthroughs and their photos, schedules, setup items, budgets, assets, lease reminder tasks, and the requests and invoices filed against its address, in the same transaction; a new table that copies a house's region joins that list, and `properties.integration.test.ts`.
+
 Region names are compared in one canonical form, so a stored legacy `west-central` still matches `West Central`.
 
 ### Resident access to walkthroughs
@@ -235,7 +237,7 @@ A property's front-of-house photo is authorized through `findUploadReferences` l
 
 ## Audit log
 
-`server/audit.ts` records the actions somebody may need to account for later: **user, permission and house-link changes, maintenance status changes, invoice and billing changes, rent charge and security-deposit changes, property document-link changes, a project's contract link changing (`maintenance_request.documents_changed` — which request, never the link), a house's door, gate or alarm code changing (`property.access_code_changed` — which code and which house, never the value), a resident being deleted from the roster (`resident.deleted` — the name and the house, since the row and its cascaded finance and paperwork rows are gone), and document uploads and downloads.** `AUDIT_ACTIONS` is the full vocabulary; it lives in `shared/audit.ts` (the activity trail on the client needs the labels too) and `server/audit.ts` re-exports it.
+`server/audit.ts` records the actions somebody may need to account for later: **user, permission and house-link changes, maintenance status changes, invoice and billing changes, rent charge and security-deposit changes, property document-link changes, a project's contract link changing (`maintenance_request.documents_changed` — which request, never the link), a house's door, gate or alarm code changing (`property.access_code_changed` — which code and which house, never the value), a resident being deleted from the roster (`resident.deleted` — the name and the house, since the row and its cascaded finance and paperwork rows are gone), a house being deleted (`property.deleted` — refused with a 409 while it still has residents, moved-out ones included, or HH fee, deposit or deduction rows), and document uploads and downloads.** `AUDIT_ACTIONS` is the full vocabulary; it lives in `shared/audit.ts` (the activity trail on the client needs the labels too) and `server/audit.ts` re-exports it.
 
 Admins read it in the app: the activity trail in Settings, backed by `GET /api/audit-log` and `client/src/components/ActivityLog.tsx`. Reporting beyond that is a separate piece of work; the `audit_log` table can also be read directly with SQL.
 

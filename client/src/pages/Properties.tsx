@@ -21,6 +21,7 @@ import PropertyLeaseFields, { PropertyPhotoAndNotes, propertyFormSchema, type Pr
 import { Section, Container, PageHeader, PageStack } from "@/components/layout/page";
 import { LoadingState, EmptyState } from "@/components/states";
 import { formatDate } from "@/lib/format";
+import { serverMessage } from "@/lib/serverMessage";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -177,10 +178,10 @@ export default function Properties() {
         description: "Property deleted successfully",
       });
     },
-    onError: () => {
+    onError: (error: Error) => {
       toast({
-        title: "Error",
-        description: "Failed to delete property",
+        title: "The property was not deleted",
+        description: serverMessage(error) ?? "Failed to delete property",
         variant: "destructive",
       });
     },
@@ -829,7 +830,9 @@ export default function Properties() {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete Property</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete this property? This action cannot be undone.
+              A property can only be deleted once nobody is on its roster (moved-out residents included) and it has no HH fees or deposits.
+              Deleting it also deletes its walkthroughs and their photos, maintenance schedules, setup checklist, house facts and access codes,
+              and startup budgets, and unlinks any resident login from it. Its maintenance requests and assets are kept. This cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
