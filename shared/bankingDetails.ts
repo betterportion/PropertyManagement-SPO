@@ -7,7 +7,8 @@
  *
  *   1. A card number: typed the way a card is (one unbroken run of 13 to 19
  *      digits, four groups of four, or Amex's 4-6-5), starting with an
- *      issuer's digit (2 to 6), and passing the Luhn check.
+ *      issuer's digit (2 to 6), not four numbers counting up by one (a list
+ *      of check numbers), and passing the Luhn check.
  *   2. A banking word -- routing, acct, account (number / no / # / is), ABA
  *      -- right next to a run of 6 or more digits that is not a date.
  *
@@ -55,17 +56,28 @@ function passesLuhn(digits: string): boolean {
  */
 const CARD_SHAPES = [/^\d{13,19}$/, /^\d{4}(?:[ -]\d{4}){3}(?:[ -]\d{1,3})?$/, /^\d{4}[ -]\d{6}[ -]\d{5}$/];
 
+/** "2036 2037 2038 2039": check numbers written in a row, which no card is. */
+function countsUpByOne(candidate: string): boolean {
+  const groups = candidate.split(/[ -]/).map(Number);
+  return groups.length >= 4 && groups.every((group, i) => i === 0 || group === groups[i - 1] + 1);
+}
+
 function looksLikeCard(candidate: string): boolean {
   const digits = candidate.replace(/[ -]/g, "");
-  return CARD_SHAPES.some((shape) => shape.test(candidate)) && /^[2-6]/.test(digits) && passesLuhn(digits);
+  return (
+    CARD_SHAPES.some((shape) => shape.test(candidate)) &&
+    /^[2-6]/.test(digits) &&
+    !countsUpByOne(candidate) &&
+    passesLuhn(digits)
+  );
 }
 
 /**
  * True when some whole groups of a digit run are a card number. Whole groups
  * only, so "4111 1111 1111 1111 2026" is still a card, while one unbroken
  * 22-digit processor number is never cut into windows that pass the checksum
- * by chance. The shape and the issuer's digit are what keep a list of check
- * numbers ("checks 1041 1042 1043 1044") from counting as one.
+ * by chance. The shape, the issuer's digit and the counting-up check are what
+ * keep a list of check numbers ("checks 2036 2037 2038 2039") from counting as one.
  */
 function runHoldsCardNumber(run: string): boolean {
   const groups = run.match(/[ -]?\d+/g) ?? [];

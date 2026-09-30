@@ -56,6 +56,10 @@ describe("a processor or check reference", () => {
     // card starts with a 1 and no card is typed as a list of short numbers.
     "checks 1041 1042 1043 1044",
     "checks 1004 1005 1006 1007",
+    // The same, starting with an issuer's digit and passing the checksum: four
+    // numbers that count up by one are a list, not a card.
+    "checks 2036 2037 2038 2039",
+    "checks 4009 4010 4011 4012",
     "411 1111 1111 1111 1", // a card's digits, but not grouped the way a card is
   ])("passes: %s", (text) => {
     expect(containsBankingDetails(text)).toBe(false);
