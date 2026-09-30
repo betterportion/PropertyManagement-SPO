@@ -100,7 +100,7 @@ import {
 } from "@shared/schema";
 import { db } from "./db";
 import { REGIONS } from "@shared/regions";
-import { eq, and, or, desc, asc, inArray, isNull, lt, lte, gte, ilike, count, notInArray, sql } from "drizzle-orm";
+import { eq, and, or, desc, asc, inArray, isNull, lt, lte, gte, ilike, like, count, notInArray, sql } from "drizzle-orm";
 
 // Helper function to filter out undefined values from partial updates
 function filterUndefined<T extends Record<string, any>>(obj: T): Partial<T> {
@@ -149,6 +149,18 @@ export interface WalkthroughItemDismissFields {
   dismissedAt?: Date | null;
   dismissReason?: string | null;
   dismissedByUserId?: string | null;
+}
+
+/**
+ * What deleting a house would take with it that nobody can rebuild: the
+ * roster (moved-out residents included) and, by cascade from it, every HH fee,
+ * deposit and deduction. Counted by the house's id.
+ */
+export interface PropertyDeleteBlockers {
+  residents: number;
+  hhFees: number;
+  deposits: number;
+  deductions: number;
 }
 
 export interface IStorage {
@@ -435,6 +447,7 @@ export interface IStorage {
   linkContactToRequest(requestId: string, contactId: string): Promise<void>;
   unlinkContactFromRequest(requestId: string, contactId: string): Promise<void>;
   updateProperty(id: string, data: Partial<InsertPropertyWithAddress>): Promise<Property>;
+  getPropertyDeleteBlockers(id: string): Promise<PropertyDeleteBlockers>;
   deleteProperty(id: string): Promise<string[]>;
 
   // Resource hub
@@ -1541,12 +1554,70 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateProperty(id: string, data: Partial<InsertPropertyWithAddress>): Promise<Property> {
-    const [property] = await db
-      .update(properties)
-      .set({ ...filterUndefined(data), updatedAt: new Date() })
-      .where(eq(properties.id, id))
-      .returning();
-    return property;
+    return await db.transaction(async (tx) => {
+      const [current] = await tx.select().from(properties).where(eq(properties.id, id)).for("update");
+      const [property] = await tx
+        .update(properties)
+        .set({ ...filterUndefined(data), updatedAt: new Date() })
+        .where(eq(properties.id, id))
+        .returning();
+      if (!current || data.region === undefined || data.region === current.region) return property;
+
+      // A region move. Region scoping reads each record's own copy of its
+      // house's region, so every copy moves with the house, in this same
+      // transaction -- otherwise the old region's RA keeps the roster, the
+      // fees and the requests, and the new one sees none of them. Requests and
+      // invoices know their house only by address: the address it had before
+      // this edit, since the same edit may change it.
+      const region = data.region;
+      const houseWalkthroughs = tx
+        .select({ id: walkthroughs.id })
+        .from(walkthroughs)
+        .where(eq(walkthroughs.propertyId, id));
+      const houseRooms = tx
+        .select({ id: walkthroughRooms.id })
+        .from(walkthroughRooms)
+        .where(or(eq(walkthroughRooms.propertyId, id), inArray(walkthroughRooms.walkthroughId, houseWalkthroughs)));
+      const houseResidents = tx
+        .select({ id: residents.id })
+        .from(residents)
+        .where(eq(residents.propertyId, id));
+
+      await tx.update(residentDocuments).set({ region }).where(inArray(residentDocuments.residentId, houseResidents));
+      await tx.update(walkthroughPhotos).set({ region }).where(inArray(walkthroughPhotos.roomId, houseRooms));
+      await tx.update(residents).set({ region }).where(eq(residents.propertyId, id));
+      await tx.update(rentPayments).set({ region }).where(eq(rentPayments.propertyId, id));
+      await tx.update(securityDeposits).set({ region }).where(eq(securityDeposits.propertyId, id));
+      await tx.update(depositDeductions).set({ region }).where(eq(depositDeductions.propertyId, id));
+      await tx.update(walkthroughs).set({ region }).where(eq(walkthroughs.propertyId, id));
+      await tx.update(maintenanceSchedules).set({ region }).where(eq(maintenanceSchedules.propertyId, id));
+      await tx.update(propertySetupItems).set({ region }).where(eq(propertySetupItems.propertyId, id));
+      await tx.update(propertyBudgets).set({ region }).where(eq(propertyBudgets.propertyId, id));
+      await tx.update(assets).set({ region }).where(eq(assets.propertyId, id));
+      await tx.update(maintenanceRequests).set({ region }).where(eq(maintenanceRequests.buildingAddress, current.address));
+      await tx.update(invoices).set({ region }).where(eq(invoices.buildingAddress, current.address));
+      // The lease reminders are generated per house (server/seasonalTasks.ts).
+      await tx
+        .update(tasks)
+        .set({ region })
+        .where(or(like(tasks.sourceKey, `lease-renewal:${id}:%`), like(tasks.sourceKey, `utilities-lease:${id}:%`)));
+      return property;
+    });
+  }
+
+  async getPropertyDeleteBlockers(id: string): Promise<PropertyDeleteBlockers> {
+    const [[roster], [fees], [deposits], [deductions]] = await Promise.all([
+      db.select({ value: count() }).from(residents).where(eq(residents.propertyId, id)),
+      db.select({ value: count() }).from(rentPayments).where(eq(rentPayments.propertyId, id)),
+      db.select({ value: count() }).from(securityDeposits).where(eq(securityDeposits.propertyId, id)),
+      db.select({ value: count() }).from(depositDeductions).where(eq(depositDeductions.propertyId, id)),
+    ]);
+    return {
+      residents: roster.value,
+      hhFees: fees.value,
+      deposits: deposits.value,
+      deductions: deductions.value,
+    };
   }
 
   async deleteProperty(id: string): Promise<string[]> {

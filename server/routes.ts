@@ -1,6 +1,6 @@
 import type { Express, RequestHandler, Response } from "express";
 import { createServer, type Server } from "http";
-import { storage } from "./storage";
+import { storage, type PropertyDeleteBlockers } from "./storage";
 import { setupAuth, isAuthenticated, getUserId } from "./auth";
 import {
   loadAuthContext,
@@ -334,6 +334,23 @@ const CLEARED_PROJECT_FIELDS = { contractUrl: null, estimatedCost: null, actualC
 const NOT_A_HOUSE_MESSAGE = "Choose one of the portal's houses for this request.";
 
 const RETURNED_OVER_HELD = "The amount returned cannot be more than the amount held.";
+
+/**
+ * Why a house cannot be deleted yet, naming what it still holds, or undefined
+ * when nothing stands in the way.
+ */
+function propertyDeleteRefusal(name: string, left: PropertyDeleteBlockers): string | undefined {
+  const counted = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+  const parts = [
+    left.residents > 0 && `${counted(left.residents, "resident", "residents")} on its roster (moved-out residents count)`,
+    left.hhFees > 0 && counted(left.hhFees, "HH fee record", "HH fee records"),
+    left.deposits > 0 && counted(left.deposits, "deposit", "deposits"),
+    left.deductions > 0 && counted(left.deductions, "deposit deduction", "deposit deductions"),
+  ].filter((part): part is string => typeof part === "string");
+  if (parts.length === 0) return undefined;
+  const list = parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
+  return `${name} can't be deleted: it still has ${list}. Deleting the house would erase them.`;
+}
 
 function projectFieldsProblem(
   nextType: string,
@@ -5448,7 +5465,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       if (!requireRegion(res, ctx, existingProperty.region)) return;
 
+      // The roster goes with the house by cascade, and every HH fee, deposit
+      // and deduction goes with the roster. None of that can be rebuilt, so a
+      // house still holding any of it stays.
+      const refusal = propertyDeleteRefusal(
+        existingProperty.name,
+        await storage.getPropertyDeleteBlockers(req.params.id),
+      );
+      if (refusal) return res.status(409).json({ message: refusal });
+
       await removeDeletedRecordFiles(await storage.deleteProperty(req.params.id));
+      recordAuditEvent(ctx, {
+        action: AUDIT_ACTIONS.PROPERTY_DELETED,
+        entityType: "property",
+        entityId: existingProperty.id,
+        summary: `Deleted ${existingProperty.name} (${existingProperty.address})`,
+        details: { region: existingProperty.region },
+      });
       res.json({ success: true });
     } catch (error) {
       sendError(res, error, "Failed to delete property");

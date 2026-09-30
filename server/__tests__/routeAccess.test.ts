@@ -6381,6 +6381,95 @@ describe("deleting a resident", () => {
 });
 
 /**
+ * Deleting a house takes its roster with it by cascade, and the roster takes
+ * every HH fee, deposit and deduction. So a house that still has any of those
+ * is refused, before anything is deleted, and a delete that does go through is
+ * on the record.
+ */
+describe("deleting a house", () => {
+  const ALL_PROPERTIES = { canViewProperties: true, canManageProperties: true };
+  const WEST_HOUSE = { id: "prop-1", name: "Cleveland House", address: "1 Main St, St Paul, MN 55101", region: "West Central" };
+  const NOTHING_LEFT = { residents: 0, hhFees: 0, deposits: 0, deductions: 0 };
+
+  beforeEach(() => {
+    storageMock.getProperty.mockResolvedValue(WEST_HOUSE);
+    storageMock.getPropertyDeleteBlockers.mockResolvedValue(NOTHING_LEFT);
+    storageMock.deleteProperty.mockResolvedValue([]);
+  });
+
+  it.each([
+    ["residents on the roster", { residents: 2 }],
+    ["HH fees", { hhFees: 1 }],
+    ["deposits", { deposits: 1 }],
+    ["deposit deductions", { deductions: 3 }],
+  ])("refuses while the house still has %s, and deletes nothing", async (_what, left) => {
+    actAs(STAFF, { ...ALL_PROPERTIES, allowedRegions: ["West Central"] });
+    storageMock.getPropertyDeleteBlockers.mockResolvedValue({ ...NOTHING_LEFT, ...left });
+
+    const { status, body } = await request("DELETE", "/api/properties/prop-1");
+
+    expect(status).toBe(409);
+    expect(body.message).toMatch(/can't be deleted/);
+    expect(storageMock.getPropertyDeleteBlockers).toHaveBeenCalledWith("prop-1");
+    expect(storageMock.deleteProperty).not.toHaveBeenCalled();
+    expect(storageMock.createAuditEvent).not.toHaveBeenCalled();
+  });
+
+  it("says what is still on the house, in words a person can act on", async () => {
+    actAs(ADMIN);
+    storageMock.getPropertyDeleteBlockers.mockResolvedValue({ residents: 1, hhFees: 12, deposits: 1, deductions: 0 });
+
+    const { status, body } = await request("DELETE", "/api/properties/prop-1");
+
+    expect(status).toBe(409);
+    expect(body.message).toBe(
+      "Cleveland House can't be deleted: it still has 1 resident on its roster (moved-out residents count), 12 HH fee records and 1 deposit. Deleting the house would erase them.",
+    );
+  });
+
+  it("deletes an empty house and records who deleted which house -- the positive control", async () => {
+    actAs(STAFF, { ...ALL_PROPERTIES, allowedRegions: ["West Central"] });
+
+    const { status } = await request("DELETE", "/api/properties/prop-1");
+
+    expect(status).toBe(200);
+    expect(storageMock.deleteProperty).toHaveBeenCalledWith("prop-1");
+    expect(storageMock.createAuditEvent).toHaveBeenCalledTimes(1);
+    expect(storageMock.createAuditEvent.mock.calls[0][0]).toMatchObject({
+      action: "property.deleted",
+      actorId: STAFF.id,
+      entityType: "property",
+      entityId: "prop-1",
+      summary: "Deleted Cleveland House (1 Main St, St Paul, MN 55101)",
+    });
+  });
+
+  it("refuses a resident account, and deletes nothing", async () => {
+    actAs(ALICE, { canManageProperties: true, allowedRegions: ["West Central"] });
+
+    expect((await request("DELETE", "/api/properties/prop-1")).status).toBe(403);
+    expect(storageMock.deleteProperty).not.toHaveBeenCalled();
+    expect(storageMock.createAuditEvent).not.toHaveBeenCalled();
+  });
+
+  it("refuses staff without the manage-properties flag, and deletes nothing", async () => {
+    actAs(STAFF, { canViewProperties: true, allowedRegions: ["West Central"] });
+
+    expect((await request("DELETE", "/api/properties/prop-1")).status).toBe(403);
+    expect(storageMock.deleteProperty).not.toHaveBeenCalled();
+    expect(storageMock.createAuditEvent).not.toHaveBeenCalled();
+  });
+
+  it("refuses staff outside the house's region, and deletes nothing", async () => {
+    actAs(STAFF, { ...ALL_PROPERTIES, allowedRegions: ["East Central"] });
+
+    expect((await request("DELETE", "/api/properties/prop-1")).status).toBe(403);
+    expect(storageMock.deleteProperty).not.toHaveBeenCalled();
+    expect(storageMock.createAuditEvent).not.toHaveBeenCalled();
+  });
+});
+
+/**
  * A walkthrough room or photo belongs to a walkthrough, and the walkthrough
  * is what carries the region. These routes used to check the region the
  * request body named, or the room's loose propertyId, so a hand-made request
@@ -6559,6 +6648,7 @@ describe("deleting a record removes the files it held", () => {
   it("removes every file a deleted house takes with it", async () => {
     actAs(ADMIN);
     storageMock.getProperty.mockResolvedValue(WEST_PROPERTY_ROW);
+    storageMock.getPropertyDeleteBlockers.mockResolvedValue({ residents: 0, hhFees: 0, deposits: 0, deductions: 0 });
     storageMock.deleteProperty.mockResolvedValue([
       "/uploads/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.jpg",
       "/uploads/cccccccccccccccccccccccccccccccc.jpg",
