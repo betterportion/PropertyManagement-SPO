@@ -178,6 +178,7 @@ export interface IStorage {
   ): Promise<User>;
   updateUserActiveStatus(id: string, isActive: boolean): Promise<User>;
   updateUserProperty(id: string, propertyId: string | null): Promise<User>;
+  deactivateAndUnlinkUser(id: string): Promise<User>;
   /** The comment email off switch. A preference, so it is not audited. */
   updateUserCommentEmails(id: string, enabled: boolean): Promise<User>;
   getActiveResidentAccountByEmail(email: string): Promise<User | undefined>;
@@ -690,6 +691,18 @@ export class DatabaseStorage implements IStorage {
       }
       return user;
     });
+  }
+
+  // Move-out switches a login off and unlinks it from its house in one
+  // statement: done as two, a failure between them would leave an inactive
+  // login still linked, which a retry cannot find to repair.
+  async deactivateAndUnlinkUser(id: string): Promise<User> {
+    const [user] = await db
+      .update(users)
+      .set({ isActive: false, propertyId: null, updatedAt: new Date() })
+      .where(eq(users.id, id))
+      .returning();
+    return user;
   }
 
   async updateUserActiveStatus(id: string, isActive: boolean): Promise<User> {

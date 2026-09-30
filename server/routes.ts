@@ -3662,7 +3662,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (deactivateAccount) {
         const account = await loginForRosterRow(resident);
         if (account) {
-          await storage.updateUserActiveStatus(account.id, false);
+          // The house link is what reaches the house's requests, walkthroughs
+          // and codes, so it goes with the login, in the same write:
+          // reactivating the account later must not hand the old house back.
+          await storage.deactivateAndUnlinkUser(account.id);
           accountDeactivated = true;
           recordAuditEvent(ctx, {
             action: AUDIT_ACTIONS.USER_STATUS_CHANGED,
@@ -3671,10 +3674,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
             summary: `Deactivated ${account.email ?? account.id}'s login while moving them out of ${resident.buildingAddress}`,
             details: { isActive: false, reason: "move_out", residentId: resident.id },
           });
-          // The house link is what reaches the house's requests, walkthroughs
-          // and codes, so it goes with the login: reactivating the account
-          // later must not hand the old house back.
-          await storage.updateUserProperty(account.id, null);
           recordAuditEvent(ctx, {
             action: AUDIT_ACTIONS.USER_PROPERTY_CHANGED,
             entityType: "user",

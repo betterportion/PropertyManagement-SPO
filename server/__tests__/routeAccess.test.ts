@@ -6253,8 +6253,7 @@ describe("moving a resident out", () => {
       "res-1",
       expect.objectContaining({ isActive: false, moveOutDate: new Date("2026-05-15") }),
     );
-    expect(storageMock.updateUserActiveStatus).not.toHaveBeenCalled();
-    expect(storageMock.updateUserProperty).not.toHaveBeenCalled();
+    expect(storageMock.deactivateAndUnlinkUser).not.toHaveBeenCalled();
   });
 
   it("deactivates a matching resident login when asked to", async () => {
@@ -6262,7 +6261,7 @@ describe("moving a resident out", () => {
     storageMock.getResident.mockResolvedValue(WEST_RESIDENT);
     storageMock.updateResident.mockImplementation(async (id: string, patch: Record<string, unknown>) => ({ ...WEST_RESIDENT, ...patch }));
     storageMock.getActiveResidentAccountByEmail.mockResolvedValue(MARIA_LOGIN);
-    storageMock.updateUserActiveStatus.mockResolvedValue({ ...MARIA_LOGIN, isActive: false });
+    storageMock.deactivateAndUnlinkUser.mockResolvedValue({ ...MARIA_LOGIN, isActive: false, propertyId: null });
 
     const { status, body } = await request("POST", "/api/residents/res-1/move-out", {
       body: { moveOutDate: "2026-05-15", deactivateAccount: true },
@@ -6270,7 +6269,7 @@ describe("moving a resident out", () => {
 
     expect(status).toBe(200);
     expect(storageMock.getActiveResidentAccountByEmail).toHaveBeenCalledWith("maria@spo.org");
-    expect(storageMock.updateUserActiveStatus).toHaveBeenCalledWith("u-maria", false);
+    expect(storageMock.deactivateAndUnlinkUser).toHaveBeenCalledWith("u-maria");
     expect((body as { accountDeactivated: boolean }).accountDeactivated).toBe(true);
   });
 
@@ -6282,15 +6281,18 @@ describe("moving a resident out", () => {
     storageMock.getResident.mockResolvedValue(WEST_RESIDENT);
     storageMock.updateResident.mockImplementation(async (id: string, patch: Record<string, unknown>) => ({ ...WEST_RESIDENT, ...patch }));
     storageMock.getActiveResidentAccountByEmail.mockResolvedValue(MARIA_LOGIN);
-    storageMock.updateUserActiveStatus.mockResolvedValue({ ...MARIA_LOGIN, isActive: false });
-    storageMock.updateUserProperty.mockResolvedValue({ ...MARIA_LOGIN, isActive: false, propertyId: null });
+    storageMock.deactivateAndUnlinkUser.mockResolvedValue({ ...MARIA_LOGIN, isActive: false, propertyId: null });
 
     const { status } = await request("POST", "/api/residents/res-1/move-out", {
       body: { moveOutDate: "2026-05-15", deactivateAccount: true },
     });
 
     expect(status).toBe(200);
-    expect(storageMock.updateUserProperty).toHaveBeenCalledWith("u-maria", null);
+    // One write for both columns: two separate writes could leave the login
+    // switched off but still linked, and a retry cannot find an inactive login.
+    expect(storageMock.deactivateAndUnlinkUser).toHaveBeenCalledWith("u-maria");
+    expect(storageMock.updateUserActiveStatus).not.toHaveBeenCalled();
+    expect(storageMock.updateUserProperty).not.toHaveBeenCalled();
     const events = storageMock.createAuditEvent.mock.calls.map((call) => call[0]);
     expect(events).toContainEqual(
       expect.objectContaining({
@@ -6310,7 +6312,7 @@ describe("moving a resident out", () => {
     storageMock.getResident.mockResolvedValue(resident);
     storageMock.updateResident.mockImplementation(async (id: string, patch: Record<string, unknown>) => ({ ...resident, ...patch }));
     storageMock.getActiveResidentAccountByEmail.mockResolvedValue(login);
-    storageMock.updateUserActiveStatus.mockResolvedValue({ ...login, isActive: false });
+    storageMock.deactivateAndUnlinkUser.mockResolvedValue({ ...login, isActive: false, propertyId: null });
     return request("POST", "/api/residents/res-1/move-out", {
       body: { moveOutDate: "2026-05-15", deactivateAccount: true },
     });
@@ -6320,8 +6322,7 @@ describe("moving a resident out", () => {
     const { status, body } = await moveOutWithLogin(WEST_RESIDENT, { ...MARIA_LOGIN, propertyId: "prop-other" });
 
     expect(status).toBe(200);
-    expect(storageMock.updateUserActiveStatus).not.toHaveBeenCalled();
-    expect(storageMock.updateUserProperty).not.toHaveBeenCalled();
+    expect(storageMock.deactivateAndUnlinkUser).not.toHaveBeenCalled();
     expect((body as { accountDeactivated: boolean }).accountDeactivated).toBe(false);
   });
 
@@ -6329,8 +6330,7 @@ describe("moving a resident out", () => {
     const { status } = await moveOutWithLogin(WEST_RESIDENT, { ...MARIA_LOGIN, propertyId: null });
 
     expect(status).toBe(200);
-    expect(storageMock.updateUserActiveStatus).not.toHaveBeenCalled();
-    expect(storageMock.updateUserProperty).not.toHaveBeenCalled();
+    expect(storageMock.deactivateAndUnlinkUser).not.toHaveBeenCalled();
   });
 
   it("leaves a login whose email is not the roster email untouched, even in the same house", async () => {
@@ -6340,8 +6340,7 @@ describe("moving a resident out", () => {
     );
 
     expect(status).toBe(200);
-    expect(storageMock.updateUserActiveStatus).not.toHaveBeenCalled();
-    expect(storageMock.updateUserProperty).not.toHaveBeenCalled();
+    expect(storageMock.deactivateAndUnlinkUser).not.toHaveBeenCalled();
     expect((body as { accountDeactivated: boolean }).accountDeactivated).toBe(false);
   });
 
@@ -6349,7 +6348,7 @@ describe("moving a resident out", () => {
     const { status, body } = await moveOutWithLogin(WEST_RESIDENT, { ...MARIA_LOGIN, email: "Maria@SPO.org" });
 
     expect(status).toBe(200);
-    expect(storageMock.updateUserActiveStatus).toHaveBeenCalledWith("u-maria", false);
+    expect(storageMock.deactivateAndUnlinkUser).toHaveBeenCalledWith("u-maria");
     expect((body as { accountDeactivated: boolean }).accountDeactivated).toBe(true);
   });
 
@@ -6364,8 +6363,7 @@ describe("moving a resident out", () => {
     });
 
     expect(status).toBe(200);
-    expect(storageMock.updateUserActiveStatus).not.toHaveBeenCalled();
-    expect(storageMock.updateUserProperty).not.toHaveBeenCalled();
+    expect(storageMock.deactivateAndUnlinkUser).not.toHaveBeenCalled();
     expect((body as { accountDeactivated: boolean }).accountDeactivated).toBe(false);
   });
 
@@ -6379,8 +6377,7 @@ describe("moving a resident out", () => {
 
     expect(status).toBe(403);
     expect(storageMock.updateResident).not.toHaveBeenCalled();
-    expect(storageMock.updateUserActiveStatus).not.toHaveBeenCalled();
-    expect(storageMock.updateUserProperty).not.toHaveBeenCalled();
+    expect(storageMock.deactivateAndUnlinkUser).not.toHaveBeenCalled();
   });
 
   it("refuses a resident, changing nothing", async () => {
@@ -6392,8 +6389,7 @@ describe("moving a resident out", () => {
 
     expect(status).toBe(403);
     expect(storageMock.updateResident).not.toHaveBeenCalled();
-    expect(storageMock.updateUserActiveStatus).not.toHaveBeenCalled();
-    expect(storageMock.updateUserProperty).not.toHaveBeenCalled();
+    expect(storageMock.deactivateAndUnlinkUser).not.toHaveBeenCalled();
   });
 
   it("tells staff in region whether the resident has an active login", async () => {
