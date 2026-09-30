@@ -310,6 +310,8 @@ That data belongs with a qualified processor. SPO uses **QuickBooks and Ramp**; 
 
 **How to apply:** if a feature request seems to need one of those fields, the answer is a processor integration, not a new column. `scrubDetails` in `server/audit.ts` redacts fields with these names as a backstop, but the backstop is not permission — nothing should reach it.
 
+**Enforced on the finance free text (#51).** An HH fee's `reference` and `notes`, a deposit's `closeoutReference` and `deductionsNotes`, and a deduction's `description` (single and split) refuse, with a 400 that says to record the QuickBooks or Ramp reference and never repeats the value, a Luhn-valid 13–19 digit card number and a banking word (`routing`, `acct`, `account #`/`no`, `ABA`) next to 6+ digits. The rule is `containsBankingDetails` in `shared/bankingDetails.ts`, applied through `financeText` in `shared/schema.ts`, so create and `.partial()` edits both carry it. Deliberately not "any long number": a long QuickBooks, Ramp or check number must pass, and a bare account number with no banking word still gets through (covered by the helper text under each field). A new free-text finance field uses `financeText`.
+
 ### Never commit
 
 - Real secrets, API keys, tokens or connection strings. Everything comes from `process.env`; there are no hardcoded credentials in this repo and it must stay that way.
