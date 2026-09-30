@@ -8558,6 +8558,48 @@ describe("tasks & action items (regional leads only)", () => {
     expect(storageMock.createTask).toHaveBeenCalledWith(expect.objectContaining({ assignedToUserId: STAFF.id }));
   });
 
+  it("gives a personal task a region-free scope, whatever the body says", async () => {
+    actAs(STAFF, WEST);
+    storageMock.createTask.mockImplementation(async (data: Record<string, unknown>) => ({ id: "t-4", ...data }));
+    const { status } = await request("POST", "/api/tasks", {
+      body: { title: "Call Jane's parents", assignedToUserId: STAFF.id, region: "East Central" },
+    });
+    expect(status).toBe(200);
+    expect(storageMock.createTask).toHaveBeenCalledWith(expect.objectContaining({ assignedToUserId: STAFF.id, region: null }));
+  });
+
+  describe("a personal task whose owner's account is gone", () => {
+    const ORPHANED = { id: "t-o", title: "Call Jane's parents", region: null, assignedToUserId: null, createdBy: null, sourceKey: null, status: "open" };
+
+    it("is not listed for staff", async () => {
+      actAs(STAFF, { allowedRegions: ["all"] });
+      storageMock.getAllTasks.mockResolvedValue([ORPHANED]);
+      const { status, body } = await get("/api/tasks");
+      expect(status).toBe(200);
+      expect(body).toEqual([]);
+    });
+
+    it("cannot be edited by staff", async () => {
+      actAs(STAFF, { allowedRegions: ["all"] });
+      storageMock.getTask.mockResolvedValue(ORPHANED);
+      const { status } = await request("PATCH", "/api/tasks/t-o", { body: { status: "done" } });
+      expect(status).toBe(403);
+      expect(storageMock.updateTask).not.toHaveBeenCalled();
+    });
+
+    it("is listed and editable for an admin", async () => {
+      actAs(ADMIN);
+      storageMock.getAllTasks.mockResolvedValue([ORPHANED]);
+      expect((await get("/api/tasks")).body.map((t: { id: string }) => t.id)).toEqual(["t-o"]);
+
+      storageMock.getTask.mockResolvedValue(ORPHANED);
+      storageMock.updateTask.mockImplementation(async (id: string, patch: Record<string, unknown>) => ({ id, ...patch }));
+      const { status } = await request("PATCH", "/api/tasks/t-o", { body: { status: "done" } });
+      expect(status).toBe(200);
+      expect(storageMock.updateTask).toHaveBeenCalledWith("t-o", expect.objectContaining({ status: "done" }));
+    });
+  });
+
   it("does not let a task patch change who it is for, and stamps completion", async () => {
     actAs(STAFF, WEST);
     storageMock.getTask.mockResolvedValue({ id: "t-1", region: "West Central", assignedToUserId: null, createdBy: STAFF.id, status: "open" });

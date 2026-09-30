@@ -4799,9 +4799,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const validatedData = insertTaskSchema.parse(req.body);
 
-      // Scope rules. A personal task ("just me") belongs to the creator and needs
-      // no region. A region broadcast must be a region the creator can reach. An
-      // all-regions broadcast (no region) is an admin-only announcement.
+      // Scope rules. A personal task ("just me") belongs to the creator and has
+      // no region -- forced, because a personal task outlives its owner's
+      // account only as a region-free, ownerless row, which `canSeeTask` keeps
+      // to admins. A region broadcast must be a region the creator can reach.
+      // An all-regions broadcast (no region) is an admin-only announcement.
       const assignedToUserId = validatedData.assignedToUserId ? ctx.userId : null;
       if (!assignedToUserId) {
         if (validatedData.region == null) {
@@ -4813,6 +4815,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const task = await storage.createTask({
         ...validatedData,
+        region: assignedToUserId ? null : validatedData.region,
         assignedToUserId,
         createdBy: ctx.userId,
       });
