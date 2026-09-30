@@ -14,6 +14,7 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import { Badge } from "@/components/ui/badge";
+import { PRIVACY_PATH } from "@/lib/publicPages";
 import spoLogo from "@assets/SPO Logo under 600x600px_SPO Vertical - Ocean_1763138801065.png";
 
 interface AppSidebarProps {
@@ -141,6 +142,14 @@ export function AppSidebar({
               ? "Regional admin"
               : "Resident account"}
         </Badge>
+        <Link
+          href={PRIVACY_PATH}
+          onClick={closeOnMobile}
+          className="self-center rounded-md text-xs text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          data-testid="link-sidebar-privacy"
+        >
+          Privacy
+        </Link>
       </SidebarFooter>
     </Sidebar>
   );
