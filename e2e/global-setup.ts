@@ -113,7 +113,7 @@ export default async function globalSetup() {
     // links them to the house they are rostered at. The house codes follow the
     // roster, not the link alone.
     const homeProperty = (
-      await pool.query(`SELECT id, region, address FROM properties ORDER BY (chapter IS NULL), id LIMIT 1`)
+      await pool.query(`SELECT id, region, address FROM properties ORDER BY (chapter IS NULL), created_at, id LIMIT 1`)
     ).rows[0];
 
     // Put the resident on a house roster, so the in-app submit flow (which
@@ -157,7 +157,7 @@ export default async function globalSetup() {
     await saveStorageState(inactiveCookie, "e2e/.auth/inactive.json");
 
     // A few real IDs so specs navigate deterministically instead of guessing.
-    const property = (await pool.query(`SELECT id, region, chapter FROM properties WHERE chapter IS NOT NULL ORDER BY id LIMIT 1`)).rows[0];
+    const property = (await pool.query(`SELECT id, region, chapter FROM properties WHERE chapter IS NOT NULL ORDER BY created_at, id LIMIT 1`)).rows[0];
     const assetWithPhoto = (await pool.query(
       `SELECT a.id FROM assets a JOIN asset_photos p ON p.asset_id = a.id LIMIT 1`,
     )).rows[0];
