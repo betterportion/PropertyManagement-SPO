@@ -560,63 +560,64 @@ export class DatabaseStorage implements IStorage {
     return user;
   }
 
-  async upsertUser(userData: UpsertUser): Promise<User> {
-    // Handle the case where an admin pre-created this user by email with a different ID.
-    // When the user then signs in via OIDC their Replit sub differs from the stored ID,
-    // causing a unique-email constraint violation. We detect this and link the accounts
-    // by migrating the existing role/permissions to the new OIDC identity.
-    if (userData.email && userData.id) {
-      const [existingByEmail] = await db
-        .select()
-        .from(users)
-        .where(eq(users.email, userData.email));
+  /**
+   * Handles an account an admin pre-created by email under a different ID (or
+   * one kept from a previous login provider): when its owner signs in, the
+   * provider's subject differs from the stored ID. The account is renamed to
+   * the new identity in place, in a single UPDATE, so it is all-or-nothing:
+   * every foreign key to users.id is ON UPDATE CASCADE, and the permissions
+   * row, task assignments, comment authorship and every other reference move
+   * with it inside the same statement. A failure leaves the old account
+   * exactly as it was.
+   *
+   * Returns undefined when there is nothing to re-link.
+   */
+  private async relinkByEmail(userData: UpsertUser): Promise<User | undefined> {
+    if (!userData.email || !userData.id) return undefined;
 
-      if (existingByEmail && existingByEmail.id !== userData.id) {
-        // Capture existing permissions before the cascade-delete
-        const existingPerms = await this.getUserPermissions(existingByEmail.id);
+    const [existingByEmail] = await db
+      .select()
+      .from(users)
+      .where(eq(users.email, userData.email));
+    if (!existingByEmail || existingByEmail.id === userData.id) return undefined;
 
-        // Remove the old record (cascades to userPermissions)
-        await db.delete(users).where(eq(users.id, existingByEmail.id));
-
-        // Re-insert under the OIDC sub, preserving role, active status, the
-        // property link (a pre-created resident account already points at its
-        // house; the sign-in claims never carry propertyId) and the comment
-        // email switch, which an admin may already have turned off.
-        const [newUser] = await db
-          .insert(users)
-          .values({
-            ...userData,
-            role: existingByEmail.role,
-            isActive: existingByEmail.isActive,
-            propertyId: userData.propertyId ?? existingByEmail.propertyId,
-            commentEmailsEnabled: existingByEmail.commentEmailsEnabled,
-          })
-          .returning();
-
-        // Restore the pre-configured permissions (or create defaults)
-        if (existingPerms) {
-          const { id: _id, userId: _uid, createdAt: _ca, updatedAt: _ua, ...permsFields } = existingPerms;
-          await this.upsertUserPermissions({ userId: newUser.id, ...permsFields });
-        } else {
-          await this.upsertUserPermissions(computeDefaultPermissions(newUser.id, newUser.role));
-        }
-
-        return newUser;
-      }
-    }
-
-    const [user] = await db
-      .insert(users)
-      .values(userData)
-      .onConflictDoUpdate({
-        target: users.id,
-        set: {
-          ...userData,
-          updatedAt: new Date(),
-        },
+    // Role, active status, the property link (a pre-created resident account
+    // already points at its house; the sign-in claims never carry propertyId)
+    // and the comment email switch, which an admin may already have turned
+    // off, all stay as the admin set them. A claim the provider left
+    // undefined is skipped by the update, so it never blanks a stored value.
+    const [relinked] = await db
+      .update(users)
+      .set({
+        ...userData,
+        role: existingByEmail.role,
+        isActive: existingByEmail.isActive,
+        propertyId: userData.propertyId ?? existingByEmail.propertyId,
+        commentEmailsEnabled: existingByEmail.commentEmailsEnabled,
+        updatedAt: new Date(),
       })
+      .where(eq(users.id, existingByEmail.id))
       .returning();
-    
+    return relinked;
+  }
+
+  async upsertUser(userData: UpsertUser): Promise<User> {
+    const user =
+      (await this.relinkByEmail(userData)) ??
+      (
+        await db
+          .insert(users)
+          .values(userData)
+          .onConflictDoUpdate({
+            target: users.id,
+            set: {
+              ...userData,
+              updatedAt: new Date(),
+            },
+          })
+          .returning()
+      )[0];
+
     const existingPermissions = await this.getUserPermissions(user.id);
     if (!existingPermissions) {
       const defaultPermissions = computeDefaultPermissions(user.id, user.role);

@@ -9,19 +9,32 @@
  * created for was first used.
  *
  * The database is replaced with a minimal double that answers queries from a
- * queue and records inserts, so the real migration logic runs.
+ * queue and records writes, so the real migration logic runs. What the double
+ * cannot show -- that every reference to the account follows it, and that a
+ * failed re-link leaves the old account whole -- is proved against a real
+ * database in `upsertUserRelink.integration.test.ts`.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { is } from "drizzle-orm";
+import { PgTable, getTableConfig } from "drizzle-orm/pg-core";
+import * as schema from "@shared/schema";
 
-const { dbMock, selectQueue, inserted, deleted } = vi.hoisted(() => {
+const { dbMock, selectQueue, inserted, deleted, updated } = vi.hoisted(() => {
   const selectQueue: unknown[][] = [];
   const inserted: Record<string, unknown>[] = [];
   const deleted: unknown[] = [];
+  const updated: Record<string, unknown>[] = [];
   const dbMock = {
     select: () => ({ from: () => ({ where: async () => selectQueue.shift() ?? [] }) }),
     delete: () => ({
       where: async (condition: unknown) => {
         deleted.push(condition);
+      },
+    }),
+    update: () => ({
+      set: (row: Record<string, unknown>) => {
+        updated.push(row);
+        return { where: () => ({ returning: async () => [row] }) };
       },
     }),
     insert: () => ({
@@ -34,7 +47,7 @@ const { dbMock, selectQueue, inserted, deleted } = vi.hoisted(() => {
       },
     }),
   };
-  return { dbMock, selectQueue, inserted, deleted };
+  return { dbMock, selectQueue, inserted, deleted, updated };
 });
 
 vi.mock("../db", () => ({ db: dbMock, pool: {} }));
@@ -65,6 +78,7 @@ beforeEach(() => {
   selectQueue.length = 0;
   inserted.length = 0;
   deleted.length = 0;
+  updated.length = 0;
 });
 
 describe("upsertUser email re-linking", () => {
@@ -80,9 +94,10 @@ describe("upsertUser email re-linking", () => {
       // Exactly what the sign-in claims carry: no role, no propertyId.
     });
 
-    expect(deleted).toHaveLength(1); // the old row is removed
-    const reinserted = inserted.find((row) => row.id === "oidc-sub-123");
-    expect(reinserted).toMatchObject({
+    // Renamed in place, never deleted: a delete would null every reference.
+    expect(deleted).toHaveLength(0);
+    const relinked = updated.find((row) => row.id === "oidc-sub-123");
+    expect(relinked).toMatchObject({
       role: "resident",
       isActive: true,
       propertyId: "prop-west",
@@ -102,18 +117,51 @@ describe("upsertUser email re-linking", () => {
       propertyId: "prop-east",
     });
 
-    const reinserted = inserted.find((row) => row.id === "oidc-sub-123");
-    expect(reinserted).toMatchObject({ propertyId: "prop-east" });
+    const relinked = updated.find((row) => row.id === "oidc-sub-123");
+    expect(relinked).toMatchObject({ propertyId: "prop-east" });
   });
 
-  it("restores the pre-configured permissions row under the new identity", async () => {
-    selectQueue.push([PRE_CREATED], [PERMISSIONS_ROW]);
+  it("keeps the pre-configured permissions row rather than writing a new one", async () => {
+    // 2nd select: the permissions lookup under the new identity, which finds
+    // the row the database carried across with the account.
+    selectQueue.push([PRE_CREATED], [{ ...PERMISSIONS_ROW, userId: "oidc-sub-123" }]);
 
     await storage.upsertUser({ id: "oidc-sub-123", email: "steward@example.com" });
 
-    const permsInsert = inserted.find((row) => row.userId === "oidc-sub-123");
-    expect(permsInsert).toMatchObject({ canViewMaintenance: true });
-    // The old row's own id/userId must not follow it to the new account.
-    expect(permsInsert).not.toMatchObject({ id: "perm-1" });
+    expect(inserted).toEqual([]);
+  });
+
+  it("gives a pre-created account with no permissions row the defaults for its role", async () => {
+    // Positive control for the test above: the permissions lookup is what
+    // decides, so an empty one does produce a write.
+    selectQueue.push([PRE_CREATED], []);
+
+    await storage.upsertUser({ id: "oidc-sub-123", email: "steward@example.com" });
+
+    expect(inserted).toEqual([
+      expect.objectContaining({ userId: "oidc-sub-123", canViewMaintenance: true }),
+    ]);
+  });
+});
+
+describe("foreign keys to users.id", () => {
+  it("all follow a re-link: ON UPDATE CASCADE, so renaming the account's id carries every reference", () => {
+    // The re-link renames the account's id in place. A new foreign key to
+    // users.id without onUpdate "cascade" would make every re-link fail for
+    // an account that key points at, so it is caught here instead.
+    const keys = Object.values(schema)
+      .filter((value): value is PgTable => is(value, PgTable))
+      .flatMap((table) => {
+        const { name, foreignKeys } = getTableConfig(table);
+        return foreignKeys.map((fk) => ({ table: name, fk }));
+      })
+      .filter(({ fk }) => getTableConfig(fk.reference().foreignTable).name === "users");
+
+    expect(keys.length).toBeGreaterThanOrEqual(12);
+    expect(
+      keys
+        .filter(({ fk }) => fk.onUpdate !== "cascade")
+        .map(({ table, fk }) => `${table}.${fk.reference().columns.map((c) => c.name).join(",")}`),
+    ).toEqual([]);
   });
 });
