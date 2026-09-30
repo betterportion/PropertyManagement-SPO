@@ -166,6 +166,8 @@ export interface PropertyDeleteBlockers {
 export interface IStorage {
   // User Management
   getUser(id: string): Promise<User | undefined>;
+  /** The account holding exactly this email, the same match the sign-in re-link uses. */
+  getUserByEmail(email: string): Promise<User | undefined>;
   upsertUser(user: UpsertUser): Promise<User>;
   getAllUsers(): Promise<User[]>;
   /** Sets the role and, when given, replaces the permissions row in the same transaction. */
@@ -573,6 +575,11 @@ export class DatabaseStorage implements IStorage {
     return user;
   }
 
+  async getUserByEmail(email: string): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.email, email));
+    return user;
+  }
+
   /**
    * Handles an account an admin pre-created by email under a different ID (or
    * one kept from a previous login provider): when its owner signs in, the
@@ -588,10 +595,7 @@ export class DatabaseStorage implements IStorage {
   private async relinkByEmail(userData: UpsertUser): Promise<User | undefined> {
     if (!userData.email || !userData.id) return undefined;
 
-    const [existingByEmail] = await db
-      .select()
-      .from(users)
-      .where(eq(users.email, userData.email));
+    const existingByEmail = await this.getUserByEmail(userData.email);
     if (!existingByEmail || existingByEmail.id === userData.id) return undefined;
 
     // Role, active status, the property link (a pre-created resident account

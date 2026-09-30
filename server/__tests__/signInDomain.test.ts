@@ -12,10 +12,13 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-const { upsertUser } = vi.hoisted(() => ({ upsertUser: vi.fn() }));
+const { upsertUser, getUserByEmail } = vi.hoisted(() => ({
+  upsertUser: vi.fn(),
+  getUserByEmail: vi.fn(),
+}));
 
 vi.mock("../db", () => ({ db: {}, pool: {} }));
-vi.mock("../storage", () => ({ storage: { upsertUser } }));
+vi.mock("../storage", () => ({ storage: { upsertUser, getUserByEmail } }));
 
 async function loadAuth(allowedDomains: string | undefined) {
   if (allowedDomains === undefined) {
@@ -31,12 +34,17 @@ const claims = (extra: Record<string, unknown>) => ({
   sub: "google-sub-1",
   email: "jane@spo.org",
   given_name: "Jane",
+  // Verified, so every refusal below is the domain check's alone
+  // (signInRelink.test.ts covers the email_verified check).
+  email_verified: true,
   ...extra,
 });
 
 beforeEach(() => {
   upsertUser.mockReset();
   upsertUser.mockResolvedValue({});
+  getUserByEmail.mockReset();
+  getUserByEmail.mockResolvedValue(undefined);
 });
 
 afterEach(() => {
