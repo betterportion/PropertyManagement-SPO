@@ -195,7 +195,7 @@ where a mistake is expensive and silent:
 | `server/__tests__/errors.test.ts` | Failures becoming clean responses instead of stack traces |
 | `server/__tests__/region.test.ts` | Turning region names into one canonical form |
 | `server/__tests__/upsertUserRelink.test.ts` | An account re-linking to a new provider ID by email, keeping its role and permissions |
-| `server/__tests__/upsertUserRelink.integration.test.ts` | The same re-link against a real PostgreSQL database: every reference to the account follows it, and a failed re-link changes nothing |
+| `server/__tests__/upsertUserRelink.integration.test.ts` | The same re-link against a real PostgreSQL database: every foreign key to the account follows it, and a failed re-link changes nothing |
 | `server/__tests__/actionItems.test.ts` | What the dashboard raises, and in what order |
 | `server/__tests__/regionSummary.test.ts` | The per-region rollup, including what is deliberately left out of "health" |
 | `server/__tests__/schedules.test.ts` | Due schedules generating a request once, not once a day |
