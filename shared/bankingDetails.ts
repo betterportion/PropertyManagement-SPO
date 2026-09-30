@@ -8,8 +8,8 @@
  *   1. A card number: typed the way a card is (one unbroken run of 13 to 19
  *      digits, four groups of four, or Amex's 4-6-5), starting with an
  *      issuer's digit (2 to 6), and passing the Luhn check.
- *   2. A banking word -- routing, acct, account # / account no, ABA -- right
- *      next to a run of 6 or more digits.
+ *   2. A banking word -- routing, acct, account (number / no / # / is), ABA
+ *      -- right next to a run of 6 or more digits that is not a date.
  *
  * Deliberately NOT "any long run of digits": QuickBooks and Ramp transaction
  * numbers and check numbers can be that long, and a rule that refuses real
@@ -31,8 +31,9 @@ export const BANKING_DETAILS_HELP = "Amounts, dates and processor references onl
 /** Digit groups joined by single spaces or dashes: "4111 1111-1111 1111". */
 const DIGIT_RUN = /\d+(?:[ -]\d+)*/g;
 
+/** The negative lookahead skips a date typed after the word ("acct 2026-09-29"). */
 const BANKING_WORD_NEXT_TO_NUMBER =
-  /\b(?:routing|acct|aba|account\s*(?:#|no\b|number\b))(?:\s*(?:#|no\b|number\b))?[\s:#.-]*\d(?:[ -]?\d){5,}/i;
+  /\b(?:routing|acct|aba|account)(?:\s*(?:#|no\b|number\b))?(?:\s*is\b)?[\s:#.-]*(?!(?:\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4})\b)\d(?:[ -]?\d){5,}/i;
 
 /** The Luhn checksum every card number carries. */
 function passesLuhn(digits: string): boolean {

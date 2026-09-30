@@ -71,6 +71,10 @@ describe("a banking word next to a number", () => {
     "Routing number: 021000021",
     "acct no. 1234567",
     "account no 12345678",
+    "Account: 123456789",
+    "bank account 123456789",
+    "account number is 123456789",
+    "account 123456789",
   ])("is refused: %s", (text) => {
     expect(containsBankingDetails(text)).toBe(true);
   });
@@ -80,6 +84,11 @@ describe("a banking word next to a number", () => {
     "routing the refund through Ramp",
     "acct ending 1234", // the last four identify nothing that moves money
     "returned to the account on file, Ramp 4829301756",
+    "account 4000", // a QuickBooks chart-of-accounts code
+    "account 40100",
+    "acct 2026-09-29", // a date is not an account number
+    "acct 09-29-2026",
+    "account 09/29/2026",
   ])("passes: %s", (text) => {
     expect(containsBankingDetails(text)).toBe(false);
   });
