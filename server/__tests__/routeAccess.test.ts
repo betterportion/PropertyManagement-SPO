@@ -6231,12 +6231,13 @@ describe("moving a resident out", () => {
     id: "res-1",
     firstName: "Maria",
     lastName: "Gonzalez",
+    propertyId: "prop-1",
     email: "maria@spo.org",
     region: "West Central",
     buildingAddress: "1 Main St",
     isActive: true,
   };
-  const MARIA_LOGIN = { id: "u-maria", email: "maria@spo.org", role: "resident", isActive: true };
+  const MARIA_LOGIN = { id: "u-maria", email: "maria@spo.org", role: "resident", isActive: true, propertyId: "prop-1" };
 
   it("marks the resident moved out on the requested date", async () => {
     actAs(STAFF, { ...ALL_PROPERTIES, allowedRegions: ["West Central"] });
@@ -6268,6 +6269,54 @@ describe("moving a resident out", () => {
 
     expect(status).toBe(200);
     expect(storageMock.getActiveResidentAccountByEmail).toHaveBeenCalledWith("maria@spo.org");
+    expect(storageMock.updateUserActiveStatus).toHaveBeenCalledWith("u-maria", false);
+    expect((body as { accountDeactivated: boolean }).accountDeactivated).toBe(true);
+  });
+
+  // The roster row speaks only for a login with its exact email that is linked
+  // to its own house. The lookup is by email, so both conditions are checked
+  // on whatever it returns.
+  async function moveOutWithLogin(resident: Record<string, unknown>, login: Record<string, unknown>) {
+    actAs(STAFF, { ...ALL_PROPERTIES, allowedRegions: ["West Central"] });
+    storageMock.getResident.mockResolvedValue(resident);
+    storageMock.updateResident.mockImplementation(async (id: string, patch: Record<string, unknown>) => ({ ...resident, ...patch }));
+    storageMock.getActiveResidentAccountByEmail.mockResolvedValue(login);
+    storageMock.updateUserActiveStatus.mockResolvedValue({ ...login, isActive: false });
+    return request("POST", "/api/residents/res-1/move-out", {
+      body: { moveOutDate: "2026-05-15", deactivateAccount: true },
+    });
+  }
+
+  it("leaves a login linked to another house untouched", async () => {
+    const { status, body } = await moveOutWithLogin(WEST_RESIDENT, { ...MARIA_LOGIN, propertyId: "prop-other" });
+
+    expect(status).toBe(200);
+    expect(storageMock.updateUserActiveStatus).not.toHaveBeenCalled();
+    expect((body as { accountDeactivated: boolean }).accountDeactivated).toBe(false);
+  });
+
+  it("leaves a login linked to no house untouched", async () => {
+    const { status } = await moveOutWithLogin(WEST_RESIDENT, { ...MARIA_LOGIN, propertyId: null });
+
+    expect(status).toBe(200);
+    expect(storageMock.updateUserActiveStatus).not.toHaveBeenCalled();
+  });
+
+  it("leaves a login whose email is not the roster email untouched, even in the same house", async () => {
+    const { status, body } = await moveOutWithLogin(
+      { ...WEST_RESIDENT, email: "mary_k@spo.org" },
+      { ...MARIA_LOGIN, email: "mary.k@spo.org" },
+    );
+
+    expect(status).toBe(200);
+    expect(storageMock.updateUserActiveStatus).not.toHaveBeenCalled();
+    expect((body as { accountDeactivated: boolean }).accountDeactivated).toBe(false);
+  });
+
+  it("deactivates the house's login whose email differs from the roster only in case", async () => {
+    const { status, body } = await moveOutWithLogin(WEST_RESIDENT, { ...MARIA_LOGIN, email: "Maria@SPO.org" });
+
+    expect(status).toBe(200);
     expect(storageMock.updateUserActiveStatus).toHaveBeenCalledWith("u-maria", false);
     expect((body as { accountDeactivated: boolean }).accountDeactivated).toBe(true);
   });
@@ -6320,6 +6369,26 @@ describe("moving a resident out", () => {
     const { status, body } = await get("/api/residents/res-1/account-status");
     expect(status).toBe(200);
     expect(body).toEqual({ hasActiveAccount: true });
+  });
+
+  it("reports no login when the only match is linked to another house", async () => {
+    actAs(STAFF, { ...ALL_PROPERTIES, allowedRegions: ["West Central"] });
+    storageMock.getResident.mockResolvedValue(WEST_RESIDENT);
+    storageMock.getActiveResidentAccountByEmail.mockResolvedValue({ ...MARIA_LOGIN, propertyId: "prop-other" });
+
+    const { status, body } = await get("/api/residents/res-1/account-status");
+    expect(status).toBe(200);
+    expect(body).toEqual({ hasActiveAccount: false });
+  });
+
+  it("reports no login when the match is not the roster email", async () => {
+    actAs(STAFF, { ...ALL_PROPERTIES, allowedRegions: ["West Central"] });
+    storageMock.getResident.mockResolvedValue({ ...WEST_RESIDENT, email: "mary_k@spo.org" });
+    storageMock.getActiveResidentAccountByEmail.mockResolvedValue({ ...MARIA_LOGIN, email: "mary.k@spo.org" });
+
+    const { status, body } = await get("/api/residents/res-1/account-status");
+    expect(status).toBe(200);
+    expect(body).toEqual({ hasActiveAccount: false });
   });
 
   it("hides account status from staff outside the region", async () => {
@@ -7337,6 +7406,21 @@ describe("house facts and access codes", () => {
     actAs({ ...ALICE, propertyId: "prop-west" } as typeof ALICE, { canViewResourceHub: true });
     const { status } = await get("/api/properties/prop-west/facts");
     expect(status).toBe(403);
+    expect(storageMock.getPropertyFacts).not.toHaveBeenCalled();
+  });
+
+  it("refuses a resident even when their row carries staff property flags and every region", async () => {
+    // The row a resident should never hold, but the one that would get past
+    // the flag and region layers: only the staff check stands in its way.
+    actAs({ ...ALICE, propertyId: "prop-west" } as typeof ALICE, {
+      canViewProperties: true,
+      canManageProperties: true,
+      canViewResourceHub: true,
+      allowedRegions: ["all"],
+    });
+    const { status } = await get("/api/properties/prop-west/facts");
+    expect(status).toBe(403);
+    expect(storageMock.getProperty).not.toHaveBeenCalled();
     expect(storageMock.getPropertyFacts).not.toHaveBeenCalled();
   });
 
@@ -8564,6 +8648,48 @@ describe("tasks & action items (regional leads only)", () => {
     expect(storageMock.createTask).toHaveBeenCalledWith(expect.objectContaining({ assignedToUserId: STAFF.id }));
   });
 
+  it("gives a personal task a region-free scope, whatever the body says", async () => {
+    actAs(STAFF, WEST);
+    storageMock.createTask.mockImplementation(async (data: Record<string, unknown>) => ({ id: "t-4", ...data }));
+    const { status } = await request("POST", "/api/tasks", {
+      body: { title: "Call Jane's parents", assignedToUserId: STAFF.id, region: "East Central" },
+    });
+    expect(status).toBe(200);
+    expect(storageMock.createTask).toHaveBeenCalledWith(expect.objectContaining({ assignedToUserId: STAFF.id, region: null }));
+  });
+
+  describe("a personal task whose owner's account is gone", () => {
+    const ORPHANED = { id: "t-o", title: "Call Jane's parents", region: null, assignedToUserId: null, createdBy: null, sourceKey: null, status: "open" };
+
+    it("is not listed for staff", async () => {
+      actAs(STAFF, { allowedRegions: ["all"] });
+      storageMock.getAllTasks.mockResolvedValue([ORPHANED]);
+      const { status, body } = await get("/api/tasks");
+      expect(status).toBe(200);
+      expect(body).toEqual([]);
+    });
+
+    it("cannot be edited by staff", async () => {
+      actAs(STAFF, { allowedRegions: ["all"] });
+      storageMock.getTask.mockResolvedValue(ORPHANED);
+      const { status } = await request("PATCH", "/api/tasks/t-o", { body: { status: "done" } });
+      expect(status).toBe(403);
+      expect(storageMock.updateTask).not.toHaveBeenCalled();
+    });
+
+    it("is listed and editable for an admin", async () => {
+      actAs(ADMIN);
+      storageMock.getAllTasks.mockResolvedValue([ORPHANED]);
+      expect((await get("/api/tasks")).body.map((t: { id: string }) => t.id)).toEqual(["t-o"]);
+
+      storageMock.getTask.mockResolvedValue(ORPHANED);
+      storageMock.updateTask.mockImplementation(async (id: string, patch: Record<string, unknown>) => ({ id, ...patch }));
+      const { status } = await request("PATCH", "/api/tasks/t-o", { body: { status: "done" } });
+      expect(status).toBe(200);
+      expect(storageMock.updateTask).toHaveBeenCalledWith("t-o", expect.objectContaining({ status: "done" }));
+    });
+  });
+
   it("does not let a task patch change who it is for, and stamps completion", async () => {
     actAs(STAFF, WEST);
     storageMock.getTask.mockResolvedValue({ id: "t-1", region: "West Central", assignedToUserId: null, createdBy: STAFF.id, status: "open" });
@@ -9084,6 +9210,100 @@ describe("granting every permission flag", () => {
     expect(status).toBe(200);
     expect(storageMock.upsertUserPermissions).toHaveBeenCalledWith(expect.objectContaining({ userId: "u-alice", [flag]: true }));
     expect(body[flag]).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A resident account's permissions row holds only resident grants
+// ---------------------------------------------------------------------------
+
+/**
+ * A resident's row is read by the maintenance routes, walkthrough completion
+ * and the resource hub, and by nothing else. A staff flag or a region on it
+ * grants nothing today only because every staff route also checks the role,
+ * so the row is refused at the door instead of left for one missed staff
+ * check to turn into a region path.
+ */
+describe("setting a resident account's permissions", () => {
+  const patch = (path: string, body: unknown) => request("PATCH", path, { body });
+  const FLAGS = Object.entries(getTableColumns(userPermissions))
+    .filter(([, column]) => column.dataType === "boolean")
+    .map(([name]) => name);
+  // Written out rather than imported: this is what the resident flows read.
+  const RESIDENT_FLAGS = ["canViewMaintenance", "canCompleteWalkthroughs", "canViewResourceHub"];
+  const STAFF_FLAGS = FLAGS.filter((flag) => !RESIDENT_FLAGS.includes(flag));
+
+  /** The admin is signed in; the account being changed is `target`. */
+  function adminChanging(target: typeof ALICE | typeof STAFF) {
+    actAs(ADMIN);
+    storageMock.getUser.mockImplementation(async (id: string) => (id === ADMIN.id ? ADMIN : id === target.id ? target : undefined));
+    storageMock.getUserPermissions.mockResolvedValue(undefined);
+    storageMock.upsertUserPermissions.mockImplementation(async (p: unknown) => p);
+  }
+
+  it("knows every staff flag the table has", () => {
+    expect(STAFF_FLAGS).toEqual(expect.arrayContaining(["canViewProperties", "canManageProperties", "canManageMaintenance"]));
+  });
+
+  it.each(STAFF_FLAGS)("refuses %s on a resident account, writing nothing", async (flag) => {
+    adminChanging(ALICE);
+    const { status, body } = await patch("/api/users/u-alice/permissions", { [flag]: true });
+    expect(status).toBe(400);
+    expect(body.message).toMatch(/resident/i);
+    expect(storageMock.upsertUserPermissions).not.toHaveBeenCalled();
+    expect(storageMock.createAuditEvent).not.toHaveBeenCalled();
+  });
+
+  it("refuses any region on a resident account, writing nothing", async () => {
+    adminChanging(ALICE);
+    const { status } = await patch("/api/users/u-alice/permissions", {
+      canViewResourceHub: true,
+      allowedRegions: ["all"],
+    });
+    expect(status).toBe(400);
+    expect(storageMock.upsertUserPermissions).not.toHaveBeenCalled();
+  });
+
+  it.each(RESIDENT_FLAGS)("stores %s on a resident account", async (flag) => {
+    adminChanging(ALICE);
+    const { status } = await patch("/api/users/u-alice/permissions", { [flag]: true });
+    expect(status).toBe(200);
+    expect(storageMock.upsertUserPermissions).toHaveBeenCalledWith(expect.objectContaining({ userId: "u-alice", [flag]: true }));
+  });
+
+  it("lets a resident's staff flags be switched off and regions cleared", async () => {
+    // What the Settings dialog sends for a resident, so a row left over from
+    // before the rule can be cleaned up by saving it.
+    adminChanging(ALICE);
+    const { status } = await patch("/api/users/u-alice/permissions", {
+      canViewMaintenance: true,
+      canViewProperties: false,
+      canManageProperties: false,
+      allowedRegions: [],
+    });
+    expect(status).toBe(200);
+    expect(storageMock.upsertUserPermissions).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: "u-alice", canViewProperties: false, allowedRegions: [] }),
+    );
+  });
+
+  it("still gives a staff account staff flags and regions", async () => {
+    adminChanging(STAFF);
+    const { status } = await patch("/api/users/u-staff/permissions", {
+      canViewProperties: true,
+      allowedRegions: ["West Central"],
+    });
+    expect(status).toBe(200);
+    expect(storageMock.upsertUserPermissions).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: "u-staff", canViewProperties: true, allowedRegions: ["West Central"] }),
+    );
+  });
+
+  it("answers 404 for an account that does not exist, writing nothing", async () => {
+    adminChanging(ALICE);
+    const { status } = await patch("/api/users/u-nobody/permissions", { canViewMaintenance: true });
+    expect(status).toBe(404);
+    expect(storageMock.upsertUserPermissions).not.toHaveBeenCalled();
   });
 });
 

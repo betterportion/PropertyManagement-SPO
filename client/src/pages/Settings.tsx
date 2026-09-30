@@ -26,6 +26,8 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { insertUserSchema, type User, type UserPermissions, type Property } from "@shared/schema";
 import { REGIONS } from "@shared/regions";
+import { isResidentPermissionFlag } from "@shared/permissions";
+import { serverMessage } from "@/lib/serverMessage";
 import { z } from "zod";
 import { ActivityLog } from "@/components/ActivityLog";
 import ResourceLinksSettings from "@/components/ResourceLinksSettings";
@@ -112,14 +114,21 @@ export default function Settings() {
         description: "User permissions updated successfully",
       });
     },
-    onError: () => {
+    onError: (error) => {
       toast({
         title: "Error",
-        description: "Failed to update user permissions",
+        description: serverMessage(error) ?? "Failed to update user permissions",
         variant: "destructive",
       });
     },
   });
+
+  // A resident account holds only the resident grants and no regions (the
+  // server refuses anything else), so its dialog offers only those.
+  const selectedIsResident = selectedUser?.role === "resident";
+  const offeredPermissions: readonly (typeof FEATURE_PERMISSIONS)[number][] = selectedIsResident
+    ? FEATURE_PERMISSIONS.filter((perm) => isResidentPermissionFlag(perm.key))
+    : FEATURE_PERMISSIONS;
 
   const handleOpenPermissions = (user: User) => {
     setSelectedUser(user);
@@ -158,9 +167,19 @@ export default function Settings() {
   };
 
   const handleSavePermissions = () => {
-    if (selectedUser) {
-      updatePermissionsMutation.mutate(editingPermissions);
-    }
+    if (!selectedUser) return;
+    // For a resident, every staff flag goes as off and the regions as none,
+    // so saving also clears anything a row picked up before the rule.
+    updatePermissionsMutation.mutate(
+      selectedIsResident
+        ? {
+            ...Object.fromEntries(
+              FEATURE_PERMISSIONS.map(({ key }) => [key, isResidentPermissionFlag(key) && !!editingPermissions[key]]),
+            ),
+            allowedRegions: [],
+          }
+        : editingPermissions,
+    );
   };
 
   const updateRoleMutation = useMutation({
@@ -612,11 +631,14 @@ export default function Settings() {
               Permissions for {selectedUser?.firstName} {selectedUser?.lastName}
             </DialogTitle>
             <DialogDescription>
-              Configure what this user can access and which regions they can manage.
+              {selectedIsResident
+                ? "Resident accounts see only their own house, so they have no regions and only the resident options below."
+                : "Configure what this user can access and which regions they can manage."}
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-6 py-4">
+            {!selectedIsResident && (<>
             <div>
               <div className="flex items-center justify-between mb-3">
                 <h3 className="text-sm font-semibold flex items-center gap-2">
@@ -656,6 +678,7 @@ export default function Settings() {
             </div>
 
             <Separator />
+            </>)}
 
             <div>
               <h3 className="text-sm font-semibold flex items-center gap-2 mb-3">
@@ -667,7 +690,7 @@ export default function Settings() {
               </p>
               <div className="space-y-4">
                 {Object.entries(
-                  FEATURE_PERMISSIONS.reduce((acc, perm) => {
+                  offeredPermissions.reduce((acc, perm) => {
                     if (!acc[perm.section]) acc[perm.section] = [];
                     acc[perm.section].push(perm);
                     return acc;

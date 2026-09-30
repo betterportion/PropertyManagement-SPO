@@ -1576,4 +1576,27 @@ describe("canSeeTask", () => {
     expect(canSeeTask(ctx, leaseTask({ sourceKey: "walkthrough:apr:West Central:2026" }))).toBe(true);
     expect(canSeeTask(ctx, leaseTask({ sourceKey: "utilities-summer:West Central:2026" }))).toBe(true);
   });
+
+  // A personal task has no region, and once its owner's account is deleted
+  // both user columns go null -- which would otherwise read as an all-regions
+  // broadcast to every staff member.
+  const orphanedPersonal = { region: null, assignedToUserId: null, createdBy: null, sourceKey: null };
+
+  it("keeps a personal task whose owner's account is gone to admins", () => {
+    const everywhere = context({ allowedRegions: ["all"], permissions: { canViewProperties: true } });
+    expect(canSeeTask(everywhere, orphanedPersonal)).toBe(false);
+    expect(canSeeTask(context({ role: "admin", permissions: undefined }), orphanedPersonal)).toBe(true);
+  });
+
+  it("still shows staff an all-regions broadcast whose author is alive, and a generated one with no author", () => {
+    const ctx = context({ allowedRegions: ["West Central"], permissions: {} });
+    expect(canSeeTask(ctx, { ...orphanedPersonal, createdBy: "admin-1" })).toBe(true);
+    expect(canSeeTask(ctx, { ...orphanedPersonal, sourceKey: "walkthrough:apr:all:2026" })).toBe(true);
+  });
+
+  it("still shows a region broadcast whose author is gone to that region's leads, and only them", () => {
+    const orphanedBroadcast = { ...orphanedPersonal, region: "West Central" };
+    expect(canSeeTask(context({ allowedRegions: ["West Central"], permissions: {} }), orphanedBroadcast)).toBe(true);
+    expect(canSeeTask(context({ allowedRegions: ["East Central"], permissions: {} }), orphanedBroadcast)).toBe(false);
+  });
 });

@@ -270,6 +270,10 @@ export function isLeaseDerivedTaskSourceKey(sourceKey: string | null | undefined
  *     waive it;
  *   - you always see a task you created or one assigned to you;
  *   - a task assigned to someone else is private to them;
+ *   - a hand-made task with no region and nobody behind it -- no author, no
+ *     assignee -- is admin-only: that is a personal task whose owner's
+ *     account was deleted (both columns are set null), and reading it as a
+ *     broadcast would hand someone's private note to every staff member;
  *   - an all-regions broadcast (region null) is visible to every staff member;
  *   - otherwise it is a region broadcast, visible to that region's leads.
  */
@@ -288,6 +292,7 @@ export function canSeeTask(
   }
   if (task.createdBy === ctx.userId || task.assignedToUserId === ctx.userId) return true;
   if (task.assignedToUserId) return false;
+  if (task.region === null && !task.createdBy && !task.sourceKey) return false;
   if (task.region === null) return true;
   return canAccessRegion(ctx, task.region);
 }
