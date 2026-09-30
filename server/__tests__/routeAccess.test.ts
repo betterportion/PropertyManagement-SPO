@@ -6231,12 +6231,13 @@ describe("moving a resident out", () => {
     id: "res-1",
     firstName: "Maria",
     lastName: "Gonzalez",
+    propertyId: "prop-1",
     email: "maria@spo.org",
     region: "West Central",
     buildingAddress: "1 Main St",
     isActive: true,
   };
-  const MARIA_LOGIN = { id: "u-maria", email: "maria@spo.org", role: "resident", isActive: true };
+  const MARIA_LOGIN = { id: "u-maria", email: "maria@spo.org", role: "resident", isActive: true, propertyId: "prop-1" };
 
   it("marks the resident moved out on the requested date", async () => {
     actAs(STAFF, { ...ALL_PROPERTIES, allowedRegions: ["West Central"] });
@@ -6268,6 +6269,54 @@ describe("moving a resident out", () => {
 
     expect(status).toBe(200);
     expect(storageMock.getActiveResidentAccountByEmail).toHaveBeenCalledWith("maria@spo.org");
+    expect(storageMock.updateUserActiveStatus).toHaveBeenCalledWith("u-maria", false);
+    expect((body as { accountDeactivated: boolean }).accountDeactivated).toBe(true);
+  });
+
+  // The roster row speaks only for a login with its exact email that is linked
+  // to its own house. The lookup is by email, so both conditions are checked
+  // on whatever it returns.
+  async function moveOutWithLogin(resident: Record<string, unknown>, login: Record<string, unknown>) {
+    actAs(STAFF, { ...ALL_PROPERTIES, allowedRegions: ["West Central"] });
+    storageMock.getResident.mockResolvedValue(resident);
+    storageMock.updateResident.mockImplementation(async (id: string, patch: Record<string, unknown>) => ({ ...resident, ...patch }));
+    storageMock.getActiveResidentAccountByEmail.mockResolvedValue(login);
+    storageMock.updateUserActiveStatus.mockResolvedValue({ ...login, isActive: false });
+    return request("POST", "/api/residents/res-1/move-out", {
+      body: { moveOutDate: "2026-05-15", deactivateAccount: true },
+    });
+  }
+
+  it("leaves a login linked to another house untouched", async () => {
+    const { status, body } = await moveOutWithLogin(WEST_RESIDENT, { ...MARIA_LOGIN, propertyId: "prop-other" });
+
+    expect(status).toBe(200);
+    expect(storageMock.updateUserActiveStatus).not.toHaveBeenCalled();
+    expect((body as { accountDeactivated: boolean }).accountDeactivated).toBe(false);
+  });
+
+  it("leaves a login linked to no house untouched", async () => {
+    const { status } = await moveOutWithLogin(WEST_RESIDENT, { ...MARIA_LOGIN, propertyId: null });
+
+    expect(status).toBe(200);
+    expect(storageMock.updateUserActiveStatus).not.toHaveBeenCalled();
+  });
+
+  it("leaves a login whose email is not the roster email untouched, even in the same house", async () => {
+    const { status, body } = await moveOutWithLogin(
+      { ...WEST_RESIDENT, email: "mary_k@spo.org" },
+      { ...MARIA_LOGIN, email: "mary.k@spo.org" },
+    );
+
+    expect(status).toBe(200);
+    expect(storageMock.updateUserActiveStatus).not.toHaveBeenCalled();
+    expect((body as { accountDeactivated: boolean }).accountDeactivated).toBe(false);
+  });
+
+  it("deactivates the house's login whose email differs from the roster only in case", async () => {
+    const { status, body } = await moveOutWithLogin(WEST_RESIDENT, { ...MARIA_LOGIN, email: "Maria@SPO.org" });
+
+    expect(status).toBe(200);
     expect(storageMock.updateUserActiveStatus).toHaveBeenCalledWith("u-maria", false);
     expect((body as { accountDeactivated: boolean }).accountDeactivated).toBe(true);
   });
@@ -6320,6 +6369,26 @@ describe("moving a resident out", () => {
     const { status, body } = await get("/api/residents/res-1/account-status");
     expect(status).toBe(200);
     expect(body).toEqual({ hasActiveAccount: true });
+  });
+
+  it("reports no login when the only match is linked to another house", async () => {
+    actAs(STAFF, { ...ALL_PROPERTIES, allowedRegions: ["West Central"] });
+    storageMock.getResident.mockResolvedValue(WEST_RESIDENT);
+    storageMock.getActiveResidentAccountByEmail.mockResolvedValue({ ...MARIA_LOGIN, propertyId: "prop-other" });
+
+    const { status, body } = await get("/api/residents/res-1/account-status");
+    expect(status).toBe(200);
+    expect(body).toEqual({ hasActiveAccount: false });
+  });
+
+  it("reports no login when the match is not the roster email", async () => {
+    actAs(STAFF, { ...ALL_PROPERTIES, allowedRegions: ["West Central"] });
+    storageMock.getResident.mockResolvedValue({ ...WEST_RESIDENT, email: "mary_k@spo.org" });
+    storageMock.getActiveResidentAccountByEmail.mockResolvedValue({ ...MARIA_LOGIN, email: "mary.k@spo.org" });
+
+    const { status, body } = await get("/api/residents/res-1/account-status");
+    expect(status).toBe(200);
+    expect(body).toEqual({ hasActiveAccount: false });
   });
 
   it("hides account status from staff outside the region", async () => {
@@ -6376,6 +6445,95 @@ describe("deleting a resident", () => {
 
     expect(status).toBe(403);
     expect(storageMock.deleteResident).not.toHaveBeenCalled();
+    expect(storageMock.createAuditEvent).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Deleting a house takes its roster with it by cascade, and the roster takes
+ * every HH fee, deposit and deduction. So a house that still has any of those
+ * is refused, before anything is deleted, and a delete that does go through is
+ * on the record.
+ */
+describe("deleting a house", () => {
+  const ALL_PROPERTIES = { canViewProperties: true, canManageProperties: true };
+  const WEST_HOUSE = { id: "prop-1", name: "Cleveland House", address: "1 Main St, St Paul, MN 55101", region: "West Central" };
+  const NOTHING_LEFT = { residents: 0, hhFees: 0, deposits: 0, deductions: 0 };
+
+  beforeEach(() => {
+    storageMock.getProperty.mockResolvedValue(WEST_HOUSE);
+    storageMock.getPropertyDeleteBlockers.mockResolvedValue(NOTHING_LEFT);
+    storageMock.deleteProperty.mockResolvedValue([]);
+  });
+
+  it.each([
+    ["residents on the roster", { residents: 2 }],
+    ["HH fees", { hhFees: 1 }],
+    ["deposits", { deposits: 1 }],
+    ["deposit deductions", { deductions: 3 }],
+  ])("refuses while the house still has %s, and deletes nothing", async (_what, left) => {
+    actAs(STAFF, { ...ALL_PROPERTIES, allowedRegions: ["West Central"] });
+    storageMock.getPropertyDeleteBlockers.mockResolvedValue({ ...NOTHING_LEFT, ...left });
+
+    const { status, body } = await request("DELETE", "/api/properties/prop-1");
+
+    expect(status).toBe(409);
+    expect(body.message).toMatch(/can't be deleted/);
+    expect(storageMock.getPropertyDeleteBlockers).toHaveBeenCalledWith("prop-1");
+    expect(storageMock.deleteProperty).not.toHaveBeenCalled();
+    expect(storageMock.createAuditEvent).not.toHaveBeenCalled();
+  });
+
+  it("says what is still on the house, in words a person can act on", async () => {
+    actAs(ADMIN);
+    storageMock.getPropertyDeleteBlockers.mockResolvedValue({ residents: 1, hhFees: 12, deposits: 1, deductions: 0 });
+
+    const { status, body } = await request("DELETE", "/api/properties/prop-1");
+
+    expect(status).toBe(409);
+    expect(body.message).toBe(
+      "Cleveland House can't be deleted: it still has 1 resident on its roster (moved-out residents count), 12 HH fee records and 1 deposit. Deleting the house would erase them.",
+    );
+  });
+
+  it("deletes an empty house and records who deleted which house -- the positive control", async () => {
+    actAs(STAFF, { ...ALL_PROPERTIES, allowedRegions: ["West Central"] });
+
+    const { status } = await request("DELETE", "/api/properties/prop-1");
+
+    expect(status).toBe(200);
+    expect(storageMock.deleteProperty).toHaveBeenCalledWith("prop-1");
+    expect(storageMock.createAuditEvent).toHaveBeenCalledTimes(1);
+    expect(storageMock.createAuditEvent.mock.calls[0][0]).toMatchObject({
+      action: "property.deleted",
+      actorId: STAFF.id,
+      entityType: "property",
+      entityId: "prop-1",
+      summary: "Deleted Cleveland House (1 Main St, St Paul, MN 55101)",
+    });
+  });
+
+  it("refuses a resident account, and deletes nothing", async () => {
+    actAs(ALICE, { canManageProperties: true, allowedRegions: ["West Central"] });
+
+    expect((await request("DELETE", "/api/properties/prop-1")).status).toBe(403);
+    expect(storageMock.deleteProperty).not.toHaveBeenCalled();
+    expect(storageMock.createAuditEvent).not.toHaveBeenCalled();
+  });
+
+  it("refuses staff without the manage-properties flag, and deletes nothing", async () => {
+    actAs(STAFF, { canViewProperties: true, allowedRegions: ["West Central"] });
+
+    expect((await request("DELETE", "/api/properties/prop-1")).status).toBe(403);
+    expect(storageMock.deleteProperty).not.toHaveBeenCalled();
+    expect(storageMock.createAuditEvent).not.toHaveBeenCalled();
+  });
+
+  it("refuses staff outside the house's region, and deletes nothing", async () => {
+    actAs(STAFF, { ...ALL_PROPERTIES, allowedRegions: ["East Central"] });
+
+    expect((await request("DELETE", "/api/properties/prop-1")).status).toBe(403);
+    expect(storageMock.deleteProperty).not.toHaveBeenCalled();
     expect(storageMock.createAuditEvent).not.toHaveBeenCalled();
   });
 });
@@ -6559,6 +6717,7 @@ describe("deleting a record removes the files it held", () => {
   it("removes every file a deleted house takes with it", async () => {
     actAs(ADMIN);
     storageMock.getProperty.mockResolvedValue(WEST_PROPERTY_ROW);
+    storageMock.getPropertyDeleteBlockers.mockResolvedValue({ residents: 0, hhFees: 0, deposits: 0, deductions: 0 });
     storageMock.deleteProperty.mockResolvedValue([
       "/uploads/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.jpg",
       "/uploads/cccccccccccccccccccccccccccccccc.jpg",
@@ -7247,6 +7406,21 @@ describe("house facts and access codes", () => {
     actAs({ ...ALICE, propertyId: "prop-west" } as typeof ALICE, { canViewResourceHub: true });
     const { status } = await get("/api/properties/prop-west/facts");
     expect(status).toBe(403);
+    expect(storageMock.getPropertyFacts).not.toHaveBeenCalled();
+  });
+
+  it("refuses a resident even when their row carries staff property flags and every region", async () => {
+    // The row a resident should never hold, but the one that would get past
+    // the flag and region layers: only the staff check stands in its way.
+    actAs({ ...ALICE, propertyId: "prop-west" } as typeof ALICE, {
+      canViewProperties: true,
+      canManageProperties: true,
+      canViewResourceHub: true,
+      allowedRegions: ["all"],
+    });
+    const { status } = await get("/api/properties/prop-west/facts");
+    expect(status).toBe(403);
+    expect(storageMock.getProperty).not.toHaveBeenCalled();
     expect(storageMock.getPropertyFacts).not.toHaveBeenCalled();
   });
 
@@ -8474,6 +8648,48 @@ describe("tasks & action items (regional leads only)", () => {
     expect(storageMock.createTask).toHaveBeenCalledWith(expect.objectContaining({ assignedToUserId: STAFF.id }));
   });
 
+  it("gives a personal task a region-free scope, whatever the body says", async () => {
+    actAs(STAFF, WEST);
+    storageMock.createTask.mockImplementation(async (data: Record<string, unknown>) => ({ id: "t-4", ...data }));
+    const { status } = await request("POST", "/api/tasks", {
+      body: { title: "Call Jane's parents", assignedToUserId: STAFF.id, region: "East Central" },
+    });
+    expect(status).toBe(200);
+    expect(storageMock.createTask).toHaveBeenCalledWith(expect.objectContaining({ assignedToUserId: STAFF.id, region: null }));
+  });
+
+  describe("a personal task whose owner's account is gone", () => {
+    const ORPHANED = { id: "t-o", title: "Call Jane's parents", region: null, assignedToUserId: null, createdBy: null, sourceKey: null, status: "open" };
+
+    it("is not listed for staff", async () => {
+      actAs(STAFF, { allowedRegions: ["all"] });
+      storageMock.getAllTasks.mockResolvedValue([ORPHANED]);
+      const { status, body } = await get("/api/tasks");
+      expect(status).toBe(200);
+      expect(body).toEqual([]);
+    });
+
+    it("cannot be edited by staff", async () => {
+      actAs(STAFF, { allowedRegions: ["all"] });
+      storageMock.getTask.mockResolvedValue(ORPHANED);
+      const { status } = await request("PATCH", "/api/tasks/t-o", { body: { status: "done" } });
+      expect(status).toBe(403);
+      expect(storageMock.updateTask).not.toHaveBeenCalled();
+    });
+
+    it("is listed and editable for an admin", async () => {
+      actAs(ADMIN);
+      storageMock.getAllTasks.mockResolvedValue([ORPHANED]);
+      expect((await get("/api/tasks")).body.map((t: { id: string }) => t.id)).toEqual(["t-o"]);
+
+      storageMock.getTask.mockResolvedValue(ORPHANED);
+      storageMock.updateTask.mockImplementation(async (id: string, patch: Record<string, unknown>) => ({ id, ...patch }));
+      const { status } = await request("PATCH", "/api/tasks/t-o", { body: { status: "done" } });
+      expect(status).toBe(200);
+      expect(storageMock.updateTask).toHaveBeenCalledWith("t-o", expect.objectContaining({ status: "done" }));
+    });
+  });
+
   it("does not let a task patch change who it is for, and stamps completion", async () => {
     actAs(STAFF, WEST);
     storageMock.getTask.mockResolvedValue({ id: "t-1", region: "West Central", assignedToUserId: null, createdBy: STAFF.id, status: "open" });
@@ -8998,6 +9214,100 @@ describe("granting every permission flag", () => {
 });
 
 // ---------------------------------------------------------------------------
+// A resident account's permissions row holds only resident grants
+// ---------------------------------------------------------------------------
+
+/**
+ * A resident's row is read by the maintenance routes, walkthrough completion
+ * and the resource hub, and by nothing else. A staff flag or a region on it
+ * grants nothing today only because every staff route also checks the role,
+ * so the row is refused at the door instead of left for one missed staff
+ * check to turn into a region path.
+ */
+describe("setting a resident account's permissions", () => {
+  const patch = (path: string, body: unknown) => request("PATCH", path, { body });
+  const FLAGS = Object.entries(getTableColumns(userPermissions))
+    .filter(([, column]) => column.dataType === "boolean")
+    .map(([name]) => name);
+  // Written out rather than imported: this is what the resident flows read.
+  const RESIDENT_FLAGS = ["canViewMaintenance", "canCompleteWalkthroughs", "canViewResourceHub"];
+  const STAFF_FLAGS = FLAGS.filter((flag) => !RESIDENT_FLAGS.includes(flag));
+
+  /** The admin is signed in; the account being changed is `target`. */
+  function adminChanging(target: typeof ALICE | typeof STAFF) {
+    actAs(ADMIN);
+    storageMock.getUser.mockImplementation(async (id: string) => (id === ADMIN.id ? ADMIN : id === target.id ? target : undefined));
+    storageMock.getUserPermissions.mockResolvedValue(undefined);
+    storageMock.upsertUserPermissions.mockImplementation(async (p: unknown) => p);
+  }
+
+  it("knows every staff flag the table has", () => {
+    expect(STAFF_FLAGS).toEqual(expect.arrayContaining(["canViewProperties", "canManageProperties", "canManageMaintenance"]));
+  });
+
+  it.each(STAFF_FLAGS)("refuses %s on a resident account, writing nothing", async (flag) => {
+    adminChanging(ALICE);
+    const { status, body } = await patch("/api/users/u-alice/permissions", { [flag]: true });
+    expect(status).toBe(400);
+    expect(body.message).toMatch(/resident/i);
+    expect(storageMock.upsertUserPermissions).not.toHaveBeenCalled();
+    expect(storageMock.createAuditEvent).not.toHaveBeenCalled();
+  });
+
+  it("refuses any region on a resident account, writing nothing", async () => {
+    adminChanging(ALICE);
+    const { status } = await patch("/api/users/u-alice/permissions", {
+      canViewResourceHub: true,
+      allowedRegions: ["all"],
+    });
+    expect(status).toBe(400);
+    expect(storageMock.upsertUserPermissions).not.toHaveBeenCalled();
+  });
+
+  it.each(RESIDENT_FLAGS)("stores %s on a resident account", async (flag) => {
+    adminChanging(ALICE);
+    const { status } = await patch("/api/users/u-alice/permissions", { [flag]: true });
+    expect(status).toBe(200);
+    expect(storageMock.upsertUserPermissions).toHaveBeenCalledWith(expect.objectContaining({ userId: "u-alice", [flag]: true }));
+  });
+
+  it("lets a resident's staff flags be switched off and regions cleared", async () => {
+    // What the Settings dialog sends for a resident, so a row left over from
+    // before the rule can be cleaned up by saving it.
+    adminChanging(ALICE);
+    const { status } = await patch("/api/users/u-alice/permissions", {
+      canViewMaintenance: true,
+      canViewProperties: false,
+      canManageProperties: false,
+      allowedRegions: [],
+    });
+    expect(status).toBe(200);
+    expect(storageMock.upsertUserPermissions).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: "u-alice", canViewProperties: false, allowedRegions: [] }),
+    );
+  });
+
+  it("still gives a staff account staff flags and regions", async () => {
+    adminChanging(STAFF);
+    const { status } = await patch("/api/users/u-staff/permissions", {
+      canViewProperties: true,
+      allowedRegions: ["West Central"],
+    });
+    expect(status).toBe(200);
+    expect(storageMock.upsertUserPermissions).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: "u-staff", canViewProperties: true, allowedRegions: ["West Central"] }),
+    );
+  });
+
+  it("answers 404 for an account that does not exist, writing nothing", async () => {
+    adminChanging(ALICE);
+    const { status } = await patch("/api/users/u-nobody/permissions", { canViewMaintenance: true });
+    expect(status).toBe(404);
+    expect(storageMock.upsertUserPermissions).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Every field that names a stored file checks who stored it
 // ---------------------------------------------------------------------------
 
@@ -9215,5 +9525,87 @@ describe("every field that names a stored file checks the caller stored it", () 
     const { status } = await request(w.method, w.path, { body: { [w.field]: null } });
     expect(status).toBe(200);
     expect(storageMock.getUploadByStorageKey).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Guards on deletes and lists that no other test names
+//
+// Each of these guards could be removed with the whole suite still green
+// (pilot-readiness audit, 2026-09-29). Every refusal asserts the write never
+// happened, and every refusal is paired with an accepted request proving the
+// same spy fires, so a broken fixture cannot pass as a refusal.
+// ---------------------------------------------------------------------------
+
+describe("guards on deletes and lists", () => {
+  describe("deleting an account is admin work", () => {
+    it.each([
+      ["a regional administrator holding every region", STAFF, { canManageUsers: true, allowedRegions: ["all"] }],
+      ["a resident", ALICE, ALL_MAINTENANCE],
+    ])("refuses %s, and deletes nothing", async (_who, user, permissions) => {
+      actAs(user, permissions);
+      const { status } = await request("DELETE", `/api/users/${BOB.id}`);
+      expect(status).toBe(403);
+      expect(storageMock.deleteUser).not.toHaveBeenCalled();
+    });
+
+    it("lets an admin with no permissions row delete the account", async () => {
+      actAs(ADMIN);
+      const { status } = await request("DELETE", `/api/users/${BOB.id}`);
+      expect(status).toBe(200);
+      expect(storageMock.deleteUser).toHaveBeenCalledWith(BOB.id);
+    });
+  });
+
+  describe("region scoping on deletes", () => {
+    const rows = [
+      { name: "an asset", path: "/api/assets/rec-1", flag: "canManageAssets", load: "getAsset", write: "deleteAsset" },
+      { name: "a maintenance schedule", path: "/api/maintenance-schedules/rec-1", flag: "canManageMaintenance", load: "getMaintenanceSchedule", write: "deleteMaintenanceSchedule" },
+      { name: "an HH-fee payment", path: "/api/rent-payments/rec-1", flag: "canManageFinancials", load: "getRentPayment", write: "deleteRentPayment" },
+      { name: "a security deposit", path: "/api/security-deposits/rec-1", flag: "canManageFinancials", load: "getSecurityDeposit", write: "deleteSecurityDeposit" },
+      { name: "a contact", path: "/api/contacts/rec-1", flag: "canManageContacts", load: "getMaintenanceContact", write: "deleteMaintenanceContact" },
+    ];
+
+    const arrange = (row: (typeof rows)[number], recordRegion: string) => {
+      actAs(STAFF, { [row.flag]: true, allowedRegions: ["West Central"] });
+      storageMock[row.load].mockResolvedValue({ id: "rec-1", region: recordRegion, buildingAddress: "1 Main St" });
+      // deleteAsset hands back the file URLs its rows held.
+      storageMock[row.write].mockResolvedValue([]);
+    };
+
+    it.each(rows)("$name: refuses staff outside the record's region, and deletes nothing", async (row) => {
+      arrange(row, "East Central");
+      const { status } = await request("DELETE", row.path);
+      expect(status).toBe(403);
+      expect(storageMock[row.write]).not.toHaveBeenCalled();
+    });
+
+    it.each(rows)("$name: deletes for staff in the record's region", async (row) => {
+      arrange(row, "West Central");
+      const { status } = await request("DELETE", row.path);
+      expect(status).toBe(200);
+      expect(storageMock[row.write]).toHaveBeenCalledWith("rec-1");
+    });
+  });
+
+  describe("the resident roster is scoped by region", () => {
+    const WEST_RESIDENT = { id: "res-west", firstName: "Ann", region: "West Central", buildingAddress: "1 Main St" };
+    const EAST_RESIDENT = { id: "res-east", firstName: "Ben", region: "East Central", buildingAddress: "2 River Rd" };
+
+    it("gives West-only staff the West rows and none of the East ones", async () => {
+      actAs(STAFF, { canViewProperties: true, allowedRegions: ["West Central"] });
+      storageMock.getAllResidents.mockResolvedValue([WEST_RESIDENT, EAST_RESIDENT]);
+      const { status, body } = await get("/api/residents");
+      expect(status).toBe(200);
+      expect(body.map((r: { id: string }) => r.id)).toEqual(["res-west"]);
+    });
+
+    it("gives staff with no regions an empty roster, never everything", async () => {
+      actAs(STAFF, { canViewProperties: true, allowedRegions: [] });
+      storageMock.getAllResidents.mockResolvedValue([WEST_RESIDENT, EAST_RESIDENT]);
+      const { status, body } = await get("/api/residents");
+      expect(status).toBe(200);
+      expect(body).toEqual([]);
+    });
   });
 });

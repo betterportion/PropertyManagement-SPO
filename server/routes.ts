@@ -1,6 +1,6 @@
 import type { Express, RequestHandler, Response } from "express";
 import { createServer, type Server } from "http";
-import { storage } from "./storage";
+import { storage, type PropertyDeleteBlockers } from "./storage";
 import { setupAuth, isAuthenticated, getUserId } from "./auth";
 import {
   loadAuthContext,
@@ -121,6 +121,7 @@ import { readAppUrlFromEnv } from "./config";
 import { log } from "./logger";
 import { normalizeRegion, normalizeRegions } from "./migrateRegions";
 import { REGIONS } from "@shared/regions";
+import { fieldsNotForResident } from "@shared/permissions";
 
 // Uploads are buffered in memory only long enough to be written to App Storage.
 // Nothing is written to the container filesystem, because autoscale rebuilds it
@@ -334,6 +335,23 @@ const CLEARED_PROJECT_FIELDS = { contractUrl: null, estimatedCost: null, actualC
 const NOT_A_HOUSE_MESSAGE = "Choose one of the portal's houses for this request.";
 
 const RETURNED_OVER_HELD = "The amount returned cannot be more than the amount held.";
+
+/**
+ * Why a house cannot be deleted yet, naming what it still holds, or undefined
+ * when nothing stands in the way.
+ */
+function propertyDeleteRefusal(name: string, left: PropertyDeleteBlockers): string | undefined {
+  const counted = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+  const parts = [
+    left.residents > 0 && `${counted(left.residents, "resident", "residents")} on its roster (moved-out residents count)`,
+    left.hhFees > 0 && counted(left.hhFees, "HH fee record", "HH fee records"),
+    left.deposits > 0 && counted(left.deposits, "deposit", "deposits"),
+    left.deductions > 0 && counted(left.deductions, "deposit deduction", "deposit deductions"),
+  ].filter((part): part is string => typeof part === "string");
+  if (parts.length === 0) return undefined;
+  const list = parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
+  return `${name} can't be deleted: it still has ${list}. Deleting the house would erase them.`;
+}
 
 function projectFieldsProblem(
   nextType: string,
@@ -579,6 +597,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const filteredData = Object.fromEntries(
         Object.entries(validatedData).filter(([_, v]) => v !== undefined)
       );
+
+      // A resident's row holds only resident grants: a staff flag or a region
+      // on it would be one missed staff check away from a region path.
+      const target = await storage.getUser(req.params.id);
+      if (!target) {
+        return res.status(404).json({ message: "User not found" });
+      }
+      if (target.role === "resident" && fieldsNotForResident(filteredData).length > 0) {
+        return res.status(400).json({
+          message:
+            "A resident account can only be allowed to view maintenance, complete walkthroughs and see the Resources page. Staff permissions and regions are for staff accounts.",
+        });
+      }
+
       const existingPermissions = await auditLookup(() => storage.getUserPermissions(req.params.id));
       const permissions = await storage.upsertUserPermissions({
         userId: req.params.id,
@@ -3556,6 +3588,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // The portal login a roster row speaks for: an active resident login with
+  // the row's exact email (case aside) that is linked to the row's own house.
+  // A login elsewhere is not this row's to report on or switch off, even if a
+  // roster email was typed to match it.
+  async function loginForRosterRow(resident: { email: string; propertyId: string | null }) {
+    const account = await storage.getActiveResidentAccountByEmail(resident.email);
+    if (!account || !resident.propertyId || account.propertyId !== resident.propertyId) return undefined;
+    if (account.email?.toLowerCase() !== resident.email.toLowerCase()) return undefined;
+    return account;
+  }
+
   // Whether a roster resident has an active portal login, so the move-out
   // dialog can offer to switch it off. Same guards as the move-out itself.
   app.get('/api/residents/:id/account-status', isAuthenticated, async (req: any, res) => {
@@ -3571,7 +3614,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       if (!requireRegion(res, ctx, resident.region)) return;
 
-      const account = await storage.getActiveResidentAccountByEmail(resident.email);
+      const account = await loginForRosterRow(resident);
       res.json({ hasActiveAccount: !!account });
     } catch (error) {
       sendError(res, error, "Failed to check the resident's account");
@@ -3609,12 +3652,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         insertResidentSchema.partial().parse({ isActive: false, moveOutDate }),
       );
 
-      // Bounded on purpose: only an *active, resident-role* login matching
-      // this roster row's email can be switched off here, and this route only
-      // ever deactivates. Reactivation stays an admin action in Settings.
+      // Bounded on purpose: only an *active, resident-role* login with this
+      // roster row's email and linked to its house can be switched off here,
+      // and this route only ever deactivates. Reactivation stays an admin
+      // action in Settings.
       let accountDeactivated = false;
       if (deactivateAccount) {
-        const account = await storage.getActiveResidentAccountByEmail(resident.email);
+        const account = await loginForRosterRow(resident);
         if (account) {
           await storage.updateUserActiveStatus(account.id, false);
           accountDeactivated = true;
@@ -4772,9 +4816,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const validatedData = insertTaskSchema.parse(req.body);
 
-      // Scope rules. A personal task ("just me") belongs to the creator and needs
-      // no region. A region broadcast must be a region the creator can reach. An
-      // all-regions broadcast (no region) is an admin-only announcement.
+      // Scope rules. A personal task ("just me") belongs to the creator and has
+      // no region -- forced, because a personal task outlives its owner's
+      // account only as a region-free, ownerless row, which `canSeeTask` keeps
+      // to admins. A region broadcast must be a region the creator can reach.
+      // An all-regions broadcast (no region) is an admin-only announcement.
       const assignedToUserId = validatedData.assignedToUserId ? ctx.userId : null;
       if (!assignedToUserId) {
         if (validatedData.region == null) {
@@ -4786,6 +4832,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const task = await storage.createTask({
         ...validatedData,
+        region: assignedToUserId ? null : validatedData.region,
         assignedToUserId,
         createdBy: ctx.userId,
       });
@@ -5448,7 +5495,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       if (!requireRegion(res, ctx, existingProperty.region)) return;
 
+      // The roster goes with the house by cascade, and every HH fee, deposit
+      // and deduction goes with the roster. None of that can be rebuilt, so a
+      // house still holding any of it stays.
+      const refusal = propertyDeleteRefusal(
+        existingProperty.name,
+        await storage.getPropertyDeleteBlockers(req.params.id),
+      );
+      if (refusal) return res.status(409).json({ message: refusal });
+
       await removeDeletedRecordFiles(await storage.deleteProperty(req.params.id));
+      recordAuditEvent(ctx, {
+        action: AUDIT_ACTIONS.PROPERTY_DELETED,
+        entityType: "property",
+        entityId: existingProperty.id,
+        summary: `Deleted ${existingProperty.name} (${existingProperty.address})`,
+        details: { region: existingProperty.region },
+      });
       res.json({ success: true });
     } catch (error) {
       sendError(res, error, "Failed to delete property");

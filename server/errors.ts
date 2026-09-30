@@ -5,12 +5,15 @@ import type {
   Response,
 } from "express";
 import { ZodError } from "zod";
+import pg from "pg";
+import { DrizzleQueryError } from "drizzle-orm/errors";
 
 /**
  * One place that decides what an error means and what the caller is told.
  *
  * Two rules hold everywhere:
- *  1. The full error -- stack included -- is logged on the server.
+ *  1. The full error -- stack included -- is logged on the server, except
+ *     that a database failure is logged without the values its query carried.
  *  2. The response contains only a short sentence written for SPO staff.
  *     Stack traces, file paths, SQL, and configuration values never leave the
  *     process, because an error body is one of the easiest ways to leak them.
@@ -164,9 +167,38 @@ export function classifyError(
   return { status: 500, body: { message: fallbackMessage } };
 }
 
-/** Logs the whole error, with its stack, against a short context label. */
+/**
+ * A database failure, reduced to what identifies it without the data it
+ * carried. A DrizzleQueryError's message and stack hold the query text and
+ * every parameter -- a door code, an email address, whatever was being saved
+ * -- and the driver error's `detail` echoes the offending values, so neither
+ * is logged. The Postgres code and message, and the names of the table,
+ * column and constraint involved, are enough to tell what went wrong.
+ *
+ * Undefined for anything that is not a database failure.
+ */
+function databaseFailureForLog(err: unknown): Record<string, unknown> | undefined {
+  const wrapped = err instanceof DrizzleQueryError;
+  const source = wrapped ? err.cause : err;
+  if (!wrapped && !(source instanceof pg.DatabaseError)) return undefined;
+  if (!isRecord(source)) return { name: "DrizzleQueryError" };
+
+  const fields: Record<string, unknown> = {
+    name: wrapped ? "DrizzleQueryError" : source.name,
+  };
+  for (const key of ["code", "message", "table", "column", "constraint"]) {
+    if (source[key] !== undefined) fields[key] = source[key];
+  }
+  return fields;
+}
+
+/**
+ * Logs the whole error, with its stack, against a short context label --
+ * except a database failure, which is logged without its query parameters
+ * (see databaseFailureForLog).
+ */
 export function logError(context: string, err: unknown): void {
-  console.error(`[error] ${context}:`, err);
+  console.error(`[error] ${context}:`, databaseFailureForLog(err) ?? err);
 }
 
 /**

@@ -173,7 +173,7 @@ This is the step with the most moving parts, and the only one that requires Goog
 **In Google Cloud Console**, in a project belonging to the Google Workspace organisation:
 
 1. **APIs & Services → OAuth consent screen**
-   - **User type: Internal.** This restricts sign-in to the organisation's own Workspace accounts and skips Google's verification review entirely. Choose External only if people outside the Workspace domain need to sign in, and expect a verification process.
+   - **User type: Internal.** This restricts sign-in to the organisation's own Workspace accounts and skips Google's verification review entirely. Choose External only if people outside the Workspace domain need to sign in, and expect a verification process. **On External, any Google account can sign in and arrives as an active resident** unless `OIDC_ALLOWED_DOMAINS` is set (below).
    - App name: `SPO Admin Portal`
    - Support email and developer contact email: a monitored address
    - Scopes: `openid`, `email`, `profile` — nothing more. The portal reads nothing from Google beyond who the person is.
@@ -201,6 +201,9 @@ This is the step with the most moving parts, and the only one that requires Goog
 | `OIDC_CLIENT_SECRET` | the client secret from above |
 | `OIDC_PROVIDER_NAME` | `google` |
 | `OIDC_SCOPES` | `openid email profile` |
+| `OIDC_ALLOWED_DOMAINS` | SPO's Workspace domain, e.g. `spo.org` (comma-separated if more than one) |
+
+**Set `OIDC_ALLOWED_DOMAINS` as well as choosing Internal.** It makes the app itself refuse any sign-in whose Google hosted-domain (`hd`) claim is not one of the listed domains, before an account is created, so the restriction no longer rests on a single console setting that anyone with access to the Google Cloud project can change. Personal Google accounts carry no `hd` claim and are refused even when their address is on the SPO domain. Unset, the app accepts anyone Google does. It is Google-only: another provider sends no `hd`, and setting it there refuses everyone.
 
 **`OIDC_SCOPES` must be set explicitly for Google.** The application's default includes `offline_access`, and **Google rejects that scope** — login fails with `invalid_scope` and no user gets in. Google uses its own mechanism for long-lived access, which this app does not need.
 

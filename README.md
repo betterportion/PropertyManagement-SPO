@@ -169,11 +169,15 @@ block a merge, and clearing them is tracked as issue #37.
 secrets — everything external is replaced with a stand-in — so it is safe to
 run anywhere and takes a couple of seconds.
 
-The one exception is `auditRetention.integration.test.ts`, which needs real
-SQL to be worth anything. It runs only when `TEST_DATABASE_URL` (or
-`DATABASE_URL`) is set, and skips silently otherwise, so CI and a fresh
-checkout are unaffected. When it does run it works inside a schema it creates
-and drops for that run, never the application's own tables.
+The exceptions are `auditRetention.integration.test.ts` and
+`properties.integration.test.ts`, which need real
+SQL to be worth anything. They run only when `TEST_DATABASE_URL` (or
+`DATABASE_URL`) is set, and skip silently otherwise, so CI and a fresh
+checkout are unaffected. When they do run they work inside a schema created
+and dropped for that run, never the application's own tables.
+`upsertUserRelink.integration.test.ts` is stricter: it needs the real
+foreign keys, so it writes to the application's own tables, and runs only
+when `TEST_DATABASE_URL` points at a throwaway, migrated database.
 
 The suite is weighted towards **who is allowed to do what**, because that is
 where a mistake is expensive and silent:
@@ -187,9 +191,11 @@ where a mistake is expensive and silent:
 | `server/__tests__/objectStorage.test.ts` | Storage keys, including the ones that try to escape the uploads folder |
 | `server/__tests__/audit.test.ts` | The audit log never storing a credential and never failing a request |
 | `server/__tests__/auditRetention.integration.test.ts` | The retention query against a real PostgreSQL database: expired routine entries go in batches, account and permission history stays |
+| `server/__tests__/properties.integration.test.ts` | A house moving region carrying its region to every record that copies it, and what deleting a house would erase, against a real PostgreSQL database |
 | `server/__tests__/errors.test.ts` | Failures becoming clean responses instead of stack traces |
 | `server/__tests__/region.test.ts` | Turning region names into one canonical form |
 | `server/__tests__/upsertUserRelink.test.ts` | An account re-linking to a new provider ID by email, keeping its role and permissions |
+| `server/__tests__/upsertUserRelink.integration.test.ts` | The same re-link against a real PostgreSQL database: every foreign key to the account follows it, and a failed re-link changes nothing |
 | `server/__tests__/actionItems.test.ts` | What the dashboard raises, and in what order |
 | `server/__tests__/regionSummary.test.ts` | The per-region rollup, including what is deliberately left out of "health" |
 | `server/__tests__/schedules.test.ts` | Due schedules generating a request once, not once a day |
