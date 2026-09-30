@@ -7319,6 +7319,21 @@ describe("house facts and access codes", () => {
     expect(storageMock.getPropertyFacts).not.toHaveBeenCalled();
   });
 
+  it("refuses a resident even when their row carries staff property flags and every region", async () => {
+    // The row a resident should never hold, but the one that would get past
+    // the flag and region layers: only the staff check stands in its way.
+    actAs({ ...ALICE, propertyId: "prop-west" } as typeof ALICE, {
+      canViewProperties: true,
+      canManageProperties: true,
+      canViewResourceHub: true,
+      allowedRegions: ["all"],
+    });
+    const { status } = await get("/api/properties/prop-west/facts");
+    expect(status).toBe(403);
+    expect(storageMock.getProperty).not.toHaveBeenCalled();
+    expect(storageMock.getPropertyFacts).not.toHaveBeenCalled();
+  });
+
   it("gives a resident of another house nothing of this house's facts", async () => {
     // Bob lives in the east house. His own-house projection is the only read
     // he has, and it answers only for the house on his account -- so the
@@ -9063,6 +9078,100 @@ describe("granting every permission flag", () => {
     expect(status).toBe(200);
     expect(storageMock.upsertUserPermissions).toHaveBeenCalledWith(expect.objectContaining({ userId: "u-alice", [flag]: true }));
     expect(body[flag]).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A resident account's permissions row holds only resident grants
+// ---------------------------------------------------------------------------
+
+/**
+ * A resident's row is read by the maintenance routes, walkthrough completion
+ * and the resource hub, and by nothing else. A staff flag or a region on it
+ * grants nothing today only because every staff route also checks the role,
+ * so the row is refused at the door instead of left for one missed staff
+ * check to turn into a region path.
+ */
+describe("setting a resident account's permissions", () => {
+  const patch = (path: string, body: unknown) => request("PATCH", path, { body });
+  const FLAGS = Object.entries(getTableColumns(userPermissions))
+    .filter(([, column]) => column.dataType === "boolean")
+    .map(([name]) => name);
+  // Written out rather than imported: this is what the resident flows read.
+  const RESIDENT_FLAGS = ["canViewMaintenance", "canCompleteWalkthroughs", "canViewResourceHub"];
+  const STAFF_FLAGS = FLAGS.filter((flag) => !RESIDENT_FLAGS.includes(flag));
+
+  /** The admin is signed in; the account being changed is `target`. */
+  function adminChanging(target: typeof ALICE | typeof STAFF) {
+    actAs(ADMIN);
+    storageMock.getUser.mockImplementation(async (id: string) => (id === ADMIN.id ? ADMIN : id === target.id ? target : undefined));
+    storageMock.getUserPermissions.mockResolvedValue(undefined);
+    storageMock.upsertUserPermissions.mockImplementation(async (p: unknown) => p);
+  }
+
+  it("knows every staff flag the table has", () => {
+    expect(STAFF_FLAGS).toEqual(expect.arrayContaining(["canViewProperties", "canManageProperties", "canManageMaintenance"]));
+  });
+
+  it.each(STAFF_FLAGS)("refuses %s on a resident account, writing nothing", async (flag) => {
+    adminChanging(ALICE);
+    const { status, body } = await patch("/api/users/u-alice/permissions", { [flag]: true });
+    expect(status).toBe(400);
+    expect(body.message).toMatch(/resident/i);
+    expect(storageMock.upsertUserPermissions).not.toHaveBeenCalled();
+    expect(storageMock.createAuditEvent).not.toHaveBeenCalled();
+  });
+
+  it("refuses any region on a resident account, writing nothing", async () => {
+    adminChanging(ALICE);
+    const { status } = await patch("/api/users/u-alice/permissions", {
+      canViewResourceHub: true,
+      allowedRegions: ["all"],
+    });
+    expect(status).toBe(400);
+    expect(storageMock.upsertUserPermissions).not.toHaveBeenCalled();
+  });
+
+  it.each(RESIDENT_FLAGS)("stores %s on a resident account", async (flag) => {
+    adminChanging(ALICE);
+    const { status } = await patch("/api/users/u-alice/permissions", { [flag]: true });
+    expect(status).toBe(200);
+    expect(storageMock.upsertUserPermissions).toHaveBeenCalledWith(expect.objectContaining({ userId: "u-alice", [flag]: true }));
+  });
+
+  it("lets a resident's staff flags be switched off and regions cleared", async () => {
+    // What the Settings dialog sends for a resident, so a row left over from
+    // before the rule can be cleaned up by saving it.
+    adminChanging(ALICE);
+    const { status } = await patch("/api/users/u-alice/permissions", {
+      canViewMaintenance: true,
+      canViewProperties: false,
+      canManageProperties: false,
+      allowedRegions: [],
+    });
+    expect(status).toBe(200);
+    expect(storageMock.upsertUserPermissions).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: "u-alice", canViewProperties: false, allowedRegions: [] }),
+    );
+  });
+
+  it("still gives a staff account staff flags and regions", async () => {
+    adminChanging(STAFF);
+    const { status } = await patch("/api/users/u-staff/permissions", {
+      canViewProperties: true,
+      allowedRegions: ["West Central"],
+    });
+    expect(status).toBe(200);
+    expect(storageMock.upsertUserPermissions).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: "u-staff", canViewProperties: true, allowedRegions: ["West Central"] }),
+    );
+  });
+
+  it("answers 404 for an account that does not exist, writing nothing", async () => {
+    adminChanging(ALICE);
+    const { status } = await patch("/api/users/u-nobody/permissions", { canViewMaintenance: true });
+    expect(status).toBe(404);
+    expect(storageMock.upsertUserPermissions).not.toHaveBeenCalled();
   });
 });
 

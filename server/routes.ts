@@ -121,6 +121,7 @@ import { readAppUrlFromEnv } from "./config";
 import { log } from "./logger";
 import { normalizeRegion, normalizeRegions } from "./migrateRegions";
 import { REGIONS } from "@shared/regions";
+import { fieldsNotForResident } from "@shared/permissions";
 
 // Uploads are buffered in memory only long enough to be written to App Storage.
 // Nothing is written to the container filesystem, because autoscale rebuilds it
@@ -579,6 +580,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const filteredData = Object.fromEntries(
         Object.entries(validatedData).filter(([_, v]) => v !== undefined)
       );
+
+      // A resident's row holds only resident grants: a staff flag or a region
+      // on it would be one missed staff check away from a region path.
+      const target = await storage.getUser(req.params.id);
+      if (!target) {
+        return res.status(404).json({ message: "User not found" });
+      }
+      if (target.role === "resident" && fieldsNotForResident(filteredData).length > 0) {
+        return res.status(400).json({
+          message:
+            "A resident account can only be allowed to view maintenance, complete walkthroughs and see the Resources page. Staff permissions and regions are for staff accounts.",
+        });
+      }
+
       const existingPermissions = await auditLookup(() => storage.getUserPermissions(req.params.id));
       const permissions = await storage.upsertUserPermissions({
         userId: req.params.id,
