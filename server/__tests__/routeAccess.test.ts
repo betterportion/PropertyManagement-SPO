@@ -6231,12 +6231,13 @@ describe("moving a resident out", () => {
     id: "res-1",
     firstName: "Maria",
     lastName: "Gonzalez",
+    propertyId: "prop-1",
     email: "maria@spo.org",
     region: "West Central",
     buildingAddress: "1 Main St",
     isActive: true,
   };
-  const MARIA_LOGIN = { id: "u-maria", email: "maria@spo.org", role: "resident", isActive: true };
+  const MARIA_LOGIN = { id: "u-maria", email: "maria@spo.org", role: "resident", isActive: true, propertyId: "prop-1" };
 
   it("marks the resident moved out on the requested date", async () => {
     actAs(STAFF, { ...ALL_PROPERTIES, allowedRegions: ["West Central"] });
@@ -6268,6 +6269,54 @@ describe("moving a resident out", () => {
 
     expect(status).toBe(200);
     expect(storageMock.getActiveResidentAccountByEmail).toHaveBeenCalledWith("maria@spo.org");
+    expect(storageMock.updateUserActiveStatus).toHaveBeenCalledWith("u-maria", false);
+    expect((body as { accountDeactivated: boolean }).accountDeactivated).toBe(true);
+  });
+
+  // The roster row speaks only for a login with its exact email that is linked
+  // to its own house. The lookup is by email, so both conditions are checked
+  // on whatever it returns.
+  async function moveOutWithLogin(resident: Record<string, unknown>, login: Record<string, unknown>) {
+    actAs(STAFF, { ...ALL_PROPERTIES, allowedRegions: ["West Central"] });
+    storageMock.getResident.mockResolvedValue(resident);
+    storageMock.updateResident.mockImplementation(async (id: string, patch: Record<string, unknown>) => ({ ...resident, ...patch }));
+    storageMock.getActiveResidentAccountByEmail.mockResolvedValue(login);
+    storageMock.updateUserActiveStatus.mockResolvedValue({ ...login, isActive: false });
+    return request("POST", "/api/residents/res-1/move-out", {
+      body: { moveOutDate: "2026-05-15", deactivateAccount: true },
+    });
+  }
+
+  it("leaves a login linked to another house untouched", async () => {
+    const { status, body } = await moveOutWithLogin(WEST_RESIDENT, { ...MARIA_LOGIN, propertyId: "prop-other" });
+
+    expect(status).toBe(200);
+    expect(storageMock.updateUserActiveStatus).not.toHaveBeenCalled();
+    expect((body as { accountDeactivated: boolean }).accountDeactivated).toBe(false);
+  });
+
+  it("leaves a login linked to no house untouched", async () => {
+    const { status } = await moveOutWithLogin(WEST_RESIDENT, { ...MARIA_LOGIN, propertyId: null });
+
+    expect(status).toBe(200);
+    expect(storageMock.updateUserActiveStatus).not.toHaveBeenCalled();
+  });
+
+  it("leaves a login whose email is not the roster email untouched, even in the same house", async () => {
+    const { status, body } = await moveOutWithLogin(
+      { ...WEST_RESIDENT, email: "mary_k@spo.org" },
+      { ...MARIA_LOGIN, email: "mary.k@spo.org" },
+    );
+
+    expect(status).toBe(200);
+    expect(storageMock.updateUserActiveStatus).not.toHaveBeenCalled();
+    expect((body as { accountDeactivated: boolean }).accountDeactivated).toBe(false);
+  });
+
+  it("deactivates the house's login whose email differs from the roster only in case", async () => {
+    const { status, body } = await moveOutWithLogin(WEST_RESIDENT, { ...MARIA_LOGIN, email: "Maria@SPO.org" });
+
+    expect(status).toBe(200);
     expect(storageMock.updateUserActiveStatus).toHaveBeenCalledWith("u-maria", false);
     expect((body as { accountDeactivated: boolean }).accountDeactivated).toBe(true);
   });
@@ -6320,6 +6369,26 @@ describe("moving a resident out", () => {
     const { status, body } = await get("/api/residents/res-1/account-status");
     expect(status).toBe(200);
     expect(body).toEqual({ hasActiveAccount: true });
+  });
+
+  it("reports no login when the only match is linked to another house", async () => {
+    actAs(STAFF, { ...ALL_PROPERTIES, allowedRegions: ["West Central"] });
+    storageMock.getResident.mockResolvedValue(WEST_RESIDENT);
+    storageMock.getActiveResidentAccountByEmail.mockResolvedValue({ ...MARIA_LOGIN, propertyId: "prop-other" });
+
+    const { status, body } = await get("/api/residents/res-1/account-status");
+    expect(status).toBe(200);
+    expect(body).toEqual({ hasActiveAccount: false });
+  });
+
+  it("reports no login when the match is not the roster email", async () => {
+    actAs(STAFF, { ...ALL_PROPERTIES, allowedRegions: ["West Central"] });
+    storageMock.getResident.mockResolvedValue({ ...WEST_RESIDENT, email: "mary_k@spo.org" });
+    storageMock.getActiveResidentAccountByEmail.mockResolvedValue({ ...MARIA_LOGIN, email: "mary.k@spo.org" });
+
+    const { status, body } = await get("/api/residents/res-1/account-status");
+    expect(status).toBe(200);
+    expect(body).toEqual({ hasActiveAccount: false });
   });
 
   it("hides account status from staff outside the region", async () => {

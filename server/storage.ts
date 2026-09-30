@@ -633,12 +633,14 @@ export class DatabaseStorage implements IStorage {
   async getActiveResidentAccountByEmail(email: string): Promise<User | undefined> {
     // Case-insensitive like the roster lookup: the roster email is typed by
     // staff, the login email comes from the identity provider, and the two
-    // can disagree on case. Restricted to active resident-role accounts
-    // because that is the only kind of login a roster row can speak for.
+    // can disagree on case. An exact comparison rather than ILIKE, so a `_` or
+    // `%` in an address matches only itself. Restricted to active
+    // resident-role accounts because that is the only kind of login a roster
+    // row can speak for.
     const [user] = await db
       .select()
       .from(users)
-      .where(and(ilike(users.email, email), eq(users.role, "resident"), eq(users.isActive, true)))
+      .where(and(sql`lower(${users.email}) = lower(${email})`, eq(users.role, "resident"), eq(users.isActive, true)))
       .limit(1);
     return user;
   }
@@ -1249,12 +1251,13 @@ export class DatabaseStorage implements IStorage {
 
   async getActiveResidentByEmail(email: string): Promise<Resident | undefined> {
     // Matched case-insensitively: a login provider may return a different case
-    // than the roster was entered in. Most recent active residency wins if the
-    // same person appears more than once.
+    // than the roster was entered in. Exact rather than ILIKE, so a `_` or `%`
+    // matches only itself. Most recent active residency wins if the same
+    // person appears more than once.
     const [resident] = await db
       .select()
       .from(residents)
-      .where(and(ilike(residents.email, email), eq(residents.isActive, true)))
+      .where(and(sql`lower(${residents.email}) = lower(${email})`, eq(residents.isActive, true)))
       .orderBy(desc(residents.createdAt))
       .limit(1);
     return resident;

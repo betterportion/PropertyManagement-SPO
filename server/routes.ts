@@ -3556,6 +3556,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // The portal login a roster row speaks for: an active resident login with
+  // the row's exact email (case aside) that is linked to the row's own house.
+  // A login elsewhere is not this row's to report on or switch off, even if a
+  // roster email was typed to match it.
+  async function loginForRosterRow(resident: { email: string; propertyId: string | null }) {
+    const account = await storage.getActiveResidentAccountByEmail(resident.email);
+    if (!account || !resident.propertyId || account.propertyId !== resident.propertyId) return undefined;
+    if (account.email?.toLowerCase() !== resident.email.toLowerCase()) return undefined;
+    return account;
+  }
+
   // Whether a roster resident has an active portal login, so the move-out
   // dialog can offer to switch it off. Same guards as the move-out itself.
   app.get('/api/residents/:id/account-status', isAuthenticated, async (req: any, res) => {
@@ -3571,7 +3582,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       if (!requireRegion(res, ctx, resident.region)) return;
 
-      const account = await storage.getActiveResidentAccountByEmail(resident.email);
+      const account = await loginForRosterRow(resident);
       res.json({ hasActiveAccount: !!account });
     } catch (error) {
       sendError(res, error, "Failed to check the resident's account");
@@ -3609,12 +3620,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         insertResidentSchema.partial().parse({ isActive: false, moveOutDate }),
       );
 
-      // Bounded on purpose: only an *active, resident-role* login matching
-      // this roster row's email can be switched off here, and this route only
-      // ever deactivates. Reactivation stays an admin action in Settings.
+      // Bounded on purpose: only an *active, resident-role* login with this
+      // roster row's email and linked to its house can be switched off here,
+      // and this route only ever deactivates. Reactivation stays an admin
+      // action in Settings.
       let accountDeactivated = false;
       if (deactivateAccount) {
-        const account = await storage.getActiveResidentAccountByEmail(resident.email);
+        const account = await loginForRosterRow(resident);
         if (account) {
           await storage.updateUserActiveStatus(account.id, false);
           accountDeactivated = true;
