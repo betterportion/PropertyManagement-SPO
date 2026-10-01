@@ -39,7 +39,7 @@ The daily jobs log to the hosting provider's log stream. Nobody watches that log
 
 - **Purpose:** keep the activity trail from growing forever, while never losing the record of who changed someone's access.
 - **Trigger:** daily job (`server/audit.ts`).
-- **What the portal does:** deletes routine activity entries older than **two years**, at most 1,000 rows per delete so the table is never locked for long. Account and access events are kept indefinitely: accounts created or deleted, role, status and permission changes, and the house a resident login is linked to (`AUDIT_ACTIONS_KEPT_INDEFINITELY`).
+- **What the portal does:** deletes routine activity entries older than **two years**, at most 1,000 rows per delete so the table is never locked for long. Account and access events are kept indefinitely: accounts created or deleted, role, status and permission changes, an account re-linked to a new sign-in, and the house a resident login is linked to (`AUDIT_ACTIONS_KEPT_INDEFINITELY`).
 - **What SPO must do:** nothing.
 - **Needs:** nothing beyond the database.
 - **How to check it's working:** Settings → Activity trail never shows a routine entry older than two years.
