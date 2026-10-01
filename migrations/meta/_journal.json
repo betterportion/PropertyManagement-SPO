@@ -288,6 +288,13 @@
       "when": 1790834369323,
       "tag": "0040_move_out_and_deposit_rules",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1790834943066,
+      "tag": "0041_email_log",
+      "breakpoints": true
     }
   ]
 }

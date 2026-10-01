@@ -31,6 +31,7 @@ import {
   moveOutChecklists,
   moveOutPhotos,
   depositReturnRules,
+  emailLog,
   propertyFacts,
   residents,
   rentPayments,
@@ -98,6 +99,7 @@ import {
   type MoveOutChecklist,
   type MoveOutPhoto,
   type DepositReturnRule,
+  type EmailLogEntry,
   type PropertyFacts,
   type PropertyFactsWrite,
   type MaintenanceSchedule,
@@ -560,6 +562,12 @@ export interface IStorage {
   getAllDepositReturnRules(): Promise<DepositReturnRule[]>;
   /** Null days removes the state's rule. */
   setDepositReturnRule(state: string, days: number | null, byEmail: string | null): Promise<void>;
+
+  // Email log
+  createEmailLogEntry(entry: Omit<EmailLogEntry, "id" | "createdAt">): Promise<void>;
+  getEmailLogSince(since: Date): Promise<EmailLogEntry[]>;
+  /** Deletes up to `limit` entries older than `cutoff`; returns how many. */
+  deleteEmailLogBefore(cutoff: Date, limit: number): Promise<number>;
 
   // House facts
   getPropertyFacts(propertyId: string): Promise<PropertyFacts | undefined>;
@@ -2176,6 +2184,21 @@ export class DatabaseStorage implements IStorage {
       .insert(depositReturnRules)
       .values({ state, days, updatedByEmail: byEmail })
       .onConflictDoUpdate({ target: depositReturnRules.state, set: { days, updatedByEmail: byEmail, updatedAt: new Date() } });
+  }
+
+  // Email log Implementation
+  async createEmailLogEntry(entry: Omit<EmailLogEntry, "id" | "createdAt">): Promise<void> {
+    await db.insert(emailLog).values(entry);
+  }
+
+  async getEmailLogSince(since: Date): Promise<EmailLogEntry[]> {
+    return await db.select().from(emailLog).where(gte(emailLog.createdAt, since)).orderBy(desc(emailLog.createdAt));
+  }
+
+  async deleteEmailLogBefore(cutoff: Date, limit: number): Promise<number> {
+    const doomed = db.select({ id: emailLog.id }).from(emailLog).where(lt(emailLog.createdAt, cutoff)).limit(limit);
+    const removed = await db.delete(emailLog).where(inArray(emailLog.id, doomed)).returning({ id: emailLog.id });
+    return removed.length;
   }
 
   // House facts Implementation

@@ -281,6 +281,7 @@ beforeEach(() => {
   storageMock.getRecentRosterSyncRuns.mockResolvedValue([]);
   storageMock.getLastSuccessfulRosterSyncRun.mockResolvedValue(undefined);
   storageMock.getRosterReviewItems.mockResolvedValue([]);
+  storageMock.getEmailLogSince.mockResolvedValue([]);
   sendEmailMock.mockReset();
   sendEmailMock.mockResolvedValue({ sent: false, reason: "not_configured" });
 });
@@ -8635,6 +8636,28 @@ describe("move-out checklist and state deposit deadlines", () => {
     expect((await request("PUT", "/api/deposit-return-rules/MN", { body: { days: null } })).status).toBe(200);
     expect(storageMock.setDepositReturnRule).toHaveBeenLastCalledWith("MN", null, ADMIN.email);
     expect((await request("PUT", "/api/deposit-return-rules/MN", { body: { days: 0 } })).status).toBe(400);
+  });
+});
+
+describe("email health", () => {
+  beforeEach(() => {
+    storageMock.getEmailLogSince.mockResolvedValue([]);
+  });
+
+  it("refuses the panel and the test send to a regional lead holding every grant, sending nothing", async () => {
+    actAs(STAFF, { canManageProperties: true, canManageUsers: true, canManageFinancials: true, allowedRegions: ["all"] });
+    expect((await get("/api/email-health")).status).toBe(403);
+    expect((await request("POST", "/api/email-health/test")).status).toBe(403);
+    expect(storageMock.getEmailLogSince).not.toHaveBeenCalled();
+    expect(sendEmailMock).not.toHaveBeenCalled();
+  });
+
+  it("sends the test to the admin pressing the button, and to nobody else (positive control)", async () => {
+    actAs(ADMIN);
+    const { status } = await request("POST", "/api/email-health/test", { body: { to: "someone-else@example.org" } });
+    expect(status).toBe(200);
+    expect(sendEmailMock).toHaveBeenCalledTimes(1);
+    expect(sendEmailMock).toHaveBeenCalledWith(expect.objectContaining({ template: "test", to: ADMIN.email }));
   });
 });
 

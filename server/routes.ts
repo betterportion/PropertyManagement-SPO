@@ -120,7 +120,7 @@ import { fiscalYearLabel } from "@shared/fiscalYear";
 import { MAX_SNOOZE_DAYS, MAX_SNOOZE_MONTHS } from "@shared/assetLifecycle";
 import { randomBytes, randomUUID, timingSafeEqual } from "crypto";
 import { contractorLoad, recurringIssues } from "./aggregates";
-import { sendEmail } from "./email";
+import { onEmailOutcome, sendEmail, type OutboundEmail } from "./email";
 import { commentEmail, householdEmail, maintenanceReceivedEmail, maintenanceStatusEmail } from "./notifications";
 import { commentRecipients } from "./commentRecipients";
 import { readAppUrlFromEnv, readQuickBooksConfigFromEnv } from "./config";
@@ -129,6 +129,8 @@ import { createQuickBooksApi, QuickBooksConnectionLostError, QuickBooksRequestEr
 import { decryptToken, encryptToken } from "./quickbooks/crypto";
 import { isQuickBooksStale } from "@shared/quickbooks";
 import { rosterSyncHealth, runRosterSync, runScheduledRosterSync } from "./rosterSheetSync";
+import { emailHealth, summarizeEmailLog } from "./emailLog";
+import { readEmailConfigFromEnv } from "./config";
 import { readRosterSheetConfigFromEnv } from "./config";
 import { ROSTER_SHEET_COLUMNS } from "@shared/rosterSheet";
 import { log } from "./logger";
@@ -384,6 +386,10 @@ function projectFieldsProblem(
 
 export async function registerRoutes(app: Express): Promise<Server> {
   await setupAuth(app);
+
+  // Every automated send's outcome goes to the email log (Settings → Email
+  // health). Registered here, before any route or job can send.
+  onEmailOutcome((record) => storage.createEmailLogEntry(record));
 
   app.get('/api/auth/user', isAuthenticated, async (req: any, res) => {
     try {
@@ -755,7 +761,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
    * mail provider should not hold a response open, and an acknowledgement is a
    * courtesy attached to something that has already happened.
    */
-  function notify(message: { to: string; subject: string; text: string } | null) {
+  function notify(message: OutboundEmail | null) {
     if (message) void sendEmail(message);
   }
 
@@ -5180,6 +5186,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ── Email health ─────────────────────────────────────────────────────────
+  //
+  // Admins only. The log holds which email, to whom and whether it went --
+  // never what it said.
+
+  app.get('/api/email-health', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireAdmin(res, ctx)) return;
+      const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1_000);
+      res.json(summarizeEmailLog(await storage.getEmailLogSince(since), readEmailConfigFromEnv().configured));
+    } catch (error) {
+      sendError(res, error, "Failed to load email health");
+    }
+  });
+
+  // Sends one test message to the admin pressing the button, and nobody else.
+  app.post('/api/email-health/test', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireAdmin(res, ctx)) return;
+      const to = ctx.user.email;
+      if (!to) return res.status(400).json({ message: "Your account has no email address to send to" });
+      const result = await sendEmail({
+        template: "test",
+        to,
+        subject: "Test email from the SPO portal",
+        text: "This is a test from Settings → Email health. If you are reading it, the portal's email is working.\n\nSaint Paul's Outreach housing",
+      });
+      res.json(result);
+    } catch (error) {
+      sendError(res, error, "Failed to send the test email");
+    }
+  });
+
   // ── Move-out checklist ───────────────────────────────────────────────────
   //
   // The RA's record that a room was checked when somebody left. Staff only,
@@ -5390,9 +5433,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const seesBudgets = canSeeActionItemSource(ctx, "budget");
       const seesIntegrations = canSeeActionItemSource(ctx, "integration");
       const needsHealth = seesBudgets || seesIntegrations;
-      const [health, roster, repairBudgets, spend, links] = await Promise.all([
+      const [health, roster, email, repairBudgets, spend, links] = await Promise.all([
         needsHealth ? quickBooksHealth() : undefined,
         seesIntegrations ? rosterSyncHealth() : undefined,
+        seesIntegrations ? emailHealth() : undefined,
         seesBudgets ? storage.getAllRepairBudgets() : [],
         seesBudgets ? storage.getAllPropertySpend() : [],
         seesBudgets ? storage.getAllPropertyQuickbooksLinks() : [],
@@ -5404,6 +5448,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         depositRules,
         quickbooks: seesIntegrations ? health : undefined,
         roster,
+        email,
         repairBudgets:
           seesBudgets && health
             ? {
