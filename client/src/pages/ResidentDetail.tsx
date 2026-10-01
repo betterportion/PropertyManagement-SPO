@@ -10,6 +10,7 @@ import { Container, PageHeader, PageStack, Section } from "@/components/layout/p
 import { EmptyState, LoadingState } from "@/components/states";
 import DepositLedger from "@/components/deposit/DepositLedger";
 import MoveOutChecklistCard from "@/components/MoveOutChecklistCard";
+import PortalAccessCard from "@/components/PortalAccessCard";
 import ResidentPaperwork from "@/components/ResidentPaperwork";
 import ResidentEditDialog from "@/components/ResidentEditDialog";
 import { useAuth } from "@/hooks/useAuth";
@@ -216,6 +217,8 @@ export default function ResidentDetail() {
               )}
             </CardContent>
           </Card>
+
+          <PortalAccessCard resident={resident} canManage={canManageProperties} />
 
           {otherStays.length > 0 && (
             <Card data-testid="card-other-stays">

@@ -212,6 +212,16 @@ export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
   /** The account holding exactly this email, the same match the sign-in re-link uses. */
   getUserByEmail(email: string): Promise<User | undefined>;
+  /** Case aside: an invite is typed from the roster, the sign-in email comes from Google. */
+  getUserByEmailInsensitive(email: string): Promise<User | undefined>;
+  /** Active resident-role accounts linked to a house: its household leaders and stewards. */
+  getActiveResidentAccountsByProperty(propertyId: string): Promise<User[]>;
+  /**
+   * Gives a roster resident portal access: a resident account linked to the
+   * house with the household grants, created (waiting for its owner's first
+   * sign-in to attach by email) or reactivated. One transaction.
+   */
+  grantResidentPortalAccess(input: { email: string; firstName: string; lastName: string; propertyId: string }): Promise<{ user: User; created: boolean; previous?: User }>;
   upsertUser(user: UpsertUser): Promise<UpsertUserResult>;
   getAllUsers(): Promise<User[]>;
   /** Sets the role and, when given, replaces the permissions row in the same transaction. */
@@ -669,6 +679,51 @@ export class DatabaseStorage implements IStorage {
   async getUserByEmail(email: string): Promise<User | undefined> {
     const [user] = await db.select().from(users).where(eq(users.email, email));
     return user;
+  }
+
+  async getUserByEmailInsensitive(email: string): Promise<User | undefined> {
+    // An exact lower() comparison rather than ILIKE, so `_` and `%` match only themselves.
+    const [user] = await db.select().from(users).where(sql`lower(${users.email}) = lower(${email.trim()})`).limit(1);
+    return user;
+  }
+
+  async getActiveResidentAccountsByProperty(propertyId: string): Promise<User[]> {
+    return await db
+      .select()
+      .from(users)
+      .where(and(eq(users.propertyId, propertyId), eq(users.role, "resident"), eq(users.isActive, true)));
+  }
+
+  async grantResidentPortalAccess(input: {
+    email: string;
+    firstName: string;
+    lastName: string;
+    propertyId: string;
+  }): Promise<{ user: User; created: boolean; previous?: User }> {
+    return await db.transaction(async (tx) => {
+      const [previous] = await tx.select().from(users).where(sql`lower(${users.email}) = lower(${input.email})`).limit(1).for("update");
+      let user: User;
+      if (previous) {
+        [user] = await tx
+          .update(users)
+          .set({ isActive: true, propertyId: input.propertyId, updatedAt: new Date() })
+          .where(eq(users.id, previous.id))
+          .returning();
+      } else {
+        // A placeholder id until the owner's first Google sign-in renames it
+        // to their real subject (relinkByEmail).
+        [user] = await tx
+          .insert(users)
+          .values({ email: input.email, firstName: input.firstName, lastName: input.lastName, role: "resident", isActive: true, propertyId: input.propertyId })
+          .returning();
+      }
+      // The household grants and nothing else: the resident minimum plus
+      // walkthrough completion and the resources page.
+      const grants = { ...computeDefaultPermissions(user.id, "resident"), canCompleteWalkthroughs: true, canViewResourceHub: true, allowedRegions: [] as string[] };
+      const { userId: _id, ...set } = grants;
+      await tx.insert(userPermissions).values(grants).onConflictDoUpdate({ target: userPermissions.userId, set: { ...set, updatedAt: new Date() } });
+      return { user, created: !previous, previous };
+    });
   }
 
   /**

@@ -12,12 +12,15 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-const { upsertUser } = vi.hoisted(() => ({
+const { upsertUser, getUser } = vi.hoisted(() => ({
   upsertUser: vi.fn(),
+  getUser: vi.fn(),
 }));
 
 vi.mock("../db", () => ({ db: {}, pool: {} }));
-vi.mock("../storage", () => ({ storage: { upsertUser } }));
+// A returning account, so every refusal below is the domain check's alone
+// (signInRelink.test.ts covers invite-only first sign-ins).
+vi.mock("../storage", () => ({ storage: { upsertUser, getUser, getUserByEmailInsensitive: vi.fn() } }));
 
 async function loadAuth(allowedDomains: string | undefined) {
   if (allowedDomains === undefined) {
@@ -42,6 +45,7 @@ const claims = (extra: Record<string, unknown>) => ({
 beforeEach(() => {
   upsertUser.mockReset();
   upsertUser.mockResolvedValue({ user: {} });
+  getUser.mockReset().mockResolvedValue({ id: "google-sub-1", email: "jane@spo.org" });
 });
 
 afterEach(() => {

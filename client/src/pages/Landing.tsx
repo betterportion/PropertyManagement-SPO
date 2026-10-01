@@ -34,7 +34,16 @@ const features = [
   },
 ];
 
+/** Why a sign-in was turned away (server/auth.ts SignInRefused), in plain words. */
+const SIGN_IN_REFUSED: Record<string, string> = {
+  not_invited:
+    "That Google account hasn't been given access. The portal is by invitation: ask your regional administrator to give you access using the email address you sign in with.",
+  unverified: "Google hasn't confirmed that account's email address yet. Confirm it with Google, then sign in again.",
+  domain: "This portal only accepts SPO accounts. Sign out of Google and sign in with your SPO account.",
+};
+
 export default function Landing() {
+  const refused = SIGN_IN_REFUSED[new URLSearchParams(window.location.search).get("signin") ?? ""];
   return (
     <div className="min-h-[100dvh] bg-muted/30">
       <Section size="lg"><Container>
@@ -51,6 +60,11 @@ export default function Landing() {
           </div>
 
           <div className="flex flex-col items-center gap-3 py-4">
+            {refused && (
+              <p role="alert" className="max-w-md rounded-md border border-destructive/40 bg-destructive/5 p-3 text-center text-sm" data-testid="text-signin-refused">
+                {refused}
+              </p>
+            )}
             <Button
               size="lg"
               onClick={() => window.location.href = "/api/login"}

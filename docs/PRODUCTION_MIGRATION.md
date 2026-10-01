@@ -227,13 +227,13 @@ Send that list to whoever administers Google Workspace and have them confirm eac
 
 ### First sign-in on a fresh database
 
-Whoever signs in first is created as a `resident`. There is no bootstrap admin. Promote them by hand, once:
+The portal is **invite-only**: a sign-in gets in only to an account that is already waiting for its email. On a fresh database nobody is waiting, so create your own admin account by hand, once, **before** you first sign in:
 
 ```sql
-update users set role = 'admin' where email = 'you@spo.org';
+insert into users (email, role, is_active) values ('you@spo.org', 'admin', true);
 ```
 
-Sign out and back in for the change to take effect.
+Your first Google sign-in with that address attaches to it (the re-link by email). From then on, admins create staff accounts in Settings, and each RA gives household leaders and stewards access from their house's roster (up to 3 per house). Anyone else who signs in is turned away with "ask your regional administrator".
 
 ---
 
