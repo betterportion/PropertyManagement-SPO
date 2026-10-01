@@ -31,6 +31,7 @@ import {
   type PermissionName,
 } from "./authz";
 import { z } from "zod";
+import Papa from "papaparse";
 import { sendError, logError, HttpError } from "./errors";
 import { permissionsAfterRoleChange } from "./roleChange";
 import { recordAuditEvent, auditLookup, changedFields, AUDIT_ACTIONS } from "./audit";
@@ -126,6 +127,9 @@ import { quickBooksHealth, runQuickBooksSync, withQuickBooks } from "./quickbook
 import { createQuickBooksApi, QuickBooksConnectionLostError, QuickBooksRequestError } from "./quickbooks/api";
 import { decryptToken, encryptToken } from "./quickbooks/crypto";
 import { isQuickBooksStale } from "@shared/quickbooks";
+import { rosterSyncHealth, runRosterSync, runScheduledRosterSync } from "./rosterSheetSync";
+import { readRosterSheetConfigFromEnv } from "./config";
+import { ROSTER_SHEET_COLUMNS } from "@shared/rosterSheet";
 import { log } from "./logger";
 import { normalizeRegion, normalizeRegions } from "./migrateRegions";
 import { REGIONS } from "@shared/regions";
@@ -3602,7 +3606,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // therefore its region/buildingAddress are not editable.
       const { propertyId: _p, region: _r, buildingAddress: _b, ...editable } = req.body ?? {};
       const validatedData = insertResidentSchema.partial().parse(editable);
-      const resident = await storage.updateResident(req.params.id, validatedData);
+      // A person's edit: the sheet sync flags it if the sheet later changes it.
+      const resident = await storage.updateResident(req.params.id, validatedData, { by: ctx.user.email ?? null, at: new Date() });
       res.json(resident);
     } catch (error) {
       sendError(res, error, "Failed to update resident");
@@ -3671,6 +3676,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const updated = await storage.updateResident(
         req.params.id,
         insertResidentSchema.partial().parse({ isActive: false, moveOutDate }),
+        { by: ctx.user.email ?? null, at: new Date() },
       );
 
       // Bounded on purpose: only an *active, resident-role* login with this
@@ -5069,6 +5075,108 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ── Resident roster sync (master Google Sheet, or a CSV of the same columns)
+  //
+  // Admins only, every route: the sync writes across every region's roster.
+
+  app.get('/api/roster-sync/status', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireAdmin(res, ctx)) return;
+      const [health, runs, open, reviewed] = await Promise.all([
+        rosterSyncHealth(),
+        storage.getRecentRosterSyncRuns(10),
+        storage.getRosterReviewItems("open", 200),
+        storage.getRosterReviewItems("reviewed", 20),
+      ]);
+      const config = readRosterSheetConfigFromEnv();
+      res.json({
+        ...health,
+        // Which sheet, so an admin can tell it is the right one; never the key.
+        sheet: config.configured ? { tab: config.config.tab, serviceAccountEmail: config.config.clientEmail } : null,
+        columns: Object.values(ROSTER_SHEET_COLUMNS),
+        runs,
+        openReviews: open,
+        recentlyReviewed: reviewed,
+      });
+    } catch (error) {
+      sendError(res, error, "Failed to load the roster sync status");
+    }
+  });
+
+  app.post('/api/roster-sync/run', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireAdmin(res, ctx)) return;
+      const { dryRun } = z.object({ dryRun: z.boolean() }).parse(req.body ?? {});
+      if (!readRosterSheetConfigFromEnv().configured) {
+        return res.status(409).json({ message: "The resident sheet is not set up on this server yet." });
+      }
+      res.json(dryRun ? await runRosterSync({ source: "sheet", dryRun: true, actor: ctx }) : await runScheduledRosterSync(ctx));
+    } catch (error) {
+      sendError(res, error, "Failed to run the roster sync");
+    }
+  });
+
+  // The CSV fallback: the same columns, the same rules, the same banking
+  // refusal. Checked BEFORE the body is read.
+  const requireAdminBeforeUpload: RequestHandler = async (req: any, res, next) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireAdmin(res, ctx)) return;
+      req.rosterCtx = ctx;
+      next();
+    } catch (error) {
+      sendError(res, error, "Failed to start the roster import");
+    }
+  };
+
+  app.post(
+    '/api/roster-sync/csv',
+    isAuthenticated,
+    uploadRateLimit,
+    requireAdminBeforeUpload,
+    ...guardedUpload(csvUpload.single('file'), CSV_IMPORT_MAX_BYTES),
+    async (req: any, res) => {
+      try {
+        if (!req.file) return res.status(400).json({ message: "No file uploaded" });
+        const text = decodeCsv(req.file.buffer);
+        if (text === null) {
+          return res.status(400).json({ message: "That file is not readable as text. Export it as CSV and try again." });
+        }
+        const parsed = Papa.parse<string[]>(text.replace(/^\uFEFF/, ""), { skipEmptyLines: "greedy" });
+        const [headers = [], ...rows] = parsed.data;
+        const dryRun = req.query.dryRun !== "false";
+        res.json(await runRosterSync({ source: "csv", table: { headers, rows }, dryRun, actor: req.rosterCtx }));
+      } catch (error) {
+        sendError(res, error, "Failed to read the roster file");
+      }
+    },
+  );
+
+  app.post('/api/roster-review-items/:id/reviewed', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireAdmin(res, ctx)) return;
+      const item = await storage.markRosterReviewItemReviewed(req.params.id, ctx.user.email ?? null);
+      if (!item) return res.status(404).json({ message: "That review item is already reviewed or does not exist" });
+      recordAuditEvent(ctx, {
+        action: AUDIT_ACTIONS.RESIDENT_REVIEW_RESOLVED,
+        entityType: "roster_review_item",
+        entityId: item.id,
+        summary: `Marked reviewed: ${item.detail}`,
+        details: { kind: item.kind, residentId: item.residentId },
+      });
+      res.json(item);
+    } catch (error) {
+      sendError(res, error, "Failed to mark the item reviewed");
+    }
+  });
+
   // ── Aggregates: what keeps going wrong, and who keeps being called back ───
 
   /**
@@ -5133,16 +5241,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // connection, the property flag for budgets. Nobody else's list costs
       // the lookup.
       const seesBudgets = canSeeActionItemSource(ctx, "budget");
-      const needsHealth = seesBudgets || canSeeActionItemSource(ctx, "integration");
-      const [health, repairBudgets, spend, links] = await Promise.all([
+      const seesIntegrations = canSeeActionItemSource(ctx, "integration");
+      const needsHealth = seesBudgets || seesIntegrations;
+      const [health, roster, repairBudgets, spend, links] = await Promise.all([
         needsHealth ? quickBooksHealth() : undefined,
+        seesIntegrations ? rosterSyncHealth() : undefined,
         seesBudgets ? storage.getAllRepairBudgets() : [],
         seesBudgets ? storage.getAllPropertySpend() : [],
         seesBudgets ? storage.getAllPropertyQuickbooksLinks() : [],
       ]);
 
       const items = buildActionItems({
-        quickbooks: canSeeActionItemSource(ctx, "integration") ? health : undefined,
+        quickbooks: seesIntegrations ? health : undefined,
+        roster,
         repairBudgets:
           seesBudgets && health
             ? {

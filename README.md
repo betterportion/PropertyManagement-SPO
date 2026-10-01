@@ -84,6 +84,10 @@ QuickBooks is another all-or-nothing group: `QUICKBOOKS_CLIENT_ID`, `QUICKBOOKS_
 spend sync; none of them leaves it off, and some but not all fails the boot check.
 `docs/WORKFLOWS.md` has the setup steps on both sides.
 
+The resident sheet sync is the same: `GOOGLE_SERVICE_ACCOUNT_JSON`, `RESIDENT_SHEET_ID` and
+`RESIDENT_SHEET_TAB`, all or none. `docs/WORKFLOWS.md` lists the exact column headers the
+sheet must have.
+
 If anything required is missing, the server refuses to start and prints **every** missing value at once, rather than failing hours later when someone tries to log in or upload a file.
 
 Never commit a real `.env` — it is gitignored.

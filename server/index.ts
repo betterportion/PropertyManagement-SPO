@@ -158,6 +158,7 @@ app.use((req, res, next) => {
   const { startScheduleGenerationJob } = await import("./schedules");
   const { startSeasonalTaskJob } = await import("./seasonalTasks");
   const { startQuickBooksSyncJob } = await import("./quickbooksSync");
+  const { startRosterSheetSyncJob } = await import("./rosterSheetSync");
 
   // Before the rest of the API so that the platform can always tell whether
   // this instance is serving, even while other routes are being set up.
@@ -205,6 +206,7 @@ app.use((req, res, next) => {
     startScheduleGenerationJob();
     startSeasonalTaskJob();
     startQuickBooksSyncJob();
+    startRosterSheetSyncJob();
   });
 })().catch((error) => {
   // A startup failure must not leave a half-initialised process running and

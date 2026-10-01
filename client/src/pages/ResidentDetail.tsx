@@ -71,6 +71,14 @@ export default function ResidentDetail() {
   const resident = residentsQuery.data?.find((candidate) => candidate.id === residentId);
   const property = propertiesQuery.data?.find((candidate) => candidate.id === resident?.propertyId);
   const deposit = depositsQuery.data?.find((candidate) => candidate.residentId === residentId);
+  // Every other stay by the same person -- a returning resident gets a new
+  // row per stay, each with its own dates, deposit and paperwork. Matched by
+  // email, within the stays this account may see.
+  const otherStays = resident
+    ? (residentsQuery.data ?? [])
+        .filter((r) => r.id !== resident.id && r.email.trim().toLowerCase() === resident.email.trim().toLowerCase())
+        .sort((a, b) => new Date(b.moveInDate ?? 0).getTime() - new Date(a.moveInDate ?? 0).getTime())
+    : [];
 
   const assigned = useMemo(
     () => (assetsQuery.data ?? []).filter((asset) => asset.assignedResidentId === residentId),
@@ -195,6 +203,10 @@ export default function ResidentDetail() {
                   label="Agreed deposit"
                   value={formatValue(resident.depositAmountOverride ?? null)}
                 />
+                <Fact
+                  label="Payment plan"
+                  value={resident.paymentPlan ? (resident.paymentPlan === "monthly" ? "Monthly" : "Installments") : formatValue(null)}
+                />
               </dl>
               {resident.notes && (
                 <p className="mt-4 whitespace-pre-line text-sm" data-testid="text-resident-notes">
@@ -203,6 +215,30 @@ export default function ResidentDetail() {
               )}
             </CardContent>
           </Card>
+
+          {otherStays.length > 0 && (
+            <Card data-testid="card-other-stays">
+              <CardHeader>
+                <CardTitle>Other stays</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <ul className="divide-y text-sm">
+                  {otherStays.map((stay) => (
+                    <li key={stay.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
+                      <Link href={`/residents/${stay.id}`} className="font-medium hover:underline" data-testid={`link-stay-${stay.id}`}>
+                        {stay.buildingAddress}
+                      </Link>
+                      <span className="text-muted-foreground">
+                        {stay.moveInDate ? formatDate(stay.moveInDate) : "No start date"} –{" "}
+                        {stay.moveOutDate ? formatDate(stay.moveOutDate) : stay.isActive ? "now" : "no stop date"}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+                <p className="mt-2 text-xs text-muted-foreground">Each stay keeps its own paperwork, deposit and fees. Open one to see them.</p>
+              </CardContent>
+            </Card>
+          )}
 
           <ResidentPaperwork resident={resident} canManage={canManageProperties} />
 

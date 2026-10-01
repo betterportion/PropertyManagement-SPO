@@ -35,6 +35,7 @@ import { isPastDue } from "@shared/dueDates";
 import type { ActionItemCategory, ActionItemSource } from "@shared/actionItems";
 import { isQuickBooksStale, QUICKBOOKS_STALE_AFTER_HOURS, type QuickBooksHealth } from "@shared/quickbooks";
 import { budgetPace } from "@shared/budgetPace";
+import type { RosterSyncHealth } from "@shared/rosterSheet";
 import { fiscalYearBounds, fiscalYearLabel, fiscalYearOf, monthsLeftInFiscalYear } from "@shared/fiscalYear";
 import type { PropertySpend, RepairBudget } from "@shared/schema";
 
@@ -92,6 +93,8 @@ export interface ActionItemInputs {
   requests: MaintenanceRequest[];
   /** The QuickBooks connection, for admins only; absent for anyone else. */
   quickbooks?: QuickBooksHealth;
+  /** The resident sheet sync, for admins only; absent for anyone else. */
+  roster?: RosterSyncHealth;
   /** Repair budgets against spend, for callers holding the property flag; absent otherwise. */
   repairBudgets?: RepairBudgetInputs;
 }
@@ -370,9 +373,53 @@ export function buildActionItems(inputs: ActionItemInputs, now: Date = new Date(
   }
 
   items.push(...quickBooksItems(inputs.quickbooks, now));
+  items.push(...rosterSyncItems(inputs.roster, now));
   if (inputs.repairBudgets) items.push(...repairBudgetItems(inputs.repairBudgets, inputs.properties, inputs.requests, now));
 
   return items.sort(compareUrgency);
+}
+
+/**
+ * The resident sheet needs an admin: it was refused for a banking-like column,
+ * it has not synced in a day and a half, or the sync left changes to review.
+ * Nothing while the sheet is not set up, or before its first run.
+ */
+export function rosterSyncItems(health: RosterSyncHealth | undefined, now: Date): ActionItem[] {
+  if (!health?.configured) return [];
+  const items: ActionItem[] = [];
+  const base = { source: "integration" as const, category: "general" as const, region: null };
+  const last = health.lastRun;
+  if (last && last.refusedColumns.length > 0) {
+    items.push({
+      ...base,
+      id: "roster-refused",
+      title: "Resident sheet refused: it has a banking column",
+      subtitle: `Remove ${last.refusedColumns.map((c) => `"${c}"`).join(", ")} from the sheet. Nothing was read or changed.`,
+      dueDate: iso(now),
+      overdue: true,
+    });
+  } else if (last && isQuickBooksStale(health.lastSuccessAt, now)) {
+    items.push({
+      ...base,
+      id: "roster-stale",
+      title: "Resident sheet hasn't synced",
+      subtitle:
+        `No successful sync in over ${QUICKBOOKS_STALE_AFTER_HOURS} hours` + (last.error ? `: ${last.error}` : ". Try Sync now in Settings."),
+      dueDate: iso(health.lastSuccessAt ? new Date(health.lastSuccessAt) : now),
+      overdue: true,
+    });
+  }
+  if (health.openReviews > 0) {
+    items.push({
+      ...base,
+      id: "roster-review",
+      title: `${health.openReviews} roster change${health.openReviews === 1 ? "" : "s"} to review`,
+      subtitle: "From the resident sheet: edits it overwrote, new stays, missing rows or unknown houses.",
+      dueDate: null,
+      overdue: false,
+    });
+  }
+  return items;
 }
 
 /** "$11,000" -- whole dollars read better in a sentence than cents. */
