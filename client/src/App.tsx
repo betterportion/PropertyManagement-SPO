@@ -34,6 +34,7 @@ import Tasks from "@/pages/Tasks";
 import Contacts from "@/pages/Contacts";
 import ContactDetail from "@/pages/ContactDetail";
 import Properties from "@/pages/Properties";
+import PropertyBudget from "@/pages/PropertyBudget";
 import PropertyDetail from "@/pages/PropertyDetail";
 import MyWalkthroughs from "@/pages/MyWalkthroughs";
 import ResidentDashboard from "@/pages/ResidentDashboard";
@@ -63,6 +64,7 @@ function Router() {
         <Route path="/" component={AdminDashboard} />
         <Route path="/tasks" component={Tasks} />
         <Route path="/properties" component={Properties} />
+        <Route path="/properties/:id/budget" component={PropertyBudget} />
         <Route path="/properties/:id" component={PropertyDetail} />
         <Route path="/residents" component={Residents} />
         <Route path="/residents/:id" component={ResidentDetail} />

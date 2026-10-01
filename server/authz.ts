@@ -323,6 +323,9 @@ const ACTION_ITEM_PERMISSIONS: Record<ActionItemSource, readonly PermissionName[
   // with none listed, only the admin bypass passes -- they are about setup
   // only an admin can fix.
   integration: [],
+  // A house's repair budget against its spend: the property flag, like the
+  // budget list (/api/repair-budgets) and the spend (/api/property-spend).
+  budget: ["canViewProperties", "canManageProperties"],
 };
 
 /** Whether the caller may see dashboard items of this kind. Staff only. */

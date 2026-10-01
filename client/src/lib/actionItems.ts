@@ -112,6 +112,9 @@ export function resolveRequest(item: ActionItem): ResolveRequest {
       const query = new URLSearchParams({ building: item.id, view: "open" });
       return { actionLabel: "See the open work", href: `/maintenance?${query.toString()}` };
     }
+    case "budget":
+      // The house's budget page, with its wishlist requests as ideas.
+      return { actionLabel: "See the budget", href: `/properties/${item.id}/budget` };
     case "integration":
       // A connection only an admin can repair, on the settings screen.
       return { actionLabel: "Open Settings", href: "/settings#quickbooks" };
@@ -130,6 +133,7 @@ export function categoryLabel(item: ActionItem): string {
   if (item.source === "asset") return "Asset";
   if (item.source === "maintenance") return "Maintenance";
   if (item.source === "integration") return "QuickBooks";
+  if (item.source === "budget") return "Budget";
   if (item.category === "safety") return "Safety";
   if (item.source === "task") return "Task";
   if (item.category === "finance") return "Finance";

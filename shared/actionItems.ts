@@ -21,6 +21,7 @@ export const ACTION_ITEM_SOURCES = [
   "asset",
   "maintenance",
   "integration",
+  "budget",
 ] as const;
 
 export type ActionItemSource = (typeof ACTION_ITEM_SOURCES)[number];

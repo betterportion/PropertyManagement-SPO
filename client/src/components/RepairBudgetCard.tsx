@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
+import { Link } from "wouter";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,16 +12,8 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { formatCurrency, formatDate, formatDateTime, localToday } from "@/lib/format";
 import { serverMessage } from "@/lib/serverMessage";
 import { fiscalYearBounds, fiscalYearLabel, fiscalYearOf } from "@shared/fiscalYear";
-import type { Property, PropertySpend, RepairBudget } from "@shared/schema";
-
-/** What /api/property-spend answers: the figures, and whether to trust them. */
-export interface SpendResponse {
-  connected: boolean;
-  lastSuccessAt: string | null;
-  stale: boolean;
-  linkedPropertyIds: string[];
-  spend: PropertySpend[];
-}
+import type { SpendResponse } from "@/lib/budgetRollup";
+import type { Property, RepairBudget } from "@shared/schema";
 
 /**
  * One owned house's repair & maintenance budget for the fiscal year.
@@ -85,6 +78,10 @@ export default function RepairBudgetCard({ property, canManage }: { property: Pr
             <SpendFigure propertyId={property.id} fiscalYear={currentYear} budget={current?.amount ?? null} data={spendData} />
           </div>
         </dl>
+
+        <Link href={`/properties/${property.id}/budget`} className="inline-block text-sm text-primary hover:underline" data-testid="link-house-budget">
+          See the year: pace, open work and wishlist
+        </Link>
 
         {next && (
           <p className="text-sm text-muted-foreground" data-testid="text-repair-budget-next">

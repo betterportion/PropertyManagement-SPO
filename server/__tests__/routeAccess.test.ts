@@ -275,6 +275,9 @@ beforeEach(() => {
   fileStoreMock.createUploadSignedUrl.mockResolvedValue(null);
   fileStoreMock.openUploadStream.mockResolvedValue(Readable.from([Buffer.from("file-bytes")]));
   storageMock.getAllUsersWithPermissions.mockResolvedValue([]);
+  storageMock.getAllRepairBudgets.mockResolvedValue([]);
+  storageMock.getAllPropertySpend.mockResolvedValue([]);
+  storageMock.getAllPropertyQuickbooksLinks.mockResolvedValue([]);
   sendEmailMock.mockReset();
   sendEmailMock.mockResolvedValue({ sent: false, reason: "not_configured" });
 });
@@ -8392,7 +8395,7 @@ describe("QuickBooks", () => {
     expect(storageMock.createAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ action: "quickbooks.accounts_changed" }));
   });
 
-  it("raises a lost connection for an admin, and never reads the connection for anyone else", async () => {
+  it("raises a lost connection for an admin only, and reads the connection for nobody without a use for it", async () => {
     for (const name of ["getAllMaintenanceSchedules", "getAllRentPayments", "getAllSecurityDeposits", "getAllDepositDeductions", "getAllResidents", "getAllTasks", "getAllProperties", "getAllPropertySetupItems", "getAllAssets"]) {
       storageMock[name].mockResolvedValue([]);
     }
@@ -8404,11 +8407,18 @@ describe("QuickBooks", () => {
       repairAccountIds: [],
     });
 
-    actAs(STAFF, { canViewMaintenance: true, canViewProperties: true, canViewFinancials: true, canViewAssets: true, allowedRegions: ["all"] });
+    // No property flag: no budget to judge, so the connection is not read.
+    actAs(STAFF, { canViewMaintenance: true, canViewFinancials: true, canViewAssets: true, allowedRegions: ["all"] });
     const staff = await get("/api/action-items");
     expect(staff.status).toBe(200);
     expect(staff.body.some((i: { source: string }) => i.source === "integration")).toBe(false);
     expect(storageMock.getQuickbooksIntegration).not.toHaveBeenCalled();
+
+    // The property flag reads it, to know whether spend is current -- and
+    // still never sees the admin's item.
+    actAs(STAFF, { canViewProperties: true, allowedRegions: ["all"] });
+    const withBudgets = await get("/api/action-items");
+    expect(withBudgets.body.some((i: { source: string }) => i.source === "integration")).toBe(false);
 
     actAs(ADMIN);
     const admin = await get("/api/action-items");
@@ -9375,6 +9385,27 @@ describe("dashboard items follow the flag of the list they come from (#158)", ()
   const WEST = { allowedRegions: ["West Central"] };
   const soon = () => new Date(Date.now() + 10 * 24 * 60 * 60 * 1000);
 
+  // QuickBooks on and current, so the budget source has a figure to judge.
+  const QB_ENV = {
+    QUICKBOOKS_CLIENT_ID: "client-id",
+    QUICKBOOKS_CLIENT_SECRET: "client-secret",
+    QUICKBOOKS_REDIRECT_URI: "https://portal.example.org/api/quickbooks/callback",
+    QUICKBOOKS_TOKEN_KEY: "ab".repeat(32),
+  };
+  const savedEnv: Record<string, string | undefined> = {};
+  beforeAll(() => {
+    for (const [name, value] of Object.entries(QB_ENV)) {
+      savedEnv[name] = process.env[name];
+      process.env[name] = value;
+    }
+  });
+  afterAll(() => {
+    for (const [name, value] of Object.entries(savedEnv)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  });
+
   // One West-Central record behind every non-finance source, plus a task.
   function mockEverySource() {
     storageMock.getAllRentPayments.mockResolvedValue([]);
@@ -9386,7 +9417,25 @@ describe("dashboard items follow the flag of the list they come from (#158)", ()
     ]);
     storageMock.getAllProperties.mockResolvedValue([
       { id: "prop-w", name: "Cleveland House", address: "1 Main St", region: "West Central", ownership: "rented", leaseRenewalDate: soon(), renewalDecision: "undecided" },
+      { id: "prop-w2", name: "Raven House", address: "2 Main St", region: "West Central", ownership: "owned" },
     ]);
+    // Over its budget: the one pace verdict that holds on any date this runs.
+    const fiscalYear = new Date().getUTCMonth() >= 5 ? new Date().getUTCFullYear() + 1 : new Date().getUTCFullYear();
+    storageMock.getAllRepairBudgets.mockResolvedValue([{ id: "rb-w2", propertyId: "prop-w2", fiscalYear, amount: "10000.00", region: "West Central" }]);
+    storageMock.getAllPropertySpend.mockResolvedValue([
+      { id: "sp-w2", propertyId: "prop-w2", fiscalYear, amount: "12000.00", region: "West Central", syncedAt: new Date() },
+    ]);
+    storageMock.getAllPropertyQuickbooksLinks.mockResolvedValue([
+      { propertyId: "prop-w2", kind: "class", externalId: "101", externalName: "Raven", region: "West Central" },
+    ]);
+    storageMock.getQuickbooksIntegration.mockResolvedValue({
+      id: "default",
+      realmId: "9130",
+      encryptedRefreshToken: "v1:x:y:z",
+      connectedAt: new Date(),
+      lastSuccessAt: new Date(),
+      repairAccountIds: ["57"],
+    });
     storageMock.getAllPropertySetupItems.mockResolvedValue([{ propertyId: "prop-w", itemKey: "electric", status: "open" }]);
     storageMock.getAllAssets.mockResolvedValue([
       { id: "asset-w", name: "Boiler", category: "Water Heater", replacementDueDate: soon(), buildingAddress: "1 Main St", region: "West Central" },
@@ -9423,7 +9472,7 @@ describe("dashboard items follow the flag of the list they come from (#158)", ()
 
     actAs(STAFF, { ...WEST, canViewProperties: true });
     mockEverySource();
-    expect(sources((await get("/api/action-items")).body)).toEqual(["lease", "setup", "task"]);
+    expect(sources((await get("/api/action-items")).body)).toEqual(["budget", "lease", "setup", "task"]);
 
     actAs(STAFF, { ...WEST, canViewAssets: true });
     mockEverySource();
@@ -9433,7 +9482,7 @@ describe("dashboard items follow the flag of the list they come from (#158)", ()
   it("gives every source to staff holding every flag -- the positive control", async () => {
     actAs(STAFF, { ...WEST, canViewMaintenance: true, canViewProperties: true, canViewAssets: true });
     mockEverySource();
-    expect(sources((await get("/api/action-items")).body)).toEqual(["asset", "lease", "maintenance", "schedule", "setup", "task"]);
+    expect(sources((await get("/api/action-items")).body)).toEqual(["asset", "budget", "lease", "maintenance", "schedule", "setup", "task"]);
   });
 
   it("does not read the requests, schedules or houses for a region summary the caller cannot open", async () => {
