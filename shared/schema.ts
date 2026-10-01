@@ -1440,6 +1440,68 @@ export const rosterReviewItems = pgTable(
 
 export type RosterReviewItem = typeof rosterReviewItems.$inferSelect;
 
+// Move-out
+//
+// The RA's checklist when somebody leaves, completed in the portal: one per
+// resident row (a returning resident's new stay gets its own). Completing it
+// records who and when. Photos are separate rows, each a stored upload whose
+// read access follows the checklist's (canReadUploadReference).
+export const moveOutChecklists = pgTable("move_out_checklists", {
+  residentId: varchar("resident_id")
+    .primaryKey()
+    .references(() => residents.id, { onDelete: "cascade" }),
+  region: varchar("region").notNull(),
+  roomInspected: boolean("room_inspected").notNull().default(false),
+  /** What the inspection found, e.g. holes in the walls. */
+  damageNotes: text("damage_notes"),
+  belongingsRemoved: boolean("belongings_removed").notNull().default(false),
+  keysReturned: boolean("keys_returned").notNull().default(false),
+  notes: text("notes"),
+  completedAt: timestamp("completed_at"),
+  completedByEmail: varchar("completed_by_email"),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export type MoveOutChecklist = typeof moveOutChecklists.$inferSelect;
+
+export const insertMoveOutChecklistSchema = z.object({
+  roomInspected: z.boolean(),
+  damageNotes: z.string().trim().max(2000).nullish().transform((v) => v || null),
+  belongingsRemoved: z.boolean(),
+  keysReturned: z.boolean(),
+  notes: z.string().trim().max(2000).nullish().transform((v) => v || null),
+  /** True to record it complete; refused unless all three checks are ticked. */
+  complete: z.boolean().default(false),
+});
+
+export const moveOutPhotos = pgTable("move_out_photos", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  residentId: varchar("resident_id")
+    .notNull()
+    .references(() => residents.id, { onDelete: "cascade" }),
+  imageUrl: varchar("image_url").notNull(),
+  region: varchar("region").notNull(),
+  uploadedByEmail: varchar("uploaded_by_email"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type MoveOutPhoto = typeof moveOutPhotos.$inferSelect;
+
+/**
+ * Deposit return deadlines per US state, in days from move-out -- entered by
+ * an admin, never shipped with the code. Empty until SPO confirms each
+ * state's rule; a house's own `depositReturnDays` overrides its state's.
+ * Deliberately not a built-in table of legal figures (.claude/rules/deposits.md).
+ */
+export const depositReturnRules = pgTable("deposit_return_rules", {
+  state: varchar("state", { length: 2 }).primaryKey(),
+  days: integer("days").notNull(),
+  updatedByEmail: varchar("updated_by_email"),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export type DepositReturnRule = typeof depositReturnRules.$inferSelect;
+
 // Rent payments
 //
 // One row per resident per month. Rent is billed monthly (decided with SPO,

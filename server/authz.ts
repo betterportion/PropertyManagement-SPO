@@ -258,13 +258,23 @@ export function isLeaseDerivedTaskSourceKey(sourceKey: string | null | undefined
 }
 
 /**
+ * Whether a task's `sourceKey` marks it as generated from the roster: a
+ * `move-out:` reminder (server/moveOut.ts) names a resident and the day they
+ * leave, and the roster is behind the properties flag everywhere else -- so
+ * the same rule as a lease-derived task applies, assignee or not.
+ */
+export function isRosterDerivedTaskSourceKey(sourceKey: string | null | undefined): boolean {
+  return !!sourceKey && sourceKey.startsWith("move-out:");
+}
+
+/**
  * Whether a task is visible to a user.
  *
  * A task is not an ordinary region-scoped record, so it does not go through
  * `filterByRegion`: its region is nullable (an all-regions broadcast), and it
  * can be personal to one user. The rules, in order:
  *   - admins see everything;
- *   - a lease-derived task (#170) additionally requires the properties flag,
+ *   - a lease-derived task (#170) or a move-out reminder additionally requires the properties flag,
  *     ahead of the "yours" bypass below -- the lease data it exposes is
  *     gated by that flag everywhere else, so being the assignee does not
  *     waive it;
@@ -287,7 +297,10 @@ export function canSeeTask(
   },
 ): boolean {
   if (ctx.isAdmin) return true;
-  if (isLeaseDerivedTaskSourceKey(task.sourceKey) && !hasPermission(ctx, "canViewProperties", "canManageProperties")) {
+  if (
+    (isLeaseDerivedTaskSourceKey(task.sourceKey) || isRosterDerivedTaskSourceKey(task.sourceKey)) &&
+    !hasPermission(ctx, "canViewProperties", "canManageProperties")
+  ) {
     return false;
   }
   if (task.createdBy === ctx.userId || task.assignedToUserId === ctx.userId) return true;
@@ -595,6 +608,16 @@ export async function canReadUploadReference(
       // When the resource hub (which does show a house its own photo) is built,
       // the branch to add here is a house match against residentHouseAddress --
       // never a region path, exactly as on walkthroughs.
+      return (
+        !ctx.isResident &&
+        hasPermission(ctx, "canViewProperties", "canManageProperties") &&
+        canAccessRegion(ctx, reference.record.region)
+      );
+
+    case "moveOutPhoto":
+      // The RA's move-out evidence: whoever can open the checklist -- staff
+      // under the property permission, in its region. Never the resident it
+      // is about, nor their housemates.
       return (
         !ctx.isResident &&
         hasPermission(ctx, "canViewProperties", "canManageProperties") &&

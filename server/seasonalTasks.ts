@@ -19,6 +19,7 @@
  */
 import { storage } from "./storage";
 import { logError } from "./errors";
+import { syncMoveOutTasks } from "./moveOut";
 
 export const SEASONAL_TASK_GENERATION_INTERVAL_MS = 24 * 60 * 60 * 1_000;
 
@@ -209,6 +210,16 @@ function runSeasonalGeneration(): void {
       })
       .catch((error) => {
         logError("Failed to generate seasonal reminder tasks", error);
+      });
+    // The move-out reminders ride the same daily run (server/moveOut.ts).
+    void syncMoveOutTasks(new Date())
+      .then(({ created, moved, removed }) => {
+        if (created + moved + removed > 0) {
+          console.info(`[seasonal] Move-out reminders: ${created} created, ${moved} moved, ${removed} removed`);
+        }
+      })
+      .catch((error) => {
+        logError("Failed to update move-out reminders", error);
       });
   } catch (error) {
     logError("Failed to start seasonal reminder generation", error);

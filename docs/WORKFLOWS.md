@@ -211,27 +211,45 @@ The details below are the agreed intent. Each entry is filled in properly in the
 ### Move-out reminder and emails (Phase 6)
 
 - **Purpose:** make sure every departure, including one mid-year, is handled before it happens.
-- **Trigger:** date-based, 30 days before a resident's stop date. Checked by a daily job.
+- **Trigger:** date-based, 30 days before a resident's stop date (`MOVE_OUT_NOTICE_DAYS`). It is checked by the daily seasonal-task job (`server/moveOut.ts`, run from `server/seasonalTasks.ts`).
 - **What the portal does:**
-  - Creates one task for the house's RA, such as "Rachel Bauer moves out in 30 days". It is never duplicated, and it is corrected if the date changes.
-  - Emails the resident a move-out checklist and gives the RA a heads-up.
-- **What SPO must do:** see "Email" in the checklist (approve the wording).
-- **Status:** planned.
+  - Creates one task on the Tasks page for the house's region, e.g. "Rachel Bauer moves out on May 20", keyed `move-out:<resident>:<date>`.
+    - **Never duplicated**, and never recreated once marked done.
+    - **If the stop date changes,** the open task moves to the new date. If the date is cleared, or moves more than 30 days out, the task is removed.
+    - Visible to staff with a property permission, like lease reminders.
+  - Emails **the resident** a move-out checklist, and **the house's regional administrators** (active, with a property permission, covering the region) a heads-up. Admins are not emailed. The emails go once per date: when the task is created, or when it moves.
+  - **The wording** is in one file, `server/notifications.ts` (`moveOutResidentEmail`, `moveOutStaffEmail`). Change it there to change every move-out email.
+  - Never touches the resident's portal login.
+- **What SPO must do:** see "Email" in the checklist: approve the wording and the RA checklist items.
+- **Needs:** email set up (`RESEND_API_KEY`, `EMAIL_FROM`). Without it, the task is still created and the emails are skipped.
+- **How to check it's working:** a resident with a stop date within 30 days has a task on the Tasks page. Email delivery shows in Email health (Phase 7).
+- **When it fails:** the failure goes to the server log and the job tries again the next day. Already-created tasks are unaffected.
+- **Status:** built (its emails are awaiting email setup).
 
 ### RA move-out checklist (Phase 6)
 
 - **Purpose:** a record that the room was checked when someone left.
-- **Trigger:** a person's action.
-- **What the portal does:** the RA completes a checklist in the app: room inspected for damage, all belongings removed, keys returned, notes, and optional photos. It records who completed it and when.
-- **Status:** planned.
+- **Trigger:** a person's action, on the resident's page. It appears once a stop date is set, or once the resident is inactive.
+- **What the portal does:**
+  - The RA ticks: room inspected for damage, all belongings removed, keys returned. There are fields for damage found and notes, plus optional photos through the existing upload.
+  - "Mark move-out complete" needs all three ticks, and records who and when (audited as `resident.move_out_checklist_completed`).
+  - Staff with a property permission in the region can see it; managing it takes `canManageProperties`.
+  - Photos are readable only by staff with a property permission in the region, never by residents. A photo's file is removed when the photo or the resident is deleted.
+- **What SPO must do:** approve the checklist items (see "Email" in the checklist).
+- **Status:** built.
 
 ### Deposit-return follow-through (Phase 6)
 
 - **Purpose:** make sure every departing resident's deposit is dealt with. Mid-year departures historically never got theirs back.
-- **Trigger:** date-based. Once a stop date has passed, a deposit still marked "held" is flagged.
-- **What the portal does:** raises a **Needs attention** item that escalates as the deposit gets older. The return deadline is a per-region or per-state setting, not a fixed number.
-- **What SPO must do:** see "Deposits" in the checklist.
-- **Status:** planned.
+- **Trigger:** date-based. A deposit still "held" or "statement sent" after the stop date is a **Needs attention** item; it also appears 30 days *before* the stop date, so the money is ready.
+- **What the portal does:**
+  - **The return deadline** is the house's own number of days if set, otherwise **its state's**, from Settings → Deposit return deadlines. That list is admin-entered, starts empty, and is audited as `deposit_rule.changed`; no figures are built into the code.
+  - **The item escalates with age:**
+    - Past the deadline: "Deposit overdue — N days past the return deadline".
+    - With no deadline set anywhere, after 14 days: "Deposit still held N days after move-out", noting that no deadline is set.
+  - Seen by staff with a finance permission, in their regions.
+- **What SPO must do:** see "Deposits" in the checklist, then enter each state's days.
+- **Status:** built-awaiting-SPO-setup.
 
 ### Email log and Email health (Phase 7)
 
@@ -271,7 +289,7 @@ Everything that has to happen outside the code. Tick an item when it's done and 
 - [ ] Send a test email from the Email health panel and confirm it arrives. Owner: TBD
 
 ### Deposits
-- [ ] Confirm the legal deposit-return deadline for each state SPO has houses in. Owner: TBD
+- [ ] Confirm the legal deposit-return deadline for each state SPO has houses in, and enter it in Settings → Deposit return deadlines. Owner: TBD
 
 ---
 

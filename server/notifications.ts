@@ -188,3 +188,60 @@ export function commentEmail({ to, request, comment, appUrl }: CommentEmailInput
       SIGN_OFF,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Move-out (server/moveOut.ts). The wording SPO approves lives here, in one
+// place: change it here and every move-out email changes with it.
+// ---------------------------------------------------------------------------
+
+/** "Wednesday, May 20, 2027", read as the calendar day it was entered as. */
+function longDay(day: string): string {
+  return new Intl.DateTimeFormat("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric", timeZone: "UTC" }).format(
+    new Date(`${day}T00:00:00.000Z`),
+  );
+}
+
+/** The checklist to the person leaving, about 30 days ahead. */
+export function moveOutResidentEmail(input: {
+  to: string | null | undefined;
+  firstName: string;
+  propertyName: string;
+  moveOutDay: string;
+}): OutboundEmail | null {
+  const to = usableAddress(input.to);
+  if (!to) return null;
+  return {
+    to,
+    subject: `Your move-out from ${input.propertyName} on ${longDay(input.moveOutDay)}`,
+    text:
+      `Hi ${input.firstName},\n\n` +
+      `Our records show you're moving out of ${input.propertyName} on ${longDay(input.moveOutDay)}. ` +
+      `Here's what to do before you go, so your deposit can be returned without deductions:\n\n` +
+      `  1. Take all of your belongings with you. Anything left behind has to be removed, and that cost can come out of your deposit.\n` +
+      `  2. Leave your room clean, and patch or report any damage (holes in the walls, broken fixtures) before you leave.\n` +
+      `  3. Return every key to your regional administrator.\n` +
+      `  4. Your regional administrator will walk through your room with you, or after you leave.\n\n` +
+      `If your move-out date has changed, please tell your regional administrator.` +
+      SIGN_OFF,
+  };
+}
+
+/** The heads-up to the house's regional administrators. */
+export function moveOutStaffEmail(input: {
+  to: string | null | undefined;
+  residentName: string;
+  propertyName: string;
+  moveOutDay: string;
+}): OutboundEmail | null {
+  const to = usableAddress(input.to);
+  if (!to) return null;
+  return {
+    to,
+    subject: `${input.residentName} moves out of ${input.propertyName} on ${longDay(input.moveOutDay)}`,
+    text:
+      `${input.residentName} is moving out of ${input.propertyName} on ${longDay(input.moveOutDay)}.\n\n` +
+      `They have been sent the move-out checklist. In the portal, open their resident page to complete the move-out ` +
+      `checklist (room inspected, belongings removed, keys returned), and make sure their deposit is returned on time.` +
+      SIGN_OFF,
+  };
+}

@@ -31,6 +31,7 @@ import { serverMessage } from "@/lib/serverMessage";
 import { z } from "zod";
 import { ActivityLog } from "@/components/ActivityLog";
 import QuickBooksSettings from "@/components/QuickBooksSettings";
+import DepositDeadlineSettings from "@/components/DepositDeadlineSettings";
 import RosterSyncSettings from "@/components/RosterSyncSettings";
 import ResourceLinksSettings from "@/components/ResourceLinksSettings";
 import WalkthroughTemplateSettings from "@/components/WalkthroughTemplateSettings";
@@ -623,6 +624,8 @@ export default function Settings() {
       <QuickBooksSettings />
 
       <RosterSyncSettings />
+
+      <DepositDeadlineSettings />
 
       <ActivityLog />
 

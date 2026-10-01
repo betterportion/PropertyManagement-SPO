@@ -37,7 +37,7 @@ import { isQuickBooksStale, QUICKBOOKS_STALE_AFTER_HOURS, type QuickBooksHealth 
 import { budgetPace } from "@shared/budgetPace";
 import type { RosterSyncHealth } from "@shared/rosterSheet";
 import { fiscalYearBounds, fiscalYearLabel, fiscalYearOf, monthsLeftInFiscalYear } from "@shared/fiscalYear";
-import type { PropertySpend, RepairBudget } from "@shared/schema";
+import type { DepositReturnRule, PropertySpend, RepairBudget } from "@shared/schema";
 
 /** How far ahead a recurring schedule becomes an action item. */
 export const SCHEDULE_LOOKAHEAD_DAYS = 30;
@@ -52,6 +52,12 @@ export const LEASE_LOOKAHEAD_DAYS = 60;
  * chased after the fact.
  */
 export const DEPOSIT_LOOKAHEAD_DAYS = 30;
+
+/**
+ * With no deadline set for the house or its state, a deposit still held this
+ * many days after the move-out says so in its title, and louder every day.
+ */
+export const DEPOSIT_ESCALATE_AFTER_DAYS = 14;
 
 const DAY_MS = 24 * 60 * 60 * 1_000;
 
@@ -91,6 +97,11 @@ export interface ActionItemInputs {
   assets: Asset[];
   /** Every request the caller may see; only the open ones are read. */
   requests: MaintenanceRequest[];
+  /**
+   * Admin-set deposit return days per state. A house's own depositReturnDays
+   * wins; otherwise its state's. Empty means no deadline anywhere.
+   */
+  depositRules?: DepositReturnRule[];
   /** The QuickBooks connection, for admins only; absent for anyone else. */
   quickbooks?: QuickBooksHealth;
   /** The resident sheet sync, for admins only; absent for anyone else. */
@@ -298,6 +309,7 @@ export function buildActionItems(inputs: ActionItemInputs, now: Date = new Date(
   // a deposit held for somebody who has gone is worth surfacing either way.
   const residentsById = new Map(inputs.residents.map((r) => [r.id, r]));
   const propertiesById = new Map(inputs.properties.map((p) => [p.id, p]));
+  const stateDays = new Map((inputs.depositRules ?? []).map((rule) => [rule.state.toUpperCase(), rule.days]));
   const depositHorizon = new Date(now.getTime() + DEPOSIT_LOOKAHEAD_DAYS * DAY_MS);
 
   // "held" and "statement_sent" are the outstanding states. Returned, withheld
@@ -321,10 +333,10 @@ export function buildActionItems(inputs: ActionItemInputs, now: Date = new Date(
       movingOut !== null && !Number.isNaN(movingOut.getTime()) && movingOut <= depositHorizon;
     if (!hasLeft && !leavingSoon) continue;
 
-    const deadline = depositReturnDeadline(
-      movingOut,
-      propertiesById.get(d.propertyId)?.depositReturnDays,
-    );
+    // The house's own number, else its state's (admin-entered, never shipped).
+    const house = propertiesById.get(d.propertyId);
+    const returnDays = house?.depositReturnDays ?? (house?.state ? stateDays.get(house.state.toUpperCase()) : undefined);
+    const deadline = depositReturnDeadline(movingOut, returnDays);
 
     // No setting means no deadline -- but not "no urgency". Every house has
     // depositReturnDays null the day this ships, and an undated item sorts
@@ -342,12 +354,23 @@ export function buildActionItems(inputs: ActionItemInputs, now: Date = new Date(
       (inputs.deductions ?? []).filter((deduction) => deduction.residentId === d.residentId),
     );
 
+    // Escalates with age once they have gone: past the deadline, by how far;
+    // with no deadline, by how long since they left.
+    const daysSince = (from: Date) => Math.floor((now.getTime() - from.getTime()) / DAY_MS);
+    let title = leavingSoon && !hasLeft ? "Deposit to return soon" : "Deposit to return";
+    if (hasLeft && deadline && deadline < now) {
+      const late = Math.max(1, daysSince(deadline));
+      title = `Deposit overdue — ${late} day${late === 1 ? "" : "s"} past the return deadline`;
+    } else if (hasLeft && !deadline && movingOut && daysSince(movingOut) >= DEPOSIT_ESCALATE_AFTER_DAYS) {
+      title = `Deposit still held ${daysSince(movingOut)} days after move-out`;
+    }
+
     items.push({
       id: d.id,
       source: "deposit",
       category: "finance",
-      title: leavingSoon && !hasLeft ? "Deposit to return soon" : "Deposit to return",
-      subtitle: d.buildingAddress,
+      title,
+      subtitle: deadline || !hasLeft ? d.buildingAddress : `${d.buildingAddress} · no return deadline set for this house or its state`,
       amount: fromCents(owed),
       dueDate: iso(dueDate),
       overdue: deadline !== null ? isPastDue(deadline, now) : hasLeft,

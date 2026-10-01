@@ -87,6 +87,7 @@ import {
   insertResidentDocumentSchema,
   insertPropertyBudgetSchema,
   insertRepairBudgetSchema,
+  insertMoveOutChecklistSchema,
   setPropertySetupItemSchema,
   setPropertyFactsSchema,
   type InsertPropertyWithAddress,
@@ -3728,7 +3729,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       if (!requireRegion(res, ctx, existing.region)) return;
 
-      await storage.deleteResident(req.params.id);
+      const files = await storage.deleteResident(req.params.id);
+      // Its move-out photos went with it by cascade.
+      await removeDeletedRecordFiles(files);
 
       // The roster row goes and its HH fee charges, deposits and paperwork go
       // with it by cascade, so this is the only record left that the person
@@ -5177,6 +5180,150 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ── Move-out checklist ───────────────────────────────────────────────────
+  //
+  // The RA's record that a room was checked when somebody left. Staff only,
+  // under the property permission (the roster's own), in the resident's region.
+
+  async function residentForMoveOut(req: any, res: any, ctx: AuthContext, need: "view" | "manage") {
+    if (!requireStaff(res, ctx)) return undefined;
+    const flags = need === "manage" ? (["canManageProperties"] as const) : (["canViewProperties", "canManageProperties"] as const);
+    if (!requirePermission(res, ctx, ...flags)) return undefined;
+    const resident = await storage.getResident(req.params.id);
+    if (!resident) {
+      res.status(404).json({ message: "Resident not found" });
+      return undefined;
+    }
+    if (!requireRegion(res, ctx, resident.region)) return undefined;
+    return resident;
+  }
+
+  app.get('/api/residents/:id/move-out-checklist', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      const resident = await residentForMoveOut(req, res, ctx, "view");
+      if (!resident) return;
+      const [checklist, photos] = await Promise.all([storage.getMoveOutChecklist(resident.id), storage.getMoveOutPhotos(resident.id)]);
+      res.json({ checklist: checklist ?? null, photos });
+    } catch (error) {
+      sendError(res, error, "Failed to load the move-out checklist");
+    }
+  });
+
+  app.put('/api/residents/:id/move-out-checklist', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      const resident = await residentForMoveOut(req, res, ctx, "manage");
+      if (!resident) return;
+      const { complete, ...fields } = insertMoveOutChecklistSchema.parse(req.body);
+      if (complete && !(fields.roomInspected && fields.belongingsRemoved && fields.keysReturned)) {
+        return res.status(400).json({ message: "Tick all three checks before marking the move-out complete" });
+      }
+      const existing = await storage.getMoveOutChecklist(resident.id);
+      // Completing records who and when, once; editing a completed checklist
+      // keeps that record unless it is reopened by un-ticking a check.
+      const stillComplete = complete || (!!existing?.completedAt && fields.roomInspected && fields.belongingsRemoved && fields.keysReturned);
+      const checklist = await storage.upsertMoveOutChecklist({
+        residentId: resident.id,
+        region: resident.region,
+        ...fields,
+        completedAt: stillComplete ? (existing?.completedAt ?? new Date()) : null,
+        completedByEmail: stillComplete ? (existing?.completedByEmail ?? ctx.user.email ?? null) : null,
+      });
+      if (complete && !existing?.completedAt) {
+        recordAuditEvent(ctx, {
+          action: AUDIT_ACTIONS.RESIDENT_MOVE_OUT_CHECKLIST_COMPLETED,
+          entityType: "resident",
+          entityId: resident.id,
+          summary: `Completed the move-out checklist for ${resident.firstName} ${resident.lastName} at ${resident.buildingAddress}`,
+          details: { region: resident.region, damageNoted: !!fields.damageNotes },
+        });
+      }
+      res.json(checklist);
+    } catch (error) {
+      sendError(res, error, "Failed to save the move-out checklist");
+    }
+  });
+
+  app.post('/api/residents/:id/move-out-photos', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      const resident = await residentForMoveOut(req, res, ctx, "manage");
+      if (!resident) return;
+      const { imageUrl } = z.object({ imageUrl: z.string() }).parse(req.body);
+      // Only a file this caller stored, in the /uploads/<key> shape.
+      await requireOwnUploads(ctx, { imageUrl }, ["imageUrl"]);
+      res.json(
+        await storage.createMoveOutPhoto({ residentId: resident.id, imageUrl, region: resident.region, uploadedByEmail: ctx.user.email ?? null }),
+      );
+    } catch (error) {
+      sendError(res, error, "Failed to add the photo");
+    }
+  });
+
+  app.delete('/api/move-out-photos/:id', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canManageProperties")) return;
+      const photo = await storage.getMoveOutPhoto(req.params.id);
+      if (!photo) return res.status(404).json({ message: "Photo not found" });
+      if (!requireRegion(res, ctx, photo.region)) return;
+      await removeDeletedRecordFiles(await storage.deleteMoveOutPhoto(photo.id));
+      res.json({ success: true });
+    } catch (error) {
+      sendError(res, error, "Failed to remove the photo");
+    }
+  });
+
+  // ── Deposit return deadlines per state ───────────────────────────────────
+  //
+  // Admin-entered, empty until SPO confirms each state's rule. Never a figure
+  // the portal ships with (.claude/rules/deposits.md).
+
+  app.get('/api/deposit-return-rules', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireAdmin(res, ctx)) return;
+      res.json(await storage.getAllDepositReturnRules());
+    } catch (error) {
+      sendError(res, error, "Failed to load the deposit deadlines");
+    }
+  });
+
+  app.put('/api/deposit-return-rules/:state', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireAdmin(res, ctx)) return;
+      const state = String(req.params.state).toUpperCase();
+      if (!/^[A-Z]{2}$/.test(state)) return res.status(400).json({ message: "Use a two-letter state code" });
+      const { days } = z
+        .object({ days: z.number().int("Whole days only").min(1, "At least 1 day").max(365, "At most 365 days").nullable() })
+        .parse(req.body);
+      const previous = (await storage.getAllDepositReturnRules()).find((r) => r.state === state);
+      await storage.setDepositReturnRule(state, days, ctx.user.email ?? null);
+      recordAuditEvent(ctx, {
+        action: AUDIT_ACTIONS.DEPOSIT_RULE_CHANGED,
+        entityType: "deposit_rule",
+        entityId: state,
+        summary:
+          days === null
+            ? `Cleared the ${state} deposit return deadline (was ${previous?.days ?? "unset"} days)`
+            : `Set the ${state} deposit return deadline to ${days} days (was ${previous?.days ?? "unset"})`,
+        details: { state, days, previousDays: previous?.days ?? null },
+      });
+      res.json({ state, days });
+    } catch (error) {
+      sendError(res, error, "Failed to save the deposit deadline");
+    }
+  });
+
   // ── Aggregates: what keeps going wrong, and who keeps being called back ───
 
   /**
@@ -5251,7 +5398,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         seesBudgets ? storage.getAllPropertyQuickbooksLinks() : [],
       ]);
 
+      const depositRules = seesFinance ? await storage.getAllDepositReturnRules() : [];
+
       const items = buildActionItems({
+        depositRules,
         quickbooks: seesIntegrations ? health : undefined,
         roster,
         repairBudgets:
