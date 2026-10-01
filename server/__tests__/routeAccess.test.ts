@@ -10466,3 +10466,164 @@ describe("guards on deletes and lists", () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// Guards the pilot audit (2026-10-01) found no test would miss: each was
+// removed in a scratch copy and the whole suite stayed green. Every refusal
+// below is paired with the request that does succeed, so a refusal cannot
+// pass because the route simply does nothing.
+// ---------------------------------------------------------------------------
+
+describe("account and permission changes are admins' alone", () => {
+  /** A regional lead holding every flag and every region: still not an admin. */
+  const EVERYTHING_BUT_ADMIN = {
+    canViewMaintenance: true, canManageMaintenance: true, canViewProperties: true, canManageProperties: true,
+    canViewFinancials: true, canManageFinancials: true, canManageUsers: true, canManageBilling: true,
+    allowedRegions: ["all"],
+  };
+  const TARGET = { id: "u-target", email: "target@example.com", role: "regional_administrator", isActive: true };
+
+  beforeEach(() => {
+    storageMock.getAllUsers.mockResolvedValue([TARGET]);
+    storageMock.updateUserActiveStatus.mockImplementation(async (id: string, isActive: boolean) => ({ ...TARGET, id, isActive }));
+    storageMock.upsertUserPermissions.mockImplementation(async (row: object) => row);
+    storageMock.upsertUser.mockImplementation(async (u: object) => ({ user: { ...TARGET, ...u }, relinkedFrom: null }));
+  });
+
+  const ROUTES: [string, string, unknown?][] = [
+    ["GET", "/api/users"],
+    ["PATCH", "/api/users/u-target/status", { isActive: false }],
+    ["PATCH", "/api/users/u-target/permissions", { canManageUsers: true, allowedRegions: ["all"] }],
+    ["POST", "/api/users", { id: "u-admin", email: "admin@example.com", role: "admin" }],
+  ];
+  const WRITES = ["updateUserActiveStatus", "upsertUserPermissions", "upsertUser", "createAuditEvent"];
+
+  it.each(ROUTES)("refuses %s %s to a regional lead with every flag, writing nothing", async (method, path, body) => {
+    actAs(STAFF, EVERYTHING_BUT_ADMIN);
+    storageMock.getUser.mockImplementation(async (id: string) => (id === STAFF.id ? STAFF : TARGET));
+    const res = await request(method, path, { body });
+    expect(res.status).toBe(403);
+    expect(storageMock.getAllUsers).not.toHaveBeenCalled();
+    for (const write of WRITES) expect(storageMock[write]).not.toHaveBeenCalled();
+  });
+
+  it.each(ROUTES)("refuses %s %s to a resident, writing nothing", async (method, path, body) => {
+    actAs(ALICE, { canViewMaintenance: true });
+    const res = await request(method, path, { body });
+    expect(res.status).toBe(403);
+    for (const write of WRITES) expect(storageMock[write]).not.toHaveBeenCalled();
+  });
+
+  it("lets an admin do each (positive control)", async () => {
+    actAs(ADMIN);
+    storageMock.getUser.mockImplementation(async (id: string) => (id === ADMIN.id ? ADMIN : TARGET));
+    expect((await get("/api/users")).status).toBe(200);
+    expect((await request("PATCH", "/api/users/u-target/status", { body: { isActive: false } })).status).toBe(200);
+    expect(storageMock.updateUserActiveStatus).toHaveBeenCalledWith("u-target", false);
+    expect((await request("PATCH", "/api/users/u-target/permissions", { body: { canViewMaintenance: true } })).status).toBe(200);
+    expect(storageMock.upsertUserPermissions).toHaveBeenCalled();
+    expect((await request("POST", "/api/users", { body: { id: "u-new", email: "new@example.com", role: "resident" } })).status).toBe(200);
+    expect(storageMock.upsertUser).toHaveBeenCalled();
+  });
+});
+
+describe("the finance lists are cut to the caller's regions", () => {
+  const WEST_ROW = { id: "w", region: "West Central", buildingAddress: "1 Main St" };
+  const EAST_ROW = { id: "e", region: "East Central", buildingAddress: "9 Elm" };
+  const LISTS: [string, string][] = [
+    ["/api/rent-payments", "getAllRentPayments"],
+    ["/api/security-deposits", "getAllSecurityDeposits"],
+    ["/api/deposit-deductions", "getAllDepositDeductions"],
+  ];
+
+  it.each(LISTS)("gives %s only the caller's region's rows", async (path, method) => {
+    storageMock[method].mockResolvedValue([WEST_ROW, EAST_ROW]);
+    actAs(STAFF, { canViewFinancials: true, allowedRegions: ["West Central"] });
+    const { status, body } = await get(path);
+    expect(status).toBe(200);
+    expect(body.map((r: { id: string }) => r.id)).toEqual(["w"]);
+  });
+
+  it.each(LISTS)("gives %s nothing to finance staff with no regions", async (path, method) => {
+    storageMock[method].mockResolvedValue([WEST_ROW, EAST_ROW]);
+    actAs(STAFF, { canViewFinancials: true, allowedRegions: [] });
+    expect((await get(path)).body).toEqual([]);
+  });
+
+  it.each(LISTS)("gives %s every row to an admin (positive control)", async (path, method) => {
+    storageMock[method].mockResolvedValue([WEST_ROW, EAST_ROW]);
+    actAs(ADMIN);
+    expect((await get(path)).body).toHaveLength(2);
+  });
+});
+
+describe("move-out photos", () => {
+  const RESIDENT = { id: "r-1", firstName: "Rachel", lastName: "Bauer", region: "West Central", buildingAddress: "1 Main St", email: "rachel@example.org" };
+  const PHOTO = { id: "mo-1", residentId: "r-1", region: "West Central", imageUrl: "/uploads/0123456789abcdef0123456789abcdef.jpg" };
+  const OWN_UPLOAD = { storageKey: "0123456789abcdef0123456789abcdef.jpg", uploadedBy: STAFF.id };
+  const addPhoto = () => request("POST", "/api/residents/r-1/move-out-photos", { body: { imageUrl: PHOTO.imageUrl } });
+
+  beforeEach(() => {
+    storageMock.getResident.mockResolvedValue(RESIDENT);
+    storageMock.getUploadByStorageKey.mockResolvedValue(OWN_UPLOAD);
+    storageMock.createMoveOutPhoto.mockImplementation(async (row: object) => ({ id: "mo-new", ...row }));
+    storageMock.getMoveOutPhoto.mockResolvedValue(PHOTO);
+    storageMock.deleteMoveOutPhoto.mockResolvedValue([PHOTO.imageUrl]);
+  });
+
+  it.each([
+    ["a resident", () => actAs({ ...ALICE, email: RESIDENT.email } as typeof ALICE, { canViewProperties: true, canManageProperties: true })],
+    ["staff without the property flag", () => actAs(STAFF, { canViewMaintenance: true, allowedRegions: ["West Central"] })],
+    ["staff from another region", () => actAs(STAFF, { canManageProperties: true, allowedRegions: ["East Central"] })],
+  ])("refuses adding or deleting one to %s, writing nothing", async (_who, sign) => {
+    sign();
+    expect((await addPhoto()).status).toBe(403);
+    expect((await request("DELETE", "/api/move-out-photos/mo-1")).status).toBe(403);
+    expect(storageMock.createMoveOutPhoto).not.toHaveBeenCalled();
+    expect(storageMock.deleteMoveOutPhoto).not.toHaveBeenCalled();
+    expect(fileStoreMock.removeUpload).not.toHaveBeenCalled();
+  });
+
+  it("lets the house's RA add and delete one (positive control)", async () => {
+    actAs(STAFF, { canManageProperties: true, allowedRegions: ["West Central"] });
+    expect((await addPhoto()).status).toBe(200);
+    expect(storageMock.createMoveOutPhoto).toHaveBeenCalled();
+    expect((await request("DELETE", "/api/move-out-photos/mo-1")).status).toBe(200);
+    expect(storageMock.deleteMoveOutPhoto).toHaveBeenCalledWith("mo-1");
+  });
+});
+
+describe("every upload route checks a file's real contents, not only its name", () => {
+  const EXE = new Uint8Array([0x4d, 0x5a, 0x90, 0x00, 0x03, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00]);
+  const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0]);
+  const PDF = new TextEncoder().encode("%PDF-1.4\n%x\n");
+  const form = (bytes: Uint8Array, type: string, name: string) => {
+    const f = new FormData();
+    f.append("file", new Blob([bytes], { type }), name);
+    return f;
+  };
+  const post = async (path: string, body: FormData) => (await fetch(`${baseUrl}${path}`, { method: "POST", body })).status;
+
+  beforeEach(() => {
+    fileStoreMock.putUpload.mockResolvedValue(undefined);
+    storageMock.createUpload.mockImplementation(async (row: object) => ({ id: "up-1", ...row }));
+  });
+
+  const ROUTES: Array<[string, () => void, string, string]> = [
+    ["/api/upload", () => actAs(STAFF, { canManageMaintenance: true, allowedRegions: ["West Central"] }), "image/jpeg", "photo.jpg"],
+    ["/api/maintenance-request-photos/upload", () => actAs(ALICE, ALL_MAINTENANCE), "image/jpeg", "photo.jpg"],
+    ["/api/upload-doc", () => actAs(STAFF, { canManageBilling: true, allowedRegions: ["West Central"] }), "application/pdf", "w9.pdf"],
+  ];
+
+  it.each(ROUTES)("refuses an executable renamed for %s, storing nothing", async (path, sign, type, name) => {
+    sign();
+    expect(await post(path, form(EXE, type, name))).toBe(400);
+    expect(fileStoreMock.putUpload).not.toHaveBeenCalled();
+  });
+
+  it.each(ROUTES)("stores a genuine file sent to %s (positive control)", async (path, sign, type, name) => {
+    sign();
+    expect(await post(path, form(type === "application/pdf" ? PDF : JPEG, type, name))).toBe(200);
+    expect(fileStoreMock.putUpload).toHaveBeenCalled();
+  });
+});
