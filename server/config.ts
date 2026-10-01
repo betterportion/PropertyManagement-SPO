@@ -332,6 +332,57 @@ function checkQuickBooks(problems: string[]): void {
   if (problem) problems.push(problem);
 }
 
+/**
+ * The master resident sheet: a Google service account with read-only access,
+ * the spreadsheet's id and the tab to read. All three or none, like email and
+ * QuickBooks. GOOGLE_SERVICE_ACCOUNT_JSON is the key file's whole contents.
+ */
+export const ROSTER_SHEET_ENV_VARS = ["GOOGLE_SERVICE_ACCOUNT_JSON", "RESIDENT_SHEET_ID", "RESIDENT_SHEET_TAB"] as const;
+
+export type RosterSheetConfig = {
+  clientEmail: string;
+  privateKey: string;
+  sheetId: string;
+  tab: string;
+};
+
+export function readRosterSheetConfigFromEnv():
+  | { configured: true; config: RosterSheetConfig; problem?: undefined }
+  | { configured: false; problem?: string } {
+  const values = Object.fromEntries(ROSTER_SHEET_ENV_VARS.map((name) => [name, process.env[name]?.trim() || ""]));
+  const missing = ROSTER_SHEET_ENV_VARS.filter((name) => !values[name]);
+  if (missing.length === ROSTER_SHEET_ENV_VARS.length) return { configured: false };
+  if (missing.length > 0) {
+    return {
+      configured: false,
+      problem:
+        `The resident sheet sync is partly set up: ${missing.join(", ")} ${missing.length === 1 ? "is" : "are"} not set.\n` +
+        "    Set all three to turn it on, or unset them all to leave it off.",
+    };
+  }
+  let key: { client_email?: unknown; private_key?: unknown };
+  try {
+    key = JSON.parse(values.GOOGLE_SERVICE_ACCOUNT_JSON);
+  } catch {
+    return { configured: false, problem: "GOOGLE_SERVICE_ACCOUNT_JSON is not valid JSON. Paste the whole service account key file." };
+  }
+  if (typeof key.client_email !== "string" || typeof key.private_key !== "string" || !key.private_key.includes("PRIVATE KEY")) {
+    return { configured: false, problem: "GOOGLE_SERVICE_ACCOUNT_JSON is missing client_email or private_key. Paste the whole service account key file." };
+  }
+  if (!/^[A-Za-z0-9_-]{20,}$/.test(values.RESIDENT_SHEET_ID)) {
+    return { configured: false, problem: "RESIDENT_SHEET_ID should be the long id from the sheet's address (between /d/ and /edit)." };
+  }
+  return {
+    configured: true,
+    config: { clientEmail: key.client_email, privateKey: key.private_key, sheetId: values.RESIDENT_SHEET_ID, tab: values.RESIDENT_SHEET_TAB },
+  };
+}
+
+function checkRosterSheet(problems: string[]): void {
+  const { problem } = readRosterSheetConfigFromEnv();
+  if (problem) problems.push(problem);
+}
+
 function checkStorage(problems: string[]): void {
   let driver: string;
   try {
@@ -384,6 +435,7 @@ export function validateConfiguration(): void {
   checkEmail(problems);
   checkAppUrl(problems);
   checkQuickBooks(problems);
+  checkRosterSheet(problems);
 
   if (problems.length === 0) return;
 

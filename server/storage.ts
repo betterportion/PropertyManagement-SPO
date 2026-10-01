@@ -25,6 +25,9 @@ import {
   quickbooksIntegration,
   propertyQuickbooksLinks,
   propertySpend,
+  residentSheetLinks,
+  rosterSyncRuns,
+  rosterReviewItems,
   propertyFacts,
   residents,
   rentPayments,
@@ -86,6 +89,9 @@ import {
   type QuickbooksIntegration,
   type PropertyQuickbooksLink,
   type PropertySpend,
+  type ResidentSheetLink,
+  type RosterSyncRun,
+  type RosterReviewItem,
   type PropertyFacts,
   type PropertyFactsWrite,
   type MaintenanceSchedule,
@@ -181,6 +187,16 @@ export interface PropertyDeleteBlockers {
 export interface UpsertUserResult {
   user: User;
   relinkedFrom?: Pick<User, "id" | "email" | "role">;
+}
+
+/** What the roster sync writes, already worked out (server/rosterSync.ts). */
+export interface RosterPlanWrite {
+  creates: Array<{ resident: InsertResident; syncedValues: Record<string, string | boolean | null> }>;
+  updates: Array<{ id: string; data: Partial<InsertResident>; syncedValues: Record<string, string | boolean | null> }>;
+  /** Residents already matching the sheet, whose synced values are (re)recorded. */
+  links: Array<{ residentId: string; syncedValues: Record<string, string | boolean | null> }>;
+  reviews: Array<Omit<RosterReviewItem, "id" | "status" | "reviewedByEmail" | "reviewedAt" | "createdAt">>;
+  syncedAt: Date;
 }
 
 export interface IStorage {
@@ -341,7 +357,8 @@ export interface IStorage {
   getAllResidents(): Promise<Resident[]>;
   getResidentsByProperty(propertyId: string): Promise<Resident[]>;
   getActiveResidentByEmail(email: string): Promise<Resident | undefined>;
-  updateResident(id: string, data: Partial<InsertResident>): Promise<Resident>;
+  /** `edited` marks the change as a person's (see residents.editedAt); the sheet sync never passes it. */
+  updateResident(id: string, data: Partial<InsertResident>, edited?: { by: string | null; at: Date }): Promise<Resident>;
   deleteResident(id: string): Promise<void>;
 
   // Rent Payments
@@ -514,6 +531,16 @@ export interface IStorage {
   getAllPropertySpend(): Promise<PropertySpend[]>;
   /** Writes every row of one sync together, or none of them. */
   upsertPropertySpend(rows: Array<Omit<PropertySpend, "id">>): Promise<void>;
+
+  // Resident roster sync
+  getAllResidentSheetLinks(): Promise<ResidentSheetLink[]>;
+  /** Applies a whole plan in one transaction and returns the residents it created. */
+  applyRosterPlan(plan: RosterPlanWrite): Promise<Resident[]>;
+  createRosterSyncRun(run: Omit<RosterSyncRun, "id" | "createdAt">): Promise<RosterSyncRun>;
+  getRecentRosterSyncRuns(limit: number): Promise<RosterSyncRun[]>;
+  getLastSuccessfulRosterSyncRun(): Promise<RosterSyncRun | undefined>;
+  getRosterReviewItems(status: "open" | "reviewed", limit: number): Promise<RosterReviewItem[]>;
+  markRosterReviewItemReviewed(id: string, byEmail: string | null): Promise<RosterReviewItem | undefined>;
 
   // House facts
   getPropertyFacts(propertyId: string): Promise<PropertyFacts | undefined>;
@@ -1333,10 +1360,14 @@ export class DatabaseStorage implements IStorage {
     return resident;
   }
 
-  async updateResident(id: string, data: Partial<InsertResident>): Promise<Resident> {
+  async updateResident(id: string, data: Partial<InsertResident>, edited?: { by: string | null; at: Date }): Promise<Resident> {
     const [resident] = await db
       .update(residents)
-      .set({ ...filterUndefined(data), updatedAt: new Date() })
+      .set({
+        ...filterUndefined(data),
+        ...(edited ? { editedAt: edited.at, editedByEmail: edited.by } : {}),
+        updatedAt: new Date(),
+      })
       .where(eq(residents.id, id))
       .returning();
     return resident;
@@ -1990,6 +2021,74 @@ export class DatabaseStorage implements IStorage {
           });
       }
     });
+  }
+
+  // Resident roster sync Implementation
+  async getAllResidentSheetLinks(): Promise<ResidentSheetLink[]> {
+    return await db.select().from(residentSheetLinks);
+  }
+
+  async applyRosterPlan(plan: RosterPlanWrite): Promise<Resident[]> {
+    return await db.transaction(async (tx) => {
+      const link = async (residentId: string, syncedValues: Record<string, string | boolean | null>) =>
+        await tx
+          .insert(residentSheetLinks)
+          .values({ residentId, syncedValues, syncedAt: plan.syncedAt })
+          .onConflictDoUpdate({ target: residentSheetLinks.residentId, set: { syncedValues, syncedAt: plan.syncedAt } });
+
+      const created: Resident[] = [];
+      for (const c of plan.creates) {
+        const [row] = await tx.insert(residents).values(c.resident).returning();
+        await link(row.id, c.syncedValues);
+        created.push(row);
+      }
+      for (const u of plan.updates) {
+        // Not a person's edit: editedAt/editedByEmail are left as they were.
+        await tx.update(residents).set({ ...filterUndefined(u.data), updatedAt: new Date() }).where(eq(residents.id, u.id));
+        await link(u.id, u.syncedValues);
+      }
+      for (const l of plan.links) await link(l.residentId, l.syncedValues);
+      // One open item per key (a partial unique index): a repeat is a no-op.
+      for (const r of plan.reviews) await tx.insert(rosterReviewItems).values(r).onConflictDoNothing();
+      return created;
+    });
+  }
+
+  async createRosterSyncRun(run: Omit<RosterSyncRun, "id" | "createdAt">): Promise<RosterSyncRun> {
+    const [row] = await db.insert(rosterSyncRuns).values(run).returning();
+    return row;
+  }
+
+  async getRecentRosterSyncRuns(limit: number): Promise<RosterSyncRun[]> {
+    return await db.select().from(rosterSyncRuns).orderBy(desc(rosterSyncRuns.createdAt)).limit(limit);
+  }
+
+  async getLastSuccessfulRosterSyncRun(): Promise<RosterSyncRun | undefined> {
+    const [row] = await db
+      .select()
+      .from(rosterSyncRuns)
+      .where(and(eq(rosterSyncRuns.ok, true), eq(rosterSyncRuns.dryRun, false), eq(rosterSyncRuns.source, "sheet")))
+      .orderBy(desc(rosterSyncRuns.createdAt))
+      .limit(1);
+    return row;
+  }
+
+  async getRosterReviewItems(status: "open" | "reviewed", limit: number): Promise<RosterReviewItem[]> {
+    return await db
+      .select()
+      .from(rosterReviewItems)
+      .where(eq(rosterReviewItems.status, status))
+      .orderBy(desc(rosterReviewItems.createdAt))
+      .limit(limit);
+  }
+
+  async markRosterReviewItemReviewed(id: string, byEmail: string | null): Promise<RosterReviewItem | undefined> {
+    const [row] = await db
+      .update(rosterReviewItems)
+      .set({ status: "reviewed", reviewedByEmail: byEmail, reviewedAt: new Date() })
+      .where(and(eq(rosterReviewItems.id, id), eq(rosterReviewItems.status, "open")))
+      .returning();
+    return row;
   }
 
   // House facts Implementation

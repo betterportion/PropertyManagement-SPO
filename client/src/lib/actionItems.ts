@@ -117,7 +117,7 @@ export function resolveRequest(item: ActionItem): ResolveRequest {
       return { actionLabel: "See the budget", href: `/properties/${item.id}/budget` };
     case "integration":
       // A connection only an admin can repair, on the settings screen.
-      return { actionLabel: "Open Settings", href: "/settings#quickbooks" };
+      return { actionLabel: "Open Settings", href: item.id.startsWith("roster") ? "/settings#roster" : "/settings#quickbooks" };
     default:
       // A newer server can send a kind this client has never heard of. The
       // row degrades to a link rather than white-screening the page, which is
@@ -132,7 +132,7 @@ export function categoryLabel(item: ActionItem): string {
   if (item.source === "setup") return "Setup";
   if (item.source === "asset") return "Asset";
   if (item.source === "maintenance") return "Maintenance";
-  if (item.source === "integration") return "QuickBooks";
+  if (item.source === "integration") return item.id.startsWith("roster") ? "Roster" : "QuickBooks";
   if (item.source === "budget") return "Budget";
   if (item.category === "safety") return "Safety";
   if (item.source === "task") return "Task";

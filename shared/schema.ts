@@ -1282,6 +1282,9 @@ export type InsertProperty = z.infer<typeof insertPropertySchema>;
 // Type for creating/updating properties with computed address
 export type InsertPropertyWithAddress = InsertProperty & { address: string };
 
+/** How a resident pays the household fee. */
+export const RESIDENT_PAYMENT_PLANS = ["monthly", "installments"] as const;
+
 // Residents
 //
 // Who is living in each house. The roster is the foundation the money features
@@ -1323,8 +1326,17 @@ export const residents = pgTable("residents", {
   moveInDate: timestamp("move_in_date"),
   moveOutDate: timestamp("move_out_date"),
   isActive: boolean("is_active").notNull().default(true),
+  /** How the household fee is paid: monthly, or in installments. Null is not recorded. */
+  paymentPlan: varchar("payment_plan", { enum: RESIDENT_PAYMENT_PLANS }),
   region: varchar("region").notNull(),
   buildingAddress: varchar("building_address").notNull(),
+  /**
+   * The last time a PERSON changed this row in the portal, and who -- never the
+   * sheet sync. It is what lets the sync tell a plain sheet update from one
+   * that overwrites somebody's edit (server/rosterSync.ts).
+   */
+  editedAt: timestamp("edited_at"),
+  editedByEmail: varchar("edited_by_email"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -1332,6 +1344,8 @@ export const residents = pgTable("residents", {
 export const insertResidentSchema = createInsertSchema(residents)
   .omit({
     id: true,
+    editedAt: true,
+    editedByEmail: true,
     createdAt: true,
     updatedAt: true,
   })
@@ -1345,6 +1359,86 @@ export const insertResidentSchema = createInsertSchema(residents)
 
 export type Resident = typeof residents.$inferSelect;
 export type InsertResident = z.infer<typeof insertResidentSchema>;
+
+// Resident roster sync (the master Google Sheet, or a one-time CSV)
+//
+// See server/rosterSync.ts. The sheet wins; what a person changed in the
+// portal since the last sync is still overwritten, but never silently -- it
+// becomes a review item. Nothing is ever deleted by a sync.
+
+/**
+ * What the sync last wrote to a resident, field by field. A current value that
+ * differs from this was changed by a person since; a resident with no row here
+ * has never been synced.
+ */
+export const residentSheetLinks = pgTable("resident_sheet_links", {
+  residentId: varchar("resident_id")
+    .primaryKey()
+    .references(() => residents.id, { onDelete: "cascade" }),
+  syncedValues: jsonb("synced_values").$type<Record<string, string | boolean | null>>().notNull(),
+  syncedAt: timestamp("synced_at").notNull(),
+});
+
+export type ResidentSheetLink = typeof residentSheetLinks.$inferSelect;
+
+/** One run of the sync: what it read and what it did, for Settings. */
+export const rosterSyncRuns = pgTable("roster_sync_runs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  source: varchar("source", { enum: ["sheet", "csv"] }).notNull(),
+  dryRun: boolean("dry_run").notNull().default(false),
+  ok: boolean("ok").notNull(),
+  rowsRead: integer("rows_read").notNull().default(0),
+  created: integer("created").notNull().default(0),
+  updated: integer("updated").notNull().default(0),
+  conflicts: integer("conflicts").notNull().default(0),
+  skipped: integer("skipped").notNull().default(0),
+  /** [{ row, reason }] -- the sheet row number and why it was skipped. */
+  skippedRows: jsonb("skipped_rows").$type<Array<{ row: number; reason: string }>>().notNull().default([]),
+  /** Header names that look like banking fields: the whole run was refused. */
+  refusedColumns: text("refused_columns").array().notNull().default([]),
+  /** A sentence for an admin when the run could not finish. */
+  error: text("error"),
+  actorEmail: varchar("actor_email"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export type RosterSyncRun = typeof rosterSyncRuns.$inferSelect;
+
+export const ROSTER_REVIEW_KINDS = [
+  "conflict", // the sheet overwrote a person's edit
+  "missing_from_sheet", // an active resident the sheet no longer lists
+  "unknown_house", // a row naming a house the portal does not have
+  "new_stay", // a returning resident got a new stay
+  "previous_stay_open", // a new stay while the previous one has no stop date
+] as const;
+
+export const rosterReviewItems = pgTable(
+  "roster_review_items",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    /** What makes two items the same, so a re-run never files one twice. */
+    dedupeKey: varchar("dedupe_key").notNull(),
+    kind: varchar("kind", { enum: ROSTER_REVIEW_KINDS }).notNull(),
+    residentId: varchar("resident_id").references(() => residents.id, { onDelete: "set null" }),
+    email: varchar("email"),
+    name: varchar("name"),
+    field: varchar("field"),
+    oldValue: text("old_value"),
+    newValue: text("new_value"),
+    editedByEmail: varchar("edited_by_email"),
+    editedAt: timestamp("edited_at"),
+    detail: text("detail").notNull(),
+    status: varchar("status", { enum: ["open", "reviewed"] }).notNull().default("open"),
+    reviewedByEmail: varchar("reviewed_by_email"),
+    reviewedAt: timestamp("reviewed_at"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  // One OPEN item per key: once reviewed, the same thing happening again later
+  // is news and files a fresh one.
+  (table) => [uniqueIndex("IDX_roster_review_open_dedupe").on(table.dedupeKey).where(sql`status = 'open'`)],
+);
+
+export type RosterReviewItem = typeof rosterReviewItems.$inferSelect;
 
 // Rent payments
 //

@@ -49,6 +49,10 @@ export const AUDIT_ACTIONS = {
   PROPERTY_DELETED: "property.deleted",
   RESIDENT_DOCUMENT_RECORDED: "resident.document_recorded",
   RESIDENT_DELETED: "resident.deleted",
+  RESIDENT_SHEET_SYNC: "resident.sheet_sync",
+  RESIDENT_SHEET_CREATED: "resident.sheet_created",
+  RESIDENT_SHEET_UPDATED: "resident.sheet_updated",
+  RESIDENT_REVIEW_RESOLVED: "resident.review_resolved",
   DOCUMENT_UPLOADED: "document.uploaded",
   DOCUMENT_DOWNLOADED: "document.downloaded",
 } as const;
@@ -103,6 +107,10 @@ export const AUDIT_ACTION_LABELS: Record<AuditAction, string> = {
   "property.deleted": "Property deleted",
   "resident.document_recorded": "Resident paperwork recorded",
   "resident.deleted": "Resident removed from the roster",
+  "resident.sheet_sync": "Resident sheet sync",
+  "resident.sheet_created": "Resident added from the sheet",
+  "resident.sheet_updated": "Resident updated from the sheet",
+  "resident.review_resolved": "Roster review item marked reviewed",
   "document.uploaded": "Document uploaded",
   "document.downloaded": "Document downloaded",
 };

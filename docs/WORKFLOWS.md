@@ -172,20 +172,41 @@ The details below are the agreed intent. Each entry is filled in properly in the
 
 ### Resident roster from the master Google Sheet (Phase 5)
 
-- **Purpose:** keep the portal's resident list, and above all household start and stop dates, matching SPO's one master sheet without anyone retyping it.
-- **Trigger:** daily job, plus an admin "Sync now" button.
-- **What the portal does:**
-  - Reads one tab of the sheet with a read-only Google service account, and only an allowlist of columns.
-  - If any column header looks like a bank, routing, account, card or ACH field, it **refuses the entire sync**, changes nothing, and tells admins which column to remove.
-  - Matches residents by email. The sheet wins, but a value a person changed in the portal since the last sync becomes a review item.
-  - Never deletes a resident who drops off the sheet; they are flagged instead.
-  - Bad rows are skipped and reported.
-- **Column contract:** *to be finalized in Phase 5.* It covers full name, email, house, household start date, household stop date, payment plan (monthly / installments) and an active flag. The exact headers will be written here, and are what SPO builds the sheet to.
+- **Purpose:** keep the portal's roster matching SPO's one master sheet, above all household start and stop dates, which drive move-outs and deposits, without anyone retyping it.
+- **Trigger:** a daily job (`server/rosterSheetSync.ts`) that runs at boot and every 24 hours. Admins also have **Preview** (changes nothing) and **Sync now** in Settings → Resident roster sheet.
+- **What the portal does** (rules in `server/rosterSync.ts`):
+  - **Reads only the allowlisted columns.** The header row is read first, and only the columns below are requested from Google.
+  - **Refuses banking columns.** If any header looks like a bank, routing, account, card or ACH field, the whole sync is refused: no data cell is read, nothing changes, and admins get a **Needs attention** item naming the column to remove.
+  - **Matches by email,** ignoring case and spaces. A new email becomes a new resident on the house its row names. An unknown house creates nothing and is flagged.
+  - **The sheet wins.** A changed value is applied. If a person had changed that value in the portal since the last sync, it is still applied, but a review item records the old value, the new one, and who edited it when. The first sync treats every existing value as a person's, which is why the first run should be a Preview.
+  - **Returning residents get a new stay** when the house differs, or the start date is after their last stay ended. The earlier stay keeps its own dates, deposit and paperwork, and the resident page lists "Other stays". If the earlier stay has no stop date, that is flagged too.
+  - **Never deletes anyone.** An active resident the sheet no longer lists is flagged.
+  - **Skips and reports bad rows:** a bad date, a stop date before the start, an unrecognised payment plan or active value, a missing name or email, or an email on two rows. The rest of the sheet carries on.
+  - **Running the same sheet twice changes nothing.** Every write of a run happens in one transaction, or none does.
+  - **Never touches portal logins.** Switching off a departing resident's login stays a deliberate step in the move-out dialog.
+  - **Audit events:** one `resident.sheet_sync` summary per run, plus `resident.sheet_created` and `resident.sheet_updated` for each resident, with old → new dates.
+- **The column contract** (exact headers, any order; every other column is ignored):
+
+  | Header | Required | What goes in it |
+  |---|---|---|
+  | `Full Name` | Yes | First and last name. The last word is taken as the last name |
+  | `Email` | Yes | The resident's email, one row per person |
+  | `House` | Yes | The house's address exactly as the portal shows it, or its name (e.g. `Como Men's House`) |
+  | `Household Start Date` | No | `2026-08-15` or `8/15/2026` |
+  | `Household Stop Date` | No | Same formats. Blank means still living there |
+  | `Payment Plan` | No | `Monthly` or `Installments` |
+  | `Active` | No | `Yes` or `No`. Blank: active unless the stop date has passed |
+
+  **Never add a column for bank, routing, account, card or ACH details.** The sync refuses the whole sheet if one appears.
+- **CSV fallback:** Settings → Resident roster sheet → Import a CSV takes a file with the same headers through the same rules (Preview, then Apply). It is for the current spreadsheet, before the master sheet exists. The existing per-house roster import on a property's page is unchanged.
 - **What SPO must do:** see "Google Sheet" in the checklist.
-- **Needs:** environment variables, all or nothing: `GOOGLE_SERVICE_ACCOUNT_JSON` (or key and email), `RESIDENT_SHEET_ID`, `RESIDENT_SHEET_TAB`.
-- **How to check it's working:** Settings shows the last run and its counts: rows read, created, updated, conflicts, skipped (with reasons).
-- **When it fails:** nothing is changed, and admins get a **Needs attention** item. A last good sync more than 36 hours old also raises one.
-- **Status:** planned.
+- **Needs:** `GOOGLE_SERVICE_ACCOUNT_JSON` (the key file), `RESIDENT_SHEET_ID` and `RESIDENT_SHEET_TAB`, all or none. The sheet must be shared with the service account's email as a **Viewer**.
+- **How to check it's working:** Settings → Resident roster sheet shows the last successful sync, each recent run's counts (rows read, added, updated, conflicts, skipped, with reasons), and the review list.
+- **When it fails:**
+  - A failed run changes nothing.
+  - If there is no good sync for more than 36 hours, admins get "Resident sheet hasn't synced".
+  - Open review items show as "N roster changes to review". Whoever reviews them (see the checklist) marks each one reviewed.
+- **Status:** built-awaiting-SPO-setup.
 
 ### Move-out reminder and emails (Phase 6)
 
@@ -240,7 +261,7 @@ Everything that has to happen outside the code. Tick an item when it's done and 
 - [ ] Workspace admin creates the Google Cloud service account and shares its key securely with whoever sets the env vars. Owner: TBD
 - [ ] Build the master resident tab with the exact column headers in this doc. No banking columns, ever. Owner: TBD
 - [ ] Share the sheet with the service account email (Viewer only). Owner: TBD
-- [ ] Set RESIDENT_SHEET_ID / RESIDENT_SHEET_TAB and run the first sync in dry-run review. Owner: TBD
+- [ ] Set RESIDENT_SHEET_ID / RESIDENT_SHEET_TAB and run the first sync in dry-run review (Settings → Resident roster sheet → Preview). Owner: TBD
 - [ ] Name who reviews sync conflicts. Owner: TBD
 
 ### Email

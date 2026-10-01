@@ -31,6 +31,7 @@ import { serverMessage } from "@/lib/serverMessage";
 import { z } from "zod";
 import { ActivityLog } from "@/components/ActivityLog";
 import QuickBooksSettings from "@/components/QuickBooksSettings";
+import RosterSyncSettings from "@/components/RosterSyncSettings";
 import ResourceLinksSettings from "@/components/ResourceLinksSettings";
 import WalkthroughTemplateSettings from "@/components/WalkthroughTemplateSettings";
 import { Section, Container, PageHeader, PageStack } from "@/components/layout/page";
@@ -620,6 +621,8 @@ export default function Settings() {
       <ResourceLinksSettings />
 
       <QuickBooksSettings />
+
+      <RosterSyncSettings />
 
       <ActivityLog />
 

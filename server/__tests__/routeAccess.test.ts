@@ -278,6 +278,9 @@ beforeEach(() => {
   storageMock.getAllRepairBudgets.mockResolvedValue([]);
   storageMock.getAllPropertySpend.mockResolvedValue([]);
   storageMock.getAllPropertyQuickbooksLinks.mockResolvedValue([]);
+  storageMock.getRecentRosterSyncRuns.mockResolvedValue([]);
+  storageMock.getLastSuccessfulRosterSyncRun.mockResolvedValue(undefined);
+  storageMock.getRosterReviewItems.mockResolvedValue([]);
   sendEmailMock.mockReset();
   sendEmailMock.mockResolvedValue({ sent: false, reason: "not_configured" });
 });
@@ -6284,6 +6287,8 @@ describe("moving a resident out", () => {
     expect(storageMock.updateResident).toHaveBeenCalledWith(
       "res-1",
       expect.objectContaining({ isActive: false, moveOutDate: new Date("2026-05-15") }),
+      // A person's edit, so a later sheet sync that changes it is flagged.
+      { by: STAFF.email, at: expect.any(Date) },
     );
     expect(storageMock.deactivateAndUnlinkUser).not.toHaveBeenCalled();
   });
@@ -8439,6 +8444,110 @@ describe("QuickBooks", () => {
     actAs(STAFF, { canViewMaintenance: true, allowedRegions: ["West Central"] });
     expect((await get("/api/property-spend")).status).toBe(403);
     expect(storageMock.getAllPropertySpend).not.toHaveBeenCalled();
+  });
+});
+
+describe("resident roster sync", () => {
+  const SHEET_ENV = {
+    GOOGLE_SERVICE_ACCOUNT_JSON: JSON.stringify({ client_email: "sync@spo.iam.gserviceaccount.com", private_key: "-----BEGIN PRIVATE KEY-----\nx\n-----END PRIVATE KEY-----\n" }),
+    RESIDENT_SHEET_ID: "1AbCdEfGhIjKlMnOpQrStUvWxYz",
+    RESIDENT_SHEET_TAB: "Residents",
+  };
+  const savedEnv: Record<string, string | undefined> = {};
+  beforeAll(() => {
+    for (const [name, value] of Object.entries(SHEET_ENV)) {
+      savedEnv[name] = process.env[name];
+      process.env[name] = value;
+    }
+  });
+  afterAll(() => {
+    for (const [name, value] of Object.entries(savedEnv)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  });
+
+  beforeEach(() => {
+    storageMock.getRecentRosterSyncRuns.mockResolvedValue([]);
+    storageMock.getLastSuccessfulRosterSyncRun.mockResolvedValue(undefined);
+    storageMock.getRosterReviewItems.mockResolvedValue([]);
+    storageMock.getAllResidents.mockResolvedValue([]);
+    storageMock.getAllProperties.mockResolvedValue([
+      { id: "prop-como", name: "Como Men's House", address: "981 Como Ave", region: "Northwest", ownership: "owned" },
+    ]);
+    storageMock.getAllResidentSheetLinks.mockResolvedValue([]);
+    storageMock.createRosterSyncRun.mockImplementation(async (run) => ({ id: "run-1", createdAt: new Date(), ...run }));
+    storageMock.applyRosterPlan.mockResolvedValue([]);
+  });
+
+  const csv = (text: string) => {
+    const form = new FormData();
+    form.append("file", new Blob([text], { type: "text/csv" }), "roster.csv");
+    return form;
+  };
+  const postCsv = async (dryRun: boolean, text: string) => {
+    const res = await fetch(`${baseUrl}/api/roster-sync/csv?dryRun=${dryRun}`, { method: "POST", body: csv(text) });
+    return { status: res.status, body: await res.json().catch(() => null) };
+  };
+  const GOOD_CSV = "Full Name,Email,House\nSam O'Connor,sam@example.org,981 Como Ave\n";
+
+  it.each([
+    ["GET", "/api/roster-sync/status"],
+    ["POST", "/api/roster-sync/run", { dryRun: true }],
+    ["POST", "/api/roster-review-items/rv-1/reviewed"],
+  ] as [string, string, unknown?][])("refuses %s %s to a regional lead holding every grant, without a read or a write", async (method, path, body) => {
+    actAs(STAFF, { canManageProperties: true, canManageUsers: true, allowedRegions: ["all"] });
+    expect((await request(method, path, { body })).status).toBe(403);
+    expect(storageMock.getAllResidents).not.toHaveBeenCalled();
+    expect(storageMock.applyRosterPlan).not.toHaveBeenCalled();
+    expect(storageMock.markRosterReviewItemReviewed).not.toHaveBeenCalled();
+    expect(storageMock.createRosterSyncRun).not.toHaveBeenCalled();
+  });
+
+  it("refuses the CSV to a regional lead before the parser reads a byte", async () => {
+    actAs(STAFF, { canManageProperties: true, allowedRegions: ["all"] });
+    expect((await postCsv(false, GOOD_CSV)).status).toBe(403);
+    expect(multerEntered).not.toHaveBeenCalled();
+    expect(storageMock.applyRosterPlan).not.toHaveBeenCalled();
+  });
+
+  it("previews an admin's CSV without writing, then applies it (positive control)", async () => {
+    actAs(ADMIN);
+    const preview = await postCsv(true, GOOD_CSV);
+    expect(preview.status).toBe(200);
+    expect(preview.body.run).toMatchObject({ ok: true, dryRun: true, created: 1 });
+    expect(multerEntered).toHaveBeenCalledWith("/api/roster-sync/csv");
+    expect(storageMock.applyRosterPlan).not.toHaveBeenCalled();
+
+    const applied = await postCsv(false, GOOD_CSV);
+    expect(applied.body.run).toMatchObject({ ok: true, dryRun: false, created: 1 });
+    expect(storageMock.applyRosterPlan).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses an admin's CSV with a banking column, writing nothing", async () => {
+    actAs(ADMIN);
+    const { status, body } = await postCsv(false, "Full Name,Email,House,Bank Routing\nSam O'Connor,sam@example.org,981 Como Ave,123456789\n");
+    expect(status).toBe(200);
+    expect(body.run).toMatchObject({ ok: false, refusedColumns: ["Bank Routing"] });
+    expect(JSON.stringify(body)).not.toContain("123456789");
+    expect(storageMock.applyRosterPlan).not.toHaveBeenCalled();
+  });
+
+  it("tells an admin which sheet and service account, but never the key", async () => {
+    actAs(ADMIN);
+    const { status, body } = await get("/api/roster-sync/status");
+    expect(status).toBe(200);
+    expect(body.sheet).toEqual({ tab: "Residents", serviceAccountEmail: "sync@spo.iam.gserviceaccount.com" });
+    expect(JSON.stringify(body)).not.toContain("PRIVATE KEY");
+  });
+
+  it("marks a resident edit as a person's, so the sync can tell it from its own", async () => {
+    actAs(STAFF, { canManageProperties: true, allowedRegions: ["Northwest"] });
+    storageMock.getResident.mockResolvedValue({ id: "r-1", region: "Northwest" });
+    storageMock.updateResident.mockResolvedValue({ id: "r-1" });
+    const { status } = await request("PATCH", "/api/residents/r-1", { body: { notes: "Quiet" } });
+    expect(status).toBe(200);
+    expect(storageMock.updateResident).toHaveBeenCalledWith("r-1", expect.anything(), { by: STAFF.email, at: expect.any(Date) });
   });
 });
 
