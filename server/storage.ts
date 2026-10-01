@@ -21,6 +21,7 @@ import {
   resourceLinks,
   residentDocuments,
   propertyBudgets,
+  repairBudgets,
   propertyFacts,
   residents,
   rentPayments,
@@ -77,6 +78,8 @@ import {
   type ResidentDocument,
   type PropertyBudget,
   type InsertPropertyBudget,
+  type RepairBudget,
+  type InsertRepairBudget,
   type PropertyFacts,
   type PropertyFactsWrite,
   type MaintenanceSchedule,
@@ -490,6 +493,11 @@ export interface IStorage {
   getAllPropertyBudgets(): Promise<PropertyBudget[]>;
   /** Creates or replaces the figure for one house and year. */
   upsertPropertyBudget(budget: InsertPropertyBudget & { region: string }): Promise<PropertyBudget>;
+
+  // Repair & maintenance budgets (owned houses, by fiscal year)
+  getAllRepairBudgets(): Promise<RepairBudget[]>;
+  getRepairBudget(propertyId: string, fiscalYear: number): Promise<RepairBudget | undefined>;
+  upsertRepairBudget(budget: InsertRepairBudget & { region: string }): Promise<RepairBudget>;
 
   // House facts
   getPropertyFacts(propertyId: string): Promise<PropertyFacts | undefined>;
@@ -1628,6 +1636,7 @@ export class DatabaseStorage implements IStorage {
       await tx.update(maintenanceSchedules).set({ region }).where(eq(maintenanceSchedules.propertyId, id));
       await tx.update(propertySetupItems).set({ region }).where(eq(propertySetupItems.propertyId, id));
       await tx.update(propertyBudgets).set({ region }).where(eq(propertyBudgets.propertyId, id));
+      await tx.update(repairBudgets).set({ region }).where(eq(repairBudgets.propertyId, id));
       await tx.update(assets).set({ region }).where(eq(assets.propertyId, id));
       await tx.update(maintenanceRequests).set({ region }).where(eq(maintenanceRequests.buildingAddress, current.address));
       await tx.update(invoices).set({ region }).where(eq(invoices.buildingAddress, current.address));
@@ -1875,6 +1884,31 @@ export class DatabaseStorage implements IStorage {
       .onConflictDoUpdate({
         target: [propertyBudgets.propertyId, propertyBudgets.year],
         set: { amount: budget.amount, notes: budget.notes ?? null, region: budget.region, updatedAt: new Date() },
+      })
+      .returning();
+    return row;
+  }
+
+  // Repair & maintenance budgets Implementation
+  async getAllRepairBudgets(): Promise<RepairBudget[]> {
+    return await db.select().from(repairBudgets).orderBy(desc(repairBudgets.fiscalYear));
+  }
+
+  async getRepairBudget(propertyId: string, fiscalYear: number): Promise<RepairBudget | undefined> {
+    const [row] = await db
+      .select()
+      .from(repairBudgets)
+      .where(and(eq(repairBudgets.propertyId, propertyId), eq(repairBudgets.fiscalYear, fiscalYear)));
+    return row;
+  }
+
+  async upsertRepairBudget(budget: InsertRepairBudget & { region: string }): Promise<RepairBudget> {
+    const [row] = await db
+      .insert(repairBudgets)
+      .values(budget)
+      .onConflictDoUpdate({
+        target: [repairBudgets.propertyId, repairBudgets.fiscalYear],
+        set: { amount: budget.amount, region: budget.region, updatedAt: new Date() },
       })
       .returning();
     return row;

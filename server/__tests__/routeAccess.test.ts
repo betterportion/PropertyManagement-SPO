@@ -8093,6 +8093,96 @@ describe("startup budgets", () => {
   });
 });
 
+describe("repair & maintenance budgets", () => {
+  const WEST = { id: "prop-west", name: "Cleveland House", region: "West Central", address: "1 Main St", ownership: "owned" };
+  const EAST = { id: "prop-east", name: "Como House", region: "East Central", address: "9 Elm", ownership: "owned" };
+  const RENTED = { id: "prop-rented", name: "Rented House", region: "West Central", address: "5 Oak", ownership: "rented" };
+
+  beforeEach(() => {
+    storageMock.getProperty.mockImplementation(async (id: string) =>
+      ({ "prop-west": WEST, "prop-east": EAST, "prop-rented": RENTED })[id],
+    );
+    storageMock.getAllRepairBudgets.mockResolvedValue([
+      { id: "rb-west", propertyId: "prop-west", fiscalYear: 2027, amount: "10500.00", region: "West Central" },
+      { id: "rb-east", propertyId: "prop-east", fiscalYear: 2027, amount: "11000.00", region: "East Central" },
+    ]);
+    storageMock.getRepairBudget.mockResolvedValue(undefined);
+    storageMock.upsertRepairBudget.mockImplementation(async (budget) => ({ id: "rb-new", ...budget, amount: String(budget.amount) }));
+  });
+
+  it("refuses a resident the list outright, even one holding every grant, without reading", async () => {
+    // Unlike the startup budget, this figure is never the household's.
+    actAs({ ...ALICE, propertyId: "prop-west" } as typeof ALICE, {
+      canViewResourceHub: true,
+      canViewProperties: true,
+      canManageProperties: true,
+    });
+    expect((await get("/api/repair-budgets")).status).toBe(403);
+    expect(storageMock.getAllRepairBudgets).not.toHaveBeenCalled();
+  });
+
+  it("gives a regional lead their regions' figures only", async () => {
+    actAs(STAFF, { canViewProperties: true, allowedRegions: ["West Central"] });
+    const { status, body } = await get("/api/repair-budgets");
+    expect(status).toBe(200);
+    expect(body.map((b: { id: string }) => b.id)).toEqual(["rb-west"]);
+  });
+
+  it("refuses staff without a property permission, without reading", async () => {
+    actAs(STAFF, { canViewMaintenance: true, allowedRegions: ["West Central"] });
+    expect((await get("/api/repair-budgets")).status).toBe(403);
+    expect(storageMock.getAllRepairBudgets).not.toHaveBeenCalled();
+  });
+
+  it("refuses a regional lead the write, even with every property and finance grant, without writing", async () => {
+    actAs(STAFF, {
+      canManageProperties: true,
+      canManagePropertySetup: true,
+      canManageFinancials: true,
+      allowedRegions: ["West Central"],
+    });
+    const { status } = await request("PUT", "/api/properties/prop-west/repair-budget", {
+      body: { fiscalYear: 2027, amount: 10500 },
+    });
+    expect(status).toBe(403);
+    expect(storageMock.upsertRepairBudget).not.toHaveBeenCalled();
+    expect(storageMock.getProperty).not.toHaveBeenCalled();
+  });
+
+  it("lets an admin set a budget, taking region and house from the property, never the body", async () => {
+    actAs(ADMIN);
+    const { status } = await request("PUT", "/api/properties/prop-west/repair-budget", {
+      body: { fiscalYear: 2027, amount: 10500, region: "East Central", propertyId: "prop-east" },
+    });
+    expect(status).toBe(200);
+    const [budget] = storageMock.upsertRepairBudget.mock.calls[0];
+    expect(budget).toMatchObject({ propertyId: "prop-west", region: "West Central", fiscalYear: 2027 });
+  });
+
+  it("refuses a budget for a rented house, without writing", async () => {
+    actAs(ADMIN);
+    const { status, body } = await request("PUT", "/api/properties/prop-rented/repair-budget", {
+      body: { fiscalYear: 2027, amount: 5000 },
+    });
+    expect(status).toBe(400);
+    expect(body.message).toMatch(/owns/);
+    expect(storageMock.upsertRepairBudget).not.toHaveBeenCalled();
+  });
+
+  it("audits a change as money, with the figure it replaced", async () => {
+    actAs(ADMIN);
+    storageMock.getRepairBudget.mockResolvedValue({ id: "rb-west", propertyId: "prop-west", fiscalYear: 2027, amount: "10000.00" });
+    await request("PUT", "/api/properties/prop-west/repair-budget", { body: { fiscalYear: 2027, amount: 10500 } });
+    expect(storageMock.createAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "property.repair_budget_set",
+        entityId: "prop-west",
+        summary: "Changed the FY2027 repair budget for Cleveland House from 10000.00 to 10500",
+      }),
+    );
+  });
+});
+
 describe("emailing a household", () => {
   const WEST = { id: "prop-west", name: "Cleveland House", region: "West Central", address: "1 Main St" };
   const EAST = { id: "prop-east", name: "Como House", region: "East Central", address: "9 Elm" };

@@ -114,10 +114,17 @@ The details below are the agreed intent. Each entry is filled in properly in the
 
 - **Purpose:** an R&M budget for each owned house, per fiscal year.
 - **Trigger:** a person's action.
-- **What the portal does:** an admin sets each owned house's budget for the fiscal year on the property page. The fiscal year runs June 1 to May 31 and is named for the year it ends, so FY2027 is Jun 1 2026 – May 31 2027. Changes are audited as money changes. This is a new table, separate from the startup budget household leaders see. Until QuickBooks is connected, the spend reads "Spending not connected yet", never $0.
+- **What the portal does:** an admin sets each owned house's budget on the property page, for the current fiscal year or the next. The fiscal year runs June 1 to May 31 and is named for the year it ends, so FY2027 is Jun 1 2026 – May 31 2027 (`shared/fiscalYear.ts`). There is no default amount.
+  - Staff with a property permission can see the budgets for their regions. Residents never see them.
+  - It is stored in the `repair_budgets` table, separate from the startup budget household leaders see.
+  - Rented houses have no R&M budget.
+  - Every change is audited as `property.repair_budget_set`, with the old and new amounts.
+  - Until QuickBooks is connected, the spend reads "Spending not connected yet", never $0.
 - **What SPO must do:** see "Budgets" in the checklist.
 - **Needs:** nothing.
-- **Status:** planned.
+- **How to check it's working:** the property page of an owned house shows "Repair & maintenance budget" with this year's figure. Settings → Activity trail lists each change.
+- **When it fails:** the admin sees an error when saving, and nothing is changed.
+- **Status:** built-awaiting-SPO-setup.
 
 ### QuickBooks spend sync (Phase 3)
 

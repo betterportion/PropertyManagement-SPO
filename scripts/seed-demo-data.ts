@@ -22,6 +22,7 @@ import { storage } from "../server/storage";
 import { generateStorageKey, putUpload } from "../server/objectStorage";
 import { closeDatabase } from "../server/db";
 import { isClosedMaintenanceStatus } from "../shared/schema";
+import { fiscalYearOf } from "../shared/fiscalYear";
 
 // A valid 1×1 PNG. Enough for <img> tags to render without broken-image icons.
 const PLACEHOLDER_PNG = Buffer.from(
@@ -617,6 +618,22 @@ async function seed(): Promise<void> {
       "No SEED_ADMIN_EMAIL set — the first sign-in will be a resident (promote with SQL, see README).",
     );
   }
+
+  // ── Repair & maintenance budgets ─────────────────────────────────────────
+  // This fiscal year's figure for most owned houses, set per house (there is
+  // no default). Two are left unset so the "Not set yet" state shows too.
+  const rentedIds = new Set([cleveland.id, buckeye.id]);
+  const owned = properties.filter((p) => !rentedIds.has(p.id));
+  const thisFiscalYear = fiscalYearOf(new Date());
+  for (const [i, property] of owned.slice(0, -2).entries()) {
+    await storage.upsertRepairBudget({
+      propertyId: property.id,
+      fiscalYear: thisFiscalYear,
+      amount: 10500 + (i % 3) * 250,
+      region: property.region,
+    });
+  }
+  console.log(`Seeded ${owned.length - 2} repair budgets for FY${thisFiscalYear}`);
 
   console.log("Done.");
 }

@@ -16,6 +16,7 @@ import { isForbiddenError } from "@/lib/authUtils";
 import PropertySetupChecklist from "@/components/PropertySetupChecklist";
 import ResidentPaperwork from "@/components/ResidentPaperwork";
 import PropertyBudgetCard from "@/components/PropertyBudgetCard";
+import RepairBudgetCard from "@/components/RepairBudgetCard";
 import HouseFactsCard from "@/components/HouseFactsCard";
 import PropertyOpenWork from "@/components/PropertyOpenWork";
 import EmailHouseholdDialog from "@/components/EmailHouseholdDialog";
@@ -172,6 +173,8 @@ export default function PropertyDetail() {
   // over a checklist, not over what the household is told.
   const canManageFacts =
     typedUser?.role === "admin" || typedUser?.permissions?.canManageProperties === true;
+  // A repair budget is set by admins alone; the route refuses everyone else.
+  const canSetRepairBudget = typedUser?.role === "admin";
   // The flagged-items list is a walkthrough read, so it takes the walkthrough
   // grant, not the property one.
   const canSeeWalkthroughs =
@@ -461,6 +464,9 @@ export default function PropertyDetail() {
           {/* Beside the staff notes and visibly separate from them: this card
               is what the household reads on their Resources page. */}
           <HouseFactsCard property={property} canManage={canManageFacts} />
+
+          {/* Owned houses only: a rented house's repairs are the landlord's. */}
+          {property.ownership === "owned" && <RepairBudgetCard property={property} canManage={canSetRepairBudget} />}
 
           <Tabs defaultValue="residents">
             <TabsList>
