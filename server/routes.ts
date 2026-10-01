@@ -16,8 +16,10 @@ import {
   canReadComment,
   canPostComment,
   canDeleteComment,
+  residentHouse,
   residentHouseAddress,
   rosterRowSpeaksFor,
+  isCurrentRosterMember,
   canReadUpload,
   filterByRegion,
   filterByRelatedRegion,
@@ -777,10 +779,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
    */
   async function emailThreadAbout(request: MaintenanceRequest, comment: MaintenanceRequestComment): Promise<void> {
     try {
-      const [candidates, thread, properties] = await Promise.all([
+      const [candidates, thread, properties, roster] = await Promise.all([
         storage.getAllUsersWithPermissions(),
         storage.getMaintenanceRequestComments(request.id),
         storage.getAllProperties(),
+        storage.getAllResidents(),
       ]);
       const addressById = new Map(properties.map((property) => [property.id, property.address]));
       const recipients = commentRecipients({
@@ -788,7 +791,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         comment,
         candidates,
         participantIds: thread.map((entry) => entry.authorUserId),
-        houseAddressOf: (propertyId) => addressById.get(propertyId),
+        // The same house rule as every read: a login gets its house only while
+        // a current roster row there speaks for it.
+        houseAddressOf: (user) =>
+          user.propertyId && roster.some((row) => isCurrentRosterMember(row, user))
+            ? addressById.get(user.propertyId)
+            : undefined,
       });
       const appUrl = readAppUrlFromEnv().url;
       for (const { email } of recipients) {
@@ -4404,13 +4412,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // The codes go to the household, and the household is the house's
       // roster today: an active row at this house with this login's exact
-      // email (the move-out rule). The house link alone is not enough -- a
+      // email (the move-out rule) whose stop date has not passed. The house link alone is not enough -- a
       // login linked and never rostered, removed from the roster, or moved
       // out without its login switched off keeps the rest of this card but
       // not the codes.
-      const onRoster = (await storage.getResidentsByProperty(property.id)).some(
-        (row) => row.isActive && rosterRowSpeaksFor(row, ctx.user),
-      );
+      const onRoster = (await storage.getResidentsByProperty(property.id)).some((row) => isCurrentRosterMember(row, ctx.user));
 
       // The house facts (ADR-0002) reach the household through this projection
       // and nothing else: named fields again, so `notes` -- the staff-only
@@ -4658,13 +4664,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // A leader sees their own house's figure and nobody else's -- narrowed
       // by PROPERTY, not by region, so being in the same region as another
-      // house grants nothing. Checked before the read, so a resident with no
-      // house claim costs no query.
+      // house grants nothing -- and only while they are on its roster.
       if (ctx.isResident) {
-        const propertyId = ctx.user.propertyId;
-        if (!propertyId) return res.json([]);
+        const house = await residentHouse(ctx);
+        if (!house) return res.json([]);
         const budgets = await storage.getAllPropertyBudgets();
-        return res.json(budgets.filter((budget) => budget.propertyId === propertyId));
+        return res.json(budgets.filter((budget) => budget.propertyId === house.id));
       }
 
       res.json(filterByRegion(ctx, await storage.getAllPropertyBudgets()));

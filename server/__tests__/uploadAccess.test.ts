@@ -16,6 +16,7 @@ const findUploadReferences = vi.fn();
 const getAsset = vi.fn();
 const getProperty = vi.fn();
 const getMaintenanceRequest = vi.fn();
+const getResidentsByProperty = vi.fn();
 
 vi.mock("../storage", () => ({
   storage: {
@@ -23,6 +24,7 @@ vi.mock("../storage", () => ({
     getAsset: (...args: unknown[]) => getAsset(...args),
     getProperty: (...args: unknown[]) => getProperty(...args),
     getMaintenanceRequest: (...args: unknown[]) => getMaintenanceRequest(...args),
+    getResidentsByProperty: (...args: unknown[]) => getResidentsByProperty(...args),
   },
 }));
 
@@ -93,6 +95,11 @@ beforeEach(() => {
   getAsset.mockReset();
   getProperty.mockReset().mockResolvedValue(undefined);
   getMaintenanceRequest.mockReset().mockResolvedValue(undefined);
+  // The resident in these tests is on their linked house's roster today
+  // (isCurrentRosterMember); the departed case is tested in authz.test.ts.
+  getResidentsByProperty
+    .mockReset()
+    .mockImplementation(async (propertyId: string) => [{ email: "staff@example.com", propertyId, isActive: true, moveOutDate: null }]);
 });
 
 describe("canReadUpload", () => {

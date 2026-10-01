@@ -21,8 +21,10 @@ import { commentRecipients, type CommentCandidate } from "../commentRecipients";
 
 const HOUSE_A = "1 Main St";
 const HOUSE_B = "2 River Rd";
-const houseAddressOf = (propertyId: string) =>
-  ({ "prop-a": HOUSE_A, "prop-b": HOUSE_B })[propertyId] ?? null;
+// The route answers this only for a current roster member; the rule itself is
+// tested in authz.test.ts (isCurrentRosterMember) and over HTTP.
+const houseAddressOf = (user: { propertyId: string | null }) =>
+  ({ "prop-a": HOUSE_A, "prop-b": HOUSE_B })[user.propertyId ?? ""] ?? null;
 
 const REPAIR = {
   id: "req-1",

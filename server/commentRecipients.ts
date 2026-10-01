@@ -39,11 +39,12 @@ export interface CommentRecipientsInput {
   /** Everybody who has posted in the thread so far, by user id. */
   participantIds: readonly (string | null | undefined)[];
   /**
-   * The address of a resident's house by property id, or null for no house
-   * claim. Passed in rather than looked up so the function stays pure; the
-   * route resolves it once for the distinct houses in the candidate list.
+   * The address of a resident's house, or null for no house claim -- the
+   * route answers only for a login a current roster row speaks for (the same
+   * rule as every resident read, `isCurrentRosterMember`). Passed in rather
+   * than looked up so the function stays pure.
    */
-  houseAddressOf: (propertyId: string) => string | null | undefined;
+  houseAddressOf: (user: User) => string | null | undefined;
   now?: Date;
 }
 
@@ -71,7 +72,7 @@ export function commentRecipients({
     if (!email) continue;
 
     const ctx = authContextFor(user, permissions);
-    const house = ctx.isResident && user.propertyId ? (houseAddressOf(user.propertyId) ?? null) : null;
+    const house = ctx.isResident && user.propertyId ? (houseAddressOf(user) ?? null) : null;
     if (!canReadComment(ctx, request, comment, house, now)) continue;
 
     // A resident who may read it hears about it. Staff hear about it if they
