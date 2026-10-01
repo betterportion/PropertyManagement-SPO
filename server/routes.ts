@@ -5129,12 +5129,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
         storage.getAllMaintenanceRequests(),
       ]);
 
-      // Read only for someone who may see it (admins): nobody else's list
-      // costs the lookup.
-      const quickbooks = canSeeActionItemSource(ctx, "integration") ? await quickBooksHealth() : undefined;
+      // Each read only for someone who may see what it feeds: admins for the
+      // connection, the property flag for budgets. Nobody else's list costs
+      // the lookup.
+      const seesBudgets = canSeeActionItemSource(ctx, "budget");
+      const needsHealth = seesBudgets || canSeeActionItemSource(ctx, "integration");
+      const [health, repairBudgets, spend, links] = await Promise.all([
+        needsHealth ? quickBooksHealth() : undefined,
+        seesBudgets ? storage.getAllRepairBudgets() : [],
+        seesBudgets ? storage.getAllPropertySpend() : [],
+        seesBudgets ? storage.getAllPropertyQuickbooksLinks() : [],
+      ]);
 
       const items = buildActionItems({
-        quickbooks,
+        quickbooks: canSeeActionItemSource(ctx, "integration") ? health : undefined,
+        repairBudgets:
+          seesBudgets && health
+            ? {
+                budgets: filterByRegion(ctx, repairBudgets),
+                spend: filterByRegion(ctx, spend),
+                linkedPropertyIds: filterByRegion(ctx, links).map((link) => link.propertyId),
+                spendCurrent: health.configured && health.connected && !isQuickBooksStale(health.lastSuccessAt, new Date()),
+              }
+            : undefined,
         // Derived items are region-scoped exactly like their source lists.
         schedules: filterByRegion(ctx, schedules),
         rentPayments: filterByRegion(ctx, rentPayments),

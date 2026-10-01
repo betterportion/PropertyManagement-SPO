@@ -151,13 +151,24 @@ The details below are the agreed intent. Each entry is filled in properly in the
   - If `QUICKBOOKS_TOKEN_KEY` changes, the stored connection can't be read and must be reconnected.
 - **Status:** built-awaiting-SPO-setup.
 
-### Underspend and overspend alert (Phase 4)
+### Budget dashboards and the underspend alert (Phase 4)
 
 - **Purpose:** stewardship. Prompt steady, incremental improvement to every owned house, rather than leaving budget unspent.
-- **Trigger:** date-based. Checked whenever the dashboard's action items are worked out.
-- **What the portal does:** flags a house whose spend is well behind the year's pace, more strongly from March to May. For example: "$1,000 of $11,000 spent with 2 months left in FY2027". It links to that house's wishlist requests as ideas. Overspend is flagged more quietly. A house that isn't linked to QuickBooks, or whose figures are stale, never triggers the alert.
+- **Trigger:** date-based, worked out whenever the dashboard or Tasks page loads (`repairBudgetItems` in `server/actionItems.ts`; the pace rule is in `shared/budgetPace.ts`).
+- **What the portal does:**
+  - **Admin dashboard:** a "Repair & maintenance budget" section between Regions and Needs attention. Each region shows its budget, spend, % used and how many houses are behind pace, and opens to list its houses.
+  - **Regional administrator's dashboard:** their own houses.
+  - **Each owned house:** a budget page (`/properties/<id>/budget`) with budget, spend, % used, % of the year gone, open work and wishlist, and what was finished this year.
+  - **Behind pace:** a house has spent under half the share of the year that has gone (`UNDERSPEND_PACE_RATIO`). Nobody is called behind in June or July (`UNDERSPEND_QUIET_MONTHS`).
+  - **The alert** reads, for example, "$1,000 of $11,000 spent with 2 months left in FY2027 — Como Men's House", and counts the house's open wishlist requests as ideas. From March to May it becomes overdue (`LAST_QUARTER_MONTHS`).
+  - **Spending past the budget** gets a quiet item with no due date.
+  - **Never alerted:** a house with no QuickBooks link, an out-of-date figure, or no budget.
+  - Visible to staff with a property permission, for their regions.
 - **What SPO must do:** nothing beyond QuickBooks and Budgets.
-- **Status:** planned.
+- **Needs:** QuickBooks connected (Phase 3). Without it, the section shows budgets with "Not connected" and raises no alert.
+- **How to check it's working:** the dashboard section shows spend for linked houses. A house well behind pace appears in the section's list and on the Tasks page.
+- **When it fails:** it can't fail on its own. If the QuickBooks figures go stale, alerts stop rather than misfire, and the QuickBooks out-of-date alert takes over.
+- **Status:** built-awaiting-SPO-setup.
 
 ### Resident roster from the master Google Sheet (Phase 5)
 

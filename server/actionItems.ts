@@ -34,6 +34,9 @@ import { depositReturnDeadline, fromCents, runningBalance } from "@shared/deposi
 import { isPastDue } from "@shared/dueDates";
 import type { ActionItemCategory, ActionItemSource } from "@shared/actionItems";
 import { isQuickBooksStale, QUICKBOOKS_STALE_AFTER_HOURS, type QuickBooksHealth } from "@shared/quickbooks";
+import { budgetPace } from "@shared/budgetPace";
+import { fiscalYearBounds, fiscalYearLabel, fiscalYearOf, monthsLeftInFiscalYear } from "@shared/fiscalYear";
+import type { PropertySpend, RepairBudget } from "@shared/schema";
 
 /** How far ahead a recurring schedule becomes an action item. */
 export const SCHEDULE_LOOKAHEAD_DAYS = 30;
@@ -89,6 +92,16 @@ export interface ActionItemInputs {
   requests: MaintenanceRequest[];
   /** The QuickBooks connection, for admins only; absent for anyone else. */
   quickbooks?: QuickBooksHealth;
+  /** Repair budgets against spend, for callers holding the property flag; absent otherwise. */
+  repairBudgets?: RepairBudgetInputs;
+}
+
+export interface RepairBudgetInputs {
+  budgets: RepairBudget[];
+  spend: PropertySpend[];
+  linkedPropertyIds: string[];
+  /** QuickBooks is connected and its last good sync is recent. */
+  spendCurrent: boolean;
 }
 
 /** The last calendar day of a "YYYY-MM" period, as a UTC-midnight date. */
@@ -357,8 +370,82 @@ export function buildActionItems(inputs: ActionItemInputs, now: Date = new Date(
   }
 
   items.push(...quickBooksItems(inputs.quickbooks, now));
+  if (inputs.repairBudgets) items.push(...repairBudgetItems(inputs.repairBudgets, inputs.properties, inputs.requests, now));
 
   return items.sort(compareUrgency);
+}
+
+/** "$11,000" -- whole dollars read better in a sentence than cents. */
+function dollars(amount: number): string {
+  return `$${Math.round(amount).toLocaleString("en-US")}`;
+}
+
+/**
+ * An owned house well behind the year's pace on its repair budget, louder in
+ * March to May; or, quietly, one that has spent past it. Stewardship: the
+ * point is steady improvement to every house, so the item names the house's
+ * open wishlist requests as ideas for what is left.
+ *
+ * Never for a house without a QuickBooks link, without a current figure, or
+ * without a budget: a missing or stale number is not underspending.
+ */
+export function repairBudgetItems(
+  inputs: RepairBudgetInputs,
+  properties: Property[],
+  requests: MaintenanceRequest[],
+  now: Date,
+): ActionItem[] {
+  if (!inputs.spendCurrent) return [];
+  const fiscalYear = fiscalYearOf(now);
+  const label = fiscalYearLabel(fiscalYear);
+  const linked = new Set(inputs.linkedPropertyIds);
+  const items: ActionItem[] = [];
+
+  for (const p of properties) {
+    if (p.ownership !== "owned" || !linked.has(p.id)) continue;
+    const budget = inputs.budgets.find((b) => b.propertyId === p.id && b.fiscalYear === fiscalYear);
+    const spend = inputs.spend.find((s) => s.propertyId === p.id && s.fiscalYear === fiscalYear);
+    if (!budget || !spend || Number(budget.amount) <= 0) continue;
+    if (isQuickBooksStale(spend.syncedAt, now)) continue;
+
+    const budgetAmount = Number(budget.amount);
+    const spent = Number(spend.amount);
+    const pace = budgetPace(budgetAmount, spent, fiscalYear, now);
+
+    if (pace.status === "behind") {
+      const monthsLeft = monthsLeftInFiscalYear(now);
+      const wishlist = requests.filter(
+        (r) => r.buildingAddress === p.address && r.priority === "wishlist" && !isClosedMaintenanceStatus(r.status),
+      ).length;
+      items.push({
+        id: p.id,
+        source: "budget",
+        category: "property",
+        title: `${dollars(spent)} of ${dollars(budgetAmount)} spent with ${monthsLeft} month${monthsLeft === 1 ? "" : "s"} left in ${label} — ${p.name}`,
+        subtitle:
+          wishlist > 0
+            ? `Behind the year's pace · ${wishlist} wishlist idea${wishlist === 1 ? "" : "s"} for the rest of the budget`
+            : "Behind the year's pace · no wishlist requests yet",
+        // Louder in the last quarter: due at year end, and overdue -- it is
+        // the last chance to use the budget on the house.
+        dueDate: pace.lastQuarter ? iso(fiscalYearBounds(fiscalYear).end) : null,
+        overdue: pace.lastQuarter,
+        region: p.region,
+      });
+    } else if (pace.status === "over") {
+      items.push({
+        id: p.id,
+        source: "budget",
+        category: "property",
+        title: `Over the ${label} repair budget — ${p.name}`,
+        subtitle: `${dollars(spent)} of ${dollars(budgetAmount)} spent`,
+        dueDate: null,
+        overdue: false,
+        region: p.region,
+      });
+    }
+  }
+  return items;
 }
 
 /**

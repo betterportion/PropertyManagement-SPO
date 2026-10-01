@@ -6,6 +6,7 @@ import { Building2, Wrench, Hammer, DollarSign, CalendarClock, ShieldCheck, Arro
 import { useAuth } from "@/hooks/useAuth";
 import ActionItemList from "@/components/ActionItemList";
 import RegionCard, { type RegionSummary } from "@/components/RegionCard";
+import RepairBudgetSection from "@/components/RepairBudgetSection";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Container, PageHeader, PageStack, Section } from "@/components/layout/page";
@@ -151,6 +152,10 @@ export default function AdminDashboard() {
               )}
             </div>
           )}
+
+          {/* Between the regions and what needs attention: how each region's
+              owned houses are using their repair budget. */}
+          <RepairBudgetSection region={focusedRegion} properties={propertiesQuery.data ?? []} actionItems={actionItems} />
 
           <div className="space-y-4">
             <div className="flex items-center justify-between gap-3">
