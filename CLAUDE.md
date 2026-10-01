@@ -14,6 +14,18 @@ It is a single Express server that serves both the REST API and the React fronte
 
 ---
 
+## Where SPO's data is heading
+
+This portal is one of three SPO apps that will share one people layer. Read `docs/SPO-DATA-PLATFORM.md` before any change to how residents, users, chapters or roles are stored, matched or imported. It holds the vision, the identity design, who sees what, and the rules every SPO app follows. The same file is in SPO-Crew-App and DonorCRM-SPO; change all three together. What it means here:
+
+- **A resident row is a per-app copy of a person.** Later it gets linked to a permanent person ID that the shared layer mints. Keep the alias IDs a resident arrives with (sheet row, roster ID, email), and record residency as dated stays, never by overwriting dates.
+- **Email is how this portal matches people today, but it is not an identity.** `.edu` addresses vanish after graduation. Don't build anything new that assumes email is permanent.
+- **HH Paperwork, not this portal and not the ROSTER, is SPO's most accurate residency record.** The daily roster sync from the master sheet (Phase 5) is a recurring Sheets read, listed as an open question in the doc. Don't add more Sheets reads without JR deciding.
+- **`properties.chapter` is free text.** The canonical chapter list is the Crew App's Firestore `chapters` (`docs/seed-chapters.json` there). New chapter-shaped data should map onto those short ids.
+- **Records are permanent,** and nobody SPO tracks is a minor. That matches the audit log and "never deletes anyone" rules already here.
+
+---
+
 ## Commands
 
 | Command | Purpose |
