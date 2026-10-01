@@ -1823,6 +1823,73 @@ export const insertRepairBudgetSchema = createInsertSchema(repairBudgets)
 export type RepairBudget = typeof repairBudgets.$inferSelect;
 export type InsertRepairBudget = z.infer<typeof insertRepairBudgetSchema>;
 
+// QuickBooks Online (read-only repair & maintenance spend)
+//
+// One row, id "default": the connection to SPO's QuickBooks company and the
+// sync's own bookkeeping. The refresh token is the only credential kept, and
+// only ENCRYPTED (server/quickbooks/crypto.ts, key QUICKBOOKS_TOKEN_KEY); the
+// short-lived access token is never stored. Disconnecting clears the token and
+// company but keeps the account choice, so a reconnect needs no re-setup.
+//
+// Nothing from QuickBooks beyond amounts, dates and QuickBooks's own reference
+// ids is stored anywhere: never vendor bank details, payment methods or memo
+// text (see "Financial data" in CLAUDE.md).
+export const quickbooksIntegration = pgTable("quickbooks_integration", {
+  id: varchar("id").primaryKey().default("default"),
+  realmId: varchar("realm_id"),
+  companyName: varchar("company_name"),
+  encryptedRefreshToken: text("encrypted_refresh_token"),
+  refreshTokenExpiresAt: timestamp("refresh_token_expires_at"),
+  connectedAt: timestamp("connected_at"),
+  connectedByEmail: varchar("connected_by_email"),
+  /** The QuickBooks account ids an admin chose as "repair & maintenance". */
+  repairAccountIds: text("repair_account_ids").array().notNull().default([]),
+  lastAttemptAt: timestamp("last_attempt_at"),
+  lastSuccessAt: timestamp("last_success_at"),
+  /** A sentence for an admin, never a token or a raw response body. */
+  lastError: text("last_error"),
+  lastErrorAt: timestamp("last_error_at"),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export type QuickbooksIntegration = typeof quickbooksIntegration.$inferSelect;
+
+/**
+ * How an owned house is found in QuickBooks. `kind` is "class" today; SPO may
+ * switch to QuickBooks Locations later, which is a new kind and a different
+ * report column, not a new table.
+ */
+export const QUICKBOOKS_LINK_KINDS = ["class"] as const;
+
+export const propertyQuickbooksLinks = pgTable("property_quickbooks_links", {
+  propertyId: varchar("property_id")
+    .primaryKey()
+    .references(() => properties.id, { onDelete: "cascade" }),
+  kind: varchar("kind", { enum: QUICKBOOKS_LINK_KINDS }).notNull().default("class"),
+  externalId: varchar("external_id").notNull(),
+  externalName: varchar("external_name").notNull(),
+  region: varchar("region").notNull(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export type PropertyQuickbooksLink = typeof propertyQuickbooksLinks.$inferSelect;
+
+/** Repair & maintenance spend per house per fiscal year, as last read from QuickBooks. */
+export const propertySpend = pgTable(
+  "property_spend",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    propertyId: varchar("property_id").notNull().references(() => properties.id, { onDelete: "cascade" }),
+    fiscalYear: integer("fiscal_year").notNull(),
+    amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),
+    region: varchar("region").notNull(),
+    syncedAt: timestamp("synced_at").notNull(),
+  },
+  (table) => [uniqueIndex("IDX_property_spend_fiscal_year").on(table.propertyId, table.fiscalYear)],
+);
+
+export type PropertySpend = typeof propertySpend.$inferSelect;
+
 // Uploaded Files
 //
 // One row per stored object. The stored key is random, so this is where the

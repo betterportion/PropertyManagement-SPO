@@ -62,6 +62,10 @@ export default function AdminDashboard() {
   const safetyItems = actionItems.filter((i) => i.source === "schedule" || i.category === "safety");
   const scopedSafety = (focusedRegion ? safetyItems.filter((i) => i.region === focusedRegion) : safetyItems).slice(0, 5);
 
+  // The portal's own connections (QuickBooks). Admins only -- the server sends
+  // these to nobody else -- and not about any one region, so never narrowed.
+  const systemItems = actionItems.filter((i) => i.source === "integration");
+
   const attentionHeading = focusedRegion ? `${focusedRegion} — needs attention` : "Needs attention";
 
   return (
@@ -157,6 +161,14 @@ export default function AdminDashboard() {
                 </Button>
               )}
             </div>
+
+            {systemItems.length > 0 && (
+              <Card data-testid="card-system-attention">
+                <CardContent className="p-4">
+                  <ActionItemList items={systemItems} />
+                </CardContent>
+              </Card>
+            )}
 
             <div className="grid gap-6 lg:grid-cols-2">
               <div className="space-y-4">

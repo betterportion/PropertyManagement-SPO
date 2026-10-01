@@ -253,6 +253,85 @@ function checkAppUrl(problems: string[]): void {
   if (problem) problems.push(problem);
 }
 
+/**
+ * QuickBooks Online, for the daily repair & maintenance spend sync.
+ *
+ * Optional and all-or-nothing, like email: none of the four set means the
+ * integration is off and the portal says "Spending not connected yet"; some
+ * but not all is a half-finished setup and stops the boot, naming what is
+ * missing. Read at call time so the boot check and the integration agree.
+ *
+ * QUICKBOOKS_TOKEN_KEY encrypts the stored refresh token. It is 32 random
+ * bytes as 64 hex characters; losing or changing it means reconnecting.
+ */
+export const QUICKBOOKS_ENV_VARS = [
+  "QUICKBOOKS_CLIENT_ID",
+  "QUICKBOOKS_CLIENT_SECRET",
+  "QUICKBOOKS_REDIRECT_URI",
+  "QUICKBOOKS_TOKEN_KEY",
+] as const;
+
+export type QuickBooksConfig = {
+  clientId: string;
+  clientSecret: string;
+  redirectUri: string;
+  tokenKey: Buffer;
+  environment: "production" | "sandbox";
+};
+
+export function readQuickBooksConfigFromEnv():
+  | { configured: true; config: QuickBooksConfig; problem?: undefined }
+  | { configured: false; problem?: string } {
+  const values = Object.fromEntries(QUICKBOOKS_ENV_VARS.map((name) => [name, process.env[name]?.trim() || ""]));
+  const missing = QUICKBOOKS_ENV_VARS.filter((name) => !values[name]);
+  if (missing.length === QUICKBOOKS_ENV_VARS.length) return { configured: false };
+  if (missing.length > 0) {
+    return {
+      configured: false,
+      problem:
+        `QuickBooks is partly set up: ${missing.join(", ")} ${missing.length === 1 ? "is" : "are"} not set.\n` +
+        "    Set all four QUICKBOOKS_* variables to turn the spend sync on, or unset them all to leave it off.",
+    };
+  }
+
+  try {
+    const { protocol } = new URL(values.QUICKBOOKS_REDIRECT_URI);
+    if (protocol !== "https:" && protocol !== "http:") throw new Error();
+  } catch {
+    return { configured: false, problem: "QUICKBOOKS_REDIRECT_URI must be a full https:// address ending in /api/quickbooks/callback" };
+  }
+
+  if (!/^[0-9a-fA-F]{64}$/.test(values.QUICKBOOKS_TOKEN_KEY)) {
+    return {
+      configured: false,
+      problem:
+        "QUICKBOOKS_TOKEN_KEY must be 64 hex characters (32 random bytes). Generate one with:\n" +
+        "    node -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\"",
+    };
+  }
+
+  const environment = (process.env.QUICKBOOKS_ENVIRONMENT?.trim() || "production").toLowerCase();
+  if (environment !== "production" && environment !== "sandbox") {
+    return { configured: false, problem: `QUICKBOOKS_ENVIRONMENT must be "production" or "sandbox", not "${environment}"` };
+  }
+
+  return {
+    configured: true,
+    config: {
+      clientId: values.QUICKBOOKS_CLIENT_ID,
+      clientSecret: values.QUICKBOOKS_CLIENT_SECRET,
+      redirectUri: values.QUICKBOOKS_REDIRECT_URI,
+      tokenKey: Buffer.from(values.QUICKBOOKS_TOKEN_KEY, "hex"),
+      environment,
+    },
+  };
+}
+
+function checkQuickBooks(problems: string[]): void {
+  const { problem } = readQuickBooksConfigFromEnv();
+  if (problem) problems.push(problem);
+}
+
 function checkStorage(problems: string[]): void {
   let driver: string;
   try {
@@ -304,6 +383,7 @@ export function validateConfiguration(): void {
   checkStorage(problems);
   checkEmail(problems);
   checkAppUrl(problems);
+  checkQuickBooks(problems);
 
   if (problems.length === 0) return;
 

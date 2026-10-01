@@ -116,12 +116,16 @@ import { fromCents, returnedExceedsHeld, splitEvenly, toCents } from "@shared/de
 import { hasBegunEverywhere } from "@shared/dueDates";
 import { fiscalYearLabel } from "@shared/fiscalYear";
 import { MAX_SNOOZE_DAYS, MAX_SNOOZE_MONTHS } from "@shared/assetLifecycle";
-import { randomUUID } from "crypto";
+import { randomBytes, randomUUID, timingSafeEqual } from "crypto";
 import { contractorLoad, recurringIssues } from "./aggregates";
 import { sendEmail } from "./email";
 import { commentEmail, householdEmail, maintenanceReceivedEmail, maintenanceStatusEmail } from "./notifications";
 import { commentRecipients } from "./commentRecipients";
-import { readAppUrlFromEnv } from "./config";
+import { readAppUrlFromEnv, readQuickBooksConfigFromEnv } from "./config";
+import { quickBooksHealth, runQuickBooksSync, withQuickBooks } from "./quickbooksSync";
+import { createQuickBooksApi, QuickBooksConnectionLostError, QuickBooksRequestError } from "./quickbooks/api";
+import { decryptToken, encryptToken } from "./quickbooks/crypto";
+import { isQuickBooksStale } from "@shared/quickbooks";
 import { log } from "./logger";
 import { normalizeRegion, normalizeRegions } from "./migrateRegions";
 import { REGIONS } from "@shared/regions";
@@ -4754,6 +4758,317 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ── QuickBooks (read-only repair & maintenance spend) ────────────────────
+  //
+  // Everything that manages the connection is admins only. The spend itself
+  // is read by staff under the property permission, like the budget beside it.
+
+  /** A QuickBooks failure, in the words the API module already wrote for an admin. */
+  function quickBooksError(error: unknown): unknown {
+    return error instanceof QuickBooksRequestError || error instanceof QuickBooksConnectionLostError
+      ? new HttpError(502, error.message)
+      : error;
+  }
+
+  app.get('/api/quickbooks/status', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireAdmin(res, ctx)) return;
+      const [health, row] = await Promise.all([quickBooksHealth(), storage.getQuickbooksIntegration()]);
+      // Never the token, encrypted or not: only what an admin needs to read.
+      res.json({
+        ...health,
+        companyName: row?.companyName ?? null,
+        connectedByEmail: row?.connectedByEmail ?? null,
+        repairAccountIds: row?.repairAccountIds ?? [],
+        lastAttemptAt: row?.lastAttemptAt ?? null,
+        lastErrorAt: row?.lastErrorAt ?? null,
+      });
+    } catch (error) {
+      sendError(res, error, "Failed to load the QuickBooks status");
+    }
+  });
+
+  app.post('/api/quickbooks/connect', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireAdmin(res, ctx)) return;
+      const config = readQuickBooksConfigFromEnv();
+      if (!config.configured) {
+        return res.status(409).json({ message: "QuickBooks is not set up on this server yet." });
+      }
+      // Ties the callback to this admin's own session, so a link someone else
+      // started cannot attach a company to this portal.
+      const state = randomBytes(24).toString("hex");
+      req.session.quickbooksOAuthState = state;
+      res.json({ url: createQuickBooksApi(config.config).authorizeUrl(state) });
+    } catch (error) {
+      sendError(res, error, "Failed to start connecting QuickBooks");
+    }
+  });
+
+  // Intuit sends the browser back here. A page redirect, not JSON: the outcome
+  // lands on Settings as ?quickbooks=connected|failed.
+  app.get('/api/quickbooks/callback', isAuthenticated, async (req: any, res) => {
+    const done = (outcome: "connected" | "failed" | "cancelled") => res.redirect(`/settings?quickbooks=${outcome}#quickbooks`);
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireAdmin(res, ctx)) return;
+
+      const expected: unknown = req.session.quickbooksOAuthState;
+      delete req.session.quickbooksOAuthState;
+      const state = typeof req.query.state === "string" ? req.query.state : "";
+      const stateMatches =
+        typeof expected === "string" &&
+        expected.length === state.length &&
+        timingSafeEqual(Buffer.from(expected), Buffer.from(state));
+      if (!stateMatches) {
+        logError("QuickBooks callback refused: state did not match this session", new Error("state mismatch"));
+        return done("failed");
+      }
+
+      if (typeof req.query.error === "string") return done("cancelled");
+      const code = typeof req.query.code === "string" ? req.query.code : "";
+      const realmId = typeof req.query.realmId === "string" && /^\d+$/.test(req.query.realmId) ? req.query.realmId : "";
+      const config = readQuickBooksConfigFromEnv();
+      if (!code || !realmId || !config.configured) return done("failed");
+
+      const api = createQuickBooksApi(config.config);
+      const tokens = await api.exchangeCode(code);
+      const companyName = await api.companyName(tokens.accessToken, realmId);
+
+      // A different company's class and account ids mean nothing here.
+      const previous = await storage.getQuickbooksIntegration();
+      const companyChanged = !!previous?.realmId && previous.realmId !== realmId;
+      if (companyChanged) {
+        for (const link of await storage.getAllPropertyQuickbooksLinks()) {
+          await storage.deletePropertyQuickbooksLink(link.propertyId);
+        }
+      }
+
+      await storage.updateQuickbooksIntegration({
+        realmId,
+        companyName,
+        encryptedRefreshToken: encryptToken(tokens.refreshToken, config.config.tokenKey),
+        refreshTokenExpiresAt: tokens.refreshTokenExpiresAt,
+        connectedAt: new Date(),
+        connectedByEmail: ctx.user.email ?? null,
+        lastError: null,
+        lastErrorAt: null,
+        ...(companyChanged ? { repairAccountIds: [] } : {}),
+      });
+
+      recordAuditEvent(ctx, {
+        action: AUDIT_ACTIONS.QUICKBOOKS_CONNECTED,
+        entityType: "quickbooks",
+        summary:
+          `Connected QuickBooks company ${companyName}` +
+          (companyChanged ? " (a different company: house links and account choices were cleared)" : ""),
+        details: { companyName, companyChanged },
+      });
+      done("connected");
+    } catch (error) {
+      logError("QuickBooks connect failed", error);
+      if (!res.headersSent) done("failed");
+    }
+  });
+
+  app.post('/api/quickbooks/disconnect', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireAdmin(res, ctx)) return;
+      const row = await storage.getQuickbooksIntegration();
+      const config = readQuickBooksConfigFromEnv();
+
+      // Best effort: tell Intuit to forget the token. Forgetting it here is
+      // what matters, and happens whether or not Intuit answers.
+      if (row?.encryptedRefreshToken && config.configured) {
+        try {
+          await createQuickBooksApi(config.config).revoke(decryptToken(row.encryptedRefreshToken, config.config.tokenKey));
+        } catch (error) {
+          logError("QuickBooks revoke failed; the token is forgotten here regardless", error);
+        }
+      }
+      // The company id stays, so connecting a DIFFERENT company later is
+      // recognised and the old company's links are cleared.
+      await storage.updateQuickbooksIntegration({
+        encryptedRefreshToken: null,
+        refreshTokenExpiresAt: null,
+        connectedAt: null,
+        connectedByEmail: null,
+      });
+      recordAuditEvent(ctx, {
+        action: AUDIT_ACTIONS.QUICKBOOKS_DISCONNECTED,
+        entityType: "quickbooks",
+        summary: `Disconnected QuickBooks${row?.companyName ? ` company ${row.companyName}` : ""}`,
+      });
+      res.json({ ok: true });
+    } catch (error) {
+      sendError(res, error, "Failed to disconnect QuickBooks");
+    }
+  });
+
+  app.get('/api/quickbooks/accounts', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireAdmin(res, ctx)) return;
+      res.json(await withQuickBooks((api, token, realmId) => api.listExpenseAccounts(token, realmId)));
+    } catch (error) {
+      sendError(res, quickBooksError(error), "Failed to load the QuickBooks accounts");
+    }
+  });
+
+  app.put('/api/quickbooks/accounts', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireAdmin(res, ctx)) return;
+      const { accountIds } = z
+        .object({ accountIds: z.array(z.string().regex(/^\d+$/, "Not a QuickBooks account id")).max(100) })
+        .parse(req.body);
+      const unique = Array.from(new Set(accountIds));
+      const previous = (await storage.getQuickbooksIntegration())?.repairAccountIds ?? [];
+      await storage.updateQuickbooksIntegration({ repairAccountIds: unique });
+      // What counts as repair spend is a money decision.
+      recordAuditEvent(ctx, {
+        action: AUDIT_ACTIONS.QUICKBOOKS_ACCOUNTS_CHANGED,
+        entityType: "quickbooks",
+        summary: `Chose ${unique.length} QuickBooks account${unique.length === 1 ? "" : "s"} as repair & maintenance (was ${previous.length})`,
+        details: { accountIds: unique, previousAccountIds: previous },
+      });
+      res.json({ repairAccountIds: unique });
+    } catch (error) {
+      sendError(res, error, "Failed to save the QuickBooks accounts");
+    }
+  });
+
+  app.get('/api/quickbooks/classes', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireAdmin(res, ctx)) return;
+      res.json(await withQuickBooks((api, token, realmId) => api.listClasses(token, realmId)));
+    } catch (error) {
+      sendError(res, quickBooksError(error), "Failed to load the QuickBooks classes");
+    }
+  });
+
+  app.get('/api/quickbooks/links', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireAdmin(res, ctx)) return;
+      res.json(await storage.getAllPropertyQuickbooksLinks());
+    } catch (error) {
+      sendError(res, error, "Failed to load the QuickBooks links");
+    }
+  });
+
+  app.put('/api/properties/:propertyId/quickbooks-link', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireAdmin(res, ctx)) return;
+      const property = await propertyForSetup(req, res, ctx);
+      if (!property) return;
+      if (property.ownership !== "owned") {
+        return res.status(400).json({ message: "Only houses SPO owns are linked to QuickBooks" });
+      }
+      const { classId } = z.object({ classId: z.string().regex(/^\d+$/, "Not a QuickBooks class id") }).parse(req.body);
+
+      // The name is QuickBooks's, never the caller's: a link to a class that
+      // does not exist would read as a house that spent nothing.
+      const classes = await withQuickBooks((api, token, realmId) => api.listClasses(token, realmId)).catch((error) => {
+        throw quickBooksError(error);
+      });
+      const chosen = classes.find((c) => c.id === classId);
+      if (!chosen) return res.status(400).json({ message: "That class is not in QuickBooks. Refresh the list and pick again." });
+
+      const link = await storage.setPropertyQuickbooksLink({
+        propertyId: property.id,
+        kind: "class",
+        externalId: chosen.id,
+        externalName: chosen.name,
+        region: property.region,
+      });
+      recordAuditEvent(ctx, {
+        action: AUDIT_ACTIONS.QUICKBOOKS_MAPPING_CHANGED,
+        entityType: "property",
+        entityId: property.id,
+        summary: `Linked ${property.name} to QuickBooks class ${chosen.name}`,
+        details: { classId: chosen.id, className: chosen.name, region: property.region },
+      });
+      res.json(link);
+    } catch (error) {
+      sendError(res, error, "Failed to link the house to QuickBooks");
+    }
+  });
+
+  app.delete('/api/properties/:propertyId/quickbooks-link', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireAdmin(res, ctx)) return;
+      const property = await propertyForSetup(req, res, ctx);
+      if (!property) return;
+      const removed = await storage.deletePropertyQuickbooksLink(property.id);
+      if (removed) {
+        recordAuditEvent(ctx, {
+          action: AUDIT_ACTIONS.QUICKBOOKS_MAPPING_CHANGED,
+          entityType: "property",
+          entityId: property.id,
+          summary: `Unlinked ${property.name} from QuickBooks`,
+          details: { region: property.region },
+        });
+      }
+      res.json({ ok: true });
+    } catch (error) {
+      sendError(res, error, "Failed to unlink the house from QuickBooks");
+    }
+  });
+
+  app.post('/api/quickbooks/sync', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireAdmin(res, ctx)) return;
+      res.json(await runQuickBooksSync(ctx));
+    } catch (error) {
+      sendError(res, error, "Failed to sync QuickBooks");
+    }
+  });
+
+  // The spend, for the budget card and the dashboards. Says whether it is
+  // connected and current, and which houses are linked, so a screen never
+  // shows a missing figure as $0.
+  app.get('/api/property-spend', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canViewProperties", "canManageProperties")) return;
+      const [health, spend, links] = await Promise.all([
+        quickBooksHealth(),
+        storage.getAllPropertySpend(),
+        storage.getAllPropertyQuickbooksLinks(),
+      ]);
+      res.json({
+        connected: health.configured && health.connected,
+        lastSuccessAt: health.lastSuccessAt,
+        stale: isQuickBooksStale(health.lastSuccessAt, new Date()),
+        linkedPropertyIds: filterByRegion(ctx, links).map((link) => link.propertyId),
+        spend: filterByRegion(ctx, spend),
+      });
+    } catch (error) {
+      sendError(res, error, "Failed to fetch repair spend");
+    }
+  });
+
   // ── Aggregates: what keeps going wrong, and who keeps being called back ───
 
   /**
@@ -4814,7 +5129,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         storage.getAllMaintenanceRequests(),
       ]);
 
+      // Read only for someone who may see it (admins): nobody else's list
+      // costs the lookup.
+      const quickbooks = canSeeActionItemSource(ctx, "integration") ? await quickBooksHealth() : undefined;
+
       const items = buildActionItems({
+        quickbooks,
         // Derived items are region-scoped exactly like their source lists.
         schedules: filterByRegion(ctx, schedules),
         rentPayments: filterByRegion(ctx, rentPayments),

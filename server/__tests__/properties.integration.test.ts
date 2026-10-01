@@ -31,6 +31,8 @@ import {
   propertySetupItems,
   propertyBudgets,
   repairBudgets,
+  propertyQuickbooksLinks,
+  propertySpend,
   maintenanceRequests,
   assets,
   invoices,
@@ -104,6 +106,8 @@ const TABLES: Table[] = [
   propertySetupItems,
   propertyBudgets,
   repairBudgets,
+  propertyQuickbooksLinks,
+  propertySpend,
   maintenanceRequests,
   assets,
   invoices,
@@ -154,6 +158,8 @@ async function seedHouse(key: string, region: string): Promise<HouseRows> {
   await db.insert(propertySetupItems).values({ id: id("setup"), propertyId, itemKey: "insurance", region });
   await db.insert(propertyBudgets).values({ id: id("budget"), propertyId, year: 2026, amount: "1000.00", region });
   await db.insert(repairBudgets).values({ id: id("repair-budget"), propertyId, fiscalYear: 2027, amount: "10500.00", region });
+  await db.insert(propertyQuickbooksLinks).values({ propertyId, externalId: "101", externalName: `${key} House`, region });
+  await db.insert(propertySpend).values({ id: id("spend"), propertyId, fiscalYear: 2027, amount: "1200.00", region, syncedAt: new Date() });
   await db.insert(maintenanceRequests).values({
     id: id("request"), title: "Leaky tap", description: "Drips", category: "plumbing", priority: "low",
     location: "Kitchen", submittedBy: `${key}@example.org`, ...common,
@@ -179,6 +185,7 @@ async function seedHouse(key: string, region: string): Promise<HouseRows> {
     property_setup_items: [id("setup")],
     property_budgets: [id("budget")],
     repair_budgets: [id("repair-budget")],
+    property_spend: [id("spend")],
     maintenance_requests: [id("request")],
     assets: [id("asset")],
     invoices: [id("invoice")],
@@ -248,6 +255,14 @@ describe.skipIf(!TEST_DATABASE_URL)("a house's records, against PostgreSQL", () 
     const untouched = await regionsOf(staying);
     expect(untouched).toEqual(allIn(WEST, untouched));
     expect(await regionsOf({ tasks: ["regional-task"] })).toEqual({ "tasks/regional-task": WEST });
+    // The QuickBooks link is keyed by its house, not an id, so it is read here.
+    const { rows: links } = await pool.query<{ property_id: string; region: string }>(
+      `select property_id, region from property_quickbooks_links order by property_id`,
+    );
+    expect(links).toEqual([
+      { property_id: "a1-house", region: EAST },
+      { property_id: "b2-house", region: WEST },
+    ]);
   });
 
   it("finds the house's requests and invoices by the address it had before the same edit changed it", async () => {

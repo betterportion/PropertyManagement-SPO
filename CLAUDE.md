@@ -65,7 +65,7 @@ New notes about one feature go in its file, or a new one with its own `paths`. R
 
 ### Backend (`server/`)
 
-**Three daily jobs run inside the web process**, each started at boot and run once immediately: audit-log retention (`audit.ts`), maintenance-schedule generation (`schedules.ts`), and seasonal reminder tasks (`seasonalTasks.ts`). There is no separate worker and no cron. All three are idempotent, because a restart re-runs them — if you add a fourth, it must be too, and it must not be able to fail the boot.
+**Four daily jobs run inside the web process**, each started at boot and run once immediately: audit-log retention (`audit.ts`), maintenance-schedule generation (`schedules.ts`), seasonal reminder tasks (`seasonalTasks.ts`), and the QuickBooks spend sync (`quickbooksSync.ts`, which does nothing unless the `QUICKBOOKS_*` variables are set). There is no separate worker and no cron. All of them are idempotent, because a restart re-runs them — if you add another, it must be too, and it must not be able to fail the boot. `docs/WORKFLOWS.md` lists each one.
 
 **Route handlers never touch the database directly.** They go through `storage`. Keep it that way — it is the only reason the data layer is testable and swappable.
 

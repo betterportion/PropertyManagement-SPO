@@ -129,13 +129,27 @@ The details below are the agreed intent. Each entry is filled in properly in the
 ### QuickBooks spend sync (Phase 3)
 
 - **Purpose:** each owned house's repair and maintenance spend for the fiscal year, read from QuickBooks Online once a day, so nobody types it in.
-- **Trigger:** daily job, plus an admin "Sync now" button.
-- **What the portal does:** for each house mapped to a QuickBooks Class, reads the current fiscal year's spend on the accounts an admin has marked as repair and maintenance. Until July 31 it also refreshes the year before, to catch late entries. It stores amounts, dates and QuickBooks reference IDs only: never vendor bank details, payment methods or memo text. Read-only: the portal never writes to QuickBooks.
-- **What SPO must do:** see "QuickBooks" in the checklist.
-- **Needs:** a QuickBooks Online company and an Intuit developer app. Environment variables, all or nothing: the Intuit client ID and secret, a redirect URL, and `QUICKBOOKS_TOKEN_KEY` (encrypts the stored connection at rest). Exact names are settled in Phase 3.
-- **How to check it's working:** Settings → QuickBooks shows the connected company, the last successful sync and the last error.
-- **When it fails:** existing figures are left alone. If the connection is lost, or the last good sync is more than 36 hours old, admins get a **Needs attention** item.
-- **Status:** planned.
+- **Trigger:** a daily job (`server/quickbooksSync.ts`) that runs at boot and every 24 hours, plus an admin "Sync now" button.
+- **What the portal does:**
+  - For each owned house linked to a QuickBooks **Class**, reads that fiscal year's spend on the accounts an admin ticked as repair and maintenance. Ticking a parent account includes its sub-accounts.
+  - Until July 31 it also re-reads the year just ended, so late entries land in the right year.
+  - It uses QuickBooks's **Profit and Loss report, summarized by class**, for the fiscal year's dates. That is the same figure SPO's bookkeeper sees, on the company's own accounting basis. It already includes every kind of transaction (bills, checks, expenses, card charges, journal entries, vendor credits), and one call covers every house.
+  - Read-only: the portal never writes to QuickBooks. It stores only amounts, dates and QuickBooks's own ids for classes and accounts. It never stores vendor bank details, payment methods or memo text.
+  - The connection is a refresh token, stored **encrypted** with `QUICKBOOKS_TOKEN_KEY`. Intuit replaces it on use, so the newest one is saved the moment it arrives. It is never logged, audited or sent to the browser.
+  - A failed sync changes no figures; the last good ones stay, marked out of date.
+  - Linking houses by QuickBooks **Location** instead of Class later would be a new link "kind" and a different report column (`property_quickbooks_links.kind`). Nothing else changes.
+  - Audit events: `quickbooks.connected`, `quickbooks.disconnected`, `quickbooks.mapping_changed`, `quickbooks.accounts_changed`, and one `quickbooks.sync` per run (counts only).
+- **What SPO must do:** see "QuickBooks" in the checklist. Also, whoever manages the server:
+  - [ ] Creates an app in the Intuit Developer portal with the accounting scope, and sets its redirect URI to `https://<portal address>/api/quickbooks/callback`. Owner: TBD
+  - [ ] Sets the four `QUICKBOOKS_*` variables on the server, then restarts it. Owner: TBD
+- **Needs:** `QUICKBOOKS_CLIENT_ID`, `QUICKBOOKS_CLIENT_SECRET`, `QUICKBOOKS_REDIRECT_URI` and `QUICKBOOKS_TOKEN_KEY` (all or none; some but not all stops the boot). Optional: `QUICKBOOKS_ENVIRONMENT=sandbox` for an Intuit test company.
+- **How to check it's working:** Settings → QuickBooks shows the connected company, the last successful sync (within the last day) and "Last error: None". An owned house's page shows "From QuickBooks, <date>" under Spent so far.
+- **When it fails:**
+  - If the connection is refused, admins immediately get a **Needs attention** item, "QuickBooks connection lost". Reconnecting fixes it.
+  - If there has been no good sync for more than 36 hours, admins get "QuickBooks spend is out of date", with the last error.
+  - Either way, the house pages say the figure is out of date.
+  - If `QUICKBOOKS_TOKEN_KEY` changes, the stored connection can't be read and must be reconnected.
+- **Status:** built-awaiting-SPO-setup.
 
 ### Underspend and overspend alert (Phase 4)
 

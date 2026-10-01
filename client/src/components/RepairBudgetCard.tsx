@@ -8,10 +8,19 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { formatCurrency, formatDate, localToday } from "@/lib/format";
+import { formatCurrency, formatDate, formatDateTime, localToday } from "@/lib/format";
 import { serverMessage } from "@/lib/serverMessage";
 import { fiscalYearBounds, fiscalYearLabel, fiscalYearOf } from "@shared/fiscalYear";
-import type { Property, RepairBudget } from "@shared/schema";
+import type { Property, PropertySpend, RepairBudget } from "@shared/schema";
+
+/** What /api/property-spend answers: the figures, and whether to trust them. */
+export interface SpendResponse {
+  connected: boolean;
+  lastSuccessAt: string | null;
+  stale: boolean;
+  linkedPropertyIds: string[];
+  spend: PropertySpend[];
+}
 
 /**
  * One owned house's repair & maintenance budget for the fiscal year.
@@ -29,6 +38,7 @@ export default function RepairBudgetCard({ property, canManage }: { property: Pr
   const [amount, setAmount] = useState("");
 
   const { data: budgets = [] } = useQuery<RepairBudget[]>({ queryKey: ["/api/repair-budgets"] });
+  const { data: spendData } = useQuery<SpendResponse>({ queryKey: ["/api/property-spend"] });
 
   const byYear = useMemo(
     () => new Map(budgets.filter((b) => b.propertyId === property.id).map((b) => [b.fiscalYear, b])),
@@ -72,9 +82,7 @@ export default function RepairBudgetCard({ property, canManage }: { property: Pr
           </div>
           <div>
             <dt className="text-xs text-muted-foreground">Spent so far</dt>
-            <dd className="mt-0.5 text-sm text-muted-foreground" data-testid="text-repair-spend">
-              Spending not connected yet
-            </dd>
+            <SpendFigure propertyId={property.id} fiscalYear={currentYear} budget={current?.amount ?? null} data={spendData} />
           </div>
         </dl>
 
@@ -131,5 +139,45 @@ export default function RepairBudgetCard({ property, canManage }: { property: Pr
         )}
       </CardContent>
     </Card>
+  );
+}
+
+/**
+ * The spend, or why there isn't one. Every state that is not a real figure is
+ * said in words: $0 would read as a house nobody spent anything on.
+ */
+function SpendFigure({
+  propertyId,
+  fiscalYear,
+  budget,
+  data,
+}: {
+  propertyId: string;
+  fiscalYear: number;
+  budget: string | null;
+  data: SpendResponse | undefined;
+}) {
+  const muted = (text: string) => (
+    <dd className="mt-0.5 text-sm text-muted-foreground" data-testid="text-repair-spend">
+      {text}
+    </dd>
+  );
+  if (!data || !data.connected) return muted("Spending not connected yet");
+  if (!data.linkedPropertyIds.includes(propertyId)) return muted("Not linked to QuickBooks");
+  const row = data.spend.find((s) => s.propertyId === propertyId && s.fiscalYear === fiscalYear);
+  if (!row) return muted("Waiting for the first QuickBooks sync");
+
+  const share = budget && Number(budget) > 0 ? Math.round((Number(row.amount) / Number(budget)) * 100) : null;
+  return (
+    <>
+      <dd className="mt-0.5 text-lg font-semibold" data-testid="text-repair-spend">
+        {formatCurrency(row.amount)}
+        {share !== null && <span className="ml-2 text-sm font-normal text-muted-foreground">{share}% of budget</span>}
+      </dd>
+      <dd className={data.stale ? "text-xs text-destructive" : "text-xs text-muted-foreground"} data-testid="text-repair-spend-synced">
+        {data.stale ? "Out of date — QuickBooks last updated " : "From QuickBooks, "}
+        {formatDateTime(row.syncedAt)}
+      </dd>
+    </>
   );
 }
