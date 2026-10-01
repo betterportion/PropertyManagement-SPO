@@ -22,7 +22,8 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Plus, MoreVertical, Check, Undo2, Wallet, PiggyBank, CalendarClock, AlertCircle } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { type RentPayment, type SecurityDeposit, type Resident, type Property } from "@shared/schema";
+import { type RentPayment, type SecurityDeposit, type Resident, type Property, type DepositDeduction } from "@shared/schema";
+import { depositsToSettle } from "@/lib/depositsToSettle";
 import { z } from "zod";
 import { Section, Container, PageHeader, PageStack } from "@/components/layout/page";
 import DepositLedger from "@/components/deposit/DepositLedger";
@@ -77,6 +78,7 @@ export default function Finances() {
   const { data: deposits = [], isLoading: depLoading } = useQuery<SecurityDeposit[]>({ queryKey: ["/api/security-deposits"] });
   const { data: residents = [] } = useQuery<Resident[]>({ queryKey: ["/api/residents"] });
   const { data: properties = [] } = useQuery<Property[]>({ queryKey: ["/api/properties"] });
+  const { data: deductions = [] } = useQuery<DepositDeduction[]>({ queryKey: ["/api/deposit-deductions"] });
 
   const residentName = (id: string) => {
     const r = residents.find((x) => x.id === id);
@@ -336,13 +338,12 @@ export default function Finances() {
     .sort((a, b) => a.period.localeCompare(b.period));
   const outstandingTotal = outstandingPayments.reduce((sum, p) => sum + Number(p.amount), 0);
   const failedPayments = outstandingPayments.filter((p) => p.status === "failed");
-  const activeResidentIds = new Set(residents.filter((r) => r.isActive).map((r) => r.id));
-  const depositsToSettle = inRegion(deposits).filter(
-    (d) => d.status === "held" && !activeResidentIds.has(d.residentId),
-  );
+  // Held or statement sent, for somebody who has gone, at the balance after
+  // deductions -- the dashboard's rule (lib/depositsToSettle.ts).
+  const toSettle = depositsToSettle(inRegion(deposits), residents, deductions);
 
   const renderOutstanding = () => {
-    if (outstandingPayments.length === 0 && depositsToSettle.length === 0) {
+    if (outstandingPayments.length === 0 && toSettle.length === 0) {
       return (
         <EmptyState
           title="Nothing outstanding"
@@ -364,8 +365,8 @@ export default function Finances() {
             : "No HH fees outstanding."}
           {failedPayments.length > 0 &&
             ` ${failedPayments.length} ${failedPayments.length === 1 ? "payment has" : "payments have"} failed and may need a new payment or a follow-up.`}
-          {depositsToSettle.length > 0 &&
-            ` ${depositsToSettle.length} deposit${depositsToSettle.length === 1 ? "" : "s"} still held for former residents.`}
+          {toSettle.length > 0 &&
+            ` ${toSettle.length} deposit${toSettle.length === 1 ? "" : "s"} still to settle for former residents.`}
         </p>
 
         {Array.from(byProperty.entries()).map(([propertyId, list]) => (
@@ -410,17 +411,21 @@ export default function Finances() {
           </div>
         ))}
 
-        {depositsToSettle.length > 0 && (
+        {toSettle.length > 0 && (
           <div className="space-y-3">
             <h3 className="font-semibold">Deposits to settle</h3>
             <div className="space-y-3">
-              {depositsToSettle.map((d) => (
+              {toSettle.map(({ deposit: d, owed }) => (
                 <Card key={d.id} data-testid={`card-settle-deposit-${d.id}`}>
                   <CardContent className="flex items-start justify-between gap-4 p-4">
                     <div className="min-w-0">
                       <p className="font-medium">{residentName(d.residentId)}</p>
-                      <p className="mt-1 text-sm text-muted-foreground">
-                        {formatCurrency(d.amountHeld)} held · {propertyName(d.propertyId)} · resident has moved out
+                      <p className="mt-1 text-sm text-muted-foreground" data-testid={`text-settle-owed-${d.id}`}>
+                        {Number(owed) < 0
+                          ? `${formatCurrency(-Number(owed))} short after deductions`
+                          : `${formatCurrency(owed)} to return`}
+                        {owed !== Number(d.amountHeld).toFixed(2) ? ` (of ${formatCurrency(d.amountHeld)} held)` : ""} ·{" "}
+                        {propertyName(d.propertyId)} · {d.status === "statement_sent" ? "statement sent" : "resident has moved out"}
                       </p>
                     </div>
                     {canManage && (
