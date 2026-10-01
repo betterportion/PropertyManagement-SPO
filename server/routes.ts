@@ -85,6 +85,7 @@ import {
   insertResourceLinkSchema,
   insertResidentDocumentSchema,
   insertPropertyBudgetSchema,
+  insertRepairBudgetSchema,
   setPropertySetupItemSchema,
   setPropertyFactsSchema,
   type InsertPropertyWithAddress,
@@ -113,6 +114,7 @@ import { RESIDENT_DOCUMENTS, isKnownResidentDocument } from "@shared/residentDoc
 import { buildRegionSummaries, type RegionStaff } from "./regionSummary";
 import { fromCents, returnedExceedsHeld, splitEvenly, toCents } from "@shared/depositLedger";
 import { hasBegunEverywhere } from "@shared/dueDates";
+import { fiscalYearLabel } from "@shared/fiscalYear";
 import { MAX_SNOOZE_DAYS, MAX_SNOOZE_MONTHS } from "@shared/assetLifecycle";
 import { randomUUID } from "crypto";
 import { contractorLoad, recurringIssues } from "./aggregates";
@@ -4684,6 +4686,71 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(budget);
     } catch (error) {
       sendError(res, error, "Failed to save the startup budget");
+    }
+  });
+
+  // ── Repair & maintenance budgets ─────────────────────────────────────────
+
+  // Staff only, under the property permission: the budget is an operating
+  // figure about a house, read beside the house. A resident never reaches it,
+  // whatever their grants -- unlike the startup budget, it is not the
+  // household's to see.
+  app.get('/api/repair-budgets', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canViewProperties", "canManageProperties")) return;
+
+      res.json(filterByRegion(ctx, await storage.getAllRepairBudgets()));
+    } catch (error) {
+      sendError(res, error, "Failed to fetch repair budgets");
+    }
+  });
+
+  // Admins only. Region-scoped as well, which an admin passes on the bypass;
+  // it is there so that opening this to a permission later cannot forget it.
+  app.put('/api/properties/:propertyId/repair-budget', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireAdmin(res, ctx)) return;
+
+      const property = await propertyForSetup(req, res, ctx);
+      if (!property) return;
+      if (property.ownership !== "owned") {
+        return res.status(400).json({ message: "Repair budgets are set only for houses SPO owns" });
+      }
+
+      const body = insertRepairBudgetSchema.omit({ propertyId: true }).parse(req.body);
+      const previous = await storage.getRepairBudget(property.id, body.fiscalYear);
+
+      const budget = await storage.upsertRepairBudget({
+        ...body,
+        propertyId: property.id,
+        region: property.region,
+      });
+
+      // Money: an upsert leaves no other trace of the figure it replaced.
+      const label = fiscalYearLabel(body.fiscalYear);
+      recordAuditEvent(ctx, {
+        action: AUDIT_ACTIONS.PROPERTY_REPAIR_BUDGET_SET,
+        entityType: "property",
+        entityId: property.id,
+        summary: previous
+          ? `Changed the ${label} repair budget for ${property.name} from ${previous.amount} to ${budget.amount}`
+          : `Set the ${label} repair budget for ${property.name} to ${budget.amount}`,
+        details: {
+          fiscalYear: body.fiscalYear,
+          amount: budget.amount,
+          previousAmount: previous?.amount ?? null,
+          region: property.region,
+        },
+      });
+
+      res.json(budget);
+    } catch (error) {
+      sendError(res, error, "Failed to save the repair budget");
     }
   });
 

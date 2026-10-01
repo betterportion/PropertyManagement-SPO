@@ -1792,6 +1792,37 @@ export const insertPropertyBudgetSchema = createInsertSchema(propertyBudgets)
 export type PropertyBudget = typeof propertyBudgets.$inferSelect;
 export type InsertPropertyBudget = z.infer<typeof insertPropertyBudgetSchema>;
 
+// Repair & maintenance budget
+//
+// What an OWNED house is expected to spend on repairs and upkeep in one
+// fiscal year (June 1 – May 31, named for the year it ends: shared/fiscalYear.ts).
+// Deliberately separate from the startup budget above: a different year, a
+// different audience (staff only -- household leaders never see it) and a
+// different author (admins only). Spend against it comes from QuickBooks.
+export const repairBudgets = pgTable(
+  "repair_budgets",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    propertyId: varchar("property_id").notNull().references(() => properties.id, { onDelete: "cascade" }),
+    fiscalYear: integer("fiscal_year").notNull(),
+    amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),
+    region: varchar("region").notNull(),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [uniqueIndex("IDX_repair_budget_fiscal_year").on(table.propertyId, table.fiscalYear)],
+);
+
+export const insertRepairBudgetSchema = createInsertSchema(repairBudgets)
+  .omit({ id: true, region: true, createdAt: true, updatedAt: true })
+  .extend({
+    fiscalYear: z.coerce.number().int().min(2000, "Use a four-digit fiscal year").max(2100),
+    amount: nonNegativeAmount,
+  });
+
+export type RepairBudget = typeof repairBudgets.$inferSelect;
+export type InsertRepairBudget = z.infer<typeof insertRepairBudgetSchema>;
+
 // Uploaded Files
 //
 // One row per stored object. The stored key is random, so this is where the

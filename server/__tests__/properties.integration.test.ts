@@ -30,6 +30,7 @@ import {
   maintenanceSchedules,
   propertySetupItems,
   propertyBudgets,
+  repairBudgets,
   maintenanceRequests,
   assets,
   invoices,
@@ -102,6 +103,7 @@ const TABLES: Table[] = [
   maintenanceSchedules,
   propertySetupItems,
   propertyBudgets,
+  repairBudgets,
   maintenanceRequests,
   assets,
   invoices,
@@ -151,6 +153,7 @@ async function seedHouse(key: string, region: string): Promise<HouseRows> {
   });
   await db.insert(propertySetupItems).values({ id: id("setup"), propertyId, itemKey: "insurance", region });
   await db.insert(propertyBudgets).values({ id: id("budget"), propertyId, year: 2026, amount: "1000.00", region });
+  await db.insert(repairBudgets).values({ id: id("repair-budget"), propertyId, fiscalYear: 2027, amount: "10500.00", region });
   await db.insert(maintenanceRequests).values({
     id: id("request"), title: "Leaky tap", description: "Drips", category: "plumbing", priority: "low",
     location: "Kitchen", submittedBy: `${key}@example.org`, ...common,
@@ -175,6 +178,7 @@ async function seedHouse(key: string, region: string): Promise<HouseRows> {
     maintenance_schedules: [id("schedule")],
     property_setup_items: [id("setup")],
     property_budgets: [id("budget")],
+    repair_budgets: [id("repair-budget")],
     maintenance_requests: [id("request")],
     assets: [id("asset")],
     invoices: [id("invoice")],
