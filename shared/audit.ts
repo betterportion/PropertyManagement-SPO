@@ -53,6 +53,8 @@ export const AUDIT_ACTIONS = {
   RESIDENT_SHEET_CREATED: "resident.sheet_created",
   RESIDENT_SHEET_UPDATED: "resident.sheet_updated",
   RESIDENT_REVIEW_RESOLVED: "resident.review_resolved",
+  RESIDENT_MOVE_OUT_CHECKLIST_COMPLETED: "resident.move_out_checklist_completed",
+  DEPOSIT_RULE_CHANGED: "deposit_rule.changed",
   DOCUMENT_UPLOADED: "document.uploaded",
   DOCUMENT_DOWNLOADED: "document.downloaded",
 } as const;
@@ -111,6 +113,8 @@ export const AUDIT_ACTION_LABELS: Record<AuditAction, string> = {
   "resident.sheet_created": "Resident added from the sheet",
   "resident.sheet_updated": "Resident updated from the sheet",
   "resident.review_resolved": "Roster review item marked reviewed",
+  "resident.move_out_checklist_completed": "Move-out checklist completed",
+  "deposit_rule.changed": "State deposit return deadline changed",
   "document.uploaded": "Document uploaded",
   "document.downloaded": "Document downloaded",
 };

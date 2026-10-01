@@ -8551,6 +8551,93 @@ describe("resident roster sync", () => {
   });
 });
 
+describe("move-out checklist and state deposit deadlines", () => {
+  const RESIDENT = { id: "r-1", firstName: "Rachel", lastName: "Bauer", region: "Northwest", buildingAddress: "981 Como Ave", email: "rachel@example.org" };
+  const TICKED = { roomInspected: true, belongingsRemoved: true, keysReturned: true, damageNotes: "Two holes by the desk", notes: null };
+
+  beforeEach(() => {
+    storageMock.getResident.mockResolvedValue(RESIDENT);
+    storageMock.getMoveOutChecklist.mockResolvedValue(undefined);
+    storageMock.getMoveOutPhotos.mockResolvedValue([]);
+    storageMock.upsertMoveOutChecklist.mockImplementation(async (row) => row);
+    storageMock.createMoveOutPhoto.mockImplementation(async (row) => ({ id: "mo-1", ...row }));
+    storageMock.getAllDepositReturnRules.mockResolvedValue([]);
+  });
+
+  it("refuses the checklist to a resident -- even the one moving out -- and to staff without the property flag, without reading", async () => {
+    actAs({ ...ALICE, email: RESIDENT.email } as typeof ALICE, { canViewProperties: true, canManageProperties: true });
+    expect((await get("/api/residents/r-1/move-out-checklist")).status).toBe(403);
+    actAs(STAFF, { canViewMaintenance: true, allowedRegions: ["Northwest"] });
+    expect((await get("/api/residents/r-1/move-out-checklist")).status).toBe(403);
+    expect(storageMock.getMoveOutChecklist).not.toHaveBeenCalled();
+  });
+
+  it("refuses another region's resident, writing nothing", async () => {
+    actAs(STAFF, { canManageProperties: true, allowedRegions: ["Southwest"] });
+    const { status } = await request("PUT", "/api/residents/r-1/move-out-checklist", { body: { ...TICKED, complete: true } });
+    expect(status).toBe(403);
+    expect(storageMock.upsertMoveOutChecklist).not.toHaveBeenCalled();
+  });
+
+  it("refuses to mark it complete until all three checks are ticked", async () => {
+    actAs(STAFF, { canManageProperties: true, allowedRegions: ["Northwest"] });
+    const { status } = await request("PUT", "/api/residents/r-1/move-out-checklist", { body: { ...TICKED, keysReturned: false, complete: true } });
+    expect(status).toBe(400);
+    expect(storageMock.upsertMoveOutChecklist).not.toHaveBeenCalled();
+  });
+
+  it("records who completed it and when, and audits it (positive control)", async () => {
+    actAs(STAFF, { canManageProperties: true, allowedRegions: ["Northwest"] });
+    const { status } = await request("PUT", "/api/residents/r-1/move-out-checklist", { body: { ...TICKED, complete: true, region: "Elsewhere" } });
+    expect(status).toBe(200);
+    expect(storageMock.upsertMoveOutChecklist).toHaveBeenCalledWith(
+      expect.objectContaining({ residentId: "r-1", region: "Northwest", completedByEmail: STAFF.email, completedAt: expect.any(Date) }),
+    );
+    expect(storageMock.createAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ action: "resident.move_out_checklist_completed" }));
+  });
+
+  it("refuses a photo that is not the caller's own upload, storing nothing", async () => {
+    actAs(STAFF, { canManageProperties: true, allowedRegions: ["Northwest"] });
+    storageMock.getUploadByStorageKey.mockResolvedValue({ storageKey: "0123456789abcdef0123456789abcdef.jpg", uploadedBy: "someone-else" });
+    const { status } = await request("POST", "/api/residents/r-1/move-out-photos", {
+      body: { imageUrl: "/uploads/0123456789abcdef0123456789abcdef.jpg" },
+    });
+    // ownUploadFromClient's answer everywhere: "not one you uploaded".
+    expect(status).toBe(400);
+    expect(storageMock.createMoveOutPhoto).not.toHaveBeenCalled();
+  });
+
+  it("stores the caller's own upload as a photo (positive control)", async () => {
+    actAs(STAFF, { canManageProperties: true, allowedRegions: ["Northwest"] });
+    storageMock.getUploadByStorageKey.mockResolvedValue({ storageKey: "0123456789abcdef0123456789abcdef.jpg", uploadedBy: STAFF.id });
+    const { status } = await request("POST", "/api/residents/r-1/move-out-photos", {
+      body: { imageUrl: "/uploads/0123456789abcdef0123456789abcdef.jpg" },
+    });
+    expect(status).toBe(200);
+    expect(storageMock.createMoveOutPhoto).toHaveBeenCalledWith(expect.objectContaining({ residentId: "r-1", region: "Northwest" }));
+  });
+
+  it("keeps the state deadlines to admins, writing nothing for anyone else", async () => {
+    actAs(STAFF, { canManageFinancials: true, canManageProperties: true, allowedRegions: ["all"] });
+    expect((await get("/api/deposit-return-rules")).status).toBe(403);
+    expect((await request("PUT", "/api/deposit-return-rules/MN", { body: { days: 21 } })).status).toBe(403);
+    expect(storageMock.setDepositReturnRule).not.toHaveBeenCalled();
+  });
+
+  it("lets an admin set and clear a state's days, audited with the old value", async () => {
+    actAs(ADMIN);
+    storageMock.getAllDepositReturnRules.mockResolvedValue([{ state: "MN", days: 14 }]);
+    expect((await request("PUT", "/api/deposit-return-rules/mn", { body: { days: 21 } })).status).toBe(200);
+    expect(storageMock.setDepositReturnRule).toHaveBeenCalledWith("MN", 21, ADMIN.email);
+    expect(storageMock.createAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "deposit_rule.changed", summary: "Set the MN deposit return deadline to 21 days (was 14)" }),
+    );
+    expect((await request("PUT", "/api/deposit-return-rules/MN", { body: { days: null } })).status).toBe(200);
+    expect(storageMock.setDepositReturnRule).toHaveBeenLastCalledWith("MN", null, ADMIN.email);
+    expect((await request("PUT", "/api/deposit-return-rules/MN", { body: { days: 0 } })).status).toBe(400);
+  });
+});
+
 describe("emailing a household", () => {
   const WEST = { id: "prop-west", name: "Cleveland House", region: "West Central", address: "1 Main St" };
   const EAST = { id: "prop-east", name: "Como House", region: "East Central", address: "9 Elm" };

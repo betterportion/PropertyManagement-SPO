@@ -281,6 +281,13 @@
       "when": 1790833288565,
       "tag": "0039_roster_sheet_sync",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1790834369323,
+      "tag": "0040_move_out_and_deposit_rules",
+      "breakpoints": true
     }
   ]
 }

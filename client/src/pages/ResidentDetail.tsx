@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Container, PageHeader, PageStack, Section } from "@/components/layout/page";
 import { EmptyState, LoadingState } from "@/components/states";
 import DepositLedger from "@/components/deposit/DepositLedger";
+import MoveOutChecklistCard from "@/components/MoveOutChecklistCard";
 import ResidentPaperwork from "@/components/ResidentPaperwork";
 import ResidentEditDialog from "@/components/ResidentEditDialog";
 import { useAuth } from "@/hooks/useAuth";
@@ -238,6 +239,11 @@ export default function ResidentDetail() {
                 <p className="mt-2 text-xs text-muted-foreground">Each stay keeps its own paperwork, deposit and fees. Open one to see them.</p>
               </CardContent>
             </Card>
+          )}
+
+          {/* Once a leaving date is known, or they have gone: the RA's checklist. */}
+          {(resident.moveOutDate || !resident.isActive) && (
+            <MoveOutChecklistCard resident={resident} canManage={canManageProperties} />
           )}
 
           <ResidentPaperwork resident={resident} canManage={canManageProperties} />

@@ -64,6 +64,7 @@ import {
   canSeeActionItemSource,
   canSeeTask,
   isLeaseDerivedTaskSourceKey,
+  isRosterDerivedTaskSourceKey,
   type AuthContext,
   type PermissionName,
 } from "../authz";
@@ -1588,6 +1589,14 @@ describe("canSeeTask", () => {
 
     const manager = context({ allowedRegions: ["West Central"], permissions: { canManageProperties: true } });
     expect(canSeeTask(manager, leaseTask())).toBe(true);
+  });
+
+  it("applies the same rule to a move-out reminder, which names a resident and their leaving date", () => {
+    expect(isRosterDerivedTaskSourceKey("move-out:r-1:2027-05-20")).toBe(true);
+    expect(isRosterDerivedTaskSourceKey("lease-renewal:prop-1:2026-10-01")).toBe(false);
+    const moveOut = leaseTask({ sourceKey: "move-out:r-1:2027-05-20", assignedToUserId: "user-1" });
+    expect(canSeeTask(context({ allowedRegions: ["West Central"], permissions: {} }), moveOut)).toBe(false);
+    expect(canSeeTask(context({ allowedRegions: ["West Central"], permissions: { canViewProperties: true } }), moveOut)).toBe(true);
   });
 
   it("shows a lease-derived task to an admin with no permissions row at all", () => {

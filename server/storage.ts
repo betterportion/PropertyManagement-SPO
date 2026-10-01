@@ -28,6 +28,9 @@ import {
   residentSheetLinks,
   rosterSyncRuns,
   rosterReviewItems,
+  moveOutChecklists,
+  moveOutPhotos,
+  depositReturnRules,
   propertyFacts,
   residents,
   rentPayments,
@@ -92,6 +95,9 @@ import {
   type ResidentSheetLink,
   type RosterSyncRun,
   type RosterReviewItem,
+  type MoveOutChecklist,
+  type MoveOutPhoto,
+  type DepositReturnRule,
   type PropertyFacts,
   type PropertyFactsWrite,
   type MaintenanceSchedule,
@@ -359,7 +365,8 @@ export interface IStorage {
   getActiveResidentByEmail(email: string): Promise<Resident | undefined>;
   /** `edited` marks the change as a person's (see residents.editedAt); the sheet sync never passes it. */
   updateResident(id: string, data: Partial<InsertResident>, edited?: { by: string | null; at: Date }): Promise<Resident>;
-  deleteResident(id: string): Promise<void>;
+  /** Returns the file URLs the removed rows held (move-out photos), for cleanup. */
+  deleteResident(id: string): Promise<string[]>;
 
   // Rent Payments
   createRentPayment(payment: InsertRentPayment): Promise<RentPayment>;
@@ -542,6 +549,18 @@ export interface IStorage {
   getRosterReviewItems(status: "open" | "reviewed", limit: number): Promise<RosterReviewItem[]>;
   markRosterReviewItemReviewed(id: string, byEmail: string | null): Promise<RosterReviewItem | undefined>;
 
+  // Move-out
+  getMoveOutChecklist(residentId: string): Promise<MoveOutChecklist | undefined>;
+  upsertMoveOutChecklist(checklist: Omit<MoveOutChecklist, "updatedAt">): Promise<MoveOutChecklist>;
+  getMoveOutPhotos(residentId: string): Promise<MoveOutPhoto[]>;
+  getMoveOutPhoto(id: string): Promise<MoveOutPhoto | undefined>;
+  createMoveOutPhoto(photo: Omit<MoveOutPhoto, "id" | "createdAt">): Promise<MoveOutPhoto>;
+  /** Returns the removed photo's file URL, for cleanup. */
+  deleteMoveOutPhoto(id: string): Promise<string[]>;
+  getAllDepositReturnRules(): Promise<DepositReturnRule[]>;
+  /** Null days removes the state's rule. */
+  setDepositReturnRule(state: string, days: number | null, byEmail: string | null): Promise<void>;
+
   // House facts
   getPropertyFacts(propertyId: string): Promise<PropertyFacts | undefined>;
   /**
@@ -630,7 +649,8 @@ export type UploadReference =
   | { kind: "walkthroughPhoto"; record: WalkthroughPhoto }
   | { kind: "assetPhoto"; record: AssetPhoto }
   | { kind: "billingRecord"; record: BillingRecord }
-  | { kind: "property"; record: Property };
+  | { kind: "property"; record: Property }
+  | { kind: "moveOutPhoto"; record: MoveOutPhoto };
 
 export class DatabaseStorage implements IStorage {
   async getUser(id: string): Promise<User | undefined> {
@@ -1373,8 +1393,14 @@ export class DatabaseStorage implements IStorage {
     return resident;
   }
 
-  async deleteResident(id: string): Promise<void> {
-    await db.delete(residents).where(eq(residents.id, id));
+  async deleteResident(id: string): Promise<string[]> {
+    // Move-out photos go with the resident by cascade; their files are the
+    // caller's to remove once the row is gone.
+    return await db.transaction(async (tx) => {
+      const photos = await tx.select({ url: moveOutPhotos.imageUrl }).from(moveOutPhotos).where(eq(moveOutPhotos.residentId, id));
+      await tx.delete(residents).where(eq(residents.id, id));
+      return fileUrls(photos);
+    });
   }
 
   // Rent Payments Implementation
@@ -1676,6 +1702,13 @@ export class DatabaseStorage implements IStorage {
       await tx.update(residentDocuments).set({ region }).where(inArray(residentDocuments.residentId, houseResidents));
       await tx.update(walkthroughPhotos).set({ region }).where(inArray(walkthroughPhotos.roomId, houseRooms));
       await tx.update(residents).set({ region }).where(eq(residents.propertyId, id));
+      await tx.update(moveOutChecklists).set({ region }).where(inArray(moveOutChecklists.residentId, houseResidents));
+      await tx.update(moveOutPhotos).set({ region }).where(inArray(moveOutPhotos.residentId, houseResidents));
+      // The move-out reminders are generated per resident (server/moveOut.ts).
+      await tx
+        .update(tasks)
+        .set({ region })
+        .where(and(like(tasks.sourceKey, "move-out:%"), inArray(sql`split_part(${tasks.sourceKey}, ':', 2)`, houseResidents)));
       await tx.update(rentPayments).set({ region }).where(eq(rentPayments.propertyId, id));
       await tx.update(securityDeposits).set({ region }).where(eq(securityDeposits.propertyId, id));
       await tx.update(depositDeductions).set({ region }).where(eq(depositDeductions.propertyId, id));
@@ -1724,11 +1757,16 @@ export class DatabaseStorage implements IStorage {
         .innerJoin(walkthroughRooms, eq(walkthroughPhotos.roomId, walkthroughRooms.id))
         .innerJoin(walkthroughs, eq(walkthroughRooms.walkthroughId, walkthroughs.id))
         .where(eq(walkthroughs.propertyId, id));
+      const moveOut = await tx
+        .select({ url: moveOutPhotos.imageUrl })
+        .from(moveOutPhotos)
+        .innerJoin(residents, eq(moveOutPhotos.residentId, residents.id))
+        .where(eq(residents.propertyId, id));
       const deleted = await tx
         .delete(properties)
         .where(eq(properties.id, id))
         .returning({ url: properties.photoUrl });
-      return fileUrls([...photos, ...deleted]);
+      return fileUrls([...photos, ...moveOut, ...deleted]);
     });
   }
 
@@ -2091,6 +2129,55 @@ export class DatabaseStorage implements IStorage {
     return row;
   }
 
+  // Move-out Implementation
+  async getMoveOutChecklist(residentId: string): Promise<MoveOutChecklist | undefined> {
+    const [row] = await db.select().from(moveOutChecklists).where(eq(moveOutChecklists.residentId, residentId));
+    return row;
+  }
+
+  async upsertMoveOutChecklist(checklist: Omit<MoveOutChecklist, "updatedAt">): Promise<MoveOutChecklist> {
+    const { residentId: _id, ...rest } = checklist;
+    const [row] = await db
+      .insert(moveOutChecklists)
+      .values(checklist)
+      .onConflictDoUpdate({ target: moveOutChecklists.residentId, set: { ...rest, updatedAt: new Date() } })
+      .returning();
+    return row;
+  }
+
+  async getMoveOutPhotos(residentId: string): Promise<MoveOutPhoto[]> {
+    return await db.select().from(moveOutPhotos).where(eq(moveOutPhotos.residentId, residentId)).orderBy(asc(moveOutPhotos.createdAt));
+  }
+
+  async getMoveOutPhoto(id: string): Promise<MoveOutPhoto | undefined> {
+    const [row] = await db.select().from(moveOutPhotos).where(eq(moveOutPhotos.id, id));
+    return row;
+  }
+
+  async createMoveOutPhoto(photo: Omit<MoveOutPhoto, "id" | "createdAt">): Promise<MoveOutPhoto> {
+    const [row] = await db.insert(moveOutPhotos).values(photo).returning();
+    return row;
+  }
+
+  async deleteMoveOutPhoto(id: string): Promise<string[]> {
+    return fileUrls(await db.delete(moveOutPhotos).where(eq(moveOutPhotos.id, id)).returning({ url: moveOutPhotos.imageUrl }));
+  }
+
+  async getAllDepositReturnRules(): Promise<DepositReturnRule[]> {
+    return await db.select().from(depositReturnRules).orderBy(asc(depositReturnRules.state));
+  }
+
+  async setDepositReturnRule(state: string, days: number | null, byEmail: string | null): Promise<void> {
+    if (days === null) {
+      await db.delete(depositReturnRules).where(eq(depositReturnRules.state, state));
+      return;
+    }
+    await db
+      .insert(depositReturnRules)
+      .values({ state, days, updatedByEmail: byEmail })
+      .onConflictDoUpdate({ target: depositReturnRules.state, set: { days, updatedByEmail: byEmail, updatedAt: new Date() } });
+  }
+
   // House facts Implementation
   async getPropertyFacts(propertyId: string): Promise<PropertyFacts | undefined> {
     const [row] = await db.select().from(propertyFacts).where(eq(propertyFacts.propertyId, propertyId));
@@ -2355,7 +2442,7 @@ export class DatabaseStorage implements IStorage {
     // Each of these is the full set of columns in which the application stores
     // an uploaded file's URL. A new column holding one has to be added here, or
     // downloads of those files will be refused to everyone but the uploader.
-    const [requests, requestPhotos, comments, bids, walkthrough, asset, billing, property] = await Promise.all([
+    const [requests, requestPhotos, comments, bids, walkthrough, asset, billing, property, moveOut] = await Promise.all([
       db.select().from(maintenanceRequests).where(eq(maintenanceRequests.photoUrl, url)),
       db.select().from(maintenanceRequestPhotos).where(eq(maintenanceRequestPhotos.imageUrl, url)),
       db.select().from(maintenanceRequestComments).where(eq(maintenanceRequestComments.attachmentUrl, url)),
@@ -2373,6 +2460,7 @@ export class DatabaseStorage implements IStorage {
           ),
         ),
       db.select().from(properties).where(eq(properties.photoUrl, url)),
+      db.select().from(moveOutPhotos).where(eq(moveOutPhotos.imageUrl, url)),
     ]);
 
     return [
@@ -2384,6 +2472,7 @@ export class DatabaseStorage implements IStorage {
       ...asset.map((record) => ({ kind: "assetPhoto" as const, record })),
       ...billing.map((record) => ({ kind: "billingRecord" as const, record })),
       ...property.map((record) => ({ kind: "property" as const, record })),
+      ...moveOut.map((record) => ({ kind: "moveOutPhoto" as const, record })),
     ];
   }
 }

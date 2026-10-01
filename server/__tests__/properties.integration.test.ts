@@ -33,6 +33,8 @@ import {
   repairBudgets,
   propertyQuickbooksLinks,
   propertySpend,
+  moveOutChecklists,
+  moveOutPhotos,
   maintenanceRequests,
   assets,
   invoices,
@@ -108,6 +110,8 @@ const TABLES: Table[] = [
   repairBudgets,
   propertyQuickbooksLinks,
   propertySpend,
+  moveOutChecklists,
+  moveOutPhotos,
   maintenanceRequests,
   assets,
   invoices,
@@ -172,6 +176,9 @@ async function seedHouse(key: string, region: string): Promise<HouseRows> {
   });
   await db.insert(tasks).values({ id: id("lease-task"), title: "Renew or leave?", region, sourceKey: `lease-renewal:${propertyId}:2027-01-01` });
   await db.insert(tasks).values({ id: id("utilities-task"), title: "Turn off utilities", region, sourceKey: `utilities-lease:${propertyId}:2027-06-30` });
+  await db.insert(tasks).values({ id: id("move-out-task"), title: "Maria moves out", region, sourceKey: `move-out:${residentId}:2027-05-20` });
+  await db.insert(moveOutChecklists).values({ residentId, region });
+  await db.insert(moveOutPhotos).values({ id: id("move-out-photo"), residentId, imageUrl: "/uploads/m.jpg", region });
 
   return {
     residents: [id("resident")],
@@ -189,7 +196,8 @@ async function seedHouse(key: string, region: string): Promise<HouseRows> {
     maintenance_requests: [id("request")],
     assets: [id("asset")],
     invoices: [id("invoice")],
-    tasks: [id("lease-task"), id("utilities-task")],
+    tasks: [id("lease-task"), id("utilities-task"), id("move-out-task")],
+    move_out_photos: [id("move-out-photo")],
   };
 }
 
@@ -262,6 +270,13 @@ describe.skipIf(!TEST_DATABASE_URL)("a house's records, against PostgreSQL", () 
     expect(links).toEqual([
       { property_id: "a1-house", region: EAST },
       { property_id: "b2-house", region: WEST },
+    ]);
+    const { rows: checklists } = await pool.query<{ resident_id: string; region: string }>(
+      `select resident_id, region from move_out_checklists order by resident_id`,
+    );
+    expect(checklists).toEqual([
+      { resident_id: "a1-resident", region: EAST },
+      { resident_id: "b2-resident", region: WEST },
     ]);
   });
 

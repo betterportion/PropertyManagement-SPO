@@ -614,3 +614,31 @@ describe("canReadUpload, through a bid's document", () => {
     expect(await canReadUpload(ctx, KEY, undefined)).toBe(false);
   });
 });
+
+describe("canReadUpload, through a move-out photo", () => {
+  const moveOutReference: UploadReference = {
+    kind: "moveOutPhoto",
+    record: { id: "mo-1", residentId: "r-1", region: "Twin Cities", imageUrl: URL } as never,
+  };
+
+  beforeEach(() => {
+    findUploadReferences.mockResolvedValue([moveOutReference]);
+  });
+
+  it("lets staff with a property permission in its region see it (positive control)", async () => {
+    const ctx = context({ permissions: permissions({ canViewProperties: true }), allowedRegions: ["Twin Cities"] });
+    expect(await canReadUpload(ctx, KEY, uploadRow("someone-else"))).toBe(true);
+  });
+
+  it("refuses staff in another region, and staff without a property permission", async () => {
+    const elsewhere = context({ permissions: permissions({ canViewProperties: true }), allowedRegions: ["Southwest"] });
+    expect(await canReadUpload(elsewhere, KEY, uploadRow("someone-else"))).toBe(false);
+    const noFlag = context({ permissions: permissions({ canViewMaintenance: true }), allowedRegions: ["Twin Cities"] });
+    expect(await canReadUpload(noFlag, KEY, uploadRow("someone-else"))).toBe(false);
+  });
+
+  it("refuses a resident, even one holding the property flags -- it is never theirs to read", async () => {
+    const ctx = context({ role: "resident", permissions: permissions({ canViewProperties: true, canManageProperties: true }), allowedRegions: ["Twin Cities"] });
+    expect(await canReadUpload(ctx, KEY, uploadRow("someone-else"))).toBe(false);
+  });
+});
