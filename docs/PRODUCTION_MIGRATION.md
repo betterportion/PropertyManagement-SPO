@@ -1,6 +1,6 @@
 # Production migration runbook
 
-How to move the SPO Admin Portal from its Replit workspace onto permanent infrastructure: **Supabase** for the database and file storage, **Google Workspace** for login, **Render** for hosting.
+How to stand the SPO Admin Portal up on permanent infrastructure: **Supabase** for the database and file storage, **Google sign-in** for login, **Render** for hosting.
 
 ---
 
@@ -8,25 +8,33 @@ How to move the SPO Admin Portal from its Replit workspace onto permanent infras
 
 **No external infrastructure has been created.** No Supabase project exists, no Google Cloud OAuth client exists, no Render service exists. Every account and resource below has to be created by a person with the right access. This document is the sequence to follow and the settings to use — nothing here has been done in advance.
 
+**What this is for right now: the two-region pilot** (issue #216 has the launch order). East Central and West Central, each with its regional administrator (RA) and its houses' household leaders and stewards. For the pilot:
+
+- **The production database starts empty.** There is no old data to bring across, so step 9 is skipped and step 12 is a first launch, not a move.
+- **Sign-in is by invitation only.** Nobody gets in unless an account is already waiting for their email (step 5). Household leaders sign in with **personal** Google accounts, which is why the Google consent screen is External and no domain restriction is set.
+- **The QuickBooks sync and the Google Sheet roster sync stay off.** Their settings are left unset (step 6). Rosters go in by CSV import.
+- **Email is optional.** It can be switched on later, once SPO's sending domain is ready (issue #49).
+- **Backups and one rehearsed restore come before any real data** (step 11).
+
 **Do staging first.** Every step below is written to be done twice: once against a throwaway staging environment, then again for production. Do not skip staging. The two steps most likely to go wrong — the login provider and the storage bucket — both fail in ways you cannot see until a real person tries to sign in or open a document, and in production that means locked-out staff and unreachable files.
 
-**Do not cut over until staging works end to end.** The checklist in step 8 is the bar. If any item fails, fix it in staging.
+**Do not go live until staging works end to end.** The checklist in step 8 is the bar. If any item fails, fix it in staging.
 
 ### What you need before starting
 
 | Access | Needed for | Who typically has it |
 |---|---|---|
-| Google Workspace **super admin**, or an admin who can manage Google Cloud | Creating the OAuth client that staff sign in with | Better Portion |
-| A Google Cloud project in the same organisation | Holding the OAuth client | Better Portion |
+| A Google account that can create a Google Cloud project, ideally inside SPO's or Better Portion's Google organisation | Creating the OAuth client that everyone signs in with | Better Portion |
+| A Google Cloud project | Holding the OAuth client | Better Portion |
 | Supabase account | Database and file storage | Whoever will own the infrastructure |
 | Render account | Hosting | Whoever will own the infrastructure |
 | The GitHub repository | Render deploys from it | — |
 
-Set aside a couple of hours for the staging pass. The Google OAuth verification screen can take longer if the app is not marked internal — see step 5.
+Set aside a couple of hours for the staging pass, plus time to invite test accounts (step 8 needs a personal Gmail as well as a staff account).
 
 ### A note on cost
 
-Supabase and Render both have free tiers that are fine for staging. For production, expect the paid entry tier of each: a free Render service sleeps when idle, which means the first person to open the portal in the morning waits for a cold start, and a free Supabase project pauses after a week of inactivity.
+Supabase and Render both have free tiers that are fine for staging. For production, expect the paid entry tier of each: a free Render service sleeps when idle, which means the first person to open the portal in the morning waits for a cold start, and a free Supabase project pauses after a week of inactivity. Supabase's automated daily backups also come only with a paid tier, and production needs them (step 11).
 
 ---
 
@@ -39,9 +47,11 @@ Supabase and Render both have free tiers that are fine for staging. For producti
    - the **Transaction pooler** string — this is what the running app uses,
    - the **Direct connection** string — this is what migrations use.
 
-The pooler exists because the app keeps a connection pool of its own and Render may run more than one instance; going direct from every instance exhausts Postgres' connection limit. Migrations use the direct connection because the transaction pooler does not support everything a migration may do.
+The pooler keeps the app's connections within Postgres' connection limit, including during a deploy, when the old and new copies of the server briefly run side by side. Migrations use the direct connection because the transaction pooler does not support everything a migration may do.
 
 Keep both. `DATABASE_URL` for the service is the pooled one.
+
+If the direct connection will not connect from your laptop, your network probably has no IPv6, which Supabase's direct address needs. The **Session pooler** string on the same screen works over IPv4 and is fine for migrations.
 
 ---
 
@@ -54,7 +64,7 @@ npm ci
 DATABASE_URL="postgresql://...direct..." npm run db:migrate
 ```
 
-That applies every file in `migrations/` in order and records them in a `__drizzle_migrations` table.
+That applies every file in `migrations/` in order (forty-two of them, `0000` through `0041_email_log`) and records them in the `drizzle.__drizzle_migrations` table.
 
 Verify:
 
@@ -63,11 +73,13 @@ select table_name from information_schema.tables
 where table_schema = 'public' order by table_name;
 ```
 
-You should see thirty-four tables — `asset_photos`, `assets`, `audit_log`, `billing_records`, `contact_notes`, `deposit_deductions`, `invoices`, `maintenance_contacts`, `maintenance_request_bids`, `maintenance_request_comments`, `maintenance_request_photos`, `maintenance_requests`, `maintenance_schedules`, `properties`, `property_budgets`, `property_facts`, `property_setup_items`, `rent_payments`, `request_contacts`, `resident_documents`, `residents`, `resource_links`, `security_deposits`, `sessions`, `tasks`, `uploads`, `user_permissions`, `users`, `walkthrough_items`, `walkthrough_photos`, `walkthrough_rooms`, `walkthrough_template_items`, `walkthrough_template_rooms`, `walkthroughs` — plus `__drizzle_migrations`.
+You should see forty-five tables — `asset_photos`, `assets`, `audit_log`, `billing_records`, `contact_notes`, `deposit_deductions`, `deposit_return_rules`, `email_log`, `invoices`, `maintenance_contacts`, `maintenance_request_bids`, `maintenance_request_comments`, `maintenance_request_photos`, `maintenance_requests`, `maintenance_schedules`, `move_out_checklists`, `move_out_photos`, `properties`, `property_budgets`, `property_facts`, `property_quickbooks_links`, `property_setup_items`, `property_spend`, `quickbooks_integration`, `rent_payments`, `repair_budgets`, `request_contacts`, `resident_documents`, `resident_sheet_links`, `residents`, `resource_links`, `roster_review_items`, `roster_sync_runs`, `security_deposits`, `sessions`, `tasks`, `uploads`, `user_permissions`, `users`, `walkthrough_items`, `walkthrough_photos`, `walkthrough_rooms`, `walkthrough_template_items`, `walkthrough_template_rooms`, `walkthroughs`. The QuickBooks and roster-sheet tables are created even though both syncs stay off; empty, they do nothing. `select count(*) from drizzle.__drizzle_migrations;` should say 42.
 
 > **`sessions` must be in that list.** The app does not create it at startup — the session store is deliberately configured not to — so if the migrations did not run, logging in fails rather than silently starting a fresh store.
 
 **Do not use `npm run db:push` against staging or production.** It pushes the schema with no migration record, so the next `db:migrate` sees an empty history against a full database and tries to create everything again.
+
+**Do not run `npm run db:seed` against production.** It fills an empty database with made-up demo houses, residents and requests. It is fine on staging if you want something to click through, but then staging no longer starts empty the way production will, and it refuses to run once any house exists.
 
 ### Migrating an existing database instead of a fresh one
 
@@ -92,7 +104,7 @@ npm run db:baseline -- <tag>     # then npm run db:migrate
 | The app as it runs today, before the audit log | `npm run db:baseline -- 0002_drop_monday_item_id` |
 | Only the original schema, no `uploads` table | `npm run db:baseline` |
 
-The middle row was the old Replit database: it had the `uploads` table (`0001`) and no longer had `monday_item_id` (`0002`), so it baselined through `0002_drop_monday_item_id` and then migrated. Yours will name a different tag — there are thirty-seven migrations now, through `0036_user_references_follow_relink`.
+The middle row was the old Replit database: it had the `uploads` table (`0001`) and no longer had `monday_item_id` (`0002`), so it baselined through `0002_drop_monday_item_id` and then migrated. Yours will name a different tag — there are forty-two migrations now, through `0041_email_log`.
 
 You do not have to get this right by inspection. Before recording anything, the command compares the database against the migrations in both directions — a missing table or column, a column a later migration should already have dropped, or a table that only a later migration creates — and refuses if anything disagrees. It then works out which tag the database *does* match and tells you:
 
@@ -140,7 +152,7 @@ The service role key bypasses every access rule in the project. It is a server-o
 
 ## Step 4 — Prove uploads work before going further
 
-Still local, pointed at staging:
+You need to be able to sign in for this, so it comes after step 5 in practice. Either run it on the staging service once step 7 passes, or locally, pointed at staging:
 
 ```bash
 export DATABASE_URL="postgresql://...pooled..."
@@ -149,10 +161,13 @@ export STORAGE_DRIVER=supabase
 export SUPABASE_URL="https://<ref>.supabase.co"
 export SUPABASE_SERVICE_ROLE_KEY="..."
 export SUPABASE_STORAGE_BUCKET=uploads
+# plus the OIDC_* values from step 5
 npm run dev
 ```
 
-Sign in (still on Replit login at this point — the provider changes in step 5), then:
+Locally, the staging OAuth client needs `http://localhost:5000/api/callback` as an extra redirect URI, and your admin account must already exist (end of step 5). Remove the localhost URI from the client afterwards.
+
+Sign in as that admin, then:
 
 1. Upload a photo to a maintenance request. It should appear.
 2. Check **Storage → uploads** in Supabase — a new object with a long random name should be there.
@@ -164,16 +179,17 @@ If a file lands on disk instead of in Supabase, `STORAGE_DRIVER` is not set to `
 
 ---
 
-## Step 5 — Google Workspace login
+## Step 5 — Google sign-in
 
-This is the step with the most moving parts, and the only one that requires Google Workspace administrator access.
+This is the step with the most moving parts.
 
 ### What Better Portion must configure
 
-**In Google Cloud Console**, in a project belonging to the Google Workspace organisation:
+**In Google Cloud Console**, in the project that will hold the sign-in client:
 
 1. **APIs & Services → OAuth consent screen**
-   - **User type: Internal.** This restricts sign-in to the organisation's own Workspace accounts and skips Google's verification review entirely. Choose External only if people outside the Workspace domain need to sign in, and expect a verification process. **On External, any Google account can sign in and arrives as an active resident** unless `OIDC_ALLOWED_DOMAINS` is set (below).
+   - **User type: External.** Household leaders and stewards sign in with personal Google accounts (Gmail, or a university address made into a Google account), and Internal would turn every one of them away. External lets any Google account *reach* the portal; the portal itself then refuses anyone it has not invited (below), before any account is created.
+   - **Publishing status: In production.** Left on "Testing", only the test users listed on the consent screen can sign in. With only the three basic scopes below, Google does not require the app to go through its verification review.
    - App name: `SPO Admin Portal`
    - Support email and developer contact email: a monitored address
    - Scopes: `openid`, `email`, `profile` — nothing more. The portal reads nothing from Google beyond who the person is.
@@ -201,39 +217,39 @@ This is the step with the most moving parts, and the only one that requires Goog
 | `OIDC_CLIENT_SECRET` | the client secret from above |
 | `OIDC_PROVIDER_NAME` | `google` |
 | `OIDC_SCOPES` | `openid email profile` |
-| `OIDC_ALLOWED_DOMAINS` | SPO's Workspace domain, e.g. `spo.org` (comma-separated if more than one) |
+| `OIDC_ALLOWED_DOMAINS` | **Leave unset** |
 
-**Set `OIDC_ALLOWED_DOMAINS` as well as choosing Internal.** It makes the app itself refuse any sign-in whose Google hosted-domain (`hd`) claim is not one of the listed domains, before an account is created, so the restriction no longer rests on a single console setting that anyone with access to the Google Cloud project can change. Personal Google accounts carry no `hd` claim and are refused even when their address is on the SPO domain. Unset, the app accepts anyone Google does. It is Google-only: another provider sends no `hd`, and setting it there refuses everyone.
+**Leave `OIDC_ALLOWED_DOMAINS` unset for this deployment.** When set, it refuses any sign-in whose Google hosted-domain (`hd`) claim is not one of the listed domains — and personal Google accounts carry no `hd` claim at all, so it would lock out every household leader. It exists for a deployment where only staff on a Google Workspace domain sign in. Here, invite-only sign-in (below) is what keeps strangers out.
 
-**`OIDC_SCOPES` must be set explicitly for Google.** The application's default includes `offline_access`, and **Google rejects that scope** — login fails with `invalid_scope` and no user gets in. Google uses its own mechanism for long-lived access, which this app does not need.
+**`OIDC_SCOPES` can be left unset**: the default is already `openid email profile`. Setting it to exactly that does no harm. **Never add `offline_access`** — Google rejects that scope, login fails with `invalid_scope`, and nobody gets in.
 
-The consequence, which is worth stating plainly to whoever supports the portal: **sessions end when the access token expires and staff sign in again.** The app can only refresh a session in the background when the provider issues a refresh token. Signing in again is a click — the browser is already signed in to Google — but it is not invisible.
+The consequence, which is worth stating plainly to whoever supports the portal and to the pilot RAs: **on Google, a session ends after about an hour, and people sign in again.** Without `offline_access` Google issues no refresh token, so the portal cannot renew a session in the background; when Google's one-hour token expires, the next action asks them to sign in. Signing in again is a click or two — the browser is usually still signed in to Google — but it is not invisible, and a half-written form can be lost.
 
 No code changes. `server/auth.ts` reads all of this from the environment.
 
-### What happens to existing accounts
+### Who can sign in
 
-Accounts re-link **by email address**. On sign-in, if the email matches an existing user under a different provider ID, that account is migrated in place and keeps its role, its active flag and its permissions.
+The portal is **invite-only** (`recordSignIn` in `server/auth.ts`). A sign-in gets in only to an account that is already waiting for its email address (capital letters aside). Anyone else lands back on the sign-in page with: *"That Google account hasn't been given access. The portal is by invitation: ask your regional administrator to give you access using the email address you sign in with."* Nothing is written for a refused sign-in. Google must also mark the address as verified, or the sign-in is refused with a different message.
 
-That has one sharp edge: **an address that does not match exactly arrives as a brand-new account with the `resident` role.** Someone whose portal account says `jane@spo.org` but who signs in to Google as `jane.doe@spo.org` will find themselves looking at a resident's empty request list, not the admin pages.
+Accounts are waiting for people because somebody made them:
 
-Before switching a provider:
+- **The first admin** — by SQL, once, below.
+- **Staff** (admins and RAs) — an admin creates them in **Settings**, then sets their permissions and regions.
+- **Household leaders and stewards** — their RA opens the resident's page and uses **Portal access → Give portal access**, which uses the email on the roster. At most **3** switched-on household logins per house. The RA needs the "manage properties" permission for that house's region.
 
-```sql
-select email, role, is_active from users order by role, email;
-```
+The email has to be the exact address the person signs in to Google with. If someone is turned away, compare the two; an alias or a different Gmail will not match.
 
-Send that list to whoever administers Google Workspace and have them confirm each address is the exact Workspace primary address. Fix mismatches in the `users` table *before* the switch, not after. Aliases do not help — Google reports the primary address.
+**When someone leaves the house**, their login stops reaching the house's records as soon as the roster no longer lists them as current (inactive, or their stop date has passed): the house rule needs a current roster row with their email. The login itself is switched off by the move-out dialog's "Also switch off their portal login", or by the RA from the resident's page, which also frees the place for the house.
 
 ### First sign-in on a fresh database
 
-The portal is **invite-only**: a sign-in gets in only to an account that is already waiting for its email. On a fresh database nobody is waiting, so create your own admin account by hand, once, **before** you first sign in:
+On a fresh database nobody is waiting, so create your own admin account by hand, once, **before** you first sign in. Using the direct connection (Supabase's SQL editor works too):
 
 ```sql
 insert into users (email, role, is_active) values ('you@spo.org', 'admin', true);
 ```
 
-Your first Google sign-in with that address attaches to it (the re-link by email). From then on, admins create staff accounts in Settings, and each RA gives household leaders and stewards access from their house's roster (up to 3 per house). Anyone else who signs in is turned away with "ask your regional administrator".
+Use the address you will sign in to Google with. Your first sign-in attaches to that row (the portal re-links an account by its email the first time a new Google identity signs in with it). From then on, everything else is done in the app.
 
 ---
 
@@ -245,20 +261,32 @@ Your first Google sign-in with that address attaches to it (the re-link by email
 |---|---|
 | Environment | Node |
 | Node version | 20 (set `NODE_VERSION=20` if Render picks another) |
-| Build command | `npm ci && npm run build` |
+| Build command | `npm ci --include=dev && npm run build` |
 | Start command | `npm run start` |
 | Health check path | `/api/health` |
 | Instance type | Free is fine for staging; use a paid instance for production |
+| Instance count | **1.** No autoscaling |
 
 The health check endpoint returns 200 only when the process is serving **and** the database answers, so Render will not route traffic to an instance that cannot reach Supabase.
 
 `PORT` is supplied by Render — do not set it yourself. The server reads it and listens on `0.0.0.0`.
+
+**`--include=dev` in the build command is needed** because `NODE_ENV=production` is set below, and with it set, a plain `npm ci` skips the build tools (Vite, esbuild) and the build fails.
+
+### Run exactly one instance
+
+The portal's five daily jobs — audit-log retention, preventive maintenance requests, seasonal reminder tasks (which also creates move-out reminders), the QuickBooks sync and the roster-sheet sync — run **inside the web server**. There is no separate worker and no cron (`docs/WORKFLOWS.md` lists each one). Each runs once when the server starts and then every 24 hours from that moment, not at a fixed time of day, so a redeploy restarts the clock.
+
+So keep the service at **one instance**. A second instance would run every job twice, and the guards that stop two syncs overlapping, and the limit on uploads in progress, only hold within one process. The jobs are written so that running twice changes nothing, which is what makes the brief overlap during a deploy safe — but that is a safety net, not a way to run two copies.
+
+**Time zone:** leave `TZ` unset. Render runs in UTC, and the portal's own date rules (due dates, move-out reminders, "today") are all worked out in UTC whatever `TZ` says, so setting it would only change the times printed in the log. Bear in mind that a UTC day starts in the evening in Ohio and Kansas (between 6 and 8pm local time, depending on the state and daylight saving).
 
 ### Environment variables
 
 Set these in **Environment** on the service:
 
 ```
+NODE_ENV              = production
 DATABASE_URL          = <Supabase pooled connection string>
 SESSION_SECRET        = <fresh 32+ character random string, different per environment>
 STORAGE_DRIVER        = supabase
@@ -270,15 +298,26 @@ OIDC_CLIENT_ID        = <Google client ID>
 OIDC_CLIENT_SECRET    = <Google client secret>
 OIDC_PROVIDER_NAME    = google
 OIDC_SCOPES           = openid email profile
+APP_URL               = https://<this service's hostname>
 ```
 
-Outbound email is deliberately **not** in that list. The app runs fine with no mailer and
-simply sends nothing. When the Resend domain is ready (issue #49), add `RESEND_API_KEY`
-and `EMAIL_FROM` together — and optionally `EMAIL_REPLY_TO`. Setting only one of the pair
-fails the boot check on purpose, so a half-configured mailer can never silently swallow
-messages.
+`npm run start` already sets `NODE_ENV=production`; setting it on the service as well makes sure nothing run on the instance (a Render shell, say) falls back to development behaviour. Production mode is what turns on secure cookies, HSTS and the content security policy, which step 8 checks.
 
-`APP_URL` is optional too: set it to the address people open the portal at (the Render hostname, once you have it) and comment emails carry an "open this request" link; leave it unset and they go out without one. It must be an `https://` address when set.
+**Deliberately left unset for the pilot:**
+
+| Variables | What they switch on | For the pilot |
+|---|---|---|
+| `OIDC_ALLOWED_DOMAINS` | Limit sign-in to Google Workspace domains | **Unset.** It would refuse every household leader's personal account (step 5) |
+| `QUICKBOOKS_CLIENT_ID`, `QUICKBOOKS_CLIENT_SECRET`, `QUICKBOOKS_REDIRECT_URI`, `QUICKBOOKS_TOKEN_KEY` (+ optional `QUICKBOOKS_ENVIRONMENT`) | The daily QuickBooks repair & maintenance spend sync | **Unset.** Off for the pilot; house pages say "Spending not connected yet" |
+| `GOOGLE_SERVICE_ACCOUNT_JSON`, `RESIDENT_SHEET_ID`, `RESIDENT_SHEET_TAB` | The daily sync from SPO's master resident Google Sheet | **Unset.** Off for the pilot; rosters go in by CSV |
+| `RESEND_API_KEY`, `EMAIL_FROM` (+ optional `EMAIL_REPLY_TO`) | Outbound email | Unset until SPO's sending domain is ready (issue #49) |
+
+Each group is **all or nothing**: none of it set leaves that feature off and the server runs normally; some but not all of it stops the server at boot, on purpose, so a half-configured feature can never fail silently. The setup for each, when its time comes, is in `docs/WORKFLOWS.md`.
+
+- **Rosters for the pilot** go in by CSV: a house's roster through **Import from spreadsheet** on the Residents page, or a file with the master sheet's columns through **Settings → Resident roster sheet → Import a CSV instead** (**Preview file**, then **Apply file**). Both show what they would do first and write nothing until you confirm. (Even once the sheet variables are set later, the daily sheet sync does nothing until an admin has pressed **Sync now** once.)
+- **Email off** means the portal sends nothing and carries on normally. **Settings → Email health** says email isn't set up, and counts the messages it would have sent. When email is switched on, send yourself the test email from that panel.
+
+`APP_URL` is the address people open the portal at. Comment emails use it for their "open this request" link (leave it unset and they go out without one). It must be an `https://` address when set; change it if the portal moves to a custom domain.
 
 `.env.example` documents every one of these, and the optional tuning variables (`DATABASE_SSL`, `DATABASE_POOL_MAX`, `MAX_UPLOAD_BYTES_IN_FLIGHT`).
 
@@ -288,11 +327,11 @@ If anything required is missing the service will fail to start and the log will 
 
 ### Point Google at the real hostname
 
-Render assigns the hostname only after the service is created. Go back to the Google OAuth client and make sure the authorised redirect URI matches it exactly, including `/api/callback`.
+Render assigns the hostname only after the service is created. Go back to the Google OAuth client and make sure the authorised redirect URI matches it exactly, including `/api/callback`, and set `APP_URL` to the same `https://` address.
 
 ### Migrations on deploy
 
-Render does not run migrations for you, and this project does not run them at startup — a schema change on boot with several instances starting at once is a good way to corrupt a database. Apply migrations deliberately:
+Render does not run migrations for you, and this project does not run them at startup — a schema change applied by a server as it boots, possibly while the previous copy is still running, is a good way to corrupt a database. Apply migrations deliberately:
 
 ```bash
 DATABASE_URL="<direct connection string>" npm run db:migrate
@@ -310,20 +349,49 @@ Before testing, check the running service reports itself healthy:
 curl https://<staging-host>/api/health
 ```
 
-Expect `200` and a body indicating the database is reachable. A `503` here means the app is up but Supabase is not answering — check `DATABASE_URL` and that you used the pooled string.
+Expect `200` and `{"status":"ok","database":"ok",...}`. A `503` here means the app is up but Supabase is not answering — check `DATABASE_URL` and that you used the pooled string.
+
+Then check the security headers and the session cookie:
+
+```bash
+curl -sI https://<staging-host>/            # the page itself
+curl -sI https://<staging-host>/api/login   # starts a sign-in, so it sets a cookie
+```
+
+- [ ] The page response has `Strict-Transport-Security: max-age=15552000; includeSubDomains` and a `Content-Security-Policy` header that includes `frame-ancestors 'none'`. Neither is sent outside production mode, so a missing one means `NODE_ENV` is not `production`.
+- [ ] The `/api/login` response is a redirect to `accounts.google.com`, and its `Set-Cookie: connect.sid=...` line includes `HttpOnly`, `Secure` and `SameSite=Lax`.
+
+And confirm the bucket is private from outside. Take the storage key of any uploaded file (the part after `/uploads/` in the portal's link, or a name from **Storage → uploads**) and ask Supabase for it as a public file:
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' \
+  https://<ref>.supabase.co/storage/v1/object/public/uploads/<key>
+```
+
+- [ ] It is refused (a 400 or 404), not `200`. A `200` means the bucket is public: switch it to private at once (step 3).
 
 ---
 
 ## Step 8 — Test staging properly
 
-This is the bar for cutover. Work through it with at least two accounts: an admin and a non-admin.
+This is the bar for going live. Work through it with at least four Google accounts, mirroring the pilot:
+
+- **an admin** (the one inserted by SQL in step 5),
+- **a non-admin RA**, created by the admin in Settings, with the property and maintenance permissions and one region,
+- **a household leader on a personal Gmail**, given access by that RA from a resident's page on one of the RA's houses,
+- **an uninvited personal Gmail** that nobody has added.
 
 **Login**
-- [ ] Sign in with a Google Workspace account. You land in the portal, not on an error.
+- [ ] Sign in as the admin. You land in the portal, not on an error.
 - [ ] The correct name and email appear in the sidebar.
 - [ ] Sign out, then sign in again.
-- [ ] An existing pre-migration account keeps its role and its permissions.
-- [ ] A Google account from **outside** the Workspace organisation cannot sign in (if the consent screen is Internal, Google refuses it).
+- [ ] Sign in as the RA. Only their region's houses show, and Settings (admins only) shows an access-denied message.
+- [ ] As the RA, import a small roster for one house by CSV (Preview, then Apply), open a resident and use **Portal access → Give portal access**.
+- [ ] Sign in as that leader on their personal Gmail. They see the resident pages for their own house only: its requests, its walkthroughs and the resource hub, with no admin navigation.
+- [ ] Sign in with the **uninvited** Gmail. It is turned back to the sign-in page with "That Google account hasn't been given access. The portal is by invitation…", and `select count(*) from users where email = '<that address>';` is still 0.
+- [ ] Give portal access to a fourth person at the same house after three are switched on. It is refused.
+- [ ] Mark the leader as moved out (or give them a stop date in the past). They can no longer read the house's requests.
+- [ ] Leave a session alone for a little over an hour, then click something. You are asked to sign in again, and signing in returns you to the portal (step 5 explains why).
 
 **Access control** — the part worth being slow about
 - [ ] A resident account sees only resident pages, with no admin navigation.
@@ -355,13 +423,16 @@ This is the bar for cutover. Work through it with at least two accounts: an admi
 select created_at, actor_email, action, summary
 from audit_log order by created_at desc limit 20;
 ```
-- [ ] The role change, deactivation, invoice and document actions from above are all listed with the right actor.
+- [ ] The role change, deactivation, portal-access grant, invoice and document actions from above are all listed with the right actor.
 
 **Operational**
 - [ ] `/api/health` returns 200.
+- [ ] Render shows exactly one instance.
 - [ ] Restart the service in Render; it comes back without manual intervention.
 - [ ] Sessions survive that restart (they live in Postgres, not in memory).
 - [ ] The Render logs contain no stack traces during normal use.
+- [ ] **Settings → Email health** says email isn't set up (or, if email is on, the test email from that panel arrives).
+- [ ] Settings → QuickBooks and Settings → Resident roster sheet both say they are not set up.
 
 ---
 
@@ -392,16 +463,16 @@ Only if the existing data has to be preserved. If the portal is going live with 
 
 ## Step 10 — Production
 
-Repeat steps 1, 3, 5 and 6 with **separate resources**:
+Repeat steps 1, 2, 3, 5 and 6 with **separate resources**:
 
-- a **separate Supabase project** (not a second bucket in the staging project),
-- a **separate Google OAuth client**, with the production redirect URI,
-- a **separate Render service**, on a paid instance so it does not sleep,
+- a **separate Supabase project** (not a second bucket in the staging project), on a **paid tier** so it has daily backups and does not pause,
+- a **separate Google OAuth client**, with the production redirect URI (External, In production, exactly as in step 5),
+- a **separate Render service**, on a paid instance so it does not sleep, still at **one instance**,
 - a **fresh `SESSION_SECRET`**.
 
 Separate projects, not shared ones. A shared database means a staging mistake damages real data; a shared OAuth client means a staging redirect URI is trusted in production.
 
-Apply the migrations to the production database with the direct connection string, then deploy.
+Apply the migrations to the empty production database with the direct connection string (`npm run db:migrate`; never `db:seed`), insert the first admin (end of step 5), then deploy. Run the step 7 checks against the production hostname.
 
 ### Custom domain
 
@@ -410,39 +481,85 @@ If the portal will live at something like `portal.spo.org`:
 1. Add the domain in Render and create the DNS record it asks for.
 2. Wait for the certificate to be issued.
 3. **Add `https://portal.spo.org/api/callback` to the Google OAuth client.** Login is broken on the new domain until this exists.
-4. Test sign-in on the custom domain specifically. The app registers its login strategy per hostname, so a working `onrender.com` address proves nothing about the custom one.
+4. **Change `APP_URL` to `https://portal.spo.org`**, so email links point at the address people use. (Once QuickBooks is switched on after the pilot, `QUICKBOOKS_REDIRECT_URI` and the Intuit app's redirect URI change to the new domain too.)
+5. Test sign-in on the custom domain specifically. The app registers its login strategy per hostname, so a working `onrender.com` address proves nothing about the custom one.
 
 ---
 
-## Step 11 — Cutover
+## Step 11 — Backups and one rehearsed restore
 
-Only after staging has passed step 8 in full.
+**Do this before any real data goes into production** (issue #212). Deletes in the portal are permanent: a deleted record's rows are gone, and its photos and documents are removed from the bucket. And **Supabase's database backups do not include Storage files**, so the database and the bucket each need their own backup.
 
-1. Agree a window when nobody is using the portal.
-2. Tell staff: the address is changing, and they will sign in with their Google Workspace account from now on.
-3. Freeze the old portal — stop the Replit deployment so nobody keeps entering data into it.
-4. Take the final data dump and restore it into production (step 9).
-5. Update DNS if a custom domain is in use.
-6. Sign in on production as an admin and spot-check the security items from step 8 — the access-control checks, and one upload and download.
-7. Watch the Render logs for the first day.
-8. Keep the old environment intact, powered down, for a fortnight. Do not delete anything until the new one has been through a full working week.
+### Database
+
+- [ ] The production Supabase project is on a **paid tier**, and **Database → Backups** shows daily backups. Write the retention period here: ______.
+
+### Uploaded files
+
+- [ ] A **scheduled copy of the private `uploads` bucket**, at least nightly, to somewhere that is not the production project: a second private bucket in another Supabase project, or off-Supabase storage. Supabase Storage speaks the S3 protocol (create S3 access keys in the project's Storage settings; they are secrets, like the service role key), so a tool such as `rclone` can do the copy:
+
+  ```bash
+  rclone copy spo-prod:uploads spo-backup:spo-uploads
+  ```
+
+  Use **copy**, not **sync**: a sync would delete from the backup whatever was deleted in the portal, which is exactly the mistake the backup is there to undo. The destination must be private too; it holds the same W-9s and photographs.
+- [ ] Write down how the copy runs and where (which scheduler, which destination, who gets told if it fails): ______.
+
+### Rehearse a restore
+
+A backup nobody has restored is a guess. Once, before real data, restore both halves into a **scratch** Supabase project — never into production — and prove the portal can read them. Production is still empty at this point, so first give it something to check: a test house, a walkthrough with a photo, and a billing record with a document. Wait for a daily backup and a bucket copy to include them, then:
+
+1. Create a scratch Supabase project, and a **private** `uploads` bucket in it (step 3).
+2. **Database:** restore the latest daily backup into the scratch project. Use the dashboard's restore-to-a-new-project option if your plan offers it; otherwise take a dump of the portal's own schemas from production and load it (Supabase's built-in schemas are left out because the scratch project already has its own):
+   ```bash
+   pg_dump --no-owner --no-acl --schema=public --schema=drizzle \
+     "<production direct connection string>" > spo-restore-test.sql
+   psql "<scratch direct connection string>" < spo-restore-test.sql
+   ```
+3. **Files:** copy the bucket backup into the scratch bucket, the other way round: `rclone copy spo-backup:spo-uploads spo-scratch:uploads`.
+4. **Check it:** run the portal locally against the scratch project (step 4's variables, with the scratch database, URL and service role key). Sign in, open a walkthrough with photos and a billing record with a document, and confirm both display. `select count(*) from uploads;` should be close to the number of objects in the scratch bucket (new uploads since the last copy account for any gap).
+5. Write down the date, how long it took, and anything that did not go as written, and correct this section to match. Then delete the scratch project, and the test records from production.
+
+### Restoring production for real
+
+1. Tell staff the portal is down, and stop the Render service so nothing is written mid-restore.
+2. Restore the database from **Database → Backups** (this replaces the current database with the backup; anything entered since that backup is lost and has to be re-entered).
+3. Copy the bucket backup back into the `uploads` bucket with `rclone copy`. It only adds what is missing; every storage key is unique, so nothing current is overwritten. Files uploaded after the last bucket copy cannot come back.
+4. Start the service, run the step 7 checks, and open a few recent photos and documents.
+
+- [ ] **Who restores, and how they are reached:** ______. Name a second person.
+
+---
+
+## Step 12 — Go live
+
+Only after staging has passed step 8 in full and step 11 is done.
+
+**For the pilot there is no old portal to move from**: production starts empty, so there is no freeze and no data dump.
+
+1. Sign in on production as the admin and spot-check the security items from step 8 — the access-control checks, the uninvited-Gmail refusal, and one upload and download.
+2. Set the portal up for the pilot (issue #214): the two RAs with their regions, the houses, the rosters by CSV, portal access for the household leaders and stewards, deposit return deadlines, budgets.
+3. Tell the RAs, and through them the leaders: sign in with **the Google account whose email the RA gave access to**; and expect to sign in again after about an hour.
+4. Watch the Render logs for the first day.
+
+### Moving from an existing deployment instead
+
+If a later move is from a portal that already holds data: agree a quiet window; tell staff the address is changing; stop the old deployment so nobody keeps entering data into it; take the final dump and restore it into production (step 9); update DNS; spot-check as above; and keep the old environment intact, powered down, for a fortnight before deleting anything.
 
 ### If it goes wrong
 
-Nothing about the migration is one-way as long as the old environment still exists:
-
 - **Login broken for everyone** — check the redirect URI matches the hostname exactly, and that `OIDC_SCOPES` does not contain `offline_access`.
-- **One person locked out** — almost always an email mismatch. Compare `users.email` with their Workspace primary address; fix the row and have them sign in again.
-- **Everyone lands as a resident** — the emails in `users` do not match the Workspace addresses. Stop, fix the addresses, and remove the duplicate accounts that were created.
+- **Everyone is told they haven't been given access** — that is invite-only working on accounts nobody has created. Check the first admin row exists (step 5) and that its email is exactly the address being signed in with.
+- **One person turned away** — almost always an email mismatch. Compare the email on their account (or their roster row, for a leader) with the Google account they actually sign in with; fix it and have them sign in again. If the RA could not give a leader access at all, the house already has 3 switched-on logins; switch one off first.
+- **A Workspace domain restriction refusing leaders** ("This portal only accepts SPO accounts") — `OIDC_ALLOWED_DOMAINS` is set. Remove it and restart.
 - **Files not appearing** — check `STORAGE_DRIVER=supabase` and the service role key.
-- **Total failure** — bring the old deployment back up and point DNS back at it. Anything entered on the new system since cutover has to be re-entered, which is why the window should be quiet.
+- **Data lost or damaged** — restore from backup (step 11).
 
 ---
 
 ## After the move
 
-- **Rotate the secrets that were used during setup** if any were pasted into a chat, a ticket or a shared document — particularly the Supabase service role key.
-- **Turn on backups.** Supabase's paid tiers include automated daily backups; confirm they are enabled and note the retention period. A backup nobody has restored is a guess, so restore one into a scratch project once.
+- **Rotate the secrets that were used during setup** if any were pasted into a chat, a ticket or a shared document — particularly the Supabase service role key. The full list of secrets the portal holds: `SESSION_SECRET` (changing it signs everyone out), `SUPABASE_SERVICE_ROLE_KEY`, `OIDC_CLIENT_SECRET`, `RESEND_API_KEY` once email is on, the bucket-backup S3 keys, and, once those integrations are switched on after the pilot, `QUICKBOOKS_CLIENT_SECRET` and `QUICKBOOKS_TOKEN_KEY` (changing the token key means an admin reconnects QuickBooks) and the Google service-account key in `GOOGLE_SERVICE_ACCOUNT_JSON` (create a new key in Google Cloud, replace the variable, restart, then delete the old key).
 - **Decide who holds the accounts.** Supabase, Render and the Google Cloud project should each be owned by an organisation account with more than one administrator, not by an individual's personal login.
 - **Keep `.env.example` current.** It is the only complete list of what the app reads, and it is what the next person will follow.
-- **Work through the known issues** in `README.md` — particularly the orphaned files left in storage when a photo or document is deleted, and the frontend's missing error boundary.
+- **Work through the known issues** in `README.md` — particularly that replacing a photo or document on an edit leaves the old file in storage.
