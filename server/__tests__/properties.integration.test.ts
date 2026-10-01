@@ -39,6 +39,7 @@ import {
   assets,
   invoices,
   tasks,
+  maintenanceContacts,
 } from "@shared/schema";
 
 const { TEST_SCHEMA, TEST_DATABASE_URL } = vi.hoisted(() => ({
@@ -116,6 +117,7 @@ const TABLES: Table[] = [
   assets,
   invoices,
   tasks,
+  maintenanceContacts,
 ];
 
 /** The rows that carry a region, by table, for one house. */
@@ -294,6 +296,36 @@ describe.skipIf(!TEST_DATABASE_URL)("a house's records, against PostgreSQL", () 
       invoices: moving.invoices,
     });
     expect(moved).toEqual(allIn(EAST, moved));
+  });
+
+  it("carries a corrected address to every record that keeps a copy of it, and to nobody else's", async () => {
+    const house = await seedHouse("f6", WEST);
+    const neighbour = await seedHouse("g7", WEST);
+    await db.insert(maintenanceContacts).values({
+      id: "f6-contact", name: "Pat", company: "Pipes Inc", service: "Plumbing", phone: "555", email: "pat@example.org",
+      region: WEST, buildingAddress: "f6 Main St, St Paul, MN 55101",
+    });
+    const before = "f6 Main St, St Paul, MN 55101";
+    const after = "f6 Main St, St Paul, MN 55104";
+
+    await storage.updateProperty("f6-house", { zipCode: "55104", address: after });
+
+    // Every table with a buildingAddress column, read directly.
+    const tables = [
+      "maintenance_requests", "invoices", "maintenance_contacts", "residents", "rent_payments", "security_deposits",
+      "deposit_deductions", "walkthroughs", "walkthrough_rooms", "walkthrough_photos", "maintenance_schedules", "assets",
+    ];
+    for (const table of tables) {
+      const { rows: old } = await pool.query(`select id from "${table}" where building_address = $1`, [before]);
+      expect({ table, left: old.length }).toEqual({ table, left: 0 });
+    }
+    const { rows: moved } = await pool.query(`select count(*)::int as n from residents where building_address = $1`, [after]);
+    expect(moved[0].n).toBe(house.residents.length);
+    const { rows: requests } = await pool.query(`select id from maintenance_requests where building_address = $1`, [after]);
+    expect(requests.map((r) => r.id)).toEqual(house.maintenance_requests);
+    // The neighbour's copies are untouched.
+    const { rows: theirs } = await pool.query(`select building_address from residents where id = any($1)`, [neighbour.residents]);
+    expect(theirs.map((r) => r.building_address)).toEqual(["g7 Main St, St Paul, MN 55101"]);
   });
 
   it("leaves every record alone on an edit that keeps the region", async () => {
