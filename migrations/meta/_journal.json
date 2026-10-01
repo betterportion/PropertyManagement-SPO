@@ -267,6 +267,13 @@
       "when": 1790831524743,
       "tag": "0037_repair_budgets",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1790831910987,
+      "tag": "0038_quickbooks_spend",
+      "breakpoints": true
     }
   ]
 }

@@ -22,6 +22,9 @@ import {
   residentDocuments,
   propertyBudgets,
   repairBudgets,
+  quickbooksIntegration,
+  propertyQuickbooksLinks,
+  propertySpend,
   propertyFacts,
   residents,
   rentPayments,
@@ -80,6 +83,9 @@ import {
   type InsertPropertyBudget,
   type RepairBudget,
   type InsertRepairBudget,
+  type QuickbooksIntegration,
+  type PropertyQuickbooksLink,
+  type PropertySpend,
   type PropertyFacts,
   type PropertyFactsWrite,
   type MaintenanceSchedule,
@@ -498,6 +504,16 @@ export interface IStorage {
   getAllRepairBudgets(): Promise<RepairBudget[]>;
   getRepairBudget(propertyId: string, fiscalYear: number): Promise<RepairBudget | undefined>;
   upsertRepairBudget(budget: InsertRepairBudget & { region: string }): Promise<RepairBudget>;
+
+  // QuickBooks: the one connection row, house links, and the synced spend
+  getQuickbooksIntegration(): Promise<QuickbooksIntegration | undefined>;
+  updateQuickbooksIntegration(patch: Partial<Omit<QuickbooksIntegration, "id" | "updatedAt">>): Promise<QuickbooksIntegration>;
+  getAllPropertyQuickbooksLinks(): Promise<PropertyQuickbooksLink[]>;
+  setPropertyQuickbooksLink(link: Omit<PropertyQuickbooksLink, "updatedAt">): Promise<PropertyQuickbooksLink>;
+  deletePropertyQuickbooksLink(propertyId: string): Promise<boolean>;
+  getAllPropertySpend(): Promise<PropertySpend[]>;
+  /** Writes every row of one sync together, or none of them. */
+  upsertPropertySpend(rows: Array<Omit<PropertySpend, "id">>): Promise<void>;
 
   // House facts
   getPropertyFacts(propertyId: string): Promise<PropertyFacts | undefined>;
@@ -1637,6 +1653,8 @@ export class DatabaseStorage implements IStorage {
       await tx.update(propertySetupItems).set({ region }).where(eq(propertySetupItems.propertyId, id));
       await tx.update(propertyBudgets).set({ region }).where(eq(propertyBudgets.propertyId, id));
       await tx.update(repairBudgets).set({ region }).where(eq(repairBudgets.propertyId, id));
+      await tx.update(propertyQuickbooksLinks).set({ region }).where(eq(propertyQuickbooksLinks.propertyId, id));
+      await tx.update(propertySpend).set({ region }).where(eq(propertySpend.propertyId, id));
       await tx.update(assets).set({ region }).where(eq(assets.propertyId, id));
       await tx.update(maintenanceRequests).set({ region }).where(eq(maintenanceRequests.buildingAddress, current.address));
       await tx.update(invoices).set({ region }).where(eq(invoices.buildingAddress, current.address));
@@ -1912,6 +1930,66 @@ export class DatabaseStorage implements IStorage {
       })
       .returning();
     return row;
+  }
+
+  // QuickBooks Implementation
+  async getQuickbooksIntegration(): Promise<QuickbooksIntegration | undefined> {
+    const [row] = await db.select().from(quickbooksIntegration).where(eq(quickbooksIntegration.id, "default"));
+    return row;
+  }
+
+  async updateQuickbooksIntegration(
+    patch: Partial<Omit<QuickbooksIntegration, "id" | "updatedAt">>,
+  ): Promise<QuickbooksIntegration> {
+    const [row] = await db
+      .insert(quickbooksIntegration)
+      .values({ id: "default", ...patch })
+      .onConflictDoUpdate({ target: quickbooksIntegration.id, set: { ...patch, updatedAt: new Date() } })
+      .returning();
+    return row;
+  }
+
+  async getAllPropertyQuickbooksLinks(): Promise<PropertyQuickbooksLink[]> {
+    return await db.select().from(propertyQuickbooksLinks);
+  }
+
+  async setPropertyQuickbooksLink(link: Omit<PropertyQuickbooksLink, "updatedAt">): Promise<PropertyQuickbooksLink> {
+    const [row] = await db
+      .insert(propertyQuickbooksLinks)
+      .values(link)
+      .onConflictDoUpdate({
+        target: propertyQuickbooksLinks.propertyId,
+        set: { kind: link.kind, externalId: link.externalId, externalName: link.externalName, region: link.region, updatedAt: new Date() },
+      })
+      .returning();
+    return row;
+  }
+
+  async deletePropertyQuickbooksLink(propertyId: string): Promise<boolean> {
+    const removed = await db
+      .delete(propertyQuickbooksLinks)
+      .where(eq(propertyQuickbooksLinks.propertyId, propertyId))
+      .returning({ propertyId: propertyQuickbooksLinks.propertyId });
+    return removed.length > 0;
+  }
+
+  async getAllPropertySpend(): Promise<PropertySpend[]> {
+    return await db.select().from(propertySpend);
+  }
+
+  async upsertPropertySpend(rows: Array<Omit<PropertySpend, "id">>): Promise<void> {
+    if (rows.length === 0) return;
+    await db.transaction(async (tx) => {
+      for (const row of rows) {
+        await tx
+          .insert(propertySpend)
+          .values(row)
+          .onConflictDoUpdate({
+            target: [propertySpend.propertyId, propertySpend.fiscalYear],
+            set: { amount: row.amount, region: row.region, syncedAt: row.syncedAt },
+          });
+      }
+    });
   }
 
   // House facts Implementation

@@ -30,6 +30,7 @@ import { isResidentPermissionFlag } from "@shared/permissions";
 import { serverMessage } from "@/lib/serverMessage";
 import { z } from "zod";
 import { ActivityLog } from "@/components/ActivityLog";
+import QuickBooksSettings from "@/components/QuickBooksSettings";
 import ResourceLinksSettings from "@/components/ResourceLinksSettings";
 import WalkthroughTemplateSettings from "@/components/WalkthroughTemplateSettings";
 import { Section, Container, PageHeader, PageStack } from "@/components/layout/page";
@@ -617,6 +618,8 @@ export default function Settings() {
       <WalkthroughTemplateSettings />
 
       <ResourceLinksSettings />
+
+      <QuickBooksSettings />
 
       <ActivityLog />
 

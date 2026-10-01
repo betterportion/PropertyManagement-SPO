@@ -33,6 +33,7 @@ import { assetLifecycle } from "@shared/assetLifecycle";
 import { depositReturnDeadline, fromCents, runningBalance } from "@shared/depositLedger";
 import { isPastDue } from "@shared/dueDates";
 import type { ActionItemCategory, ActionItemSource } from "@shared/actionItems";
+import { isQuickBooksStale, QUICKBOOKS_STALE_AFTER_HOURS, type QuickBooksHealth } from "@shared/quickbooks";
 
 /** How far ahead a recurring schedule becomes an action item. */
 export const SCHEDULE_LOOKAHEAD_DAYS = 30;
@@ -86,6 +87,8 @@ export interface ActionItemInputs {
   assets: Asset[];
   /** Every request the caller may see; only the open ones are read. */
   requests: MaintenanceRequest[];
+  /** The QuickBooks connection, for admins only; absent for anyone else. */
+  quickbooks?: QuickBooksHealth;
 }
 
 /** The last calendar day of a "YYYY-MM" period, as a UTC-midnight date. */
@@ -353,7 +356,41 @@ export function buildActionItems(inputs: ActionItemInputs, now: Date = new Date(
     });
   }
 
+  items.push(...quickBooksItems(inputs.quickbooks, now));
+
   return items.sort(compareUrgency);
+}
+
+/**
+ * The QuickBooks connection needs an admin: it was refused, or the spend has
+ * not updated in a day and a half. Nothing at all while QuickBooks is not set
+ * up on the server -- off is a choice, not a fault -- or before anyone has
+ * connected it (Settings says so; an alert from day one would be noise).
+ */
+export function quickBooksItems(health: QuickBooksHealth | undefined, now: Date): ActionItem[] {
+  if (!health?.configured) return [];
+  const base = { id: "quickbooks", source: "integration" as const, category: "general" as const, region: null, overdue: true };
+  if (health.lost) {
+    return [{
+      ...base,
+      title: "QuickBooks connection lost",
+      subtitle: "Repair spend has stopped updating. Reconnect QuickBooks in Settings.",
+      dueDate: iso(now),
+    }];
+  }
+  if (!health.connected) return [];
+  // Measured from the last good sync, or from connecting when there has not
+  // been one yet.
+  const since = health.lastSuccessAt ?? health.connectedAt;
+  if (!isQuickBooksStale(since, now)) return [];
+  return [{
+    ...base,
+    title: "QuickBooks spend is out of date",
+    subtitle:
+      `No successful sync in over ${QUICKBOOKS_STALE_AFTER_HOURS} hours` +
+      (health.lastError ? `: ${health.lastError}` : ". Try Sync now in Settings."),
+    dueDate: iso(since ? new Date(since) : now),
+  }];
 }
 
 /** "2 repairs, 1 project, 1 capital project" -- only the kinds that are there, in type order. */

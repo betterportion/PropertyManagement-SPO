@@ -115,6 +115,28 @@ vi.mock("../email", async (importOriginal) => {
   return { ...actual, sendEmail: sendEmailMock };
 });
 
+/**
+ * QuickBooks is replaced at the one seam everything reaches it through, so
+ * these tests can say which calls to Intuit a refused request never made.
+ */
+const { qbApi } = vi.hoisted(() => ({
+  qbApi: {
+    authorizeUrl: vi.fn(),
+    exchangeCode: vi.fn(),
+    refresh: vi.fn(),
+    revoke: vi.fn(),
+    companyName: vi.fn(),
+    listClasses: vi.fn(),
+    listExpenseAccounts: vi.fn(),
+    profitAndLossByClass: vi.fn(),
+  },
+}));
+
+vi.mock("../quickbooks/api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../quickbooks/api")>();
+  return { ...actual, createQuickBooksApi: () => qbApi };
+});
+
 // The real isAuthenticated and getUserId are kept. Only setupAuth is replaced,
 // because it performs OIDC discovery against a live identity provider.
 vi.mock("../auth", async (importOriginal) => {
@@ -125,6 +147,7 @@ vi.mock("../auth", async (importOriginal) => {
 import { registerRoutes } from "../routes";
 import { errorHandler } from "../errors";
 import { DOCUMENT_UPLOAD_MAX_BYTES } from "../uploadLimits";
+import { decryptToken, encryptToken } from "../quickbooks/crypto";
 
 // ---------------------------------------------------------------------------
 // The simulated session
@@ -139,6 +162,9 @@ interface SessionUser {
 
 /** Mutable box; tests set `.user` to choose who (if anyone) is signed in. */
 const session: { user: SessionUser | null } = { user: null };
+
+/** The rest of the session (what express-session would keep between requests). */
+let sessionData: Record<string, unknown> = {};
 
 const inAnHour = () => Math.floor(Date.now() / 1000) + 3600;
 const anHourAgo = () => Math.floor(Date.now() / 1000) - 3600;
@@ -213,6 +239,7 @@ beforeAll(async () => {
   app.use((req, _res, next) => {
     (req as unknown as { isAuthenticated: () => boolean }).isAuthenticated = () => session.user !== null;
     (req as unknown as { user?: SessionUser }).user = session.user ?? undefined;
+    (req as unknown as { session: Record<string, unknown> }).session = sessionData;
     next();
   });
 
@@ -229,7 +256,9 @@ afterAll(
 
 beforeEach(() => {
   session.user = null;
+  sessionData = {};
   for (const fn of storageFns.values()) fn.mockReset();
+  for (const fn of Object.values(qbApi)) fn.mockReset();
   for (const fn of Object.values(fileStoreMock)) fn.mockReset();
   multerEntered.mockReset();
 
@@ -8180,6 +8209,226 @@ describe("repair & maintenance budgets", () => {
         summary: "Changed the FY2027 repair budget for Cleveland House from 10000.00 to 10500",
       }),
     );
+  });
+});
+
+describe("QuickBooks", () => {
+  const TOKEN_KEY_HEX = "ab".repeat(32);
+  const TOKEN_KEY = Buffer.from(TOKEN_KEY_HEX, "hex");
+  const QB_ENV = {
+    QUICKBOOKS_CLIENT_ID: "client-id",
+    QUICKBOOKS_CLIENT_SECRET: "client-secret",
+    QUICKBOOKS_REDIRECT_URI: "https://portal.example.org/api/quickbooks/callback",
+    QUICKBOOKS_TOKEN_KEY: TOKEN_KEY_HEX,
+  };
+  const savedEnv: Record<string, string | undefined> = {};
+  const WEST = { id: "prop-west", name: "Cleveland House", region: "West Central", address: "1 Main St", ownership: "owned" };
+  const EAST = { id: "prop-east", name: "Como House", region: "East Central", address: "9 Elm", ownership: "owned" };
+  const RENTED = { id: "prop-rented", name: "Rented House", region: "West Central", address: "5 Oak", ownership: "rented" };
+
+  /** Every write a refused QuickBooks request must never make. */
+  const QB_WRITES = ["updateQuickbooksIntegration", "setPropertyQuickbooksLink", "deletePropertyQuickbooksLink", "upsertPropertySpend"];
+
+  beforeAll(() => {
+    for (const [name, value] of Object.entries(QB_ENV)) {
+      savedEnv[name] = process.env[name];
+      process.env[name] = value;
+    }
+  });
+  afterAll(() => {
+    for (const [name, value] of Object.entries(savedEnv)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  });
+
+  beforeEach(() => {
+    storageMock.getProperty.mockImplementation(async (id: string) =>
+      ({ "prop-west": WEST, "prop-east": EAST, "prop-rented": RENTED })[id],
+    );
+    storageMock.getQuickbooksIntegration.mockResolvedValue({
+      id: "default",
+      realmId: "9130",
+      companyName: "SPO Inc",
+      encryptedRefreshToken: encryptToken("refresh-old", TOKEN_KEY),
+      repairAccountIds: ["57"],
+      connectedAt: new Date("2026-09-01T00:00:00Z"),
+    });
+    storageMock.updateQuickbooksIntegration.mockImplementation(async (patch) => patch);
+    storageMock.getAllPropertyQuickbooksLinks.mockResolvedValue([
+      { propertyId: "prop-west", kind: "class", externalId: "101", externalName: "Cleveland", region: "West Central" },
+      { propertyId: "prop-east", kind: "class", externalId: "102", externalName: "Como", region: "East Central" },
+    ]);
+    storageMock.setPropertyQuickbooksLink.mockImplementation(async (link) => link);
+    storageMock.getAllPropertySpend.mockResolvedValue([
+      { id: "s-west", propertyId: "prop-west", fiscalYear: 2027, amount: "500.00", region: "West Central", syncedAt: new Date() },
+      { id: "s-east", propertyId: "prop-east", fiscalYear: 2027, amount: "900.00", region: "East Central", syncedAt: new Date() },
+    ]);
+    qbApi.refresh.mockResolvedValue({ accessToken: "access-1", refreshToken: "refresh-new", refreshTokenExpiresAt: null });
+    qbApi.listClasses.mockResolvedValue([{ id: "101", name: "Cleveland" }, { id: "102", name: "Como" }]);
+    qbApi.listExpenseAccounts.mockResolvedValue([{ id: "57", name: "Repairs", type: "Expense" }]);
+    qbApi.authorizeUrl.mockImplementation((state: string) => `https://appcenter.intuit.com/connect/oauth2?state=${state}`);
+    qbApi.exchangeCode.mockResolvedValue({ accessToken: "access-1", refreshToken: "refresh-first", refreshTokenExpiresAt: null });
+    qbApi.companyName.mockResolvedValue("SPO Inc");
+  });
+
+  const ADMIN_ROUTES: [string, string, unknown?][] = [
+    ["GET", "/api/quickbooks/status"],
+    ["POST", "/api/quickbooks/connect"],
+    ["GET", "/api/quickbooks/callback?code=c&realmId=9130&state=s"],
+    ["POST", "/api/quickbooks/disconnect"],
+    ["GET", "/api/quickbooks/accounts"],
+    ["PUT", "/api/quickbooks/accounts", { accountIds: ["57"] }],
+    ["GET", "/api/quickbooks/classes"],
+    ["GET", "/api/quickbooks/links"],
+    ["PUT", "/api/properties/prop-west/quickbooks-link", { classId: "101" }],
+    ["DELETE", "/api/properties/prop-west/quickbooks-link"],
+    ["POST", "/api/quickbooks/sync"],
+  ];
+
+  it.each(ADMIN_ROUTES)(
+    "refuses %s %s to a regional lead holding every grant, before any QuickBooks call or write",
+    async (method, path, body) => {
+      actAs(STAFF, {
+        canViewProperties: true,
+        canManageProperties: true,
+        canManageFinancials: true,
+        canManageUsers: true,
+        allowedRegions: ["all"],
+      });
+      const { status } = await request(method, path, { body });
+      expect(status).toBe(403);
+      for (const fn of Object.values(qbApi)) expect(fn).not.toHaveBeenCalled();
+      for (const write of QB_WRITES) expect(storageMock[write]).not.toHaveBeenCalled();
+    },
+  );
+
+  it("gives an admin the live class list, storing the rotated refresh token encrypted (positive control)", async () => {
+    actAs(ADMIN);
+    const { status, body } = await get("/api/quickbooks/classes");
+    expect(status).toBe(200);
+    expect(body).toHaveLength(2);
+    expect(qbApi.refresh).toHaveBeenCalledWith("refresh-old");
+    const [patch] = storageMock.updateQuickbooksIntegration.mock.calls[0];
+    expect(patch.encryptedRefreshToken).not.toContain("refresh-new");
+    expect(decryptToken(patch.encryptedRefreshToken, TOKEN_KEY)).toBe("refresh-new");
+  });
+
+  it("never sends the stored token to the browser, encrypted or not", async () => {
+    actAs(ADMIN);
+    const { status, body } = await get("/api/quickbooks/status");
+    expect(status).toBe(200);
+    expect(body.companyName).toBe("SPO Inc");
+    expect(JSON.stringify(body)).not.toMatch(/refresh|v1:/i);
+  });
+
+  it("connects only when Intuit returns the state this admin's session was given, once", async () => {
+    actAs(ADMIN);
+    await request("POST", "/api/quickbooks/connect");
+    const [state] = qbApi.authorizeUrl.mock.calls[0];
+
+    const ok = await get(`/api/quickbooks/callback?code=c&realmId=9130&state=${state}`);
+    expect(ok.status).toBe(302);
+    expect(ok.headers.get("location")).toBe("/settings?quickbooks=connected#quickbooks");
+    const stored = storageMock.updateQuickbooksIntegration.mock.calls.at(-1)![0];
+    expect(stored.realmId).toBe("9130");
+    expect(decryptToken(stored.encryptedRefreshToken, TOKEN_KEY)).toBe("refresh-first");
+    expect(storageMock.createAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ action: "quickbooks.connected" }));
+
+    // The same state a second time is refused: it was used up.
+    qbApi.exchangeCode.mockClear();
+    const replay = await get(`/api/quickbooks/callback?code=c&realmId=9130&state=${state}`);
+    expect(replay.headers.get("location")).toBe("/settings?quickbooks=failed#quickbooks");
+    expect(qbApi.exchangeCode).not.toHaveBeenCalled();
+  });
+
+  it("refuses a callback whose state this session never issued, without exchanging the code", async () => {
+    actAs(ADMIN);
+    await request("POST", "/api/quickbooks/connect");
+    const { status, headers } = await get("/api/quickbooks/callback?code=c&realmId=9130&state=someone-elses");
+    expect(status).toBe(302);
+    expect(headers.get("location")).toBe("/settings?quickbooks=failed#quickbooks");
+    expect(qbApi.exchangeCode).not.toHaveBeenCalled();
+    expect(storageMock.updateQuickbooksIntegration).not.toHaveBeenCalled();
+  });
+
+  it("clears the house links and accounts when a different company is connected", async () => {
+    actAs(ADMIN);
+    storageMock.getQuickbooksIntegration.mockResolvedValue({ id: "default", realmId: "1111", repairAccountIds: ["57"] });
+    await request("POST", "/api/quickbooks/connect");
+    const [state] = qbApi.authorizeUrl.mock.calls[0];
+    await get(`/api/quickbooks/callback?code=c&realmId=9130&state=${state}`);
+    expect(storageMock.deletePropertyQuickbooksLink).toHaveBeenCalledTimes(2);
+    expect(storageMock.updateQuickbooksIntegration.mock.calls.at(-1)![0].repairAccountIds).toEqual([]);
+  });
+
+  it("links a house under QuickBooks's own name for the class, never the caller's", async () => {
+    actAs(ADMIN);
+    const { status } = await request("PUT", "/api/properties/prop-west/quickbooks-link", {
+      body: { classId: "101", externalName: "Made up", region: "East Central" },
+    });
+    expect(status).toBe(200);
+    expect(storageMock.setPropertyQuickbooksLink).toHaveBeenCalledWith({
+      propertyId: "prop-west",
+      kind: "class",
+      externalId: "101",
+      externalName: "Cleveland",
+      region: "West Central",
+    });
+  });
+
+  it("refuses a class QuickBooks does not have, and a rented house, without linking", async () => {
+    actAs(ADMIN);
+    expect((await request("PUT", "/api/properties/prop-west/quickbooks-link", { body: { classId: "999" } })).status).toBe(400);
+    expect((await request("PUT", "/api/properties/prop-rented/quickbooks-link", { body: { classId: "101" } })).status).toBe(400);
+    expect(storageMock.setPropertyQuickbooksLink).not.toHaveBeenCalled();
+  });
+
+  it("audits the repair-account choice as a money decision", async () => {
+    actAs(ADMIN);
+    const { status } = await request("PUT", "/api/quickbooks/accounts", { body: { accountIds: ["57", "58", "57"] } });
+    expect(status).toBe(200);
+    expect(storageMock.updateQuickbooksIntegration).toHaveBeenCalledWith({ repairAccountIds: ["57", "58"] });
+    expect(storageMock.createAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ action: "quickbooks.accounts_changed" }));
+  });
+
+  it("raises a lost connection for an admin, and never reads the connection for anyone else", async () => {
+    for (const name of ["getAllMaintenanceSchedules", "getAllRentPayments", "getAllSecurityDeposits", "getAllDepositDeductions", "getAllResidents", "getAllTasks", "getAllProperties", "getAllPropertySetupItems", "getAllAssets"]) {
+      storageMock[name].mockResolvedValue([]);
+    }
+    storageMock.getQuickbooksIntegration.mockResolvedValue({
+      id: "default",
+      realmId: "9130",
+      encryptedRefreshToken: null,
+      connectedAt: new Date("2026-09-01T00:00:00Z"),
+      repairAccountIds: [],
+    });
+
+    actAs(STAFF, { canViewMaintenance: true, canViewProperties: true, canViewFinancials: true, canViewAssets: true, allowedRegions: ["all"] });
+    const staff = await get("/api/action-items");
+    expect(staff.status).toBe(200);
+    expect(staff.body.some((i: { source: string }) => i.source === "integration")).toBe(false);
+    expect(storageMock.getQuickbooksIntegration).not.toHaveBeenCalled();
+
+    actAs(ADMIN);
+    const admin = await get("/api/action-items");
+    expect(admin.body.find((i: { source: string }) => i.source === "integration")?.title).toBe("QuickBooks connection lost");
+  });
+
+  it("gives a regional lead their regions' spend and links only", async () => {
+    actAs(STAFF, { canViewProperties: true, allowedRegions: ["West Central"] });
+    const { status, body } = await get("/api/property-spend");
+    expect(status).toBe(200);
+    expect(body.spend.map((s: { id: string }) => s.id)).toEqual(["s-west"]);
+    expect(body.linkedPropertyIds).toEqual(["prop-west"]);
+  });
+
+  it("refuses the spend to a resident with every grant, and to staff without a property grant, without reading", async () => {
+    actAs({ ...ALICE, propertyId: "prop-west" } as typeof ALICE, { canViewProperties: true, canViewResourceHub: true });
+    expect((await get("/api/property-spend")).status).toBe(403);
+    actAs(STAFF, { canViewMaintenance: true, allowedRegions: ["West Central"] });
+    expect((await get("/api/property-spend")).status).toBe(403);
+    expect(storageMock.getAllPropertySpend).not.toHaveBeenCalled();
   });
 });
 

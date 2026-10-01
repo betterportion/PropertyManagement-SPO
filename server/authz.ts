@@ -319,6 +319,10 @@ const ACTION_ITEM_PERMISSIONS: Record<ActionItemSource, readonly PermissionName[
   rent: ["canViewFinancials", "canManageFinancials"],
   deposit: ["canViewFinancials", "canManageFinancials"],
   task: null,
+  // The portal's own connections (QuickBooks today). No flag grants these:
+  // with none listed, only the admin bypass passes -- they are about setup
+  // only an admin can fix.
+  integration: [],
 };
 
 /** Whether the caller may see dashboard items of this kind. Staff only. */
