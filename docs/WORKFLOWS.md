@@ -183,7 +183,7 @@ The details below are the agreed intent. Each entry is filled in properly in the
   - **Never deletes anyone.** An active resident the sheet no longer lists is flagged.
   - **Skips and reports bad rows:** a bad date, a stop date before the start, an unrecognised payment plan or active value, a missing name or email, or an email on two rows. The rest of the sheet carries on.
   - **Running the same sheet twice changes nothing.** Every write of a run happens in one transaction, or none does.
-  - **Never touches portal logins.** Switching off a departing resident's login stays a deliberate step in the move-out dialog.
+  - **Never switches a portal login off itself.** After a sync, a household login that no current row speaks for any more is switched off by the rule in "Household logins end with the stay" below.
   - **Audit events:** one `resident.sheet_sync` summary per run, plus `resident.sheet_created` and `resident.sheet_updated` for each resident, with old → new dates.
 - **The column contract** (exact headers, any order; every other column is ignored):
 

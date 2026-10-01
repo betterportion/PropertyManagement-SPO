@@ -239,7 +239,7 @@ Accounts are waiting for people because somebody made them:
 
 The email has to be the exact address the person signs in to Google with. If someone is turned away, compare the two; an alias or a different Gmail will not match.
 
-**When someone leaves the house**, their login stops reaching the house's records as soon as the roster no longer lists them as current (inactive, or their stop date has passed): the house rule needs a current roster row with their email. The login itself is switched off by the move-out dialog's "Also switch off their portal login", or by the RA from the resident's page, which also frees the place for the house.
+**When someone leaves the house, their login switches off by itself** (`server/householdLogins.ts`). As soon as no current roster row at the house carries their email — they are moved out, marked inactive or removed, or their stop date passes — the portal switches the login off and unlinks it from the house, which frees one of the house's 3 places. It runs straight after the roster change, and in the daily run for a stop date that simply passes. If they come back, their RA gives access again. `docs/WORKFLOWS.md` ("Household logins end with the stay") has the detail.
 
 ### First sign-in on a fresh database
 
@@ -390,7 +390,7 @@ This is the bar for going live. Work through it with at least four Google accoun
 - [ ] Sign in as that leader on their personal Gmail. They see the resident pages for their own house only: its requests, its walkthroughs and the resource hub, with no admin navigation.
 - [ ] Sign in with the **uninvited** Gmail. It is turned back to the sign-in page with "That Google account hasn't been given access. The portal is by invitation…", and `select count(*) from users where email = '<that address>';` is still 0.
 - [ ] Give portal access to a fourth person at the same house after three are switched on. It is refused.
-- [ ] Mark the leader as moved out (or give them a stop date in the past). They can no longer read the house's requests.
+- [ ] Move the leader out (Move out takes only today's date or earlier). Their login is switched off: their next action is refused, Settings shows the account as inactive, and the house has a free place again.
 - [ ] Leave a session alone for a little over an hour, then click something. You are asked to sign in again, and signing in returns you to the portal (step 5 explains why).
 
 **Access control** — the part worth being slow about
