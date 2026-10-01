@@ -1685,57 +1685,86 @@ export class DatabaseStorage implements IStorage {
         .set({ ...filterUndefined(data), updatedAt: new Date() })
         .where(eq(properties.id, id))
         .returning();
-      if (!current || data.region === undefined || data.region === current.region) return property;
+      if (!current) return property;
 
-      // A region move. Region scoping reads each record's own copy of its
-      // house's region, so every copy moves with the house, in this same
-      // transaction -- otherwise the old region's RA keeps the roster, the
-      // fees and the requests, and the new one sees none of them. Requests and
-      // invoices know their house only by address: the address it had before
-      // this edit, since the same edit may change it.
-      const region = data.region;
-      const houseWalkthroughs = tx
-        .select({ id: walkthroughs.id })
-        .from(walkthroughs)
-        .where(eq(walkthroughs.propertyId, id));
-      const houseRooms = tx
-        .select({ id: walkthroughRooms.id })
-        .from(walkthroughRooms)
-        .where(or(eq(walkthroughRooms.propertyId, id), inArray(walkthroughRooms.walkthroughId, houseWalkthroughs)));
-      const houseResidents = tx
-        .select({ id: residents.id })
-        .from(residents)
-        .where(eq(residents.propertyId, id));
-
-      await tx.update(residentDocuments).set({ region }).where(inArray(residentDocuments.residentId, houseResidents));
-      await tx.update(walkthroughPhotos).set({ region }).where(inArray(walkthroughPhotos.roomId, houseRooms));
-      await tx.update(residents).set({ region }).where(eq(residents.propertyId, id));
-      await tx.update(moveOutChecklists).set({ region }).where(inArray(moveOutChecklists.residentId, houseResidents));
-      await tx.update(moveOutPhotos).set({ region }).where(inArray(moveOutPhotos.residentId, houseResidents));
-      // The move-out reminders are generated per resident (server/moveOut.ts).
-      await tx
-        .update(tasks)
-        .set({ region })
-        .where(and(like(tasks.sourceKey, "move-out:%"), inArray(sql`split_part(${tasks.sourceKey}, ':', 2)`, houseResidents)));
-      await tx.update(rentPayments).set({ region }).where(eq(rentPayments.propertyId, id));
-      await tx.update(securityDeposits).set({ region }).where(eq(securityDeposits.propertyId, id));
-      await tx.update(depositDeductions).set({ region }).where(eq(depositDeductions.propertyId, id));
-      await tx.update(walkthroughs).set({ region }).where(eq(walkthroughs.propertyId, id));
-      await tx.update(maintenanceSchedules).set({ region }).where(eq(maintenanceSchedules.propertyId, id));
-      await tx.update(propertySetupItems).set({ region }).where(eq(propertySetupItems.propertyId, id));
-      await tx.update(propertyBudgets).set({ region }).where(eq(propertyBudgets.propertyId, id));
-      await tx.update(repairBudgets).set({ region }).where(eq(repairBudgets.propertyId, id));
-      await tx.update(propertyQuickbooksLinks).set({ region }).where(eq(propertyQuickbooksLinks.propertyId, id));
-      await tx.update(propertySpend).set({ region }).where(eq(propertySpend.propertyId, id));
-      await tx.update(assets).set({ region }).where(eq(assets.propertyId, id));
-      await tx.update(maintenanceRequests).set({ region }).where(eq(maintenanceRequests.buildingAddress, current.address));
-      await tx.update(invoices).set({ region }).where(eq(invoices.buildingAddress, current.address));
-      // The lease reminders are generated per house (server/seasonalTasks.ts).
-      await tx
-        .update(tasks)
-        .set({ region })
-        .where(or(like(tasks.sourceKey, `lease-renewal:${id}:%`), like(tasks.sourceKey, `utilities-lease:${id}:%`)));
+      if (data.region !== undefined && data.region !== current.region) await moveRegion(data.region);
+      // An address change (a corrected zip, a renamed street). Every record
+      // keeps its own copy of its house's address, and the household's access
+      // is an exact match against it (isOwnHouse), so the copies move with the
+      // house in this same transaction. Otherwise the house's leaders lose its
+      // whole history, and a house later created at the old address inherits it.
+      if (property.address !== current.address) {
+        const from = current.address;
+        const to = property.address;
+        for (const table of [
+          maintenanceRequests,
+          invoices,
+          maintenanceContacts,
+          residents,
+          rentPayments,
+          securityDeposits,
+          depositDeductions,
+          walkthroughs,
+          walkthroughRooms,
+          walkthroughPhotos,
+          maintenanceSchedules,
+          assets,
+        ]) {
+          await tx.update(table).set({ buildingAddress: to }).where(eq(table.buildingAddress, from));
+        }
+      }
       return property;
+
+      async function moveRegion(region: string) {
+        // A region move. Region scoping reads each record's own copy of its
+        // house's region, so every copy moves with the house, in this same
+        // transaction -- otherwise the old region's RA keeps the roster, the
+        // fees and the requests, and the new one sees none of them. Requests and
+        // invoices know their house only by address: the address it had before
+        // this edit, since the same edit may change it -- which is why the region
+        // moves first, while the copies still hold the old address.
+        const houseWalkthroughs = tx
+          .select({ id: walkthroughs.id })
+          .from(walkthroughs)
+          .where(eq(walkthroughs.propertyId, id));
+        const houseRooms = tx
+          .select({ id: walkthroughRooms.id })
+          .from(walkthroughRooms)
+          .where(or(eq(walkthroughRooms.propertyId, id), inArray(walkthroughRooms.walkthroughId, houseWalkthroughs)));
+        const houseResidents = tx
+          .select({ id: residents.id })
+          .from(residents)
+          .where(eq(residents.propertyId, id));
+
+        await tx.update(residentDocuments).set({ region }).where(inArray(residentDocuments.residentId, houseResidents));
+        await tx.update(walkthroughPhotos).set({ region }).where(inArray(walkthroughPhotos.roomId, houseRooms));
+        await tx.update(residents).set({ region }).where(eq(residents.propertyId, id));
+        await tx.update(moveOutChecklists).set({ region }).where(inArray(moveOutChecklists.residentId, houseResidents));
+        await tx.update(moveOutPhotos).set({ region }).where(inArray(moveOutPhotos.residentId, houseResidents));
+        // The move-out reminders are generated per resident (server/moveOut.ts).
+        await tx
+          .update(tasks)
+          .set({ region })
+          .where(and(like(tasks.sourceKey, "move-out:%"), inArray(sql`split_part(${tasks.sourceKey}, ':', 2)`, houseResidents)));
+        await tx.update(rentPayments).set({ region }).where(eq(rentPayments.propertyId, id));
+        await tx.update(securityDeposits).set({ region }).where(eq(securityDeposits.propertyId, id));
+        await tx.update(depositDeductions).set({ region }).where(eq(depositDeductions.propertyId, id));
+        await tx.update(walkthroughs).set({ region }).where(eq(walkthroughs.propertyId, id));
+        await tx.update(maintenanceSchedules).set({ region }).where(eq(maintenanceSchedules.propertyId, id));
+        await tx.update(propertySetupItems).set({ region }).where(eq(propertySetupItems.propertyId, id));
+        await tx.update(propertyBudgets).set({ region }).where(eq(propertyBudgets.propertyId, id));
+        await tx.update(repairBudgets).set({ region }).where(eq(repairBudgets.propertyId, id));
+        await tx.update(propertyQuickbooksLinks).set({ region }).where(eq(propertyQuickbooksLinks.propertyId, id));
+        await tx.update(propertySpend).set({ region }).where(eq(propertySpend.propertyId, id));
+        await tx.update(assets).set({ region }).where(eq(assets.propertyId, id));
+        await tx.update(maintenanceRequests).set({ region }).where(eq(maintenanceRequests.buildingAddress, current.address));
+        await tx.update(invoices).set({ region }).where(eq(invoices.buildingAddress, current.address));
+        // The lease reminders are generated per house (server/seasonalTasks.ts).
+        await tx
+          .update(tasks)
+          .set({ region })
+          .where(or(like(tasks.sourceKey, `lease-renewal:${id}:%`), like(tasks.sourceKey, `utilities-lease:${id}:%`)));
+      }
     });
   }
 
