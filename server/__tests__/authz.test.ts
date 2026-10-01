@@ -24,8 +24,10 @@ const getUser = vi.fn();
 const getUserPermissions = vi.fn();
 const getProperty = vi.fn();
 const getWalkthroughsByProperty = vi.fn();
+const getResidentsByProperty = vi.fn();
 vi.mock("../storage", () => ({
   storage: {
+    getResidentsByProperty: (...args: unknown[]) => getResidentsByProperty(...args),
     getUser: (...args: unknown[]) => getUser(...args),
     getUserPermissions: (...args: unknown[]) => getUserPermissions(...args),
     getProperty: (...args: unknown[]) => getProperty(...args),
@@ -51,6 +53,7 @@ import {
   requireMaintenanceRequestAccess,
   residentHouseAddress,
   rosterRowSpeaksFor,
+  isCurrentRosterMember,
   canReadComment,
   canPostComment,
   canDeleteComment,
@@ -124,6 +127,7 @@ beforeEach(() => {
   getUser.mockReset();
   getUserPermissions.mockReset().mockResolvedValue(undefined);
   getProperty.mockReset().mockResolvedValue(undefined);
+  getResidentsByProperty.mockReset().mockResolvedValue([]);
 });
 
 // ---------------------------------------------------------------------------
@@ -889,11 +893,30 @@ describe("canReadMaintenanceRequest — the type rule (residents see repairs onl
 describe("residentHouseAddress", () => {
   const HOUSE_A = "123 Main St, Saint Paul, MN 55101";
 
-  it("resolves the address of the property linked to a resident account", async () => {
+  const onRoster = (patch: Record<string, unknown> = {}) => [
+    { email: "staff@example.com", propertyId: "prop-a", isActive: true, moveOutDate: null, ...patch },
+  ];
+
+  it("resolves the house of a resident a current roster row there speaks for (positive control)", async () => {
     getProperty.mockResolvedValue({ id: "prop-a", address: HOUSE_A });
+    getResidentsByProperty.mockResolvedValue(onRoster());
     const ctx = context({ role: "resident", propertyId: "prop-a" });
     expect(await residentHouseAddress(ctx)).toBe(HOUSE_A);
     expect(getProperty).toHaveBeenCalledWith("prop-a");
+    expect(getResidentsByProperty).toHaveBeenCalledWith("prop-a");
+  });
+
+  it("gives no house to a linked login whose roster row is inactive, past its stop date, or missing", async () => {
+    getProperty.mockResolvedValue({ id: "prop-a", address: HOUSE_A });
+    const ctx = context({ role: "resident", propertyId: "prop-a" });
+    getResidentsByProperty.mockResolvedValue(onRoster({ isActive: false }));
+    expect(await residentHouseAddress(ctx)).toBeNull();
+    getResidentsByProperty.mockResolvedValue(onRoster({ moveOutDate: new Date("2020-01-01T00:00:00Z") }));
+    expect(await residentHouseAddress(ctx)).toBeNull();
+    getResidentsByProperty.mockResolvedValue(onRoster({ email: "someone-else@example.com" }));
+    expect(await residentHouseAddress(ctx)).toBeNull();
+    getResidentsByProperty.mockResolvedValue([]);
+    expect(await residentHouseAddress(ctx)).toBeNull();
   });
 
   it("returns null for staff without touching storage", async () => {
@@ -912,6 +935,23 @@ describe("residentHouseAddress", () => {
     getProperty.mockResolvedValue(undefined);
     const ctx = context({ role: "resident", propertyId: "prop-gone" });
     expect(await residentHouseAddress(ctx)).toBeNull();
+  });
+});
+
+describe("isCurrentRosterMember", () => {
+  const LOGIN = { email: "Maria@spo.org", propertyId: "prop-1" };
+  const ROW = { email: "maria@spo.org", propertyId: "prop-1", isActive: true, moveOutDate: null as Date | null };
+  const NOW = new Date("2027-05-20T15:00:00Z");
+
+  it("counts the stop day itself, and nothing after it", () => {
+    expect(isCurrentRosterMember({ ...ROW, moveOutDate: new Date("2027-05-20T00:00:00Z") }, LOGIN, NOW)).toBe(true);
+    expect(isCurrentRosterMember({ ...ROW, moveOutDate: new Date("2027-05-19T00:00:00Z") }, LOGIN, NOW)).toBe(false);
+  });
+
+  it("needs the row active and speaking for this login at this house", () => {
+    expect(isCurrentRosterMember(ROW, LOGIN, NOW)).toBe(true);
+    expect(isCurrentRosterMember({ ...ROW, isActive: false }, LOGIN, NOW)).toBe(false);
+    expect(isCurrentRosterMember(ROW, { ...LOGIN, propertyId: "prop-2" }, NOW)).toBe(false);
   });
 });
 
@@ -1109,6 +1149,7 @@ describe("requireWalkthroughAccess", () => {
 
   it("resolves the caller's house itself and allows their own", async () => {
     getProperty.mockResolvedValue({ id: "prop-a", address: HOUSE_A });
+    getResidentsByProperty.mockResolvedValue([{ email: "staff@example.com", propertyId: "prop-a", isActive: true, moveOutDate: null }]);
     const res = response();
     const leader = context({
       role: "resident",

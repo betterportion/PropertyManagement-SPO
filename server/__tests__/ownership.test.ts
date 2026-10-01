@@ -81,6 +81,13 @@ vi.mock("../storage", () => ({
     getMaintenanceRequest: mockGetRequest,
     getRequestContacts: mockGetContacts,
     getProperty: mockGetProperty,
+    // The signed-in resident is on their own house's roster (isCurrentRosterMember).
+    getResidentsByProperty: vi.fn(async (propertyId: string) => {
+      const user = await mockGetUser(activeUserId.value);
+      return user?.role === "resident" && user.propertyId === propertyId
+        ? [{ id: "roster-self", email: user.email, propertyId, isActive: true, moveOutDate: null }]
+        : [];
+    }),
     getAllMaintenanceRequestPhotos: mockGetAllRequestPhotos,
     getMaintenanceRequestPhoto: mockGetRequestPhoto,
     deleteMaintenanceRequestPhoto: mockDeleteRequestPhoto,

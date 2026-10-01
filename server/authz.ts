@@ -27,7 +27,7 @@ import type { Request, Response } from "express";
 import { storage, type UploadReference } from "./storage";
 import { getUserId } from "./auth";
 import { normalizeRegion, normalizeRegions } from "./migrateRegions";
-import { isClosedMaintenanceStatus, type Upload, type User, type UserPermissions } from "@shared/schema";
+import { isClosedMaintenanceStatus, type Property, type Upload, type User, type UserPermissions } from "@shared/schema";
 import type { ActionItemSource } from "@shared/actionItems";
 
 /** Names of the boolean permission columns on the user_permissions table. */
@@ -379,21 +379,51 @@ export function rosterRowSpeaksFor(
 }
 
 /**
- * The address of the house a resident's account is linked to, or null when
- * there is nothing to resolve: a staff account, an account nobody has linked
- * to a property yet, or a link whose property has since been deleted. Every
- * null fails closed — the caller simply gets no house claim.
+ * Whether a roster row makes this login a CURRENT member of its household:
+ * the row speaks for the login (`rosterRowSpeaksFor`), is active, and its stop
+ * date, if any, has not passed -- the stop day itself still counts. Compared as
+ * UTC calendar days, the way stop dates are stored.
+ *
+ * The house link on a login (`users.propertyId`) is not enough on its own:
+ * nothing unlinks it when somebody leaves except the move-out dialog's
+ * optional "switch off their login", so a departed leader would otherwise keep
+ * reading -- and writing -- the house they left.
+ */
+export function isCurrentRosterMember(
+  row: { email: string; propertyId: string | null; isActive: boolean; moveOutDate?: Date | string | null },
+  login: { email: string | null; propertyId: string | null },
+  now: Date = new Date(),
+): boolean {
+  if (!row.isActive || !rosterRowSpeaksFor(row, login)) return false;
+  if (!row.moveOutDate) return true;
+  const stop = new Date(row.moveOutDate);
+  if (Number.isNaN(stop.getTime())) return false;
+  return stop.toISOString().slice(0, 10) >= now.toISOString().slice(0, 10);
+}
+
+/**
+ * The house a resident's account currently belongs to, or null when there is
+ * nothing to resolve: a staff account, an account nobody has linked to a
+ * property yet, a link whose property has since been deleted, or a login no
+ * current roster row at that house speaks for. Every null fails closed — the
+ * caller simply gets no house claim.
  *
  * Resolved on demand rather than in loadAuthContext because only the
- * maintenance read paths need it, and loading it for every request on every
- * route would cost a property lookup per API call.
+ * resident read and write paths need it, and loading it for every request on
+ * every route would cost two lookups per API call.
  */
-export async function residentHouseAddress(ctx: AuthContext): Promise<string | null> {
+export async function residentHouse(ctx: AuthContext, now: Date = new Date()): Promise<Property | null> {
   if (!ctx.isResident) return null;
   const propertyId = ctx.user.propertyId;
   if (!propertyId) return null;
-  const property = await storage.getProperty(propertyId);
-  return property?.address ?? null;
+  const [property, roster] = await Promise.all([storage.getProperty(propertyId), storage.getResidentsByProperty(propertyId)]);
+  if (!property) return null;
+  return (roster ?? []).some((row) => isCurrentRosterMember(row, ctx.user, now)) ? property : null;
+}
+
+/** The address of `residentHouse`, which every house-match rule compares. */
+export async function residentHouseAddress(ctx: AuthContext): Promise<string | null> {
+  return (await residentHouse(ctx))?.address ?? null;
 }
 
 /**

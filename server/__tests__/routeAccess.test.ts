@@ -275,6 +275,15 @@ beforeEach(() => {
   fileStoreMock.createUploadSignedUrl.mockResolvedValue(null);
   fileStoreMock.openUploadStream.mockResolvedValue(Readable.from([Buffer.from("file-bytes")]));
   storageMock.getAllUsersWithPermissions.mockResolvedValue([]);
+  // By default a signed-in resident is on their own house's roster, so the
+  // house rule (isCurrentRosterMember) is what the older tests assumed; the
+  // departed-resident tests replace this with an inactive or past row.
+  storageMock.getResidentsByProperty.mockImplementation(async (propertyId: string) => {
+    const user = await storageMock.getUser();
+    return user?.role === "resident" && user.propertyId === propertyId
+      ? [{ id: "roster-self", email: user.email, propertyId, isActive: true, moveOutDate: null }]
+      : [];
+  });
   storageMock.getAllRepairBudgets.mockResolvedValue([]);
   storageMock.getAllPropertySpend.mockResolvedValue([]);
   storageMock.getAllPropertyQuickbooksLinks.mockResolvedValue([]);
@@ -691,6 +700,17 @@ describe("a household leader opening a request from its page", () => {
     const { status, body } = await get("/api/maintenance-requests/req-own-open");
     expect(status).toBe(200);
     expect(body.id).toBe("req-own-open");
+  });
+
+  it("refuses their old house's request once their roster row there is past its stop date", async () => {
+    leaderOfHouseA();
+    storageMock.getResidentsByProperty.mockResolvedValue([
+      { id: "r-alice", email: ALICE.email, propertyId: "prop-a", isActive: true, moveOutDate: new Date("2020-01-01T00:00:00Z") },
+    ]);
+    storageMock.getMaintenanceRequest.mockResolvedValue(OWN_HOUSE_OPEN);
+    const { status, body } = await get("/api/maintenance-requests/req-own-open");
+    expect(status).toBe(403);
+    expect(body).not.toHaveProperty("title");
   });
 
   it("refuses another house's request, and never sends its contents", async () => {
@@ -1170,6 +1190,11 @@ describe("the thread on a request", () => {
       storageMock.getMaintenanceRequest.mockResolvedValue(OWN_HOUSE_OPEN);
       storageMock.getAllUsersWithPermissions.mockResolvedValue(candidates);
       storageMock.getAllProperties.mockResolvedValue([PROPERTY_A]);
+      // Both house accounts are on the house's roster today.
+      storageMock.getAllResidents.mockResolvedValue([
+        { id: "r-alice", email: ALICE.email, propertyId: "prop-a", isActive: true, moveOutDate: null },
+        { id: "r-bob", email: BOB.email, propertyId: "prop-a", isActive: true, moveOutDate: null },
+      ]);
       // The author has posted before; nobody else has.
       storageMock.getMaintenanceRequestComments.mockResolvedValue([INTERNAL_COMMENT]);
       storageMock.createMaintenanceRequestComment.mockImplementation(async (c: unknown) => ({ id: "c-new", ...(c as object) }));
@@ -1177,6 +1202,16 @@ describe("the thread on a request", () => {
 
     afterEach(() => {
       vi.unstubAllEnvs();
+    });
+
+    it("stops emailing a housemate who has left the roster, though their login is still linked", async () => {
+      storageMock.getAllResidents.mockResolvedValue([
+        { id: "r-alice", email: ALICE.email, propertyId: "prop-a", isActive: false, moveOutDate: new Date("2026-05-20") },
+        { id: "r-bob", email: BOB.email, propertyId: "prop-a", isActive: true, moveOutDate: null },
+      ]);
+      await post("/api/maintenance-requests/req-own-open/comments", { body: "Thursday at 9.", isInternal: false });
+      // Bob still hears: he filed it, and is on the roster. Alice does not.
+      expect(addressed()).toEqual(["bob@example.com", "tom@example.com"]);
     });
 
     it("emails a shared comment to both house accounts and the covering colleague, one message each, never the author", async () => {
@@ -4198,6 +4233,20 @@ describe("residents completing their own house's walkthrough", () => {
       "item-a",
       expect.objectContaining({ condition: "damaged", notes: "Cracked basin" }),
     );
+  });
+
+  it("refuses a leader who has left the house's roster -- moved out, login still linked -- without writing", async () => {
+    leaderOfHouseA();
+    ownHouse();
+    storageMock.getResidentsByProperty.mockResolvedValue([
+      { id: "r-alice", email: ALICE.email, propertyId: "prop-a", isActive: false, moveOutDate: new Date("2026-05-20T00:00:00Z") },
+    ]);
+    storageMock.getAllWalkthroughs.mockResolvedValue([WT_A, WT_B]);
+
+    expect((await request("GET", "/api/walkthroughs")).body).toEqual([]);
+    const { status } = await request("PATCH", "/api/walkthrough-items/item-a", { body: { condition: "damaged" } });
+    expect(status).toBe(403);
+    expectNoWalkthroughWrite();
   });
 
   it("adds a room their house has", async () => {
@@ -7646,6 +7695,11 @@ describe("house facts and access codes", () => {
 
     it("withholds them when the house's roster row carries a different email", async () => {
       rosterIs([{ ...ALICE_ON_WEST_ROSTER, email: "alice.k@example.com" }]);
+      await expectNoFacts();
+    });
+
+    it("withholds them once the roster row's stop date has passed, even while it is still marked active", async () => {
+      rosterIs([{ ...ALICE_ON_WEST_ROSTER, isActive: true, moveOutDate: new Date("2020-01-01T00:00:00Z") }]);
       await expectNoFacts();
     });
 
