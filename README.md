@@ -350,12 +350,13 @@ The build produces `dist/index.js` (server) and `dist/public/` (frontend). The s
 
 **Before the first start on a new host**, set at least `DATABASE_URL`, `SESSION_SECRET`, `STORAGE_DRIVER`, `OIDC_ISSUER_URL` and `OIDC_CLIENT_ID`, and apply the migrations with `npm run db:migrate`.
 
-Two things to know about running more than one instance:
+Three things to know about the running service:
 
-- **Uploads must not use `STORAGE_DRIVER=local`.** Local files live on one instance's disk and disappear when the host replaces it. Use `supabase`.
-- **Shutdown is graceful.** On `SIGTERM` the server stops accepting connections, lets in-flight requests finish, closes the database pool, and exits — so a rolling deploy does not cut anyone off mid-request.
+- **Run exactly one instance.** The five daily jobs run inside the web server, and the guards that stop two syncs overlapping only hold within one process. A second instance would run every job twice.
+- **Uploads must not use `STORAGE_DRIVER=local`.** Local files live on the instance's disk and disappear when the host replaces it. Use `supabase`.
+- **Shutdown is graceful.** On `SIGTERM` the server stops accepting connections, lets in-flight requests finish, closes the database pool, and exits — so a deploy does not cut anyone off mid-request.
 
-**Going to production for the first time?** Follow [`docs/PRODUCTION_MIGRATION.md`](docs/PRODUCTION_MIGRATION.md) rather than improvising. It is staging-first and lists what has to be configured inside Google Workspace and Supabase, which are the two steps nobody can do from this repository.
+**Going to production for the first time?** Follow [`docs/PRODUCTION_MIGRATION.md`](docs/PRODUCTION_MIGRATION.md) rather than improvising. It is staging-first and lists what has to be configured in Google Cloud and Supabase, which are the two steps nobody can do from this repository, plus backups and a rehearsed restore before any real data.
 
 ---
 
@@ -375,7 +376,7 @@ Two things to know about running more than one instance:
 | [`CLAUDE.md`](CLAUDE.md) | Detailed architecture, data model, conventions, standing rules and gotchas — written for AI coding assistants, but the most useful document here for any engineer |
 | [`CONTEXT.md`](CONTEXT.md) | The glossary: the words the portal uses for people, requests, threads, projects and the house, so screens, routes, tests and tickets say the same thing |
 | [`docs/adr/`](docs/adr/) | Architecture decision records — why projects are a request type, and why the portal holds a door code |
-| [`docs/PRODUCTION_MIGRATION.md`](docs/PRODUCTION_MIGRATION.md) | The staging-first runbook for standing up Supabase, Google Workspace login and Render |
+| [`docs/PRODUCTION_MIGRATION.md`](docs/PRODUCTION_MIGRATION.md) | The staging-first runbook for standing up Supabase, Google sign-in and Render, with backups and a rehearsed restore |
 | [`docs/WORKFLOWS.md`](docs/WORKFLOWS.md) | Every automated workflow and daily job — what it does, how to tell it is working — and the setup SPO must do outside the code |
 | [`design_guidelines.md`](design_guidelines.md) | Typography, spacing, layout and component design rules |
 | [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) | The current backlog: what has shipped, what is blocked and on whom, and what is deliberately left for later |
