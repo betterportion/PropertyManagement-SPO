@@ -328,6 +328,7 @@ That data belongs with a qualified processor. SPO uses **QuickBooks and Ramp**; 
 - Apply the admin bypass in any new permission check.
 - Use `getUserId(req)` rather than reading provider claims.
 - Record an audit event for anything that changes access, money, or documents.
+- Update `docs/WORKFLOWS.md` whenever you add or change a workflow, daily job, integration, or automated email.
 
 ---
 

@@ -367,6 +367,7 @@ Two things to know about running more than one instance:
 | [`CONTEXT.md`](CONTEXT.md) | The glossary: the words the portal uses for people, requests, threads, projects and the house, so screens, routes, tests and tickets say the same thing |
 | [`docs/adr/`](docs/adr/) | Architecture decision records — why projects are a request type, and why the portal holds a door code |
 | [`docs/PRODUCTION_MIGRATION.md`](docs/PRODUCTION_MIGRATION.md) | The staging-first runbook for standing up Supabase, Google Workspace login and Render |
+| [`docs/WORKFLOWS.md`](docs/WORKFLOWS.md) | Every automated workflow and daily job — what it does, how to tell it is working — and the setup SPO must do outside the code |
 | [`design_guidelines.md`](design_guidelines.md) | Typography, spacing, layout and component design rules |
 | [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) | The current backlog: what has shipped, what is blocked and on whom, and what is deliberately left for later |
 | [`docs/IMPLEMENTATION_PLAN_ADDENDUM.md`](docs/IMPLEMENTATION_PLAN_ADDENDUM.md) | Phases 9–11 from a second regional administrator's feedback: request threads, project types and house facts |
