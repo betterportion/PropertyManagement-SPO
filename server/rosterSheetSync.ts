@@ -122,6 +122,16 @@ export async function runRosterSync(options: {
     return { run, creates: [], updates: [], reviews: [] };
   }
 
+  // Every row skipped is a sheet the portal can no longer read (a changed
+  // date format, renamed values), not a quiet day: fail the run, change
+  // nothing, and let the alert say so.
+  if (plan.rowsRead > 0 && plan.skipped.length >= plan.rowsRead) {
+    const message = `Every row was skipped (${plan.skipped.length}), so nothing was changed. First reason: ${plan.skipped[0].reason}.`;
+    const run = await record({ error: message }, plan);
+    audit(actor, `Resident ${source} sync failed: ${message}`, { ok: false, dryRun });
+    return { run, creates: [], updates: [], reviews: [] };
+  }
+
   const reviews = newReviews(plan, new Set(open.map((r) => r.dedupeKey)));
 
   if (!dryRun) {
@@ -228,11 +238,30 @@ export function runScheduledRosterSync(actor: AuthContext | null): Promise<Roste
   return running;
 }
 
+/**
+ * The daily run, which applies the sheet only once an admin has: until there
+ * is one successful applied sheet sync (an admin's "Sync now", after a
+ * Preview), it does nothing. Otherwise the server's first start with the sheet
+ * variables set would apply the sheet before anybody could look at it.
+ */
+export async function runDailyRosterSync(
+  storage: Pick<IStorage, "getLastSuccessfulRosterSyncRun"> = defaultStorage,
+  run: (actor: AuthContext | null) => Promise<RosterSyncResult> = runScheduledRosterSync,
+): Promise<RosterSyncResult | null> {
+  if (!(await storage.getLastSuccessfulRosterSyncRun())) {
+    console.info("[roster] Sheet sync is set up but waits for an admin's first Sync now (Settings → Resident roster sheet)");
+    return null;
+  }
+  return await run(null);
+}
+
 function tick(): void {
   try {
-    void runScheduledRosterSync(null)
-      .then(({ run }) => {
-        if (run.ok) console.info(`[roster] Sheet sync: ${run.created} added, ${run.updated} updated, ${run.skipped} skipped`);
+    void runDailyRosterSync()
+      .then((result) => {
+        if (result?.run.ok) {
+          console.info(`[roster] Sheet sync: ${result.run.created} added, ${result.run.updated} updated, ${result.run.skipped} skipped`);
+        }
       })
       .catch((error) => logError("Resident sheet sync failed", error));
   } catch (error) {

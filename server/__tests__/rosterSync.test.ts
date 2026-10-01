@@ -10,7 +10,7 @@ const { createAuditEvent } = vi.hoisted(() => ({ createAuditEvent: vi.fn() }));
 vi.mock("../storage", () => ({ storage: { createAuditEvent } }));
 
 import { planRosterSync, parseSheetDate, residentValues, newReviews, type SheetTable, type RosterPlan } from "../rosterSync";
-import { runRosterSync } from "../rosterSheetSync";
+import { runDailyRosterSync, runRosterSync } from "../rosterSheetSync";
 import { columnLetter, createRosterSheetReader } from "../googleSheets";
 import { looksLikeBankingHeader } from "@shared/rosterSheet";
 import { rosterSyncItems } from "../actionItems";
@@ -367,7 +367,7 @@ describe("the Google Sheets reader", () => {
 describe("rosterSyncItems", () => {
   const health = (patch = {}) => ({
     configured: true,
-    lastRun: { ok: true, error: null, refusedColumns: [] as string[], createdAt: NOW },
+    lastRun: { ok: true, error: null, refusedColumns: [] as string[], skipped: 0, createdAt: NOW },
     lastSuccessAt: NOW.toISOString(),
     openReviews: 0,
     ...patch,
@@ -379,7 +379,7 @@ describe("rosterSyncItems", () => {
   });
 
   it("names the column to remove when the sheet was refused", () => {
-    const [item] = rosterSyncItems(health({ lastRun: { ok: false, error: "x", refusedColumns: ["Bank Account"], createdAt: NOW } }), NOW);
+    const [item] = rosterSyncItems(health({ lastRun: { ok: false, error: "x", refusedColumns: ["Bank Account"], skipped: 0, createdAt: NOW } }), NOW);
     expect(item).toMatchObject({ id: "roster-refused", overdue: true });
     expect(item.subtitle).toContain('"Bank Account"');
   });
@@ -388,5 +388,98 @@ describe("rosterSyncItems", () => {
     const items = rosterSyncItems(health({ lastSuccessAt: "2026-09-29T00:00:00Z", openReviews: 2 }), NOW);
     expect(items.map((i) => i.id)).toEqual(["roster-stale", "roster-review"]);
     expect(items[1].title).toBe("2 roster changes to review");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Pilot-audit fixes (2026-10-01)
+// ---------------------------------------------------------------------------
+
+describe("a house named by a name two houses share", () => {
+  const MENS_NW = { ...COMO, id: "p-nw", name: "Men's House", address: "1 North St", region: "Northwest" } as Property;
+  const MENS_SE = { ...COMO, id: "p-se", name: "Men's House", address: "2 South St", region: "Southeast" } as Property;
+  const row = (house: string) => table(["Sam O'Connor", "sam@example.org", house, "", "", "", ""]);
+  const planWith = (properties: Property[], t: SheetTable) => planRosterSync({ table: t, residents: [], properties, links: [], now: NOW });
+
+  it("creates nobody, in either order, and flags the row", () => {
+    for (const order of [[MENS_NW, MENS_SE], [MENS_SE, MENS_NW]]) {
+      const p = planWith(order, row("Men's House"));
+      expect(p.creates).toEqual([]);
+      expect(p.skipped[0].reason).toMatch(/More than one house/);
+      expect(p.reviews[0].detail).toContain("1 North St");
+    }
+  });
+
+  it("still takes the address, and a name only one house has (positive control)", () => {
+    expect(planWith([MENS_NW, MENS_SE], row("2 South St")).creates[0].property.id).toBe("p-se");
+    expect(planWith([MENS_NW, COMO], row("Men's House")).creates[0].property.id).toBe("p-nw");
+  });
+});
+
+describe("a house move whose start date is blank or earlier", () => {
+  /** Plans and applies creates three times, the way three daily runs would. */
+  function threeRuns(start: string) {
+    let residents: Resident[] = [resident({ moveOutDate: null })]; // r-1 at Como, active
+    const created: number[] = [];
+    for (let day = 0; day < 3; day++) {
+      const p = plan(table(["Sam O'Connor", "sam@example.org", "Dinkytown Women's House", start, "", "", ""]), residents, []);
+      created.push(p.creates.length);
+      residents = [
+        ...residents,
+        ...p.creates.map((c, i) =>
+          resident({ id: `new-${day}-${i}`, propertyId: c.property.id, moveInDate: null, createdAt: new Date(Date.UTC(2026, 9, 2 + day)) }),
+        ),
+      ];
+    }
+    return created;
+  }
+
+  it("makes the new stay once, not once a run", () => {
+    expect(threeRuns("")).toEqual([1, 0, 0]);
+    expect(threeRuns("2025-01-01")).toEqual([1, 0, 0]);
+  });
+
+  it("still makes a new stay for a later start at the same house once the last one ended (positive control)", () => {
+    const ended = resident({ moveInDate: new Date("2025-08-15T00:00:00Z"), moveOutDate: new Date("2026-05-20T00:00:00Z"), isActive: false });
+    const p = plan(table([SAM_ROW[0], SAM_ROW[1], SAM_ROW[2], "2026-08-15", "", "Monthly", "Yes"]), [ended], [linkFor(ended)]);
+    expect(p.creates).toHaveLength(1);
+  });
+});
+
+describe("a run that skips every row", () => {
+  beforeEach(() => createAuditEvent.mockReset());
+
+  it("fails, saves nothing and says why, instead of reporting success", async () => {
+    const storage = fakeStorage();
+    const bad = table([SAM_ROW[0], SAM_ROW[1], SAM_ROW[2], "Aug 15, 2026", "", "", ""]);
+    const { run } = await runRosterSync({ source: "sheet", dryRun: false, actor: null, now: NOW, storage: storage as never, readSheet: async () => bad });
+    expect(run.ok).toBe(false);
+    expect(run.error).toMatch(/Every row was skipped/);
+    expect(storage.applyRosterPlan).not.toHaveBeenCalled();
+  });
+
+  it("raises a failed run straight away, and skipped rows on a good one", () => {
+    const failed = rosterSyncItems(health({ lastRun: { ok: false, error: "Every row was skipped (2)", refusedColumns: [], skipped: 2, createdAt: NOW } }), NOW);
+    expect(failed.map((i) => i.id)).toEqual(["roster-failed"]);
+    const partial = rosterSyncItems(health({ lastRun: { ok: true, error: null, refusedColumns: [], skipped: 3, createdAt: NOW } }), NOW);
+    expect(partial.map((i) => i.id)).toEqual(["roster-skipped"]);
+  });
+
+  function health(patch = {}) {
+    return { configured: true, lastRun: null, lastSuccessAt: NOW.toISOString(), openReviews: 0, ...patch };
+  }
+});
+
+describe("the daily sync before an admin's first Sync now", () => {
+  it("does nothing until there has been an applied sheet sync", async () => {
+    const run = vi.fn();
+    expect(await runDailyRosterSync({ getLastSuccessfulRosterSyncRun: vi.fn(async () => undefined) }, run)).toBeNull();
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it("runs once one has happened (positive control)", async () => {
+    const run = vi.fn(async () => ({ run: { ok: true } }) as never);
+    await runDailyRosterSync({ getLastSuccessfulRosterSyncRun: vi.fn(async () => ({ id: "run-1" }) as never) }, run);
+    expect(run).toHaveBeenCalledWith(null);
   });
 });

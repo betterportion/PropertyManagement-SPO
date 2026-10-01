@@ -173,13 +173,13 @@ The details below are the agreed intent. Each entry is filled in properly in the
 ### Resident roster from the master Google Sheet (Phase 5)
 
 - **Purpose:** keep the portal's roster matching SPO's one master sheet, above all household start and stop dates, which drive move-outs and deposits, without anyone retyping it.
-- **Trigger:** a daily job (`server/rosterSheetSync.ts`) that runs at boot and every 24 hours. Admins also have **Preview** (changes nothing) and **Sync now** in Settings → Resident roster sheet.
+- **Trigger:** a daily job (`server/rosterSheetSync.ts`) that runs at boot and every 24 hours, **but only once an admin has done the first Sync now**. Until then the job does nothing, so setting the variables and restarting never applies the sheet before anyone has looked at it. Admins have **Preview** (changes nothing) and **Sync now** in Settings → Resident roster sheet.
 - **What the portal does** (rules in `server/rosterSync.ts`):
   - **Reads only the allowlisted columns.** The header row is read first, and only the columns below are requested from Google.
   - **Refuses banking columns.** If any header looks like a bank, routing, account, card or ACH field, the whole sync is refused: no data cell is read, nothing changes, and admins get a **Needs attention** item naming the column to remove.
-  - **Matches by email,** ignoring case and spaces. A new email becomes a new resident on the house its row names. An unknown house creates nothing and is flagged.
+  - **Matches by email,** ignoring case and spaces. A new email becomes a new resident on the house its row names: by its address, or by its name **only when exactly one house has that name**. An unknown or shared name creates nothing and is flagged.
   - **The sheet wins.** A changed value is applied. If a person had changed that value in the portal since the last sync, it is still applied, but a review item records the old value, the new one, and who edited it when. The first sync treats every existing value as a person's, which is why the first run should be a Preview.
-  - **Returning residents get a new stay** when the house differs, or the start date is after their last stay ended. The earlier stay keeps its own dates, deposit and paperwork, and the resident page lists "Other stays". If the earlier stay has no stop date, that is flagged too.
+  - **Returning residents get a new stay** when they have no stay at the row's house, or the row starts after their stay there ended. A row about a house they already have a stay at updates that stay, so a move with a blank start date makes one new stay, not one a day. The earlier stay keeps its own dates, deposit and paperwork, and the resident page lists "Other stays". If the earlier stay has no stop date, that is flagged too.
   - **Never deletes anyone.** An active resident the sheet no longer lists is flagged.
   - **Skips and reports bad rows:** a bad date, a stop date before the start, an unrecognised payment plan or active value, a missing name or email, or an email on two rows. The rest of the sheet carries on.
   - **Running the same sheet twice changes nothing.** Every write of a run happens in one transaction, or none does.
@@ -203,7 +203,8 @@ The details below are the agreed intent. Each entry is filled in properly in the
 - **Needs:** `GOOGLE_SERVICE_ACCOUNT_JSON` (the key file), `RESIDENT_SHEET_ID` and `RESIDENT_SHEET_TAB`, all or none. The sheet must be shared with the service account's email as a **Viewer**.
 - **How to check it's working:** Settings → Resident roster sheet shows the last successful sync, each recent run's counts (rows read, added, updated, conflicts, skipped, with reasons), and the review list.
 - **When it fails:**
-  - A failed run changes nothing.
+  - A failed run changes nothing, and admins get "Resident sheet sync failed" straight away. **A run that skips every row counts as failed**: that is a sheet the portal can no longer read (a changed date format), not a quiet day.
+  - A good run that skipped some rows raises "N resident sheet rows were skipped".
   - If there is no good sync for more than 36 hours, admins get "Resident sheet hasn't synced".
   - Open review items show as "N roster changes to review". Whoever reviews them (see the checklist) marks each one reviewed.
 - **Status:** built-awaiting-SPO-setup.
@@ -298,7 +299,7 @@ Everything that has to happen outside the code. Tick an item when it's done and 
 - [ ] Workspace admin creates the Google Cloud service account and shares its key securely with whoever sets the env vars. Owner: TBD
 - [ ] Build the master resident tab with the exact column headers in this doc. No banking columns, ever. Owner: TBD
 - [ ] Share the sheet with the service account email (Viewer only). Owner: TBD
-- [ ] Set RESIDENT_SHEET_ID / RESIDENT_SHEET_TAB and run the first sync in dry-run review (Settings → Resident roster sheet → Preview). Owner: TBD
+- [ ] Set RESIDENT_SHEET_ID / RESIDENT_SHEET_TAB, restart, Preview (Settings → Resident roster sheet), then press Sync now once. The daily sync starts only after that. **Off for the 2026 pilot**: rosters are loaded by CSV. Owner: TBD
 - [ ] Name who reviews sync conflicts. Owner: TBD
 
 ### Email
