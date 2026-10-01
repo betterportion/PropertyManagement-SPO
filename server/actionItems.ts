@@ -36,6 +36,7 @@ import type { ActionItemCategory, ActionItemSource } from "@shared/actionItems";
 import { isQuickBooksStale, QUICKBOOKS_STALE_AFTER_HOURS, type QuickBooksHealth } from "@shared/quickbooks";
 import { budgetPace } from "@shared/budgetPace";
 import type { RosterSyncHealth } from "@shared/rosterSheet";
+import { EMAIL_ALERT_WINDOW_DAYS, type EmailHealth } from "@shared/emailTemplates";
 import { fiscalYearBounds, fiscalYearLabel, fiscalYearOf, monthsLeftInFiscalYear } from "@shared/fiscalYear";
 import type { DepositReturnRule, PropertySpend, RepairBudget } from "@shared/schema";
 
@@ -104,6 +105,8 @@ export interface ActionItemInputs {
   depositRules?: DepositReturnRule[];
   /** The QuickBooks connection, for admins only; absent for anyone else. */
   quickbooks?: QuickBooksHealth;
+  /** Email outcomes, for admins only; absent for anyone else. */
+  email?: EmailHealth;
   /** The resident sheet sync, for admins only; absent for anyone else. */
   roster?: RosterSyncHealth;
   /** Repair budgets against spend, for callers holding the property flag; absent otherwise. */
@@ -397,6 +400,7 @@ export function buildActionItems(inputs: ActionItemInputs, now: Date = new Date(
 
   items.push(...quickBooksItems(inputs.quickbooks, now));
   items.push(...rosterSyncItems(inputs.roster, now));
+  items.push(...emailItems(inputs.email, now));
   if (inputs.repairBudgets) items.push(...repairBudgetItems(inputs.repairBudgets, inputs.properties, inputs.requests, now));
 
   return items.sort(compareUrgency);
@@ -438,6 +442,38 @@ export function rosterSyncItems(health: RosterSyncHealth | undefined, now: Date)
       id: "roster-review",
       title: `${health.openReviews} roster change${health.openReviews === 1 ? "" : "s"} to review`,
       subtitle: "From the resident sheet: edits it overwrote, new stays, missing rows or unknown houses.",
+      dueDate: null,
+      overdue: false,
+    });
+  }
+  return items;
+}
+
+/**
+ * Email that should have gone and did not: a failed send in the last week,
+ * or a workflow that wanted to send while email is not set up.
+ */
+export function emailItems(health: EmailHealth | undefined, now: Date): ActionItem[] {
+  if (!health) return [];
+  const items: ActionItem[] = [];
+  const base = { source: "integration" as const, category: "general" as const, region: null };
+  const week = EMAIL_ALERT_WINDOW_DAYS === 7 ? "this week" : `in the last ${EMAIL_ALERT_WINDOW_DAYS} days`;
+  if (health.failedRecent > 0) {
+    items.push({
+      ...base,
+      id: "email-failed",
+      title: `${health.failedRecent} email${health.failedRecent === 1 ? "" : "s"} failed to send ${week}`,
+      subtitle: "See Email health in Settings for which emails and why.",
+      dueDate: iso(health.lastFailureAt ? new Date(health.lastFailureAt) : now),
+      overdue: true,
+    });
+  }
+  if (!health.configured && health.notConfiguredRecent > 0) {
+    items.push({
+      ...base,
+      id: "email-unconfigured",
+      title: `Email isn't set up: ${health.notConfiguredRecent} message${health.notConfiguredRecent === 1 ? "" : "s"} not sent ${week}`,
+      subtitle: "Residents and RAs are not getting the portal's emails until the Resend settings are added.",
       dueDate: null,
       overdue: false,
     });

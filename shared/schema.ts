@@ -1502,6 +1502,27 @@ export const depositReturnRules = pgTable("deposit_return_rules", {
 
 export type DepositReturnRule = typeof depositReturnRules.$inferSelect;
 
+// Email log
+//
+// One row per automated send and its outcome -- which email, to whom, and
+// whether it went -- so somebody can tell whether the emails are going out.
+// Never a subject, a body or a credential. Kept one year (server/emailLog.ts).
+export const emailLog = pgTable(
+  "email_log",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    template: varchar("template").notNull(),
+    recipient: varchar("recipient").notNull(),
+    outcome: varchar("outcome", { enum: ["sent", "failed", "not_configured"] }).notNull(),
+    /** The kind of error, e.g. "validation_error" -- never its message. */
+    errorClass: varchar("error_class"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [index("IDX_email_log_created_at").on(table.createdAt)],
+);
+
+export type EmailLogEntry = typeof emailLog.$inferSelect;
+
 // Rent payments
 //
 // One row per resident per month. Rent is billed monthly (decided with SPO,

@@ -89,8 +89,8 @@ The daily jobs log to the hosting provider's log stream. Nobody watches that log
   Content is limited to names, dates, amounts and descriptions, never a credential or a banking identifier. A failed send never fails the action that triggered it.
 - **What SPO must do:** see "Email" in the setup checklist below.
 - **Needs:** `RESEND_API_KEY` and `EMAIL_FROM` (both or neither: setting only one stops the server at boot). Optional: `EMAIL_REPLY_TO`, and `APP_URL` for the "open this request" link. A Resend account with SPO's sending domain verified (issue #49).
-- **How to check it's working:** today, only by receiving one. Phase 7 below adds an Email health panel. Until email is set up, the server log says `email not configured; skipped ...` for each message.
-- **When it fails:** the failure is written to the server log, and the person simply doesn't get the email. **Nobody notices today**; Phase 7 fixes that.
+- **How to check it's working:** Settings → Email health shows each email's sent and failed counts, and has a test button. Until email is set up, the server log says `email not configured; skipped ...` for each message.
+- **When it fails:** the failure is recorded in the email log, and admins get a **Needs attention** item (see Email health below).
 - **Status:** built-awaiting-SPO-setup.
 
 ### Roster CSV import
@@ -255,8 +255,27 @@ The details below are the agreed intent. Each entry is filled in properly in the
 
 - **Purpose:** answer "are the automated emails actually going out?"
 - **Trigger:** every automated send.
-- **What the portal does:** records each send's outcome: which email, to whom, sent / failed / not set up, the kind of error, and when. It never stores a message body or a credential, and keeps the record for one year. An admin Email health panel shows the last 30 days by email type, recent failures, and a "Send test email to me" button. A failed send, or a workflow trying to send while email is not set up, raises a **Needs attention** item.
-- **Status:** planned.
+- **What the portal does:**
+  - **Records every send's outcome** in `email_log`, through the one seam every email passes (`server/email.ts`): which email (`shared/emailTemplates.ts`), to whom, sent / failed / not set up, and the *kind* of error (e.g. `validation_error`). It never stores the subject, the body or a credential. A failure to record never stops a send.
+  - **Keeps the log one year,** removed in capped batches by the daily audit retention run (`server/emailLog.ts`).
+  - **Settings → Email health** (admins) shows the last 30 days by email (sent, failed, not sent because email isn't set up), the recent failures, and a **"Send a test email to me"** button. The test goes only to the admin who presses it.
+  - **Needs attention** (admins):
+    - "N emails failed to send this week", when any send failed in the last 7 days.
+    - "Email isn't set up: N messages not sent this week", when a workflow tried to send while email is off.
+- **What SPO must do:** see "Email" in the checklist. The last step is sending a test from this panel.
+- **Needs:** nothing beyond email itself.
+- **How to check it's working:** the panel shows sends with 0 failed. The test email arrives.
+- **When it fails:** the failed send is listed in the panel and raises a Needs attention item.
+- **Status:** built (it reports "email isn't set up" until the Resend setup is done).
+
+#### Proposed, not built: Resend delivery webhooks
+
+The log knows whether **Resend accepted** a message, not whether it was **delivered**. A bounced address or a spam complaint never reaches the portal today. Resend can report those with a webhook (`email.bounced`, `email.complained`, `email.delivered`). To add it:
+- **Re-add the raw request body capture** in `server/index.ts`, for signature verification. It was removed with the JotForm webhook; see "Integrations" in `CLAUDE.md`.
+- **Verify the signature** with the webhook secret, failing closed when the secret is unset. Compare in constant time, and rate-limit the unauthenticated endpoint, exactly as the old JotForm webhook did.
+- **Record each event** against the `email_log` row, using the message id Resend returns, which would need storing.
+
+Listed under "Deferred to v2".
 
 ---
 

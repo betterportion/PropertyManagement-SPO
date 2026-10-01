@@ -56,6 +56,7 @@ export function maintenanceReceivedEmail(request: MaintenanceRequest): OutboundE
   if (!to) return null;
 
   return {
+    template: "maintenance_received",
     to,
     subject: `We got your request: ${request.title}`,
     text:
@@ -87,6 +88,7 @@ export function maintenanceStatusEmail(
   const words = STATUS_WORDS[request.status] ?? request.status;
 
   return {
+    template: "maintenance_status",
     to,
     subject: `Update on your request: ${request.title}`,
     text:
@@ -125,6 +127,7 @@ export function householdEmail(
     const to = usableAddress(resident.email);
     if (!to) continue;
     messages.push({
+      template: "household",
       to,
       subject: `${propertyName}: ${subject}`,
       text: `${body}${SIGN_OFF}`,
@@ -176,6 +179,7 @@ export function commentEmail({ to, request, comment, appUrl }: CommentEmailInput
 
   const where = `"${request.title}" at ${request.buildingAddress}`;
   return {
+    template: "comment",
     to: address,
     subject: `${comment.isInternal ? "Internal comment" : "New comment"} on ${request.title}`,
     text:
@@ -211,6 +215,7 @@ export function moveOutResidentEmail(input: {
   const to = usableAddress(input.to);
   if (!to) return null;
   return {
+    template: "move_out_resident",
     to,
     subject: `Your move-out from ${input.propertyName} on ${longDay(input.moveOutDay)}`,
     text:
@@ -236,6 +241,7 @@ export function moveOutStaffEmail(input: {
   const to = usableAddress(input.to);
   if (!to) return null;
   return {
+    template: "move_out_staff",
     to,
     subject: `${input.residentName} moves out of ${input.propertyName} on ${longDay(input.moveOutDay)}`,
     text:

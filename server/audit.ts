@@ -1,5 +1,6 @@
 import { storage } from "./storage";
 import { logError } from "./errors";
+import { purgeExpiredEmailLog } from "./emailLog";
 import type { AuthContext } from "./authz";
 import { AUDIT_ACTIONS, type AuditAction } from "@shared/audit";
 
@@ -192,6 +193,14 @@ function runScheduledAuditCleanup(): void {
       })
       .catch((error) => {
         logError("Failed to purge expired audit events", error);
+      });
+    // The email log rides the same daily run: one year, capped batches.
+    void purgeExpiredEmailLog()
+      .then((deleted) => {
+        if (deleted > 0) console.info(`[email] Removed ${deleted} email log entr${deleted === 1 ? "y" : "ies"} over a year old`);
+      })
+      .catch((error) => {
+        logError("Failed to purge the email log", error);
       });
   } catch (error) {
     logError("Failed to start audit retention cleanup", error);
