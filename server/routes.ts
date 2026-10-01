@@ -119,6 +119,7 @@ import { buildRegionSummaries, type RegionStaff } from "./regionSummary";
 import { fromCents, returnedExceedsHeld, splitEvenly, toCents } from "@shared/depositLedger";
 import { hasBegunEverywhere } from "@shared/dueDates";
 import { fiscalYearLabel } from "@shared/fiscalYear";
+import { HOUSE_PORTAL_ACCOUNT_LIMIT } from "@shared/residents";
 import { MAX_SNOOZE_DAYS, MAX_SNOOZE_MONTHS } from "@shared/assetLifecycle";
 import { randomBytes, randomUUID, timingSafeEqual } from "crypto";
 import { contractorLoad, recurringIssues } from "./aggregates";
@@ -5225,6 +5226,149 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(result);
     } catch (error) {
       sendError(res, error, "Failed to send the test email");
+    }
+  });
+
+  // ── Household portal access (invite-only, #217) ──────────────────────────
+  //
+  // Nobody signs up: a household leader or steward gets in because their RA
+  // gave them access from the house's roster. Staff under the property
+  // permission, in the resident's region; at most HOUSE_PORTAL_ACCOUNT_LIMIT
+  // per house. The account waits for the person's first Google sign-in with
+  // the roster email (server/auth.ts recordSignIn).
+
+  /** The login a roster row would speak for: a resident account with its email, case aside. */
+  async function portalAccountFor(resident: { email: string }) {
+    const account = await storage.getUserByEmailInsensitive(resident.email);
+    return account && account.role === "resident" ? account : undefined;
+  }
+
+  app.get('/api/residents/:id/portal-access', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      const resident = await residentForMoveOut(req, res, ctx, "view");
+      if (!resident) return;
+      const [account, house] = await Promise.all([
+        portalAccountFor(resident),
+        storage.getActiveResidentAccountsByProperty(resident.propertyId),
+      ]);
+      const hasAccess = !!account && account.isActive && account.propertyId === resident.propertyId;
+      res.json({
+        hasAccess,
+        // Never an id or anything about the account beyond what the screen says.
+        houseAccounts: house.map((u) => ({ name: [u.firstName, u.lastName].filter(Boolean).join(" ") || u.email, email: u.email })),
+        limit: HOUSE_PORTAL_ACCOUNT_LIMIT,
+      });
+    } catch (error) {
+      sendError(res, error, "Failed to load portal access");
+    }
+  });
+
+  app.post('/api/residents/:id/portal-access', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      const resident = await residentForMoveOut(req, res, ctx, "manage");
+      if (!resident) return;
+
+      const today = new Date().toISOString().slice(0, 10);
+      const stopped = resident.moveOutDate && new Date(resident.moveOutDate).toISOString().slice(0, 10) < today;
+      if (!resident.isActive || stopped) {
+        return res.status(400).json({ message: "Only someone living in the house now can be given access" });
+      }
+      const email = resident.email.trim().toLowerCase();
+      const existing = await storage.getUserByEmailInsensitive(email);
+      if (existing && existing.role !== "resident") {
+        return res.status(409).json({ message: "That email belongs to a staff account. Use a different email for the household login." });
+      }
+
+      const house = (await storage.getActiveResidentAccountsByProperty(resident.propertyId)).filter((u) => u.id !== existing?.id);
+      if (house.length >= HOUSE_PORTAL_ACCOUNT_LIMIT) {
+        return res.status(409).json({
+          message: `${resident.buildingAddress} already has ${HOUSE_PORTAL_ACCOUNT_LIMIT} people with access (${house
+            .map((u) => u.email)
+            .join(", ")}). Remove one first.`,
+        });
+      }
+
+      const { user, created, previous } = await storage.grantResidentPortalAccess({
+        email,
+        firstName: resident.firstName,
+        lastName: resident.lastName,
+        propertyId: resident.propertyId,
+      });
+      // Access history, kept indefinitely (AUDIT_ACTIONS_KEPT_INDEFINITELY).
+      if (created) {
+        recordAuditEvent(ctx, {
+          action: AUDIT_ACTIONS.USER_CREATED,
+          entityType: "user",
+          entityId: user.id,
+          summary: `Gave ${email} portal access to ${resident.buildingAddress} (waiting for their first sign-in)`,
+          details: { role: "resident", propertyId: resident.propertyId, residentId: resident.id },
+        });
+      } else {
+        if (!previous?.isActive) {
+          recordAuditEvent(ctx, {
+            action: AUDIT_ACTIONS.USER_STATUS_CHANGED,
+            entityType: "user",
+            entityId: user.id,
+            summary: `Reactivated ${email} to give them portal access to ${resident.buildingAddress}`,
+            details: { isActive: true, residentId: resident.id },
+          });
+        }
+        if (previous?.propertyId !== resident.propertyId) {
+          recordAuditEvent(ctx, {
+            action: AUDIT_ACTIONS.USER_PROPERTY_CHANGED,
+            entityType: "user",
+            entityId: user.id,
+            summary: `Linked ${email} to ${resident.buildingAddress} to give them portal access`,
+            details: { from: previous?.propertyId ?? null, to: resident.propertyId, residentId: resident.id },
+          });
+        }
+      }
+      recordAuditEvent(ctx, {
+        action: AUDIT_ACTIONS.USER_PERMISSIONS_CHANGED,
+        entityType: "user",
+        entityId: user.id,
+        summary: `Set ${email}'s household permissions: maintenance, walkthroughs, resources`,
+        details: { canViewMaintenance: true, canCompleteWalkthroughs: true, canViewResourceHub: true },
+      });
+      res.json({ hasAccess: true });
+    } catch (error) {
+      sendError(res, error, "Failed to give portal access");
+    }
+  });
+
+  app.delete('/api/residents/:id/portal-access', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      const resident = await residentForMoveOut(req, res, ctx, "manage");
+      if (!resident) return;
+      const account = await portalAccountFor(resident);
+      // Only the login this house gave access to; one linked elsewhere is not this roster row's to switch off.
+      if (!account || !account.isActive || account.propertyId !== resident.propertyId) {
+        return res.json({ hasAccess: false });
+      }
+      await storage.deactivateAndUnlinkUser(account.id);
+      recordAuditEvent(ctx, {
+        action: AUDIT_ACTIONS.USER_STATUS_CHANGED,
+        entityType: "user",
+        entityId: account.id,
+        summary: `Removed ${account.email}'s portal access to ${resident.buildingAddress}`,
+        details: { isActive: false, reason: "access_removed", residentId: resident.id },
+      });
+      recordAuditEvent(ctx, {
+        action: AUDIT_ACTIONS.USER_PROPERTY_CHANGED,
+        entityType: "user",
+        entityId: account.id,
+        summary: `Unlinked ${account.email} from ${resident.buildingAddress}`,
+        details: { from: account.propertyId, to: null, reason: "access_removed", residentId: resident.id },
+      });
+      res.json({ hasAccess: false });
+    } catch (error) {
+      sendError(res, error, "Failed to remove portal access");
     }
   });
 

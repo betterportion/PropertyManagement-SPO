@@ -116,7 +116,7 @@ a `.env` still starts and fails with the configuration report instead. Anything
 already set in your shell wins over the file, and `npm run start` does not read
 `.env` at all: production takes real environment variables.
 
-> **First user:** whoever signs in first is created as a `resident`. Promote them to `admin` directly in the database (`users.role`) to unlock the admin pages.
+> **First user:** the portal is invite-only, so on a fresh database create your admin account before you first sign in: `insert into users (email, role, is_active) values ('you@spo.org', 'admin', true);` (or seed with `SEED_ADMIN_EMAIL`). Your first sign-in with that email attaches to it. After that, admins add staff in Settings and RAs give household leaders access from the roster.
 
 ---
 

@@ -622,7 +622,7 @@ async function seed(): Promise<void> {
     console.log("Seeded 2 tasks");
   } else {
     console.log(
-      "No SEED_ADMIN_EMAIL set — the first sign-in will be a resident (promote with SQL, see README).",
+      "No SEED_ADMIN_EMAIL set — the portal is invite-only, so create an admin account by SQL before signing in (see README).",
     );
   }
 

@@ -151,6 +151,21 @@ function updateUserSession(
  * has not checked must not reach either. When the re-link does hand an
  * existing account to the new identity, it is recorded as `user.relinked`.
  */
+/**
+ * A sign-in the portal turned away, with the reason the landing page explains
+ * (/?signin=<reason>). Still an HttpError(403), so anything treating it as one
+ * keeps working.
+ */
+export class SignInRefused extends HttpError {
+  constructor(
+    public readonly reason: "not_invited" | "unverified" | "domain",
+    message: string,
+  ) {
+    super(403, message);
+    this.name = "SignInRefused";
+  }
+}
+
 export async function recordSignIn(
   claims: any,
   allowedDomains: readonly string[] = authProvider.allowedDomains,
@@ -158,19 +173,37 @@ export async function recordSignIn(
   if (allowedDomains.length > 0) {
     const hostedDomain = typeof claims["hd"] === "string" ? claims["hd"].toLowerCase() : "";
     if (!allowedDomains.includes(hostedDomain)) {
-      throw new HttpError(
-        403,
+      throw new SignInRefused(
+        "domain",
         "This portal only accepts SPO accounts. Sign out of Google and sign in with your SPO account.",
       );
     }
   }
 
-  const email: string | undefined = claims["email"];
+  let email: string | undefined = claims["email"];
   if (email && claims["email_verified"] !== true) {
-    throw new HttpError(
-      403,
+    throw new SignInRefused(
+      "unverified",
       "Your sign-in provider has not confirmed your email address. Verify it with them, then sign in again.",
     );
+  }
+
+  // Invite-only. A sign-in gets in only to an account that is already there:
+  // its own (by the provider's subject), or one waiting for its email -- staff
+  // pre-created by an admin, or a household leader or steward their RA gave
+  // portal access (#217). Anybody else is turned away before anything is
+  // written, rather than becoming an active resident account.
+  if (!(await storage.getUser(claims["sub"]))) {
+    const waiting = email ? await storage.getUserByEmailInsensitive(email) : undefined;
+    if (!waiting) {
+      throw new SignInRefused(
+        "not_invited",
+        "This portal is by invitation. Ask your regional administrator to give you access, using this email address.",
+      );
+    }
+    // The invite's own spelling of the address, so the exact re-link in
+    // upsertUser finds it whatever case the provider sends.
+    email = waiting.email ?? email;
   }
 
   const { user, relinkedFrom } = await storage.upsertUser({
@@ -268,9 +301,19 @@ export async function setupAuth(app: Express) {
 
   app.get("/api/callback", (req, res, next) => {
     ensureStrategy(req);
-    passport.authenticate(strategyNameFor(req.hostname), {
-      successReturnToOrRedirect: "/",
-      failureRedirect: "/api/login",
+    passport.authenticate(strategyNameFor(req.hostname), (error: unknown, user: Express.User | false) => {
+      // A refused sign-in lands on the sign-in page with the reason, not on a
+      // raw error and not back at Google in a loop.
+      if (error instanceof SignInRefused) return res.redirect(`/?signin=${error.reason}`);
+      if (error) return next(error);
+      if (!user) return res.redirect("/api/login");
+      req.logIn(user, (loginError) => {
+        if (loginError) return next(loginError);
+        const session = req.session as typeof req.session & { returnTo?: string };
+        const returnTo = session.returnTo;
+        delete session.returnTo;
+        res.redirect(returnTo && returnTo.startsWith("/") && !returnTo.startsWith("//") ? returnTo : "/");
+      });
     })(req, res, next);
   });
 

@@ -10627,3 +10627,92 @@ describe("every upload route checks a file's real contents, not only its name", 
     expect(fileStoreMock.putUpload).toHaveBeenCalled();
   });
 });
+
+describe("household portal access is by invitation from the house's RA (#217)", () => {
+  const ROW = {
+    id: "r-1", firstName: "Jane", lastName: "Doe", email: "Jane.Doe@Example.com", propertyId: "prop-west",
+    region: "West Central", buildingAddress: "1 Main St", isActive: true, moveOutDate: null,
+  };
+  const leader = (id: string, email: string) => ({ id, email, firstName: id, lastName: "", role: "resident", isActive: true, propertyId: "prop-west" });
+  const GRANT = () => request("POST", "/api/residents/r-1/portal-access");
+  const RA_WEST = { canManageProperties: true, allowedRegions: ["West Central"] };
+
+  beforeEach(() => {
+    storageMock.getResident.mockResolvedValue(ROW);
+    storageMock.getUserByEmailInsensitive.mockResolvedValue(undefined);
+    storageMock.getActiveResidentAccountsByProperty.mockResolvedValue([]);
+    storageMock.grantResidentPortalAccess.mockImplementation(async (input: { email: string }) => ({
+      user: { id: "placeholder", ...input, role: "resident", isActive: true },
+      created: true,
+    }));
+    storageMock.deactivateAndUnlinkUser.mockResolvedValue({});
+  });
+
+  it("lets the house's RA give access, keyed on the roster email, and records it (positive control)", async () => {
+    actAs(STAFF, RA_WEST);
+    const { status } = await GRANT();
+    expect(status).toBe(200);
+    expect(storageMock.grantResidentPortalAccess).toHaveBeenCalledWith({
+      email: "jane.doe@example.com", firstName: "Jane", lastName: "Doe", propertyId: "prop-west",
+    });
+    expect(storageMock.createAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ action: "user.created" }));
+  });
+
+  it.each([
+    ["a resident, even one holding the property flags", () => actAs({ ...ALICE, propertyId: "prop-west" } as typeof ALICE, { canManageProperties: true })],
+    ["an RA from another region", () => actAs(STAFF, { canManageProperties: true, allowedRegions: ["East Central"] })],
+    ["staff without the manage-properties flag", () => actAs(STAFF, { canViewProperties: true, allowedRegions: ["West Central"] })],
+  ])("refuses %s, giving nobody access", async (_who, sign) => {
+    sign();
+    expect((await GRANT()).status).toBe(403);
+    expect((await request("DELETE", "/api/residents/r-1/portal-access")).status).toBe(403);
+    expect(storageMock.grantResidentPortalAccess).not.toHaveBeenCalled();
+    expect(storageMock.deactivateAndUnlinkUser).not.toHaveBeenCalled();
+  });
+
+  it("refuses a 4th person at a house, naming the three who have access", async () => {
+    actAs(STAFF, RA_WEST);
+    storageMock.getActiveResidentAccountsByProperty.mockResolvedValue([
+      leader("a", "a@example.com"), leader("b", "b@example.com"), leader("c", "c@example.com"),
+    ]);
+    const { status, body } = await GRANT();
+    expect(status).toBe(409);
+    expect(body.message).toContain("a@example.com, b@example.com, c@example.com");
+    expect(storageMock.grantResidentPortalAccess).not.toHaveBeenCalled();
+  });
+
+  it("still lets one of the three be given access again (they don't count against themselves)", async () => {
+    actAs(STAFF, RA_WEST);
+    const jane = leader("jane", "jane.doe@example.com");
+    storageMock.getUserByEmailInsensitive.mockResolvedValue(jane);
+    storageMock.getActiveResidentAccountsByProperty.mockResolvedValue([jane, leader("b", "b@example.com"), leader("c", "c@example.com")]);
+    expect((await GRANT()).status).toBe(200);
+  });
+
+  it("refuses someone who has moved out, or past their stop date", async () => {
+    actAs(STAFF, RA_WEST);
+    storageMock.getResident.mockResolvedValue({ ...ROW, isActive: false });
+    expect((await GRANT()).status).toBe(400);
+    storageMock.getResident.mockResolvedValue({ ...ROW, moveOutDate: new Date("2020-01-01T00:00:00Z") });
+    expect((await GRANT()).status).toBe(400);
+    expect(storageMock.grantResidentPortalAccess).not.toHaveBeenCalled();
+  });
+
+  it("refuses an email that belongs to a staff account", async () => {
+    actAs(STAFF, RA_WEST);
+    storageMock.getUserByEmailInsensitive.mockResolvedValue({ id: "u-ra", email: "jane.doe@example.com", role: "regional_administrator", isActive: true });
+    expect((await GRANT()).status).toBe(409);
+    expect(storageMock.grantResidentPortalAccess).not.toHaveBeenCalled();
+  });
+
+  it("removes access only from the login this house gave it to", async () => {
+    actAs(STAFF, RA_WEST);
+    storageMock.getUserByEmailInsensitive.mockResolvedValue({ ...leader("jane", "jane.doe@example.com"), propertyId: "prop-east" });
+    await request("DELETE", "/api/residents/r-1/portal-access");
+    expect(storageMock.deactivateAndUnlinkUser).not.toHaveBeenCalled();
+
+    storageMock.getUserByEmailInsensitive.mockResolvedValue(leader("jane", "jane.doe@example.com"));
+    expect((await request("DELETE", "/api/residents/r-1/portal-access")).status).toBe(200);
+    expect(storageMock.deactivateAndUnlinkUser).toHaveBeenCalledWith("jane");
+  });
+});

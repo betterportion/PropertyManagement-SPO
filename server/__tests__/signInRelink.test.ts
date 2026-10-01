@@ -16,14 +16,17 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { upsertUser, createAuditEvent } = vi.hoisted(() => ({
+const { upsertUser, createAuditEvent, getUser, getUserByEmailInsensitive } = vi.hoisted(() => ({
   upsertUser: vi.fn(),
   createAuditEvent: vi.fn(),
+  getUser: vi.fn(),
+  getUserByEmailInsensitive: vi.fn(),
 }));
 
 vi.mock("../db", () => ({ db: {}, pool: {} }));
-// No getUserByEmail: the sign-in looks nothing up before upsertUser.
-vi.mock("../storage", () => ({ storage: { upsertUser, createAuditEvent } }));
+// The sign-in looks up only whether an account is waiting for it (invite-only,
+// #217); which account a re-link moves is still upsertUser's own answer.
+vi.mock("../storage", () => ({ storage: { upsertUser, createAuditEvent, getUser, getUserByEmailInsensitive } }));
 
 import { recordSignIn } from "../auth";
 import { AUDIT_ACTIONS_KEPT_INDEFINITELY } from "../audit";
@@ -56,6 +59,9 @@ const relinkEvents = () =>
 beforeEach(() => {
   upsertUser.mockReset();
   upsertUser.mockImplementation(relinked);
+  // EXISTING_ADMIN is the account waiting for jr@spo.org.
+  getUser.mockReset().mockResolvedValue(undefined);
+  getUserByEmailInsensitive.mockReset().mockResolvedValue(EXISTING_ADMIN);
   createAuditEvent.mockReset();
   createAuditEvent.mockResolvedValue({});
 });
@@ -107,6 +113,7 @@ describe("sign-in re-links an existing account only for a verified email", () =>
 
   it("lets a returning sign-in under the same id through, with no re-link recorded", async () => {
     upsertUser.mockImplementation(notRelinked);
+    getUser.mockResolvedValue({ ...EXISTING_ADMIN, id: "google-sub-new" });
 
     await recordSignIn(claims({ email_verified: true }), []);
 
@@ -114,12 +121,28 @@ describe("sign-in re-links an existing account only for a verified email", () =>
     expect(relinkEvents()).toEqual([]);
   });
 
-  it("lets a first verified sign-in create its account, with no re-link recorded", async () => {
-    upsertUser.mockImplementation(notRelinked);
+  // Invite-only (#217, JR 2026-10-01): a first sign-in nobody is waiting for no
+  // longer becomes an active resident account.
+  it("refuses a first verified sign-in nobody invited, and writes nothing", async () => {
+    getUserByEmailInsensitive.mockResolvedValue(undefined);
 
-    await recordSignIn(claims({ email_verified: true }), []);
+    await expect(recordSignIn(claims({ email_verified: true }), [])).rejects.toMatchObject({ status: 403, reason: "not_invited" });
 
-    expect(upsertUser).toHaveBeenCalledTimes(1);
-    expect(relinkEvents()).toEqual([]);
+    expect(upsertUser).not.toHaveBeenCalled();
+    expect(createAuditEvent).not.toHaveBeenCalled();
+  });
+
+  it("refuses a sign-in with no email at all when no account is waiting", async () => {
+    await expect(recordSignIn({ sub: "google-sub-new" }, [])).rejects.toMatchObject({ reason: "not_invited" });
+    expect(upsertUser).not.toHaveBeenCalled();
+  });
+
+  it("attaches an invited first sign-in under the invite's own spelling of the address", async () => {
+    // The RA's roster had "Jane.Doe@Example.com"; Google sends it lower-cased.
+    getUserByEmailInsensitive.mockResolvedValue({ id: "placeholder", email: "Jane.Doe@Example.com", role: "resident", isActive: true });
+
+    await recordSignIn(claims({ email: "jane.doe@example.com", email_verified: true }), []);
+
+    expect(upsertUser).toHaveBeenCalledWith(expect.objectContaining({ id: "google-sub-new", email: "Jane.Doe@Example.com" }));
   });
 });

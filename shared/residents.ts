@@ -26,3 +26,10 @@ export function residentsActiveOn<T extends Pick<Resident, "moveInDate" | "moveO
     return true;
   });
 }
+
+/**
+ * How many household members of one house may have portal access at once:
+ * the household leader and their stewards. An RA grants it from the roster
+ * (server/routes.ts, /api/residents/:id/portal-access).
+ */
+export const HOUSE_PORTAL_ACCOUNT_LIMIT = 3;
