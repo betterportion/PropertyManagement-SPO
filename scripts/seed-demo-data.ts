@@ -135,16 +135,16 @@ async function seed(): Promise<void> {
 
   // ── Maintenance requests ──────────────────────────────────────────────────
   const requestRows = [
-    { title: "Kitchen faucet dripping constantly", description: "The cold tap drips even when fully closed. Bucket is filling overnight.", category: "Plumbing", priority: "high", status: "pending", property: cleveland, location: "Kitchen", submittedBy: "joe.miller@spo.org" },
+    { title: "Kitchen faucet dripping constantly", description: "The cold tap drips even when fully closed. Bucket is filling overnight.", category: "Plumbing", priority: "high", status: "pending", property: cleveland, location: "Kitchen", submittedBy: "joe.miller@example.com" },
     { title: "Furnace making banging noise", description: "Loud metal bang when the heat kicks in, from the basement unit.", category: "HVAC", priority: "urgent", status: "in_progress", property: como, location: "Basement", submittedBy: "sam.oconnor@spo.org" },
     { title: "Bedroom window won't latch", description: "Second-floor north bedroom window closes but the latch doesn't catch.", category: "Structural", priority: "medium", status: "pending", property: dinkytown, location: "North bedroom", submittedBy: "clare.hughes@spo.org" },
-    { title: "Dryer not heating", description: "Runs a full cycle but clothes come out cold and damp.", category: "Appliance", priority: "high", status: "in_progress", property: buckeye, location: "Laundry room", submittedBy: "ben.walsh@spo.org" },
-    { title: "Porch light flickering", description: "Front porch fixture flickers; new bulb did not fix it.", category: "Electrical", priority: "low", status: "completed", property: aggieland, location: "Front porch", submittedBy: "luke.tran@spo.org" },
+    { title: "Dryer not heating", description: "Runs a full cycle but clothes come out cold and damp.", category: "Appliance", priority: "high", status: "in_progress", property: buckeye, location: "Laundry room", submittedBy: "ben.walsh@student.example.edu" },
+    { title: "Porch light flickering", description: "Front porch fixture flickers; new bulb did not fix it.", category: "Electrical", priority: "low", status: "completed", property: aggieland, location: "Front porch", submittedBy: "luke.tran@example.net" },
     { title: "Basement smells musty after rain", description: "Noticeable after last week's storms; no standing water visible.", category: "Structural", priority: "medium", status: "pending", property: como, location: "Basement", submittedBy: "sam.oconnor@spo.org" },
-    { title: "Garbage disposal jammed", description: "Hums but doesn't spin. Already tried the reset button.", category: "Appliance", priority: "medium", status: "completed", property: cleveland, location: "Kitchen", submittedBy: "joe.miller@spo.org" },
+    { title: "Garbage disposal jammed", description: "Hums but doesn't spin. Already tried the reset button.", category: "Appliance", priority: "medium", status: "completed", property: cleveland, location: "Kitchen", submittedBy: "joe.miller@example.com" },
     { title: "Add a second towel bar in shared bath", description: "Six guys, one towel bar. Not urgent, would be great to have.", category: "Other", priority: "wishlist", status: "pending", property: como, location: "Shared bathroom", submittedBy: "sam.oconnor@spo.org" },
     { title: "Smoke detector chirping", description: "Hallway detector chirps every minute; battery replaced, still chirping.", category: "Safety Equipment", priority: "high", status: "cancelled", property: dinkytown, location: "Hallway", submittedBy: "clare.hughes@spo.org" },
-    { title: "Water heater pilot keeps going out", description: "Relit three times this week; goes out again within a day.", category: "Plumbing", priority: "urgent", status: "pending", property: jayhawk, location: "Basement", submittedBy: "will.chen@spo.org" },
+    { title: "Water heater pilot keeps going out", description: "Relit three times this week; goes out again within a day.", category: "Plumbing", priority: "urgent", status: "pending", property: jayhawk, location: "Basement", submittedBy: "will.chen@example.org" },
   ] as const;
 
   const requests = [];
@@ -439,19 +439,26 @@ async function seed(): Promise<void> {
     movedInDaysAgo: number;
     movedOutDaysAgo?: number;
   }> = [
-    { property: properties[0], firstName: "Michael", lastName: "Fisher", email: "michael.fisher@spo.org", movedInDaysAgo: 320 },
-    { property: properties[0], firstName: "Daniel", lastName: "Nguyen", email: "daniel.nguyen@spo.org", movedInDaysAgo: 320 },
-    { property: properties[0], firstName: "Peter", lastName: "Okafor", email: "peter.okafor@spo.org", movedInDaysAgo: 55 },
-    { property: properties[1], firstName: "Rachel", lastName: "Bauer", email: "rachel.bauer@spo.org", movedInDaysAgo: 300 },
-    { property: properties[1], firstName: "Sofia", lastName: "Marchetti", email: "sofia.marchetti@spo.org", movedInDaysAgo: 300 },
-    { property: properties[2], firstName: "Grace", lastName: "Sullivan", email: "grace.sullivan@spo.org", movedInDaysAgo: 60 },
-    { property: properties[0], firstName: "Thomas", lastName: "Reilly", email: "thomas.reilly@spo.org", movedInDaysAgo: 700, movedOutDaysAgo: 40 },
-    { property: properties[1], firstName: "Anna", lastName: "Kowalski", email: "anna.kowalski@spo.org", movedInDaysAgo: 500, movedOutDaysAgo: 18 },
+    // Every SPO household is single-sex: each house's residents match its own
+    // (Cleveland, Como and Buckeye are men's houses, as their requests show;
+    // Dinkytown and Beacon are women's). Most residents are students on
+    // personal addresses, with the odd missionary on spo.org. Personal
+    // addresses use the reserved example domains (RFC 2606) so seeded data can
+    // never email a real person, even on a server with email switched on.
+    { property: properties[0], firstName: "Michael", lastName: "Fisher", email: "mfisher@example.com", movedInDaysAgo: 320 },
+    { property: properties[0], firstName: "Daniel", lastName: "Nguyen", email: "daniel.nguyen@student.example.edu", movedInDaysAgo: 320 },
+    { property: properties[0], firstName: "Peter", lastName: "Okafor", email: "peterokafor@example.net", movedInDaysAgo: 55 },
+    { property: properties[1], firstName: "Sam", lastName: "O'Connor", email: "sam.oconnor@spo.org", movedInDaysAgo: 300 },
+    { property: properties[1], firstName: "Mateo", lastName: "Alvarez", email: "mateo.alvarez@example.com", movedInDaysAgo: 300 },
+    { property: properties[2], firstName: "Grace", lastName: "Sullivan", email: "grace.s@example.org", movedInDaysAgo: 60 },
+    { property: properties[2], firstName: "Clare", lastName: "Hughes", email: "clare.hughes@spo.org", movedInDaysAgo: 400 },
+    { property: properties[0], firstName: "Thomas", lastName: "Reilly", email: "treilly@student.example.edu", movedInDaysAgo: 700, movedOutDaysAgo: 40 },
+    { property: properties[1], firstName: "Andrew", lastName: "Kowalski", email: "andrew.kowalski@example.net", movedInDaysAgo: 500, movedOutDaysAgo: 18 },
     // A few more houses/regions so Current and Former both span regions.
-    { property: properties[3], firstName: "Marcus", lastName: "Bell", email: "marcus.bell@spo.org", movedInDaysAgo: 280 },
-    { property: properties[3], firstName: "Elena", lastName: "Ross", email: "elena.ross@spo.org", movedInDaysAgo: 600, movedOutDaysAgo: 65 },
-    { property: properties[8], firstName: "Liam", lastName: "Doyle", email: "liam.doyle@spo.org", movedInDaysAgo: 200 },
-    { property: properties[8], firstName: "Nora", lastName: "Byrne", email: "nora.byrne@spo.org", movedInDaysAgo: 520, movedOutDaysAgo: 25 },
+    { property: properties[3], firstName: "Marcus", lastName: "Bell", email: "marcusbell@example.com", movedInDaysAgo: 280 },
+    { property: properties[3], firstName: "Ethan", lastName: "Ross", email: "ethan.ross@student.example.edu", movedInDaysAgo: 600, movedOutDaysAgo: 65 },
+    { property: properties[8], firstName: "Maeve", lastName: "Doyle", email: "maeve.doyle@example.org", movedInDaysAgo: 200 },
+    { property: properties[8], firstName: "Nora", lastName: "Byrne", email: "norabyrne@example.net", movedInDaysAgo: 520, movedOutDaysAgo: 25 },
   ];
   const residents = [];
   for (const row of residentRows) {
