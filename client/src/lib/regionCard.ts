@@ -19,3 +19,17 @@ export function scoreCountsHidden(hidden: string[]): boolean {
 export function isAllClear(summary: { attentionScore: number; hidden: string[] }): boolean {
   return summary.attentionScore === 0 && !scoreCountsHidden(summary.hidden);
 }
+
+/**
+ * Regions the overview has no card for in v1. "National" is the catch-all for
+ * a house outside every campus region; its card is hidden until the national
+ * management view returns in v2 (docs/WORKFLOWS.md, "Deferred to v2"). Only the
+ * card goes: the summary is still fetched, so the dashboard's totals and its
+ * "Needs attention" lists still count those houses.
+ */
+export const REGIONS_WITHOUT_A_CARD: readonly string[] = ["National"];
+
+/** The summaries the overview draws a card for. */
+export function overviewCards<T extends { region: string }>(summaries: T[]): T[] {
+  return summaries.filter((summary) => !REGIONS_WITHOUT_A_CARD.includes(summary.region));
+}

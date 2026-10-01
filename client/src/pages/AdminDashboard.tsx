@@ -13,6 +13,7 @@ import { StatGrid, StatTile } from "@/components/stat-tile";
 import { EmptyState } from "@/components/states";
 import { formatCurrency } from "@/lib/format";
 import type { ActionItem } from "@/lib/actionItems";
+import { overviewCards } from "@/lib/regionCard";
 import type { Property } from "@shared/schema";
 
 /** How many houses with open work the dashboard lists before pointing at the Maintenance page. */
@@ -138,7 +139,8 @@ export default function AdminDashboard() {
                 </Card>
               ) : (
                 <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                  {summaries.map((summary) => (
+                  {/* The totals above still count every region; only the card is held back. */}
+                  {overviewCards(summaries).map((summary) => (
                     <RegionCard key={summary.region} summary={summary} onSelect={() => setSelectedRegion(summary.region)} />
                   ))}
                 </div>
