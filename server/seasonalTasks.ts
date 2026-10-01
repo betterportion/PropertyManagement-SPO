@@ -20,6 +20,7 @@
 import { storage } from "./storage";
 import { logError } from "./errors";
 import { syncMoveOutTasks } from "./moveOut";
+import { closeDepartedHouseholdLogins } from "./householdLogins";
 
 export const SEASONAL_TASK_GENERATION_INTERVAL_MS = 24 * 60 * 60 * 1_000;
 
@@ -211,6 +212,10 @@ function runSeasonalGeneration(): void {
       .catch((error) => {
         logError("Failed to generate seasonal reminder tasks", error);
       });
+    // A stop date that simply passes ends that household login (server/householdLogins.ts).
+    void closeDepartedHouseholdLogins("all").then((closed) => {
+      if (closed > 0) console.info(`[seasonal] Switched off ${closed} household login(s) no longer on a roster`);
+    });
     // The move-out reminders ride the same daily run (server/moveOut.ts).
     void syncMoveOutTasks(new Date())
       .then(({ created, moved, removed }) => {

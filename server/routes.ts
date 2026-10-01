@@ -120,6 +120,7 @@ import { fromCents, returnedExceedsHeld, splitEvenly, toCents } from "@shared/de
 import { hasBegunEverywhere } from "@shared/dueDates";
 import { fiscalYearLabel } from "@shared/fiscalYear";
 import { HOUSE_PORTAL_ACCOUNT_LIMIT } from "@shared/residents";
+import { closeDepartedHouseholdLogins } from "./householdLogins";
 import { MAX_SNOOZE_DAYS, MAX_SNOOZE_MONTHS } from "@shared/assetLifecycle";
 import { randomBytes, randomUUID, timingSafeEqual } from "crypto";
 import { contractorLoad, recurringIssues } from "./aggregates";
@@ -3624,6 +3625,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const validatedData = insertResidentSchema.partial().parse(editable);
       // A person's edit: the sheet sync flags it if the sheet later changes it.
       const resident = await storage.updateResident(req.params.id, validatedData, { by: ctx.user.email ?? null, at: new Date() });
+      // Marked moved out, or a stop date already past: their household login ends now.
+      await closeDepartedHouseholdLogins({ propertyId: existing.propertyId });
       res.json(resident);
     } catch (error) {
       sendError(res, error, "Failed to update resident");
@@ -3687,6 +3690,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       if (!requireRegion(res, ctx, resident.region)) return;
 
+      // The day they left, not a plan: recording it switches off their portal
+      // login and drops them from the house now. A coming leaving date is the
+      // stop date on their roster record, which keeps them in until that day.
+      // One day of slack for the reader's evening, when UTC is already tomorrow.
+      const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      if (moveOutDate > tomorrow) {
+        return res.status(400).json({
+          message: "Record a move-out on or after the day they leave. To plan ahead, set their stop date on the roster instead.",
+        });
+      }
+
       // Through the shared schema so the date string becomes a Date the same
       // way every other resident write does.
       const updated = await storage.updateResident(
@@ -3725,6 +3739,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
+      // Whatever the dialog asked, a household login ends with the stay
+      // (JR, 2026-10-01); the switch-off above has already audited it with
+      // the RA as the actor when it was ticked.
+      accountDeactivated = (await closeDepartedHouseholdLogins({ propertyId: resident.propertyId })) > 0 || accountDeactivated;
       res.json({ resident: updated, accountDeactivated });
     } catch (error) {
       sendError(res, error, "Failed to move the resident out");
@@ -3745,6 +3763,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!requireRegion(res, ctx, existing.region)) return;
 
       const files = await storage.deleteResident(req.params.id);
+      await closeDepartedHouseholdLogins({ propertyId: existing.propertyId });
       // Its move-out photos went with it by cascade.
       await removeDeletedRecordFiles(files);
 

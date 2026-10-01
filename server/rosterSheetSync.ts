@@ -11,6 +11,7 @@ import { readRosterSheetConfigFromEnv } from "./config";
 import { storage as defaultStorage, type IStorage, type RosterPlanWrite } from "./storage";
 import { recordAuditEvent, AUDIT_ACTIONS } from "./audit";
 import { logError } from "./errors";
+import { closeDepartedHouseholdLogins } from "./householdLogins";
 import type { AuthContext } from "./authz";
 import { createRosterSheetReader, RosterSheetError } from "./googleSheets";
 import { newReviews, planRosterSync, type RosterPlan, type SheetTable, type SyncedValues } from "./rosterSync";
@@ -160,6 +161,10 @@ export async function runRosterSync(options: {
       audit(actor, `Resident ${source} sync failed while saving; nothing was changed`, { ok: false });
       return { run, creates: [], updates: [], reviews: [] };
     }
+
+    // A row the sheet marked inactive, or a stop date it moved into the past,
+    // ends that household login now rather than at the next daily run.
+    if (plan.updates.length > 0) await closeDepartedHouseholdLogins("all", now);
 
     // Each change on its own line: dates drive move-outs and deposits, so
     // their history matters.

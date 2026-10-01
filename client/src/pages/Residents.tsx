@@ -20,7 +20,6 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Plus, MoreVertical, LogOut, Users, Download } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { type Resident, type Property, type RentPayment, type SecurityDeposit } from "@shared/schema";
 import { z } from "zod";
@@ -122,7 +121,6 @@ export default function Residents() {
   // outstanding, and offers to switch off a matching portal login.
   const [movingOut, setMovingOut] = useState<Resident | null>(null);
   const [moveOutDate, setMoveOutDate] = useState("");
-  const [deactivateAccount, setDeactivateAccount] = useState(true);
 
   const seesFinance =
     typedUser?.role === "admin" ||
@@ -153,7 +151,6 @@ export default function Residents() {
 
   const openMoveOut = (resident: Resident) => {
     setMoveOutDate(localToday());
-    setDeactivateAccount(true);
     setMovingOut(resident);
   };
 
@@ -161,7 +158,7 @@ export default function Residents() {
     mutationFn: async ({ id }: { id: string }) => {
       const response = await apiRequest("POST", `/api/residents/${id}/move-out`, {
         moveOutDate,
-        deactivateAccount: deactivateAccount && accountStatus?.hasActiveAccount === true,
+        deactivateAccount: accountStatus?.hasActiveAccount === true,
       });
       return response.json() as Promise<{ accountDeactivated: boolean }>;
     },
@@ -519,6 +516,9 @@ export default function Residents() {
               <Input
                 id="move-out-date"
                 type="date"
+                // The day they left, never ahead of time: a planned leaving
+                // date is the stop date on their roster record.
+                max={localToday()}
                 value={moveOutDate}
                 onChange={(e) => setMoveOutDate(e.target.value)}
                 className="mt-1"
@@ -546,22 +546,10 @@ export default function Residents() {
             )}
 
             {accountStatus?.hasActiveAccount && (
-              <div className="flex items-start gap-2">
-                <Checkbox
-                  id="deactivate-account"
-                  checked={deactivateAccount}
-                  onCheckedChange={(checked) => setDeactivateAccount(checked === true)}
-                  data-testid="checkbox-deactivate-account"
-                />
-                <div className="grid gap-1">
-                  <Label htmlFor="deactivate-account">Also switch off their portal login</Label>
-                  <p className="text-xs text-muted-foreground">
-                    Their login can see the whole house's maintenance requests. Leave this checked
-                    unless they are staying involved. Switching it off also unlinks it from this house;
-                    an admin can reactivate it and link a house again from Settings.
-                  </p>
-                </div>
-              </div>
+              // A household login ends with the stay (JR, 2026-10-01): no choice to make.
+              <p className="text-sm text-muted-foreground" data-testid="text-moveout-login">
+                Their portal login will be switched off, which frees a place for this house. If they come back, give them access again from their resident page.
+              </p>
             )}
           </div>
 

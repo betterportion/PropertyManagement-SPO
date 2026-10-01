@@ -10716,3 +10716,44 @@ describe("household portal access is by invitation from the house's RA (#217)", 
     expect(storageMock.deactivateAndUnlinkUser).toHaveBeenCalledWith("jane");
   });
 });
+
+describe("a household login ends with the stay (JR, 2026-10-01)", () => {
+  const ROW = { id: "r-1", firstName: "Jane", lastName: "Doe", email: "jane@example.com", propertyId: "prop-west", region: "West Central", buildingAddress: "1 Main St", isActive: true, moveOutDate: null };
+  const JANE_LOGIN = { id: "u-jane", email: "jane@example.com", role: "resident", isActive: true, propertyId: "prop-west" };
+  const today = () => new Date().toISOString().slice(0, 10);
+
+  beforeEach(() => {
+    actAs(STAFF, { canManageProperties: true, allowedRegions: ["West Central"] });
+    storageMock.getResident.mockResolvedValue(ROW);
+    storageMock.getActiveResidentAccountsByProperty.mockResolvedValue([JANE_LOGIN]);
+    storageMock.deactivateAndUnlinkUser.mockResolvedValue({});
+    storageMock.getActiveResidentAccountByEmail.mockResolvedValue(undefined);
+  });
+
+  it("switches off the login when the RA records the move-out, even without ticking anything", async () => {
+    storageMock.updateResident.mockResolvedValue({ ...ROW, isActive: false, moveOutDate: new Date() });
+    storageMock.getResidentsByProperty.mockResolvedValue([{ ...ROW, isActive: false }]);
+    const { status } = await request("POST", "/api/residents/r-1/move-out", { body: { moveOutDate: today(), deactivateAccount: false } });
+    expect(status).toBe(200);
+    expect(storageMock.deactivateAndUnlinkUser).toHaveBeenCalledWith("u-jane");
+  });
+
+  it("switches it off when an edit marks them moved out, and leaves a current member's alone (positive control)", async () => {
+    storageMock.updateResident.mockResolvedValue({ ...ROW });
+    storageMock.getResidentsByProperty.mockResolvedValue([ROW]);
+    await request("PATCH", "/api/residents/r-1", { body: { notes: "Quiet" } });
+    expect(storageMock.deactivateAndUnlinkUser).not.toHaveBeenCalled();
+
+    storageMock.getResidentsByProperty.mockResolvedValue([{ ...ROW, isActive: false }]);
+    await request("PATCH", "/api/residents/r-1", { body: { isActive: false } });
+    expect(storageMock.deactivateAndUnlinkUser).toHaveBeenCalledWith("u-jane");
+  });
+
+  it("refuses a move-out dated in the future, changing nothing", async () => {
+    const { status, body } = await request("POST", "/api/residents/r-1/move-out", { body: { moveOutDate: "2099-01-01", deactivateAccount: true } });
+    expect(status).toBe(400);
+    expect(body.message).toMatch(/stop date/);
+    expect(storageMock.updateResident).not.toHaveBeenCalled();
+    expect(storageMock.deactivateAndUnlinkUser).not.toHaveBeenCalled();
+  });
+});
