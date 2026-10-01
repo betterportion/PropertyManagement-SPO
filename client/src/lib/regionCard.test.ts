@@ -5,7 +5,7 @@
  * part of the score, must not lose "All clear" over it.
  */
 import { describe, it, expect } from "vitest";
-import { isAllClear, scoreCountsHidden } from "./regionCard";
+import { isAllClear, overviewCards, scoreCountsHidden } from "./regionCard";
 
 describe("isAllClear", () => {
   it("is clear when the score is zero and nothing is hidden", () => {
@@ -33,5 +33,17 @@ describe("scoreCountsHidden", () => {
   it("ignores rent and flags any score source", () => {
     expect(scoreCountsHidden(["rent"])).toBe(false);
     expect(scoreCountsHidden(["maintenance"])).toBe(true);
+  });
+});
+
+describe("overviewCards", () => {
+  it("hides the National card and keeps every other region, in order", () => {
+    const summaries = [{ region: "Northwest" }, { region: "National" }, { region: "East Central" }];
+    expect(overviewCards(summaries).map((s) => s.region)).toEqual(["Northwest", "East Central"]);
+  });
+
+  it("leaves a list with no National summary untouched", () => {
+    const summaries = [{ region: "Southwest" }];
+    expect(overviewCards(summaries)).toEqual(summaries);
   });
 });

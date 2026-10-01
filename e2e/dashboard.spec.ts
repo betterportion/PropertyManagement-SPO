@@ -43,6 +43,13 @@ test.describe("admin dashboard", () => {
     await expect(page.getByTestId("button-all-regions")).toBeVisible();
   });
 
+  test("has no National card while the campus regions keep theirs", async ({ page }) => {
+    // The national view is deferred to v2 (docs/WORKFLOWS.md); the seed has a
+    // summary for every region, National included.
+    await expect(page.getByTestId("card-region-Northwest")).toBeVisible();
+    await expect(page.getByTestId("card-region-National")).toHaveCount(0);
+  });
+
   test("shows a seasonal safety reminder in the Safety & preventive stream", async ({ page }) => {
     // The seed adds an (overdue) household-walkthrough reminder for Northwest.
     await expect(page.getByText(/Household walkthroughs due/).first()).toBeVisible();
