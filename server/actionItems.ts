@@ -425,6 +425,16 @@ export function rosterSyncItems(health: RosterSyncHealth | undefined, now: Date)
       dueDate: iso(now),
       overdue: true,
     });
+  } else if (last && !last.ok) {
+    // A failed run is news now, not in a day and a half.
+    items.push({
+      ...base,
+      id: "roster-failed",
+      title: "Resident sheet sync failed",
+      subtitle: `${last.error ?? "The last run did not finish."} Nothing was changed.`,
+      dueDate: iso(now),
+      overdue: true,
+    });
   } else if (last && isQuickBooksStale(health.lastSuccessAt, now)) {
     items.push({
       ...base,
@@ -434,6 +444,16 @@ export function rosterSyncItems(health: RosterSyncHealth | undefined, now: Date)
         `No successful sync in over ${QUICKBOOKS_STALE_AFTER_HOURS} hours` + (last.error ? `: ${last.error}` : ". Try Sync now in Settings."),
       dueDate: iso(health.lastSuccessAt ? new Date(health.lastSuccessAt) : now),
       overdue: true,
+    });
+  }
+  if (last?.ok && last.skipped > 0) {
+    items.push({
+      ...base,
+      id: "roster-skipped",
+      title: `${last.skipped} resident sheet row${last.skipped === 1 ? " was" : "s were"} skipped`,
+      subtitle: "Those people were not added or updated. Settings → Resident roster sheet lists each row and why.",
+      dueDate: null,
+      overdue: false,
     });
   }
   if (health.openReviews > 0) {

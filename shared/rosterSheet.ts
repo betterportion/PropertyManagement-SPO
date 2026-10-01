@@ -53,7 +53,7 @@ export interface RosterSyncHealth {
   /** All three sheet variables are set. Off is a normal state. */
   configured: boolean;
   /** The last real run against the sheet (not a preview, not a CSV). */
-  lastRun: { ok: boolean; error: string | null; refusedColumns: string[]; createdAt: Date | string } | null;
+  lastRun: { ok: boolean; error: string | null; refusedColumns: string[]; skipped: number; createdAt: Date | string } | null;
   lastSuccessAt: string | null;
   openReviews: number;
 }

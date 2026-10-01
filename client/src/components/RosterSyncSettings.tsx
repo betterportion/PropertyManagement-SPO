@@ -159,6 +159,12 @@ export default function RosterSyncSettings() {
                     </dd>
                   </div>
                 </dl>
+                {!status.lastSuccessAt && (
+                  <p className="text-sm text-muted-foreground" data-testid="text-roster-waiting">
+                    Nothing has been applied yet. Preview the sheet, then press Sync now: the daily sync starts only after
+                    that first Sync now.
+                  </p>
+                )}
                 <div className="flex flex-wrap gap-2">
                   <Button variant="secondary" onClick={() => run.mutate(true)} disabled={run.isPending} data-testid="button-roster-preview">
                     <Eye className="mr-1 h-4 w-4" /> Preview (changes nothing)

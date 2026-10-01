@@ -152,13 +152,19 @@ export function residentValues(resident: Resident): SyncedValues {
   };
 }
 
-/** Which house a row names: its address as the portal holds it, or its name. */
-function findHouse(properties: Property[], cell: string): Property | undefined {
+/**
+ * Which house a row names: its address as the portal holds it, or else its
+ * name -- but a name only when exactly ONE house has it. Two houses can share a
+ * name ("Men's House"), and picking either would put a resident, and their
+ * name, email and dates, in another region's house.
+ */
+export function findHouse(properties: Property[], cell: string): { property: Property } | { ambiguous: Property[] } | null {
   const wanted = normAddress(cell);
-  return (
-    properties.find((p) => normAddress(p.address) === wanted) ??
-    properties.find((p) => p.name.trim().toLowerCase() === cell.trim().toLowerCase())
-  );
+  const byAddress = properties.find((p) => normAddress(p.address) === wanted);
+  if (byAddress) return { property: byAddress };
+  const byName = properties.filter((p) => p.name.trim().toLowerCase() === cell.trim().toLowerCase());
+  if (byName.length === 1) return { property: byName[0] };
+  return byName.length > 1 ? { ambiguous: byName } : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -259,13 +265,17 @@ export function planRosterSync({ table, residents, properties, links, now }: Pla
   }
 
   for (const p of usable) {
-    const property = findHouse(properties, p.house);
+    const match = findHouse(properties, p.house);
     const stays = (staysByEmail.get(p.email) ?? []).sort(byLatestStay);
     const latest = stays[0];
     const fullName = `${p.values.firstName} ${p.values.lastName}`;
 
-    if (!property) {
-      plan.skipped.push({ row: p.row, reason: `No house matches "${p.house}"` });
+    if (!match || "ambiguous" in match) {
+      const ambiguous = match && "ambiguous" in match;
+      plan.skipped.push({
+        row: p.row,
+        reason: ambiguous ? `More than one house is called "${p.house}"; use its address` : `No house matches "${p.house}"`,
+      });
       plan.reviews.push({
         dedupeKey: `unknown_house:${p.email}:${normAddress(p.house)}`,
         kind: "unknown_house",
@@ -277,17 +287,30 @@ export function planRosterSync({ table, residents, properties, links, now }: Pla
         newValue: p.house,
         editedByEmail: null,
         editedAt: null,
-        detail: `Row ${p.row} names a house the portal doesn't have: "${p.house}". Use the house's address as the portal shows it, or its name.`,
+        detail: ambiguous
+          ? `Row ${p.row} names "${p.house}", but ${match.ambiguous.length} houses have that name (${match.ambiguous
+              .map((h) => h.address)
+              .join("; ")}). Put the house's address in the sheet instead.`
+          : `Row ${p.row} names a house the portal doesn't have: "${p.house}". Use the house's address as the portal shows it, or its name.`,
       });
       continue;
     }
+    const property = match.property;
 
-    const returning =
-      latest &&
-      (latest.propertyId !== property.id ||
-        (p.values.moveInDate !== null && residentValues(latest).moveOutDate !== null && p.values.moveInDate > (residentValues(latest).moveOutDate as string)));
+    // The stay this row is about: the person's stay at THIS house, unless the
+    // row starts after that stay ended (a return). Chosen by house, not by
+    // "latest": a house move with a blank or earlier start date would
+    // otherwise never find the stay it created last time, and make another
+    // one every run.
+    const endedBeforeRowStarts = (stay: Resident) => {
+      const ended = residentValues(stay).moveOutDate;
+      return p.values.moveInDate !== null && ended !== null && p.values.moveInDate > (ended as string);
+    };
+    const stayHere = stays
+      .filter((stay) => stay.propertyId === property.id && !endedBeforeRowStarts(stay))
+      .sort((a, b) => new Date(b.createdAt ?? 0).getTime() - new Date(a.createdAt ?? 0).getTime())[0];
 
-    if (!latest || returning) {
+    if (!stayHere) {
       plan.creates.push({ row: p.row, property, values: { ...p.values, email: p.email }, previousStayId: latest?.id ?? null });
       if (latest) {
         plan.reviews.push({
@@ -322,8 +345,9 @@ export function planRosterSync({ table, residents, properties, links, now }: Pla
       continue;
     }
 
-    const current = residentValues(latest);
-    const link = linkByResident.get(latest.id);
+    const stay = stayHere;
+    const current = residentValues(stay);
+    const link = linkByResident.get(stay.id);
     const changes: PlannedUpdate["changes"] = [];
     for (const field of SYNCED_FIELDS) {
       if (current[field] === p.values[field]) continue;
@@ -334,25 +358,25 @@ export function planRosterSync({ table, residents, properties, links, now }: Pla
       changes.push({ field, from: current[field], to: p.values[field], conflict });
       if (conflict) {
         plan.reviews.push({
-          dedupeKey: `conflict:${latest.id}:${field}:${String(p.values[field])}`,
+          dedupeKey: `conflict:${stay.id}:${field}:${String(p.values[field])}`,
           kind: "conflict",
-          residentId: latest.id,
+          residentId: stay.id,
           email: p.email,
           name: fullName,
           field,
           oldValue: current[field] === null ? null : String(current[field]),
           newValue: p.values[field] === null ? null : String(p.values[field]),
-          editedByEmail: latest.editedByEmail ?? null,
-          editedAt: latest.editedAt ?? null,
+          editedByEmail: stay.editedByEmail ?? null,
+          editedAt: stay.editedAt ?? null,
           detail: `The sheet changed ${fullName}'s ${FIELD_LABEL[field]} from ${show(current[field])} to ${show(p.values[field])}, over ${
-            latest.editedByEmail ? `an edit by ${latest.editedByEmail}` : "a value entered in the portal"
+            stay.editedByEmail ? `an edit by ${stay.editedByEmail}` : "a value entered in the portal"
           }.`,
         });
       }
     }
-    if (changes.length > 0) plan.updates.push({ row: p.row, resident: latest, changes, values: p.values });
+    if (changes.length > 0) plan.updates.push({ row: p.row, resident: stay, changes, values: p.values });
     else if (!link || SYNCED_FIELDS.some((f) => link.syncedValues[f] !== p.values[f])) {
-      plan.unchanged.push({ resident: latest, values: p.values });
+      plan.unchanged.push({ resident: stay, values: p.values });
     }
   }
 
