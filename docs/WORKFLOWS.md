@@ -227,6 +227,21 @@ The details below are the agreed intent. Each entry is filled in properly in the
 - **When it fails:** the failure goes to the server log and the job tries again the next day. Already-created tasks are unaffected.
 - **Status:** built (its emails are awaiting email setup).
 
+### Household logins end with the stay
+
+- **Purpose:** a household leader's or steward's portal login is for their house while they live there.
+- **Trigger:**
+  - straight after a roster change: a resident edit, Move out, a resident removed, or a sheet sync;
+  - plus the daily seasonal-task run, for a stop date that simply passes.
+- **What the portal does:**
+  - Once no current roster row at the house speaks for a login, it switches the login off and unlinks it from the house. A current row means active, with the same email, and its stop date not past (`server/householdLogins.ts`).
+  - That frees one of the house's 3 places.
+  - Both changes are audited as access history, kept indefinitely.
+  - **Move out** takes only a date that has arrived. A planned leaving date is the roster's stop date, which keeps them in until that day.
+  - If they come back, the RA gives access again from their resident page.
+- **What SPO must do:** nothing.
+- **Status:** built.
+
 ### RA move-out checklist (Phase 6)
 
 - **Purpose:** a record that the room was checked when someone left.
