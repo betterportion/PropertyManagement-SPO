@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -17,7 +16,7 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 import { serverMessage } from "@/lib/serverMessage";
 import { MAINTENANCE_REQUEST_TYPES, isProjectType, type MaintenanceRequest, type MaintenanceContact, type Invoice, type Property } from "@shared/schema";
 import { REQUEST_TYPE } from "@/lib/requestLabels";
-import { DollarSign, Link2, FileText, Plus, Check, X, ImageIcon } from "lucide-react";
+import { DollarSign, Link2, FileText, Check, X, ImageIcon } from "lucide-react";
 import { PhotoUpload } from "@/components/PhotoUpload";
 import { formatCurrency, formatDate } from "@/lib/format";
 
@@ -68,7 +67,6 @@ function projectFieldsPayload(data: EditFormData): Record<string, unknown> {
 
 export default function MaintenanceEditDialog({ request, open, onClose }: MaintenanceEditDialogProps) {
   const { toast } = useToast();
-  const [showInvoiceForm, setShowInvoiceForm] = useState(false);
 
   const { data: contacts = [] } = useQuery<MaintenanceContact[]>({
     queryKey: ['/api/contacts'],
@@ -181,7 +179,7 @@ export default function MaintenanceEditDialog({ request, open, onClose }: Mainte
         <DialogHeader>
           <DialogTitle>Edit Maintenance Request</DialogTitle>
           <DialogDescription>
-            Update request details, link contacts, and manage invoices
+            Update request details, link contacts, and see linked invoices
           </DialogDescription>
         </DialogHeader>
 
@@ -509,16 +507,6 @@ export default function MaintenanceEditDialog({ request, open, onClose }: Mainte
                   <FileText className="h-4 w-4" />
                   Related Invoices
                 </h3>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="secondary"
-                  onClick={() => setShowInvoiceForm(!showInvoiceForm)}
-                  data-testid="button-add-invoice"
-                >
-                  <Plus className="h-3 w-3 mr-1" />
-                  Create Invoice
-                </Button>
               </div>
 
               {relatedInvoices.length > 0 ? (
@@ -548,23 +536,6 @@ export default function MaintenanceEditDialog({ request, open, onClose }: Mainte
                 </div>
               ) : (
                 <p className="text-sm text-muted-foreground">No invoices linked to this request</p>
-              )}
-
-              {showInvoiceForm && (
-                <Card className="p-4">
-                  <p className="text-sm text-muted-foreground">
-                    To create an invoice for this maintenance request, go to the Invoices section and link it to request "{request.title}".
-                  </p>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="secondary"
-                    className="mt-2"
-                    onClick={() => setShowInvoiceForm(false)}
-                  >
-                    Close
-                  </Button>
-                </Card>
               )}
             </div>
 

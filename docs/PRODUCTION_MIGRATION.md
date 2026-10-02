@@ -415,7 +415,7 @@ This is the bar for going live. Work through it with at least four Google accoun
 - [ ] Create a maintenance request; move it through its statuses; delete it.
 - [ ] Complete a walkthrough with photos.
 - [ ] Add an asset with a photo.
-- [ ] Add a vendor contact, an invoice and a billing record.
+- [ ] Add a vendor contact and a billing record.
 - [ ] Create a user, set their permissions and regions, deactivate them.
 
 **Audit log** — confirms the record of who did what is actually being written:
@@ -423,7 +423,7 @@ This is the bar for going live. Work through it with at least four Google accoun
 select created_at, actor_email, action, summary
 from audit_log order by created_at desc limit 20;
 ```
-- [ ] The role change, deactivation, portal-access grant, invoice and document actions from above are all listed with the right actor.
+- [ ] The role change, deactivation, portal-access grant, billing record and document actions from above are all listed with the right actor.
 
 **Operational**
 - [ ] `/api/health` returns 200.
