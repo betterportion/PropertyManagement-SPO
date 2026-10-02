@@ -3255,6 +3255,36 @@ describe("what reaches the audit log", () => {
     });
   });
 
+  // The account id is the sign-in provider's subject, a long number nobody
+  // can read; on staging the trail said "Changed permissions for 1178...".
+  it("names the account by email in a permission change, not by its id (#230)", async () => {
+    actAs(ADMIN);
+    const target = { ...STAFF, id: "117857551505584404776", email: "carol@example.com" };
+    storageMock.getUser.mockResolvedValueOnce(ADMIN).mockResolvedValue(target);
+    storageMock.upsertUserPermissions.mockResolvedValue({ userId: target.id });
+
+    const { status } = await patch(`/api/users/${target.id}/permissions`, { canManageBilling: true });
+
+    expect(status).toBe(200);
+    const { summary } = recordedEvent();
+    expect(summary).toContain("carol@example.com");
+    expect(summary).not.toContain(target.id);
+  });
+
+  it("names an account with no email by its name in a permission change, not by its id (#230)", async () => {
+    actAs(ADMIN);
+    const target = { ...STAFF, id: "117857551505584404776", email: null, firstName: "Carol", lastName: "Diaz" };
+    storageMock.getUser.mockResolvedValueOnce(ADMIN).mockResolvedValue(target);
+    storageMock.upsertUserPermissions.mockResolvedValue({ userId: target.id });
+
+    const { status } = await patch(`/api/users/${target.id}/permissions`, { canManageBilling: true });
+
+    expect(status).toBe(200);
+    const { summary } = recordedEvent();
+    expect(summary).toContain("Carol Diaz");
+    expect(summary).not.toContain(target.id);
+  });
+
   it("records a maintenance status change", async () => {
     actAs(STAFF, { ...ALL_MAINTENANCE, allowedRegions: ["West Central"] });
     storageMock.getMaintenanceRequest.mockResolvedValue(WEST_REQUEST);

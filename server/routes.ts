@@ -642,12 +642,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Field names and the region list only. A permissions row is all
       // booleans plus regions, so this is the whole change without storing a
-      // copy of the request.
+      // copy of the request. The account is named by email, never by its id:
+      // the id is the sign-in provider's subject, which nobody can read.
+      const who =
+        target.email ?? ([target.firstName, target.lastName].filter(Boolean).join(" ") || "an account with no email");
       recordAuditEvent(ctx, {
         action: AUDIT_ACTIONS.USER_PERMISSIONS_CHANGED,
         entityType: "user",
         entityId: req.params.id,
-        summary: `Changed permissions for ${req.params.id}`,
+        summary: `Changed permissions for ${who}`,
         details: {
           changed: changedFields(existingPermissions as Record<string, unknown> | undefined, filteredData),
           allowedRegions: filteredData.allowedRegions ?? existingPermissions?.allowedRegions ?? [],
