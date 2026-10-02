@@ -115,17 +115,16 @@ export function RosterImportDialog({
         body: form,
         credentials: "include",
       });
-      if (!res.ok) {
-        const body = await res.json().catch(() => null);
-        throw new Error(body?.message ?? "That file could not be read");
-      }
+      // The "<status>: <body>" shape apiRequest throws, so serverMessage can
+      // read the route's reason, field reasons first.
+      if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
       return res.json();
     },
     onSuccess: (result) => setPreview(result),
-    onError: (error: Error) => {
+    onError: (error) => {
       setFileName(null);
       if (fileInput.current) fileInput.current.value = "";
-      toast({ title: "Could not read that file", description: error.message, variant: "destructive" });
+      toast({ title: "Could not read that file", description: serverMessage(error) ?? "That file could not be read", variant: "destructive" });
     },
   });
 
