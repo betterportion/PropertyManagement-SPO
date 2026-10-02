@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { serverMessage } from "@/lib/serverMessage";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import AssetTracker from "@/components/AssetTracker";
@@ -147,8 +148,8 @@ export default function Assets() {
       setEditingAsset(null);
       toast({ title: "Asset updated successfully" });
     },
-    onError: () => {
-      toast({ title: "Error", description: "Failed to update asset", variant: "destructive" });
+    onError: (error) => {
+      toast({ title: "Error", description: serverMessage(error) ?? "Failed to update asset", variant: "destructive" });
     },
   });
 
@@ -161,8 +162,8 @@ export default function Assets() {
       setDeletingAssetId(null);
       toast({ title: "Asset deleted successfully" });
     },
-    onError: () => {
-      toast({ title: "Error", description: "Failed to delete asset", variant: "destructive" });
+    onError: (error) => {
+      toast({ title: "Error", description: serverMessage(error) ?? "Failed to delete asset", variant: "destructive" });
     },
   });
 
@@ -186,8 +187,8 @@ export default function Assets() {
       queryClient.invalidateQueries({ queryKey: ["/api/asset-photos"] });
       toast({ title: "Photo uploaded successfully" });
     },
-    onError: () => {
-      toast({ title: "Error", description: "Failed to upload photo", variant: "destructive" });
+    onError: (error) => {
+      toast({ title: "Error", description: serverMessage(error) ?? "Failed to upload photo", variant: "destructive" });
     },
   });
 
@@ -200,8 +201,8 @@ export default function Assets() {
       queryClient.invalidateQueries({ queryKey: ["/api/asset-photos"] });
       toast({ title: "Photo deleted successfully" });
     },
-    onError: () => {
-      toast({ title: "Error", description: "Failed to delete photo", variant: "destructive" });
+    onError: (error) => {
+      toast({ title: "Error", description: serverMessage(error) ?? "Failed to delete photo", variant: "destructive" });
     },
   });
 

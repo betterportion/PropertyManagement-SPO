@@ -14,6 +14,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { serverMessage } from "@/lib/serverMessage";
 
 /**
  * Taking a flagged item off the needs-attention list.
@@ -46,8 +47,8 @@ export default function DismissItemDialog({
       setReason("");
       toast({ title: "Dismissed", description: `${item?.label} is off the needs-attention list. It still shows on the walkthrough.` });
     },
-    onError: () => {
-      toast({ title: "That did not save", description: "The item was not dismissed. Check the reason and try again.", variant: "destructive" });
+    onError: (error) => {
+      toast({ title: "That did not save", description: serverMessage(error) ?? "The item was not dismissed. Check the reason and try again.", variant: "destructive" });
     },
   });
 

@@ -3,6 +3,7 @@ import { useLocation } from "wouter";
 
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { serverMessage } from "@/lib/serverMessage";
 import type { Walkthrough } from "@shared/schema";
 
 /**
@@ -47,8 +48,8 @@ export function useStartWalkthrough(onStarted?: () => void) {
       }
       navigate(`/walkthroughs/${walkthrough.id}`);
     },
-    onError: () => {
-      toast({ variant: "destructive", title: "Not started", description: "The walkthrough could not be started." });
+    onError: (error) => {
+      toast({ variant: "destructive", title: "Not started", description: serverMessage(error) ?? "The walkthrough could not be started." });
     },
   });
 }

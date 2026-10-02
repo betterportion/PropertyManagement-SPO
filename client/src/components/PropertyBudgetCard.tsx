@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { serverMessage } from "@/lib/serverMessage";
 import { formatCurrency } from "@/lib/format";
 import type { Property, PropertyBudget } from "@shared/schema";
 
@@ -58,8 +59,8 @@ export default function PropertyBudgetCard({
       setNotes("");
       toast({ title: "Saved", description: `Startup budget for ${year} recorded.` });
     },
-    onError: () => {
-      toast({ title: "That did not save", variant: "destructive" });
+    onError: (error) => {
+      toast({ title: "That did not save", description: serverMessage(error), variant: "destructive" });
     },
   });
 

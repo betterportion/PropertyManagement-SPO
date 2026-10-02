@@ -7,6 +7,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/states";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { serverMessage } from "@/lib/serverMessage";
 import type { WalkthroughItem } from "@shared/schema";
 import ConditionPicker from "./ConditionPicker";
 import StandingNote from "./StandingNote";
@@ -72,9 +73,9 @@ export default function RoomChecklist({ walkthroughId, items, canManage, canRemo
       );
       return { previous };
     },
-    onError: (_error, _variables, context) => {
+    onError: (error, _variables, context) => {
       if (context?.previous) queryClient.setQueryData(itemsKey, context.previous);
-      toast({ variant: "destructive", title: "Not saved", description: "That change did not save. Check your signal and try again." });
+      toast({ variant: "destructive", title: "Not saved", description: serverMessage(error) ?? "That change did not save. Check your signal and try again." });
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: itemsKey });
@@ -91,8 +92,8 @@ export default function RoomChecklist({ walkthroughId, items, canManage, canRemo
       queryClient.invalidateQueries({ queryKey: itemsKey });
       queryClient.invalidateQueries({ queryKey: ["/api/walkthrough-flagged-items"] });
     },
-    onError: () => {
-      toast({ variant: "destructive", title: "Not saved", description: "The dismissal could not be cleared." });
+    onError: (error) => {
+      toast({ variant: "destructive", title: "Not saved", description: serverMessage(error) ?? "The dismissal could not be cleared." });
     },
   });
 
@@ -103,8 +104,8 @@ export default function RoomChecklist({ walkthroughId, items, canManage, canRemo
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: itemsKey });
     },
-    onError: () => {
-      toast({ variant: "destructive", title: "Not removed", description: "That item could not be removed." });
+    onError: (error) => {
+      toast({ variant: "destructive", title: "Not removed", description: serverMessage(error) ?? "That item could not be removed." });
     },
   });
 

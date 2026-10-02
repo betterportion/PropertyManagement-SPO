@@ -24,6 +24,7 @@ import { LastTimeRoomPhotos } from "@/components/walkthrough/LastTime";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { serverMessage } from "@/lib/serverMessage";
 import { formatDate } from "@/lib/format";
 import {
   WALKTHROUGH_STATUS_BADGE,
@@ -204,9 +205,9 @@ export default function WalkthroughRun() {
         description: step === "submit" ? "Conditions and notes can still be changed." : undefined,
       });
     },
-    onError: () => {
+    onError: (error) => {
       setIsSubmitOpen(false);
-      toast({ variant: "destructive", title: "Not saved", description: "That did not go through. Try again in a moment." });
+      toast({ variant: "destructive", title: "Not saved", description: serverMessage(error) ?? "That did not go through. Try again in a moment." });
     },
   });
 

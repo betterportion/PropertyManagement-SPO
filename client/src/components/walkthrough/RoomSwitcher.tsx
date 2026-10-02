@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { serverMessage } from "@/lib/serverMessage";
 import { progressOf, roomStatus, type RoomStatus } from "@/lib/walkthrough";
 import { cn } from "@/lib/utils";
 import type { WalkthroughItem, WalkthroughRoom, WalkthroughTemplateRoom } from "@shared/schema";
@@ -108,8 +109,8 @@ export default function RoomSwitcher({
           : "That room type has no standard items, so there is nothing to check in it yet.",
       });
     },
-    onError: () => {
-      toast({ variant: "destructive", title: "Not added", description: "That room could not be added." });
+    onError: (error) => {
+      toast({ variant: "destructive", title: "Not added", description: serverMessage(error) ?? "That room could not be added." });
     },
   });
 

@@ -12,6 +12,7 @@ import { EmptyState, LoadingState } from "@/components/states";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { serverMessage } from "@/lib/serverMessage";
 import { formatCurrency, formatDate, formatDateTime } from "@/lib/format";
 import type {
   BillingRecord,
@@ -87,10 +88,10 @@ export default function ContactDetail() {
       queryClient.invalidateQueries({ queryKey: ["/api/contacts", contactId, "notes"] });
       setDraft("");
     },
-    onError: () => {
+    onError: (error) => {
       toast({
         title: "That note did not save",
-        description: "Nothing was recorded. Try again in a moment.",
+        description: serverMessage(error) ?? "Nothing was recorded. Try again in a moment.",
         variant: "destructive",
       });
     },
@@ -101,8 +102,8 @@ export default function ContactDetail() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/contacts", contactId, "notes"] });
     },
-    onError: () => {
-      toast({ title: "That note was not deleted", variant: "destructive" });
+    onError: (error) => {
+      toast({ title: "That note was not deleted", description: serverMessage(error), variant: "destructive" });
     },
   });
 

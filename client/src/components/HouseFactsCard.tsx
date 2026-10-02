@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { serverMessage } from "@/lib/serverMessage";
 import { formatDate } from "@/lib/format";
 import { ACCESS_CODE_MAX_LENGTH, type Property, type PropertyFacts } from "@shared/schema";
 import { ACCESS_CODES, HOUSE_FACT_TEXT_FIELDS } from "@shared/houseFacts";
@@ -98,8 +99,8 @@ export default function HouseFactsCard({
       queryClient.invalidateQueries({ queryKey: factsKey });
       toast({ title: "Saved", description: "The household sees this on their Resources page." });
     },
-    onError: () => {
-      toast({ title: "That did not save", variant: "destructive" });
+    onError: (error) => {
+      toast({ title: "That did not save", description: serverMessage(error), variant: "destructive" });
     },
   });
 

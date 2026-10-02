@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { serverMessage } from "@/lib/serverMessage";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import RegionSelector from "@/components/RegionSelector";
@@ -94,7 +95,7 @@ export default function Tasks() {
       addForm.reset();
       toast({ title: "Task created" });
     },
-    onError: () => toast({ title: "Error", description: "Could not create the task", variant: "destructive" }),
+    onError: (error) => toast({ title: "Error", description: serverMessage(error) ?? "Could not create the task", variant: "destructive" }),
   });
 
   const setStatusMutation = useMutation({
@@ -104,7 +105,7 @@ export default function Tasks() {
       queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
       queryClient.invalidateQueries({ queryKey: ["/api/action-items"] });
     },
-    onError: () => toast({ title: "Error", description: "Could not update the task", variant: "destructive" }),
+    onError: (error) => toast({ title: "Error", description: serverMessage(error) ?? "Could not update the task", variant: "destructive" }),
   });
 
   const deleteMutation = useMutation({
@@ -114,7 +115,7 @@ export default function Tasks() {
       queryClient.invalidateQueries({ queryKey: ["/api/action-items"] });
       toast({ title: "Task deleted" });
     },
-    onError: () => toast({ title: "Error", description: "Could not delete the task", variant: "destructive" }),
+    onError: (error) => toast({ title: "Error", description: serverMessage(error) ?? "Could not delete the task", variant: "destructive" }),
   });
 
   const visibleItems = actionItems.filter(

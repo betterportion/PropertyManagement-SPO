@@ -21,6 +21,7 @@ import { REGIONS } from "@shared/regions";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { serverMessage } from "@/lib/serverMessage";
 import { z } from "zod";
 import { Section, Container, PageHeader, PageStack } from "@/components/layout/page";
 import { EmptyState, ErrorState, LoadingState } from "@/components/states";
@@ -225,10 +226,10 @@ export default function Maintenance() {
       createForm.reset();
       setIsCreateDialogOpen(false);
     },
-    onError: () => {
+    onError: (error) => {
       toast({
         title: "Error",
-        description: "Failed to create maintenance request",
+        description: serverMessage(error) ?? "Failed to create maintenance request",
         variant: "destructive",
       });
     },

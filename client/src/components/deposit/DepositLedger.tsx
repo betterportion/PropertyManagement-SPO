@@ -156,8 +156,8 @@ export default function DepositLedger({
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/deposit-deductions"] });
     },
-    onError: () => {
-      toast({ title: "That deduction was not removed", variant: "destructive" });
+    onError: (error) => {
+      toast({ title: "That deduction was not removed", description: serverMessage(error), variant: "destructive" });
     },
   });
 

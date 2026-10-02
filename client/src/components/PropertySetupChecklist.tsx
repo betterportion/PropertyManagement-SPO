@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { LoadingState } from "@/components/states";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { serverMessage } from "@/lib/serverMessage";
 import { formatDate } from "@/lib/format";
 import {
   SETUP_ITEM_STATUS_LABEL,
@@ -89,10 +90,10 @@ export default function PropertySetupChecklist({
       queryClient.invalidateQueries({ queryKey: ["/api/properties", property.id, "setup"] });
       queryClient.invalidateQueries({ queryKey: ["/api/action-items"] });
     },
-    onError: () => {
+    onError: (error) => {
       toast({
         title: "That did not save",
-        description: "The checklist item was not changed. Try again in a moment.",
+        description: serverMessage(error) ?? "The checklist item was not changed. Try again in a moment.",
         variant: "destructive",
       });
     },
