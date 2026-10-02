@@ -94,10 +94,10 @@ export default function Contacts() {
         description: "Contact created successfully",
       });
     },
-    onError: () => {
+    onError: (error) => {
       toast({
         title: "Error",
-        description: "Failed to create contact",
+        description: serverMessage(error) ?? "Failed to create contact",
         variant: "destructive",
       });
     },
@@ -136,10 +136,10 @@ export default function Contacts() {
         description: "Contact updated successfully",
       });
     },
-    onError: () => {
+    onError: (error) => {
       toast({
         title: "Error",
-        description: "Failed to update contact",
+        description: serverMessage(error) ?? "Failed to update contact",
         variant: "destructive",
       });
     },
@@ -211,8 +211,8 @@ export default function Contacts() {
       setW9Url(null); setW9Name(null);
       toast({ title: "Success", description: "Invoice record created successfully" });
     },
-    onError: () => {
-      toast({ title: "Error", description: "Failed to create invoice record", variant: "destructive" });
+    onError: (error) => {
+      toast({ title: "Error", description: serverMessage(error) ?? "Failed to create invoice record", variant: "destructive" });
     },
   });
 

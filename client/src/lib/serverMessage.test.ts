@@ -16,6 +16,15 @@ describe("serverMessage", () => {
     expect(serverMessage(error)).toBe("A snooze can run at most 24 months.");
   });
 
+  it("gives every field reason of a refusal, not only the first", () => {
+    // What POST /api/billing sends for an invoice cost of -120.505, which the
+    // Contacts page form does not check itself (#238).
+    const error = new Error(
+      '400: {"message":"Some of the information provided is not valid.","errors":[{"field":"invoiceCost","message":"Must be 0 or greater"},{"field":"invoiceCost","message":"Use at most 2 decimal places"}]}',
+    );
+    expect(serverMessage(error)).toBe("Must be 0 or greater Use at most 2 decimal places");
+  });
+
   it("reads an upload refusal's reason, for the size limit and a refused file type", () => {
     // What the billing document upload now throws for the two refusals the
     // staging pass hit (#228): a 21 MB PDF and a renamed .exe.
