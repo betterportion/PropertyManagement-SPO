@@ -16,6 +16,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
+import { isPortalAccessQuery, portalAccessKey } from "@/lib/portalAccess";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { serverMessage } from "@/lib/serverMessage";
 import type { Resident } from "@shared/schema";
@@ -33,12 +34,13 @@ interface PortalAccess {
  */
 export default function PortalAccessCard({ resident, canManage }: { resident: Resident; canManage: boolean }) {
   const { toast } = useToast();
-  const key = `/api/residents/${resident.id}/portal-access`;
+  const key = portalAccessKey(resident.id);
   const { data } = useQuery<PortalAccess>({ queryKey: [key] });
   const [confirmRemove, setConfirmRemove] = useState(false);
 
   const refresh = () => {
-    queryClient.invalidateQueries({ queryKey: [key] });
+    // Every resident's card, not just this one: each carries the house's count.
+    queryClient.invalidateQueries({ predicate: isPortalAccessQuery });
     queryClient.invalidateQueries({ queryKey: ["/api/users"] });
   };
   const failed = (title: string) => (error: unknown) => toast({ title, description: serverMessage(error), variant: "destructive" });
