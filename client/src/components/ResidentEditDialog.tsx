@@ -18,6 +18,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { useRoomSuggestions } from "@/hooks/useRoomSuggestions";
+import { isPortalAccessQuery } from "@/lib/portalAccess";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { Resident } from "@shared/schema";
 
@@ -100,6 +101,8 @@ export default function ResidentEditDialog({
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/residents"] });
+      // The edit can end a household login, or change whose email a card matches.
+      queryClient.invalidateQueries({ predicate: isPortalAccessQuery });
       onOpenChange(false);
       toast({ title: "Saved" });
     },

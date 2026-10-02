@@ -39,6 +39,7 @@ import WalkthroughTemplateSettings from "@/components/WalkthroughTemplateSetting
 import { Section, Container, PageHeader, PageStack } from "@/components/layout/page";
 import { AccessDeniedState, EmptyState } from "@/components/states";
 import { formatDate, formatValue } from "@/lib/format";
+import { isPortalAccessQuery } from "@/lib/portalAccess";
 
 const ALL_REGIONS = REGIONS.map((r) => ({ id: r, name: r }));
 
@@ -193,7 +194,9 @@ export default function Settings() {
     onSuccess: async (_data, { role }) => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["/api/users"] }),
-        queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] })
+        queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] }),
+        // Only resident accounts count towards a house's portal logins.
+        queryClient.invalidateQueries({ predicate: isPortalAccessQuery }),
       ]);
       // Any change to a non-admin role resets permissions to that role's
       // minimum (server/roleChange.ts), so the admin needs to know to grant.
@@ -220,6 +223,7 @@ export default function Settings() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/users"] });
+      queryClient.invalidateQueries({ predicate: isPortalAccessQuery });
       toast({
         title: "Success",
         description: "User status updated successfully",
@@ -258,6 +262,7 @@ export default function Settings() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/users"] });
+      queryClient.invalidateQueries({ predicate: isPortalAccessQuery });
       toast({
         title: "Success",
         description: "The account's house was updated",
@@ -278,6 +283,8 @@ export default function Settings() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/users"] });
+      // A new resident account linked to a house takes one of its places.
+      queryClient.invalidateQueries({ predicate: isPortalAccessQuery });
       setIsAddDialogOpen(false);
       form.reset();
       toast({
