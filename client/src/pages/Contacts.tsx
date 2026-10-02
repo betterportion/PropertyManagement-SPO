@@ -3,6 +3,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
+import { serverMessage } from "@/lib/serverMessage";
 import ContactsInvoices from "@/components/ContactsInvoices";
 import RegionSelector from "@/components/RegionSelector";
 import BuildingSelector from "@/components/BuildingSelector";
@@ -226,12 +227,14 @@ export default function Contacts() {
       const fd = new FormData();
       fd.append("file", file);
       const res = await fetch("/api/upload-doc", { method: "POST", body: fd, credentials: "include" });
-      if (!res.ok) throw new Error("Upload failed");
+      // The "<status>: <body>" shape apiRequest throws, so serverMessage can
+      // read the route's reason (the size limit, a refused file type).
+      if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
       const data = await res.json();
       setUrl(data.url);
       setName(file.name);
-    } catch {
-      toast({ title: "Error", description: "Failed to upload document", variant: "destructive" });
+    } catch (error) {
+      toast({ title: "Error", description: serverMessage(error) ?? "Failed to upload document", variant: "destructive" });
     } finally {
       setUploading(false);
     }

@@ -16,6 +16,17 @@ describe("serverMessage", () => {
     expect(serverMessage(error)).toBe("A snooze can run at most 24 months.");
   });
 
+  it("reads an upload refusal's reason, for the size limit and a refused file type", () => {
+    // What the billing document upload now throws for the two refusals the
+    // staging pass hit (#228): a 21 MB PDF and a renamed .exe.
+    const tooLarge = new Error('413: {"message":"That upload is too large. Files must be smaller than 20MB."}');
+    expect(serverMessage(tooLarge)).toBe("That upload is too large. Files must be smaller than 20MB.");
+    const disguised = new Error(
+      '400: {"message":"File contents do not match the file extension. The file was not saved."}',
+    );
+    expect(serverMessage(disguised)).toBe("File contents do not match the file extension. The file was not saved.");
+  });
+
   it("has nothing to say for a body that is not the route's JSON", () => {
     expect(serverMessage(new Error("502: <html>Bad gateway</html>"))).toBeUndefined();
     expect(serverMessage(new TypeError("Failed to fetch"))).toBeUndefined();
