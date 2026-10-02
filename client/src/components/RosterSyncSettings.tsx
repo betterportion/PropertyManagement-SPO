@@ -79,14 +79,13 @@ export default function RosterSyncSettings() {
       const form = new FormData();
       form.append("file", file);
       const res = await fetch(`/api/roster-sync/csv?dryRun=${dryRun}`, { method: "POST", body: form, credentials: "include" });
-      if (!res.ok) {
-        const body = await res.json().catch(() => null);
-        throw new Error(body?.message ?? "That file could not be read");
-      }
+      // The "<status>: <body>" shape apiRequest throws, so serverMessage can
+      // read the route's reason, field reasons first.
+      if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
       return (await res.json()) as SyncResult;
     },
     onSuccess: announce,
-    onError: (error: Error) => toast({ title: "Could not read that file", description: error.message, variant: "destructive" }),
+    onError: (error) => toast({ title: "Could not read that file", description: serverMessage(error) ?? "That file could not be read", variant: "destructive" }),
   });
 
   const review = useMutation({
