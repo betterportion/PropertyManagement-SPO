@@ -6018,19 +6018,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   /**
-   * An invoice points at a contact, a request and a house, and each must be
-   * one the caller can reach -- the rule resolveContactLink applies when a
-   * contact is linked to a request. Otherwise an invoice created in the
-   * caller's region could tie together records from regions they cannot see.
-   * A value the invoice already holds is not a new reference and passes, so
-   * an edit that resends it is not refused. Sends the response and returns
-   * false on a refusal.
+   * An invoice points at a contact, a request and a house, and a billing
+   * record at a contact; each must be one the caller can reach -- the rule
+   * resolveContactLink applies when a contact is linked to a request.
+   * Otherwise a record created in the caller's region could tie together
+   * records from regions they cannot see. A value the record already holds is
+   * not a new reference and passes, so an edit that resends it is not refused.
+   * Sends the response and returns false on a refusal.
    */
   async function requireInvoiceReferences(
     res: Response,
     ctx: AuthContext,
     incoming: { contactId?: string | null; maintenanceRequestId?: string | null; buildingAddress?: string },
-    existing?: { contactId: string | null; maintenanceRequestId: string | null; buildingAddress: string },
+    existing?: { contactId: string | null; maintenanceRequestId?: string | null; buildingAddress?: string },
   ): Promise<boolean> {
     const isNew = <K extends keyof typeof incoming>(key: K) =>
       !!incoming[key] && (!existing || incoming[key] !== existing[key]);
@@ -6185,6 +6185,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const validatedData = insertBillingRecordSchema.parse(rest);
 
       if (!requireRegion(res, ctx, validatedData.region, "Forbidden - Cannot create in this region")) return;
+      if (!(await requireInvoiceReferences(res, ctx, { contactId: validatedData.contactId }))) return;
       await requireOwnUploads(ctx, validatedData, BILLING_DOCUMENT_FIELDS);
 
       // If createContact is true and no contactId, create a new contact from the billing info
@@ -6235,6 +6236,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const validatedData = insertBillingRecordSchema.partial().parse(req.body);
 
       if (!requireRegionMove(res, ctx, existingRecord.region, validatedData.region)) return;
+      if (!(await requireInvoiceReferences(res, ctx, { contactId: validatedData.contactId }, existingRecord))) return;
       await requireOwnUploads(ctx, validatedData, BILLING_DOCUMENT_FIELDS, existingRecord);
 
       const record = await storage.updateBillingRecord(req.params.id, validatedData);

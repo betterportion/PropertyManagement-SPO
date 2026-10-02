@@ -2596,6 +2596,61 @@ describe("a reference to another record is checked against the caller's regions"
     expect(status).toBe(201);
     expect(storageMock.createMaintenanceRequestComment).toHaveBeenCalledWith(expect.objectContaining({ relayContactId: WEST_CONTACT.id }));
   });
+
+  // A billing record's contact follows the invoice rule (#243).
+  describe("a billing record's contact", () => {
+    const BILLING = { companyName: "Acme", email: "a@acme.test", phone: "555", invoiceCost: "10.00", region: "West Central" };
+    const EXISTING_BILLING = { id: "bill-1", ...BILLING, contactId: EAST_CONTACT.id };
+
+    beforeEach(() => {
+      storageMock.createBillingRecord.mockImplementation(async (b: unknown) => ({ id: "bill-new", ...(b as object) }));
+      storageMock.getBillingRecord.mockResolvedValue(EXISTING_BILLING);
+      storageMock.updateBillingRecord.mockImplementation(async (_id: string, b: unknown) => ({ ...EXISTING_BILLING, ...(b as object) }));
+    });
+
+    it.each([
+      ["in another region", EAST_CONTACT.id, 403],
+      ["that does not exist", "ct-nope", 400],
+    ])("refuses a new billing record naming a contact %s, and writes nothing", async (_name, contactId, expected) => {
+      actAs(STAFF, westBilling);
+      expect((await request("POST", "/api/billing", { body: { ...BILLING, contactId } })).status).toBe(expected);
+      expect(storageMock.createBillingRecord).not.toHaveBeenCalled();
+      expect(storageMock.createMaintenanceContact).not.toHaveBeenCalled();
+    });
+
+    it("stores a billing record whose contact is in the caller's region -- the positive control", async () => {
+      actAs(STAFF, westBilling);
+      expect((await request("POST", "/api/billing", { body: { ...BILLING, contactId: WEST_CONTACT.id } })).status).toBe(200);
+      expect(storageMock.createBillingRecord).toHaveBeenCalledWith(expect.objectContaining({ contactId: WEST_CONTACT.id }));
+    });
+
+    it.each([
+      ["in another region", "ct-east-2", 403],
+      ["that does not exist", "ct-nope", 400],
+    ])("refuses a billing record edit repointing it at a contact %s, and writes nothing", async (_name, contactId, expected) => {
+      storageMock.getMaintenanceContact.mockImplementation(async (id: string) =>
+        ({ [WEST_CONTACT.id]: WEST_CONTACT, [EAST_CONTACT.id]: EAST_CONTACT, "ct-east-2": { ...EAST_CONTACT, id: "ct-east-2" } } as Record<string, unknown>)[id],
+      );
+      actAs(STAFF, westBilling);
+      expect((await request("PATCH", "/api/billing/bill-1", { body: { contactId } })).status).toBe(expected);
+      expect(storageMock.updateBillingRecord).not.toHaveBeenCalled();
+    });
+
+    it("lets a billing record edit point it at a contact in the caller's region -- the positive control", async () => {
+      actAs(STAFF, westBilling);
+      expect((await request("PATCH", "/api/billing/bill-1", { body: { contactId: WEST_CONTACT.id } })).status).toBe(200);
+      expect(storageMock.updateBillingRecord).toHaveBeenCalledWith("bill-1", expect.objectContaining({ contactId: WEST_CONTACT.id }));
+    });
+
+    // The existing record already names an East contact. Resending that
+    // unchanged value is not a new reference.
+    it("lets a billing record edit resend the contact it already names, and change its cost", async () => {
+      actAs(STAFF, westBilling);
+      const { status } = await request("PATCH", "/api/billing/bill-1", { body: { contactId: EAST_CONTACT.id, invoiceCost: "12" } });
+      expect(status).toBe(200);
+      expect(storageMock.updateBillingRecord).toHaveBeenCalledWith("bill-1", expect.objectContaining({ invoiceCost: "12" }));
+    });
+  });
 });
 
 describe("submitting a maintenance request", () => {
