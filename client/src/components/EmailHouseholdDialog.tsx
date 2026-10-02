@@ -15,6 +15,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
+import { serverMessage } from "@/lib/serverMessage";
 import type { Property, Resident } from "@shared/schema";
 
 /**
@@ -58,10 +59,10 @@ export default function EmailHouseholdDialog({
         description: `The message went to ${recipients} ${recipients === 1 ? "person" : "people"} at ${property.name}.`,
       });
     },
-    onError: () => {
+    onError: (error) => {
       toast({
         title: "That did not send",
-        description: "Nobody was emailed. Try again in a moment.",
+        description: serverMessage(error) ?? "Nobody was emailed. Try again in a moment.",
         variant: "destructive",
       });
     },

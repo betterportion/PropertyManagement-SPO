@@ -135,10 +135,10 @@ export default function Properties() {
         description: "Property created successfully",
       });
     },
-    onError: () => {
+    onError: (error) => {
       toast({
         title: "Error",
-        description: "Failed to create property",
+        description: serverMessage(error) ?? "Failed to create property",
         variant: "destructive",
       });
     },
@@ -157,10 +157,10 @@ export default function Properties() {
         description: "Property updated successfully",
       });
     },
-    onError: () => {
+    onError: (error) => {
       toast({
         title: "Error",
-        description: "Failed to update property",
+        description: serverMessage(error) ?? "Failed to update property",
         variant: "destructive",
       });
     },

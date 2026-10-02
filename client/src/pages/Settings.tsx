@@ -208,10 +208,10 @@ export default function Settings() {
             : "Role updated. Their permissions and regions were reset for the new role, so grant what they need under Permissions.",
       });
     },
-    onError: () => {
+    onError: (error) => {
       toast({
         title: "Error",
-        description: "Failed to update user role",
+        description: serverMessage(error) ?? "Failed to update user role",
         variant: "destructive",
       });
     },
@@ -229,10 +229,10 @@ export default function Settings() {
         description: "User status updated successfully",
       });
     },
-    onError: () => {
+    onError: (error) => {
       toast({
         title: "Error",
-        description: "Failed to update user status",
+        description: serverMessage(error) ?? "Failed to update user status",
         variant: "destructive",
       });
     },
@@ -247,10 +247,10 @@ export default function Settings() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/users"] });
     },
-    onError: () => {
+    onError: (error) => {
       toast({
         title: "Error",
-        description: "Failed to update the account's email setting",
+        description: serverMessage(error) ?? "Failed to update the account's email setting",
         variant: "destructive",
       });
     },
@@ -268,10 +268,10 @@ export default function Settings() {
         description: "The account's house was updated",
       });
     },
-    onError: () => {
+    onError: (error) => {
       toast({
         title: "Error",
-        description: "Failed to update the account's house",
+        description: serverMessage(error) ?? "Failed to update the account's house",
         variant: "destructive",
       });
     },
@@ -292,10 +292,10 @@ export default function Settings() {
         description: "User created successfully",
       });
     },
-    onError: () => {
+    onError: (error) => {
       toast({
         title: "Error",
-        description: "Failed to create user",
+        description: serverMessage(error) ?? "Failed to create user",
         variant: "destructive",
       });
     },

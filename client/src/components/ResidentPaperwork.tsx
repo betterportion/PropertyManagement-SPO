@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { LoadingState } from "@/components/states";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { serverMessage } from "@/lib/serverMessage";
 import { formatDate, localToday } from "@/lib/format";
 import { RESIDENT_DOCUMENTS, summarizeResidentDocuments } from "@shared/residentDocuments";
 import type { Resident, ResidentDocument } from "@shared/schema";
@@ -54,10 +55,10 @@ export default function ResidentPaperwork({
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/resident-documents"] });
     },
-    onError: () => {
+    onError: (error) => {
       toast({
         title: "That did not save",
-        description: "The paperwork was not changed. Try again in a moment.",
+        description: serverMessage(error) ?? "The paperwork was not changed. Try again in a moment.",
         variant: "destructive",
       });
     },

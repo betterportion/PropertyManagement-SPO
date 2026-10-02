@@ -88,8 +88,8 @@ export default function MaintenanceEditDialog({ request, open, onClose }: Mainte
       // The Patterns tab rolls up requests and contractor links; nothing refetches on its own.
       queryClient.invalidateQueries({ queryKey: ['/api/maintenance-aggregates'] });
     },
-    onError: () => {
-      toast({ title: "Failed to link contact", variant: "destructive" });
+    onError: (error) => {
+      toast({ title: "Failed to link contact", description: serverMessage(error), variant: "destructive" });
     },
   });
 
@@ -101,8 +101,8 @@ export default function MaintenanceEditDialog({ request, open, onClose }: Mainte
       // The Patterns tab rolls up requests and contractor links; nothing refetches on its own.
       queryClient.invalidateQueries({ queryKey: ['/api/maintenance-aggregates'] });
     },
-    onError: () => {
-      toast({ title: "Failed to unlink contact", variant: "destructive" });
+    onError: (error) => {
+      toast({ title: "Failed to unlink contact", description: serverMessage(error), variant: "destructive" });
     },
   });
 

@@ -11,6 +11,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { serverMessage } from "@/lib/serverMessage";
 import { useToast } from "@/hooks/use-toast";
 
 interface UserMenuProps {
@@ -37,10 +38,10 @@ export default function UserMenu({ user }: UserMenuProps) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
     },
-    onError: () => {
+    onError: (error) => {
       toast({
         title: "That did not save",
-        description: "Your email setting was not changed. Try again in a moment.",
+        description: serverMessage(error) ?? "Your email setting was not changed. Try again in a moment.",
         variant: "destructive",
       });
     },

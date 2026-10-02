@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { serverMessage } from "@/lib/serverMessage";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import RegionSelector from "@/components/RegionSelector";
@@ -92,7 +93,7 @@ export default function Safety() {
       addForm.reset();
       toast({ title: "Schedule added" });
     },
-    onError: () => toast({ title: "Error", description: "Could not add the schedule", variant: "destructive" }),
+    onError: (error) => toast({ title: "Error", description: serverMessage(error) ?? "Could not add the schedule", variant: "destructive" }),
   });
 
   const completeMutation = useMutation({
@@ -101,7 +102,7 @@ export default function Safety() {
       invalidate();
       toast({ title: "Marked done", description: "The next due date has been advanced." });
     },
-    onError: () => toast({ title: "Error", description: "Could not update the schedule", variant: "destructive" }),
+    onError: (error) => toast({ title: "Error", description: serverMessage(error) ?? "Could not update the schedule", variant: "destructive" }),
   });
 
   const deleteMutation = useMutation({
@@ -111,7 +112,7 @@ export default function Safety() {
       setDeletingId(null);
       toast({ title: "Schedule removed" });
     },
-    onError: () => toast({ title: "Error", description: "Could not remove the schedule", variant: "destructive" }),
+    onError: (error) => toast({ title: "Error", description: serverMessage(error) ?? "Could not remove the schedule", variant: "destructive" }),
   });
 
   const applyTemplateMutation = useMutation({
@@ -125,7 +126,7 @@ export default function Safety() {
         description: body.created > 0 ? "Edit any of them to match this house." : "This house already has the standard set.",
       });
     },
-    onError: () => toast({ title: "Error", description: "Could not apply the standard schedule", variant: "destructive" }),
+    onError: (error) => toast({ title: "Error", description: serverMessage(error) ?? "Could not apply the standard schedule", variant: "destructive" }),
   });
 
   const addForm = useForm<ScheduleForm>({

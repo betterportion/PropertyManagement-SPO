@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { serverMessage } from "@/lib/serverMessage";
 import { formatCurrency, formatDate, localToday } from "@/lib/format";
 import { fromCents, runningBalance } from "@shared/depositLedger";
 import { shareOfSplit, statementMailto, statementText, type StatementLine } from "@shared/depositStatement";
@@ -96,8 +97,8 @@ export default function DepositStatement({
       queryClient.invalidateQueries({ queryKey: ["/api/action-items"] });
       toast({ title: "Recorded", description: "The date the statement was handed over is saved." });
     },
-    onError: () => {
-      toast({ title: "That did not save", variant: "destructive" });
+    onError: (error) => {
+      toast({ title: "That did not save", description: serverMessage(error), variant: "destructive" });
     },
   });
 

@@ -17,6 +17,7 @@ import DismissItemDialog from "@/components/walkthrough/DismissItemDialog";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { serverMessage } from "@/lib/serverMessage";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -86,7 +87,7 @@ export default function FlaggedItems() {
         navigate(`/maintenance/${match[1]}`);
         return;
       }
-      toast({ title: "That did not save", description: "No request was created.", variant: "destructive" });
+      toast({ title: "That did not save", description: serverMessage(error) ?? "No request was created.", variant: "destructive" });
     },
   });
 

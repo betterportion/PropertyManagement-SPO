@@ -98,10 +98,10 @@ export default function SnoozeDialog({
       onOpenChange(false);
       toast({ title: "Back on the dashboard", description: `${asset?.name} is no longer snoozed.` });
     },
-    onError: () => {
+    onError: (error) => {
       toast({
         title: "That did not save",
-        description: "The snooze was not cleared. Try again in a moment.",
+        description: serverMessage(error) ?? "The snooze was not cleared. Try again in a moment.",
         variant: "destructive",
       });
     },

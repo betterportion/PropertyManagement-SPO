@@ -2,6 +2,7 @@ import { Link } from "wouter";
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { serverMessage } from "@/lib/serverMessage";
 import { isPortalAccessQuery } from "@/lib/portalAccess";
 import { downloadCsv } from "@/lib/csv";
 import { useAuth } from "@/hooks/useAuth";
@@ -116,7 +117,7 @@ export default function Residents() {
         toast({ title: "Resident added" });
       }
     },
-    onError: () => toast({ title: "Error", description: "Could not add the resident", variant: "destructive" }),
+    onError: (error) => toast({ title: "Error", description: serverMessage(error) ?? "Could not add the resident", variant: "destructive" }),
   });
 
   // Move-out is a considered action, not a one-click one: the dialog states
@@ -175,7 +176,7 @@ export default function Residents() {
           : "They now show under Former residents.",
       });
     },
-    onError: () => toast({ title: "Error", description: "Could not move the resident out", variant: "destructive" }),
+    onError: (error) => toast({ title: "Error", description: serverMessage(error) ?? "Could not move the resident out", variant: "destructive" }),
   });
 
   const deleteMutation = useMutation({
@@ -185,7 +186,7 @@ export default function Residents() {
       setDeletingId(null);
       toast({ title: "Resident removed" });
     },
-    onError: () => toast({ title: "Error", description: "Could not remove the resident", variant: "destructive" }),
+    onError: (error) => toast({ title: "Error", description: serverMessage(error) ?? "Could not remove the resident", variant: "destructive" }),
   });
 
   const addForm = useForm<ResidentForm>({

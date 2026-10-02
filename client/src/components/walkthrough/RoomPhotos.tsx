@@ -4,6 +4,7 @@ import { PhotoUpload } from "@/components/PhotoUpload";
 import PhotoThumbnail from "@/components/walkthrough/PhotoThumbnail";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { serverMessage } from "@/lib/serverMessage";
 import type { Walkthrough, WalkthroughPhoto, WalkthroughRoom } from "@shared/schema";
 
 /**
@@ -48,8 +49,8 @@ export default function RoomPhotos({ walkthrough, room, canManage, uploaderEmail
       setUploadKey((key) => key + 1);
       queryClient.invalidateQueries({ queryKey: photosKey });
     },
-    onError: () => {
-      toast({ variant: "destructive", title: "Not saved", description: "The photo uploaded but could not be filed against this room." });
+    onError: (error) => {
+      toast({ variant: "destructive", title: "Not saved", description: serverMessage(error) ?? "The photo uploaded but could not be filed against this room." });
     },
   });
 

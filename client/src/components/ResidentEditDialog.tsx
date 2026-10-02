@@ -20,6 +20,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useRoomSuggestions } from "@/hooks/useRoomSuggestions";
 import { isPortalAccessQuery } from "@/lib/portalAccess";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { serverMessage } from "@/lib/serverMessage";
 import type { Resident } from "@shared/schema";
 
 /**
@@ -106,8 +107,8 @@ export default function ResidentEditDialog({
       onOpenChange(false);
       toast({ title: "Saved" });
     },
-    onError: () => {
-      toast({ title: "That did not save", description: "Check the email address and try again.", variant: "destructive" });
+    onError: (error) => {
+      toast({ title: "That did not save", description: serverMessage(error) ?? "Check the email address and try again.", variant: "destructive" });
     },
   });
 

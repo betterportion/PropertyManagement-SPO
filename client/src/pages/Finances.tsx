@@ -116,7 +116,7 @@ export default function Finances() {
         description: body.created > 0 ? "Mark each one paid as the fees come in." : "Every current resident already has a charge for that month.",
       });
     },
-    onError: () => toast({ title: "Error", description: "Could not record HH fees for the house", variant: "destructive" }),
+    onError: (error) => toast({ title: "Error", description: serverMessage(error) ?? "Could not record HH fees for the house", variant: "destructive" }),
   });
 
   const setRentStatusMutation = useMutation({
@@ -126,13 +126,13 @@ export default function Finances() {
         paidDate: status === "paid" ? localToday() : null,
       }),
     onSuccess: () => invalidateRent(),
-    onError: () => toast({ title: "Error", description: "Could not update the payment", variant: "destructive" }),
+    onError: (error) => toast({ title: "Error", description: serverMessage(error) ?? "Could not update the payment", variant: "destructive" }),
   });
 
   const deleteRentMutation = useMutation({
     mutationFn: async (id: string) => apiRequest("DELETE", `/api/rent-payments/${id}`),
     onSuccess: () => { invalidateRent(); setDeletingRent(null); toast({ title: "Charge removed" }); },
-    onError: () => toast({ title: "Error", description: "Could not remove the charge", variant: "destructive" }),
+    onError: (error) => toast({ title: "Error", description: serverMessage(error) ?? "Could not remove the charge", variant: "destructive" }),
   });
 
   const generateForm = useForm<GenerateForm>({
@@ -242,10 +242,7 @@ export default function Finances() {
   const depositCreateMutation = useMutation({
     mutationFn: async (data: DepositForm) => apiRequest("POST", "/api/security-deposits", data),
     onSuccess: () => { invalidateDeposits(); setIsDepositOpen(false); depositForm.reset(); toast({ title: "Deposit recorded" }); },
-    onError: async (err: any) => {
-      const msg = err?.message?.includes("409") ? "This resident already has a deposit on file." : "Could not record the deposit";
-      toast({ title: "Error", description: msg, variant: "destructive" });
-    },
+    onError: (error) => toast({ title: "Error", description: serverMessage(error) ?? "Could not record the deposit", variant: "destructive" }),
   });
 
   const depositUpdateMutation = useMutation({
@@ -258,7 +255,7 @@ export default function Finances() {
   const deleteDepositMutation = useMutation({
     mutationFn: async (id: string) => apiRequest("DELETE", `/api/security-deposits/${id}`),
     onSuccess: () => { invalidateDeposits(); setDeletingDeposit(null); toast({ title: "Deposit removed" }); },
-    onError: () => toast({ title: "Error", description: "Could not remove the deposit", variant: "destructive" }),
+    onError: (error) => toast({ title: "Error", description: serverMessage(error) ?? "Could not remove the deposit", variant: "destructive" }),
   });
 
   const depositForm = useForm<DepositForm>({

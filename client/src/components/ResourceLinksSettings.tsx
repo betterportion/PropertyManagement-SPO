@@ -93,13 +93,13 @@ export default function ResourceLinksSettings() {
     mutationFn: async (vars: { id: string; isActive: boolean }) =>
       await apiRequest("PATCH", `/api/resource-links/${vars.id}`, { isActive: vars.isActive }),
     onSuccess: invalidate,
-    onError: () => toast({ title: "That link was not changed", variant: "destructive" }),
+    onError: (error) => toast({ title: "That link was not changed", description: serverMessage(error), variant: "destructive" }),
   });
 
   const remove = useMutation({
     mutationFn: async (id: string) => await apiRequest("DELETE", `/api/resource-links/${id}`),
     onSuccess: invalidate,
-    onError: () => toast({ title: "That link was not removed", variant: "destructive" }),
+    onError: (error) => toast({ title: "That link was not removed", description: serverMessage(error), variant: "destructive" }),
   });
 
   return (

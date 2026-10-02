@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useLocation } from "wouter";
 import { useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { serverMessage } from "@/lib/serverMessage";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -37,8 +38,8 @@ export default function ActionItemList({ items }: { items: ActionItem[] }) {
       }
       toast({ title: "Done" });
     },
-    onError: () =>
-      toast({ title: "Could not resolve", description: "Please try again, or open the record directly.", variant: "destructive" }),
+    onError: (error) =>
+      toast({ title: "Could not resolve", description: serverMessage(error) ?? "Please try again, or open the record directly.", variant: "destructive" }),
   });
 
   const onResolve = (item: ActionItem) => {
