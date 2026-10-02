@@ -2,6 +2,7 @@ import { Link } from "wouter";
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { isPortalAccessQuery } from "@/lib/portalAccess";
 import { downloadCsv } from "@/lib/csv";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
@@ -84,6 +85,8 @@ export default function Residents() {
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ["/api/residents"] });
+    // A move-out or delete can end a household login, which changes the house's count.
+    queryClient.invalidateQueries({ predicate: isPortalAccessQuery });
   };
 
   const createMutation = useMutation({

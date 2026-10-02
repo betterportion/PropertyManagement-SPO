@@ -9,6 +9,7 @@ import { LoadingState } from "@/components/states";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { formatDateTime } from "@/lib/format";
+import { isPortalAccessQuery } from "@/lib/portalAccess";
 import { serverMessage } from "@/lib/serverMessage";
 import type { RosterSyncHealth } from "@shared/rosterSheet";
 import type { RosterReviewItem, RosterSyncRun } from "@shared/schema";
@@ -51,6 +52,8 @@ export default function RosterSyncSettings() {
 
   const refresh = () => {
     for (const key of [STATUS_KEY, "/api/residents", "/api/action-items"]) queryClient.invalidateQueries({ queryKey: [key] });
+    // A sync can end household logins (closeDepartedHouseholdLogins).
+    queryClient.invalidateQueries({ predicate: isPortalAccessQuery });
   };
   const announce = (r: SyncResult) => {
     setResult(r);
