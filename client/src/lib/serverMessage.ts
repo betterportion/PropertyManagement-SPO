@@ -22,6 +22,10 @@ export function serverMessage(error: unknown): string | undefined {
         .map((issue: { message?: unknown } | null) => issue?.message)
         .filter((message): message is string => typeof message === "string" && message.length > 0)
     : [];
-  if (reasons.length > 0) return Array.from(new Set(reasons)).join(" ");
+  if (reasons.length > 0) {
+    const unique = Array.from(new Set(reasons));
+    // Field reasons have no trailing period, so several would run together.
+    return unique.length === 1 ? unique[0] : unique.map((reason) => (/[.!?]$/.test(reason) ? reason : `${reason}.`)).join(" ");
+  }
   return typeof body?.message === "string" && body.message ? body.message : undefined;
 }

@@ -22,7 +22,23 @@ describe("serverMessage", () => {
     const error = new Error(
       '400: {"message":"Some of the information provided is not valid.","errors":[{"field":"invoiceCost","message":"Must be 0 or greater"},{"field":"invoiceCost","message":"Use at most 2 decimal places"}]}',
     );
-    expect(serverMessage(error)).toBe("Must be 0 or greater Use at most 2 decimal places");
+    expect(serverMessage(error)).toBe("Must be 0 or greater. Use at most 2 decimal places.");
+  });
+
+  it("does not double a period a field reason already ends with", () => {
+    const error = new Error(
+      '400: {"message":"Some of the information provided is not valid.","errors":[{"field":"a","message":"Must be 0 or greater."},{"field":"b","message":"Use at most 2 decimal places"},{"field":"c","message":"Is this right?"}]}',
+    );
+    expect(serverMessage(error)).toBe("Must be 0 or greater. Use at most 2 decimal places. Is this right?");
+  });
+
+  it("leaves a single field reason exactly as the server sent it, and still de-duplicates", () => {
+    const one = new Error('400: {"message":"x","errors":[{"field":"a","message":"Must be 0 or greater"}]}');
+    expect(serverMessage(one)).toBe("Must be 0 or greater");
+    const repeated = new Error(
+      '400: {"message":"x","errors":[{"field":"a","message":"Required"},{"field":"b","message":"Required"}]}',
+    );
+    expect(serverMessage(repeated)).toBe("Required");
   });
 
   it("reads an upload refusal's reason, for the size limit and a refused file type", () => {
