@@ -3285,6 +3285,83 @@ describe("what reaches the audit log", () => {
     expect(summary).not.toContain(target.id);
   });
 
+  // The same rule for every account event (#239): these are kept
+  // indefinitely, so an unreadable summary would be unreadable for good.
+  describe("names an account with no email by its name, never by its id (#239)", () => {
+    const noEmail = { ...ALICE, id: "117857551505584404776", email: null, firstName: "Carol", lastName: "Diaz" };
+    const summaries = () => storageMock.createAuditEvent.mock.calls.map((c) => c[0].summary as string);
+    const expectNamed = () => {
+      expect(summaries().length).toBeGreaterThan(0);
+      for (const summary of summaries()) {
+        expect(summary).toContain("Carol Diaz");
+        expect(summary).not.toContain(noEmail.id);
+      }
+    };
+
+    it("in a role change, and the permissions reset it causes", async () => {
+      actAs(ADMIN);
+      storageMock.getUser.mockResolvedValueOnce(ADMIN).mockResolvedValue(noEmail);
+      storageMock.updateUserRole.mockResolvedValue({ ...noEmail, role: "regional_administrator" });
+
+      const { status } = await patch(`/api/users/${noEmail.id}/role`, { role: "regional_administrator" });
+
+      expect(status).toBe(200);
+      expect(storageMock.createAuditEvent.mock.calls.map((c) => c[0].action)).toEqual([
+        "user.role_changed",
+        "user.permissions_changed",
+      ]);
+      expectNamed();
+    });
+
+    it("in a status change", async () => {
+      actAs(ADMIN);
+      storageMock.getUser.mockResolvedValueOnce(ADMIN).mockResolvedValue(noEmail);
+      storageMock.updateUserActiveStatus.mockResolvedValue({ ...noEmail, isActive: false });
+
+      const { status } = await patch(`/api/users/${noEmail.id}/status`, { isActive: false });
+
+      expect(status).toBe(200);
+      expectNamed();
+    });
+
+    it.each([
+      ["linking", "prop-west"],
+      ["unlinking", null],
+    ])("in %s a house", async (_what, propertyId) => {
+      actAs(ADMIN);
+      storageMock.getUser.mockResolvedValueOnce(ADMIN).mockResolvedValue(noEmail);
+      storageMock.getProperty.mockResolvedValue({ id: "prop-west", name: "Como House", region: "West Central" });
+      storageMock.updateUserProperty.mockResolvedValue({ ...noEmail, propertyId });
+
+      const { status } = await patch(`/api/users/${noEmail.id}/property`, { propertyId });
+
+      expect(status).toBe(200);
+      expectNamed();
+    });
+
+    it("in an account delete", async () => {
+      actAs(ADMIN);
+      storageMock.getUser.mockResolvedValueOnce(ADMIN).mockResolvedValue(noEmail);
+
+      const { status } = await request("DELETE", `/api/users/${noEmail.id}`);
+
+      expect(status).toBe(200);
+      expectNamed();
+    });
+
+    it("in an account created with no email", async () => {
+      actAs(ADMIN);
+      storageMock.upsertUser.mockImplementation(async (data: Record<string, unknown>) => ({ user: { ...data, id: noEmail.id } }));
+
+      const { status } = await request("POST", "/api/users", {
+        body: { id: noEmail.id, firstName: "Carol", lastName: "Diaz", role: "resident" },
+      });
+
+      expect(status).toBe(200);
+      expectNamed();
+    });
+  });
+
   it("records a maintenance status change", async () => {
     actAs(STAFF, { ...ALL_MAINTENANCE, allowedRegions: ["West Central"] });
     storageMock.getMaintenanceRequest.mockResolvedValue(WEST_REQUEST);

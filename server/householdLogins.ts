@@ -13,7 +13,7 @@
  * Idempotent: a login already switched off is not looked at again.
  */
 import { storage as defaultStorage, type IStorage } from "./storage";
-import { recordAuditEvent, AUDIT_ACTIONS } from "./audit";
+import { recordAuditEvent, accountName, AUDIT_ACTIONS } from "./audit";
 import { isCurrentRosterMember } from "./authz";
 import { logError } from "./errors";
 import type { Resident, User } from "@shared/schema";
@@ -65,14 +65,14 @@ export async function closeDepartedHouseholdLogins(
         action: AUDIT_ACTIONS.USER_STATUS_CHANGED,
         entityType: "user",
         entityId: login.id,
-        summary: `Switched off ${login.email ?? login.id}'s login: they are no longer on their house's roster`,
+        summary: `Switched off ${accountName(login)}'s login: they are no longer on their house's roster`,
         details: { isActive: false, reason: "left_roster" },
       });
       recordAuditEvent(null, {
         action: AUDIT_ACTIONS.USER_PROPERTY_CHANGED,
         entityType: "user",
         entityId: login.id,
-        summary: `Unlinked ${login.email ?? login.id} from their house: they are no longer on its roster`,
+        summary: `Unlinked ${accountName(login)} from their house: they are no longer on its roster`,
         details: { from: login.propertyId, to: null, reason: "left_roster" },
       });
     }

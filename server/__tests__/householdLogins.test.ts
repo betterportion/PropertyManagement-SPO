@@ -54,6 +54,19 @@ describe("closeDepartedHouseholdLogins", () => {
     expect(createAuditEvent.mock.calls.map(([e]) => e.action)).toEqual(["user.status_changed", "user.property_changed"]);
   });
 
+  it("names a login with no email by its name, never by its id (#239)", async () => {
+    const s = storage([row()]);
+    const noEmail = login({ id: "117857551505584404776", email: null, firstName: "Jane", lastName: "Roe" });
+    s.getActiveResidentAccountsByProperty.mockResolvedValue([noEmail]);
+    expect(await closeDepartedHouseholdLogins({ propertyId: "p1" }, NOW, s as never)).toBe(1);
+    const summaries = createAuditEvent.mock.calls.map(([e]) => e.summary as string);
+    expect(summaries).toHaveLength(2);
+    for (const summary of summaries) {
+      expect(summary).toContain("Jane Roe");
+      expect(summary).not.toContain(noEmail.id);
+    }
+  });
+
   it("does nothing to a current member, for one house or all of them", async () => {
     const s = storage([row()]);
     expect(await closeDepartedHouseholdLogins({ propertyId: "p1" }, NOW, s as never)).toBe(0);
