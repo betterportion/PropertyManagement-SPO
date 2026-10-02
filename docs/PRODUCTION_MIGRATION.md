@@ -43,15 +43,25 @@ Supabase and Render both have free tiers that are fine for staging. For producti
 1. Create a new Supabase project. Name it something clearly temporary, e.g. `spo-portal-staging`.
 2. Choose a region close to the users.
 3. Save the database password Supabase generates. You cannot retrieve it later.
-4. Go to **Project Settings → Database → Connection string → URI** and copy two forms of it:
-   - the **Transaction pooler** string — this is what the running app uses,
+4. Click **Connect** at the top of the project page, choose the **URI** type, and copy two forms of the connection string from that panel:
+   - the **Transaction pooler** string (port 6543) — this is what the running app uses,
    - the **Direct connection** string — this is what migrations use.
+
+   Replace `[YOUR-PASSWORD]` in each with the password from 3. **Use a password of letters and digits only.** A `@`, `:`, `/`, `?` or `#` in it breaks the connection string, and the error ("could not translate host name") does not say why; reset the password in **Project Settings → Database** rather than URL-encoding it by hand.
 
 The pooler keeps the app's connections within Postgres' connection limit, including during a deploy, when the old and new copies of the server briefly run side by side. Migrations use the direct connection because the transaction pooler does not support everything a migration may do.
 
 Keep both. `DATABASE_URL` for the service is the pooled one.
 
-If the direct connection will not connect from your laptop, your network probably has no IPv6, which Supabase's direct address needs. The **Session pooler** string on the same screen works over IPv4 and is fine for migrations.
+If the direct connection will not connect from your laptop, your network probably has no IPv6, which Supabase's direct address needs (`ENETUNREACH`; WSL2 usually has none). The **Session pooler** string on the same screen (port 5432, host `aws-0-<region>.pooler.supabase.com`) works over IPv4 and is fine for migrations. After a password reset, the poolers can take a minute or two to accept the new password; a `28P01` (password authentication failed) straight after a reset may just mean wait.
+
+5. **Download Supabase's certificate authority.** Supabase signs its database certificates with its own root ("Supabase Root 2021 CA"), which Node does not trust by default, and the app verifies the database certificate. Without the root, every connection fails with `SELF_SIGNED_CERT_IN_CHAIN`, the health check answers 503, and Render never routes to the service (step 6). Download it from **Database → Settings → SSL Configuration** (`prod-ca-2021.crt`) and keep it for steps 4 and 6. It is a public certificate, not a secret. Check it verifies the pooler, with full hostname checking:
+
+   ```bash
+   psql "<transaction pooler string>?sslmode=verify-full&sslrootcert=prod-ca-2021.crt" -c 'select 1'
+   ```
+
+   That connects. The same command with `sslrootcert=system` fails with `certificate verify failed`, which is the failure the app hits without the file.
 
 ---
 
@@ -144,7 +154,7 @@ The app never relies on bucket-level access rules. It checks permissions itself 
 Then collect two values from **Project Settings → API**:
 
 - the **Project URL** (`https://<ref>.supabase.co`) → `SUPABASE_URL`
-- the **`service_role` key** → `SUPABASE_SERVICE_ROLE_KEY`
+- the **`service_role` key** → `SUPABASE_SERVICE_ROLE_KEY`. Use the **legacy** `service_role` key (a long string starting `eyJ`, under the legacy API keys); the app sends it as a bearer token, which is how that kind of key works. The newer `sb_secret_...` keys have not been tried with the portal.
 
 The service role key bypasses every access rule in the project. It is a server-only secret: it goes in Render's environment, never in a client bundle, never in the repository, never in a chat message. If it is ever exposed, rotate it in the same dashboard.
 
@@ -161,6 +171,7 @@ export STORAGE_DRIVER=supabase
 export SUPABASE_URL="https://<ref>.supabase.co"
 export SUPABASE_SERVICE_ROLE_KEY="..."
 export SUPABASE_STORAGE_BUCKET=uploads
+export NODE_EXTRA_CA_CERTS="$PWD/prod-ca-2021.crt"   # Supabase's root, step 1
 # plus the OIDC_* values from step 5
 npm run dev
 ```
@@ -202,7 +213,7 @@ This is the step with the most moving parts.
      https://<your-staging-host>/api/callback
      ```
      For a Render service that is `https://spo-portal-staging.onrender.com/api/callback`. Google matches this string exactly — scheme, host and path all have to be right, with no trailing slash.
-   - Authorised JavaScript origins: not needed.
+   - Authorised JavaScript origins: the portal does not use them, but Google's form may refuse to create the client without one. If it does, add `https://<your-staging-host>` (no path, no trailing slash); it widens nothing.
 
 3. Copy the **Client ID** and **Client secret**.
 
@@ -299,7 +310,10 @@ OIDC_CLIENT_SECRET    = <Google client secret>
 OIDC_PROVIDER_NAME    = google
 OIDC_SCOPES           = openid email profile
 APP_URL               = https://<this service's hostname>
+NODE_EXTRA_CA_CERTS   = /etc/secrets/supabase-ca.crt
 ```
+
+**And one secret file**, added on the service's **Environment** page (it is easy to miss below the variables; check it is listed before deploying): name `supabase-ca.crt`, contents the whole of Supabase's root certificate from step 1, `BEGIN` line to `END` line. Render serves secret files at `/etc/secrets/<name>`, which is what `NODE_EXTRA_CA_CERTS` points at. Without the file, Node logs `Warning: Ignoring extra certs from /etc/secrets/supabase-ca.crt, load failed` and carries on with its default certificate list, so the server starts, every health check answers 503 with `SELF_SIGNED_CERT_IN_CHAIN`, and after about 15 minutes Render marks the deploy `update_failed`, having never sent it a request. Leave `DATABASE_SSL` unset: its default is to verify the certificate, which is what the root makes possible. (`DATABASE_SSL=no-verify` would also get the service up, encrypted but without checking it is talking to Supabase; it is the fallback, not the setup.)
 
 `npm run start` already sets `NODE_ENV=production`; setting it on the service as well makes sure nothing run on the instance (a Render shell, say) falls back to development behaviour. Production mode is what turns on secure cookies, HSTS and the content security policy, which step 8 checks.
 
@@ -349,13 +363,14 @@ Before testing, check the running service reports itself healthy:
 curl https://<staging-host>/api/health
 ```
 
-Expect `200` and `{"status":"ok","database":"ok",...}`. A `503` here means the app is up but Supabase is not answering — check `DATABASE_URL` and that you used the pooled string.
+Expect `200` and `{"status":"ok","database":"ok",...}`. A `503` here means the app is up but Supabase is not answering — check the service log for the reason: `SELF_SIGNED_CERT_IN_CHAIN` means the `supabase-ca.crt` secret file or `NODE_EXTRA_CA_CERTS` is missing (step 6); anything else, check `DATABASE_URL` and that you used the pooled string. If the request hangs instead of answering, Render has no healthy instance to send it to, which is the same 503 seen from outside: read the log.
 
 Then check the security headers and the session cookie:
 
 ```bash
 curl -sI https://<staging-host>/            # the page itself
-curl -sI https://<staging-host>/api/login   # starts a sign-in, so it sets a cookie
+curl -s -D - -o /dev/null https://<staging-host>/api/login   # starts a sign-in, so it sets a cookie
+                                                     # (a GET: `curl -I` sends HEAD, which this route answers with 401)
 ```
 
 - [ ] The page response has `Strict-Transport-Security: max-age=15552000; includeSubDomains` and a `Content-Security-Policy` header that includes `frame-ancestors 'none'`. Neither is sent outside production mode, so a missing one means `NODE_ENV` is not `production`.
