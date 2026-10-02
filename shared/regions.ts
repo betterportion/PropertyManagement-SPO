@@ -33,6 +33,7 @@ export const CHAPTERS_BY_REGION: Record<string, string[]> = {
     "Texas State University",
     "Bryan College Station Young Adults",
     "University of St. Thomas - Houston",
+    "University of Houston",
   ],
   "Southeast": ["University of Central Florida", "University of South Florida"],
   "National": [],
