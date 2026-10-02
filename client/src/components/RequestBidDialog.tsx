@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { CommentAttachmentField, type PendingAttachment } from "@/components/CommentAttachmentField";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { serverMessage } from "@/lib/serverMessage";
 import type { MaintenanceContact, MaintenanceRequestBid } from "@shared/schema";
 
 /**
@@ -87,7 +88,7 @@ export function RequestBidDialog({ requestId, bid, open, onClose }: RequestBidDi
       toast({ title: bid ? "Bid updated" : "Bid recorded" });
       onClose();
     },
-    onError: (err: Error) => setError(err.message),
+    onError: (err: Error) => setError(serverMessage(err) ?? "That bid did not save."),
   });
 
   const update = (patch: Partial<BidDraft>) => setDraft((current) => ({ ...current, ...patch }));
