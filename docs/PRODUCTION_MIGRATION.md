@@ -412,7 +412,7 @@ This is the bar for going live. Work through it with at least four Google accoun
 
 **Core workflows**
 - [ ] Create, edit and delete a property.
-- [ ] Create a maintenance request; move it through its statuses; delete it.
+- [ ] Create a maintenance request; move it through its statuses, including cancelling one. (There is no delete in the app: requests are kept, and cancelling is how one is withdrawn.)
 - [ ] Complete a walkthrough with photos.
 - [ ] Add an asset with a photo.
 - [ ] Add a vendor contact, an invoice and a billing record.
