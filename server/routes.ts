@@ -36,7 +36,7 @@ import { z } from "zod";
 import Papa from "papaparse";
 import { sendError, logError, HttpError } from "./errors";
 import { permissionsAfterRoleChange } from "./roleChange";
-import { recordAuditEvent, auditLookup, changedFields, AUDIT_ACTIONS } from "./audit";
+import { recordAuditEvent, auditLookup, changedFields, accountName, AUDIT_ACTIONS } from "./audit";
 import { AUDIT_ACTION_VALUES } from "@shared/audit";
 import multer from "multer";
 import path from "path";
@@ -471,7 +471,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const existingPermissions = nextPermissions ? await storage.getUserPermissions(req.params.id) : undefined;
       const user = await storage.updateUserRole(req.params.id, validatedData.role, nextPermissions);
 
-      const who = previous.email ?? req.params.id;
+      const who = accountName(previous);
       recordAuditEvent(ctx, {
         action: AUDIT_ACTIONS.USER_ROLE_CHANGED,
         entityType: "user",
@@ -520,7 +520,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         action: AUDIT_ACTIONS.USER_STATUS_CHANGED,
         entityType: "user",
         entityId: req.params.id,
-        summary: `${isActive ? "Reactivated" : "Deactivated"} ${previous.email ?? req.params.id}`,
+        summary: `${isActive ? "Reactivated" : "Deactivated"} ${accountName(previous)}`,
         details: { isActive },
       });
 
@@ -582,8 +582,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         entityType: "user",
         entityId: req.params.id,
         summary: property
-          ? `Linked ${target.email ?? req.params.id} to ${property.name}`
-          : `Unlinked ${target.email ?? req.params.id} from their house`,
+          ? `Linked ${accountName(target)} to ${property.name}`
+          : `Unlinked ${accountName(target)} from their house`,
         details: { from: target.propertyId ?? null, to: propertyId },
       });
 
@@ -644,8 +644,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // booleans plus regions, so this is the whole change without storing a
       // copy of the request. The account is named by email, never by its id:
       // the id is the sign-in provider's subject, which nobody can read.
-      const who =
-        target.email ?? ([target.firstName, target.lastName].filter(Boolean).join(" ") || "an account with no email");
+      const who = accountName(target);
       recordAuditEvent(ctx, {
         action: AUDIT_ACTIONS.USER_PERMISSIONS_CHANGED,
         entityType: "user",
@@ -691,7 +690,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               action: AUDIT_ACTIONS.USER_CREATED,
               entityType: "user",
               entityId: user.id,
-              summary: `Created account ${user.email ?? user.id} with role ${user.role ?? "resident"}`,
+              summary: `Created account ${accountName(user)} with role ${user.role ?? "resident"}`,
               details: { role: user.role ?? null, isActive: user.isActive ?? null },
             },
       );
@@ -717,7 +716,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         action: AUDIT_ACTIONS.USER_DELETED,
         entityType: "user",
         entityId: req.params.id,
-        summary: `Deleted account ${previous?.email ?? req.params.id}`,
+        summary: previous ? `Deleted account ${accountName(previous)}` : "Deleted an account that could not be looked up",
         details: { role: previous?.role ?? null },
       });
 
@@ -3729,14 +3728,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
             action: AUDIT_ACTIONS.USER_STATUS_CHANGED,
             entityType: "user",
             entityId: account.id,
-            summary: `Deactivated ${account.email ?? account.id}'s login while moving them out of ${resident.buildingAddress}`,
+            summary: `Deactivated ${accountName(account)}'s login while moving them out of ${resident.buildingAddress}`,
             details: { isActive: false, reason: "move_out", residentId: resident.id },
           });
           recordAuditEvent(ctx, {
             action: AUDIT_ACTIONS.USER_PROPERTY_CHANGED,
             entityType: "user",
             entityId: account.id,
-            summary: `Unlinked ${account.email ?? account.id} from their house while moving them out of ${resident.buildingAddress}`,
+            summary: `Unlinked ${accountName(account)} from their house while moving them out of ${resident.buildingAddress}`,
             details: { from: account.propertyId ?? null, to: null, reason: "move_out", residentId: resident.id },
           });
         }

@@ -298,3 +298,16 @@ export function changedFields(
     .filter((key) => !before || String(before[key] ?? "") !== String(update[key] ?? ""))
     .sort();
 }
+
+/**
+ * How an audit summary names an account: its email, else its name, else a
+ * plain phrase. Never its id, which is the sign-in provider's subject (a long
+ * number nobody can read); the event's entityId holds the id already.
+ */
+export function accountName(account: {
+  email?: string | null;
+  firstName?: string | null;
+  lastName?: string | null;
+}): string {
+  return account.email || [account.firstName, account.lastName].filter(Boolean).join(" ") || "an account with no email";
+}
