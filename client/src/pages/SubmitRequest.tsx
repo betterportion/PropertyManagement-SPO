@@ -2,6 +2,7 @@ import { useMutation } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { serverMessage } from "@/lib/serverMessage";
 import MaintenanceRequestForm from "@/components/MaintenanceRequestForm";
 import { Section, Container, PageHeader, PageStack } from "@/components/layout/page";
 
@@ -29,20 +30,11 @@ export default function SubmitRequest() {
       setLocation("/my-requests");
     },
     onError: (error: Error) => {
-      // apiRequest throws "<status>: <body>"; the body is JSON like
-      // {"message":"..."}. Surface the server's message — it explains the one
-      // expected failure, not being on a house roster yet.
-      const body = error.message.replace(/^\d+:\s*/, "");
-      let message = body;
-      try {
-        const parsed = JSON.parse(body);
-        if (parsed?.message) message = parsed.message;
-      } catch {
-        // Not JSON; use the raw text.
-      }
+      // The server's own words: field reasons first, then its message. The one
+      // expected failure is not being on a house roster yet, and the route says so.
       toast({
         title: "Couldn't submit the request",
-        description: message || "Please try again.",
+        description: serverMessage(error) ?? "Please try again.",
         variant: "destructive",
       });
     },
