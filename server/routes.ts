@@ -5303,6 +5303,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (existing && existing.role !== "resident") {
         return res.status(409).json({ message: "That email belongs to a staff account. Use a different email for the household login." });
       }
+      // A login another house gave access to is not this roster row's to take, whatever region
+      // that house is in (the mirror of the DELETE below). Its house is not named: it may be
+      // outside the caller's regions.
+      if (existing?.propertyId && existing.propertyId !== resident.propertyId) {
+        return res.status(409).json({
+          message: "That email already has a household login for another house. It has to be removed there first: ask that house's regional administrator, or an admin.",
+        });
+      }
 
       const house = (await storage.getActiveResidentAccountsByProperty(resident.propertyId)).filter((u) => u.id !== existing?.id);
       if (house.length >= HOUSE_PORTAL_ACCOUNT_LIMIT) {
