@@ -2010,8 +2010,8 @@ describe("project fields and bids", () => {
     return form;
   };
 
-  async function postFile(path: string) {
-    const res = await fetch(`${baseUrl}${path}`, { method: "POST", body: aQuote() });
+  async function postFile(path: string, form: FormData = aQuote()) {
+    const res = await fetch(`${baseUrl}${path}`, { method: "POST", body: form });
     let body: any = null;
     try {
       body = await res.json();
@@ -2210,6 +2210,25 @@ describe("project fields and bids", () => {
   it("refuses an anonymous caller before the parser reads a byte", async () => {
     expect((await postFile(BID_DOCS("req-project"))).status).toBe(401);
     expect(multerEntered).not.toHaveBeenCalled();
+  });
+
+  it("refuses an executable renamed quote.pdf, storing nothing", async () => {
+    actAs(STAFF, westOnly);
+    const form = new FormData();
+    form.append("file", new Blob([new Uint8Array([0x4d, 0x5a, 0x90, 0x00, 0x03, 0x00, 0x00, 0x00])], { type: "application/pdf" }), "quote.pdf");
+    expect((await postFile(BID_DOCS("req-project"), form)).status).toBe(400);
+    // The parser did run: this is the content check, not an earlier refusal.
+    expect(multerEntered).toHaveBeenCalledWith(BID_DOCS("req-project"));
+    expect(fileStoreMock.putUpload).not.toHaveBeenCalled();
+    expect(storageMock.createUpload).not.toHaveBeenCalled();
+  });
+
+  it("refuses a resident account even when its permissions row carries the staff flags and the region", async () => {
+    // A resident row cannot hold these today (fieldsNotForResident); the staff check is the net if one ever does.
+    actAs({ ...ALICE, propertyId: "prop-a" } as typeof ALICE, westOnly);
+    expect((await postFile(BID_DOCS("req-project"))).status).toBe(403);
+    expect(multerEntered).not.toHaveBeenCalled();
+    expect(fileStoreMock.putUpload).not.toHaveBeenCalled();
   });
 
   it("attaches a document the caller uploaded, named as it was stored when the body gives no name", async () => {
@@ -10942,5 +10961,158 @@ describe("a household login ends with the stay (JR, 2026-10-01)", () => {
     expect(body.message).toMatch(/stop date/);
     expect(storageMock.updateResident).not.toHaveBeenCalled();
     expect(storageMock.deactivateAndUnlinkUser).not.toHaveBeenCalled();
+  });
+});
+
+// Each of these routes loads a record by id and checks its region before
+// touching it, and that check is the only layer: the storage methods match on
+// id alone. Listing them here keeps a removed check from passing the suite
+// (pilot audit 2026-10-02).
+describe("a record outside the caller's regions is refused by id on every route below", () => {
+  const WEST = "West Central";
+  const EAST = "East Central";
+  const echo = async (id: string, patch: Record<string, unknown>) => ({ id, ...patch });
+
+  type Case = {
+    name: string;
+    method: string;
+    path: string;
+    body?: Record<string, unknown>;
+    write: string;
+    arrange: (region: string) => void;
+  };
+
+  const cases: Case[] = [
+    {
+      name: "PATCH /api/rent-payments/:id",
+      method: "PATCH", path: "/api/rent-payments/rec-1", body: { status: "paid", amount: "0" }, write: "updateRentPayment",
+      arrange: (region) => {
+        actAs(STAFF, { canManageFinancials: true, allowedRegions: [WEST] });
+        storageMock.getRentPayment.mockResolvedValue({ id: "rec-1", region, period: "2026-08", buildingAddress: "2 River Rd", status: "due", amount: "500.00" });
+        storageMock.updateRentPayment.mockImplementation(echo);
+      },
+    },
+    {
+      name: "PATCH /api/security-deposits/:id",
+      method: "PATCH", path: "/api/security-deposits/rec-1", body: { status: "withheld", amountReturned: 0 }, write: "updateSecurityDeposit",
+      arrange: (region) => {
+        actAs(STAFF, { canManageFinancials: true, allowedRegions: [WEST] });
+        storageMock.getSecurityDeposit.mockResolvedValue({ id: "rec-1", region, buildingAddress: "2 River Rd", status: "held", amountHeld: "300.00", amountReturned: null });
+        storageMock.updateSecurityDeposit.mockImplementation(echo);
+      },
+    },
+    {
+      name: "GET /api/asset-photos/asset/:assetId",
+      method: "GET", path: "/api/asset-photos/asset/a-1", write: "getAssetPhotosByAsset",
+      arrange: (region) => {
+        actAs(STAFF, { canViewAssets: true, allowedRegions: [WEST] });
+        storageMock.getAsset.mockResolvedValue({ id: "a-1", region });
+        storageMock.getAssetPhotosByAsset.mockResolvedValue([{ id: "ph-1", assetId: "a-1", uploadedBy: "someone@example.com" }]);
+      },
+    },
+    {
+      name: "DELETE /api/asset-photos/:id",
+      method: "DELETE", path: "/api/asset-photos/ph-1", write: "deleteAssetPhoto",
+      arrange: (region) => {
+        actAs(STAFF, { canManageAssets: true, allowedRegions: [WEST] });
+        storageMock.getAssetPhoto.mockResolvedValue({ id: "ph-1", assetId: "a-1" });
+        storageMock.getAsset.mockResolvedValue({ id: "a-1", region });
+        storageMock.deleteAssetPhoto.mockResolvedValue([]);
+      },
+    },
+    {
+      name: "PATCH /api/maintenance-schedules/:id",
+      method: "PATCH", path: "/api/maintenance-schedules/rec-1", body: { isActive: false }, write: "updateMaintenanceSchedule",
+      arrange: (region) => {
+        actAs(STAFF, { canManageMaintenance: true, allowedRegions: [WEST] });
+        storageMock.getMaintenanceSchedule.mockResolvedValue({ id: "rec-1", region, buildingAddress: "2 River Rd", intervalMonths: 12 });
+        storageMock.updateMaintenanceSchedule.mockImplementation(echo);
+      },
+    },
+    {
+      name: "POST /api/maintenance-schedules/apply-template",
+      method: "POST", path: "/api/maintenance-schedules/apply-template", body: { propertyId: "p-1" }, write: "createMaintenanceSchedule",
+      arrange: (region) => {
+        actAs(STAFF, { canManageMaintenance: true, allowedRegions: [WEST] });
+        storageMock.getProperty.mockResolvedValue({ id: "p-1", region, address: "2 River Rd" });
+        storageMock.getMaintenanceSchedulesByProperty.mockResolvedValue([]);
+        storageMock.createMaintenanceSchedule.mockImplementation(async (d: Record<string, unknown>) => ({ id: "s", ...d }));
+      },
+    },
+    {
+      name: "PATCH /api/contacts/:id",
+      method: "PATCH", path: "/api/contacts/rec-1", body: { phone: "555-0100" }, write: "updateMaintenanceContact",
+      arrange: (region) => {
+        actAs(STAFF, { canManageContacts: true, allowedRegions: [WEST] });
+        storageMock.getMaintenanceContact.mockResolvedValue({ id: "rec-1", region, name: "Vendor" });
+        storageMock.updateMaintenanceContact.mockImplementation(echo);
+      },
+    },
+    {
+      name: "DELETE /api/invoices/:id",
+      method: "DELETE", path: "/api/invoices/rec-1", write: "deleteInvoice",
+      arrange: (region) => {
+        actAs(STAFF, { canManageBilling: true, allowedRegions: [WEST] });
+        storageMock.getInvoice.mockResolvedValue({ id: "rec-1", region, amount: "100.00" });
+        storageMock.deleteInvoice.mockResolvedValue(undefined);
+      },
+    },
+    {
+      name: "DELETE /api/billing/:id",
+      method: "DELETE", path: "/api/billing/rec-1", write: "deleteBillingRecord",
+      arrange: (region) => {
+        actAs(STAFF, { canManageBilling: true, allowedRegions: [WEST] });
+        storageMock.getBillingRecord.mockResolvedValue({ id: "rec-1", region, companyName: "Acme" });
+        storageMock.deleteBillingRecord.mockResolvedValue([]);
+      },
+    },
+  ];
+
+  it.each(cases)("$name: refuses West-only staff an East record, and never reaches storage", async (c) => {
+    c.arrange(EAST);
+    const { status } = await request(c.method, c.path, c.body ? { body: c.body } : {});
+    expect(status).toBe(403);
+    expect(storageMock[c.write]).not.toHaveBeenCalled();
+  });
+
+  it.each(cases)("$name: lets the same caller through on a West record (positive control)", async (c) => {
+    c.arrange(WEST);
+    const { status } = await request(c.method, c.path, c.body ? { body: c.body } : {});
+    expect(status).toBe(200);
+    expect(storageMock[c.write]).toHaveBeenCalled();
+  });
+
+  it("PATCH /api/contacts/:id refuses moving an East vendor into West", async () => {
+    actAs(STAFF, { canManageContacts: true, allowedRegions: [WEST] });
+    storageMock.getMaintenanceContact.mockResolvedValue({ id: "rec-1", region: EAST, name: "Vendor" });
+    storageMock.updateMaintenanceContact.mockImplementation(echo);
+    const { status } = await request("PATCH", "/api/contacts/rec-1", { body: { region: WEST } });
+    expect(status).toBe(403);
+    expect(storageMock.updateMaintenanceContact).not.toHaveBeenCalled();
+  });
+
+  describe("DELETE /api/resource-links/:id is admin-only, and that check is its only one", () => {
+    const arrange = () => {
+      storageMock.getResourceLink.mockResolvedValue({ id: "l-1", title: "Code of Conduct", region: null, isActive: true });
+      storageMock.deleteResourceLink.mockResolvedValue(undefined);
+    };
+    it.each([
+      ["a resident with the hub grant", ALICE, { canViewResourceHub: true }],
+      ["a resident with no permissions row", ALICE, undefined],
+      ["staff with every region", STAFF, { canViewProperties: true, canManageProperties: true, allowedRegions: ["all"] }],
+    ])("refuses %s, and deletes nothing", async (_who, user, perms) => {
+      actAs(user, perms as Record<string, unknown> | undefined);
+      arrange();
+      const { status } = await request("DELETE", "/api/resource-links/l-1");
+      expect(status).toBe(403);
+      expect(storageMock.deleteResourceLink).not.toHaveBeenCalled();
+    });
+    it("lets an admin delete (positive control)", async () => {
+      actAs(ADMIN);
+      arrange();
+      const { status } = await request("DELETE", "/api/resource-links/l-1");
+      expect(status).toBe(200);
+      expect(storageMock.deleteResourceLink).toHaveBeenCalledWith("l-1");
+    });
   });
 });
