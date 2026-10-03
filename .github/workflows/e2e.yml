@@ -60,6 +60,11 @@ jobs:
       - name: Migrate the database
         run: npm run db:migrate
 
+      # Skipped by ci.yml, which has no database. It works in a schema of its
+      # own and drops it, so it leaves nothing behind for the seed or the browser.
+      - name: Moving a house's region carries every record with it
+        run: npx vitest run server/__tests__/properties.integration.test.ts
+
       - name: Seed demo data
         run: npm run db:seed
 

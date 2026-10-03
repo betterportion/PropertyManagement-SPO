@@ -43,7 +43,7 @@ This portal is one of three SPO apps that will share one people layer. Read `doc
 | `npm run db:seed` | Demo data for an **empty** database, written through the real storage layer. Refuses to run if any properties exist. Optional `SEED_ADMIN_EMAIL` pre-creates an admin account that re-links on first sign-in |
 | `npm run db:push` | Push the schema directly, without a migration. Development only |
 
-**The gate is `npm run lint && npm run check && npm test && npm run build`.** Run all four before finishing. `.github/workflows/ci.yml` runs the same four on every push and pull request. `.github/workflows/e2e.yml` is a second workflow, running `npm run test:e2e` against a throwaway Postgres and a headless Chromium. It is deliberately outside the gate: it needs a database and a browser, which is exactly what the four checks above are built not to need.
+**The gate is `npm run lint && npm run check && npm test && npm run build`.** Run all four before finishing. `.github/workflows/ci.yml` runs the same four on every push and pull request. `.github/workflows/e2e.yml` is a second workflow, running `npm run test:e2e` against a throwaway Postgres and a headless Chromium, and first `properties.integration.test.ts`, which `ci.yml` skips for want of a database. It is deliberately outside the gate: it needs a database and a browser, which is exactly what the four checks above are built not to need.
 
 The linter catches mistakes, not style — formatting rules are off on purpose, so nothing here should ever produce a large reformatting diff. The 8 remaining warnings are React Compiler advice; one is in the generated `components/ui/` files, the rest in our own components and pages. Clearing them is issue #37.
 
