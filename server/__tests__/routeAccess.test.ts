@@ -10867,6 +10867,31 @@ describe("household portal access is by invitation from the house's RA (#217)", 
     expect(storageMock.grantResidentPortalAccess).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["an active login", true],
+    ["a login an admin switched off", false],
+  ])("refuses %s linked to another house, without moving or reactivating it or naming that house", async (_what, isActive) => {
+    actAs(STAFF, RA_WEST);
+    storageMock.getUserByEmailInsensitive.mockResolvedValue({ ...leader("jane", "jane.doe@example.com"), isActive, propertyId: "prop-east" });
+    const { status, body } = await GRANT();
+    expect(status).toBe(409);
+    expect(JSON.stringify(body)).not.toContain("prop-east");
+    expect(storageMock.grantResidentPortalAccess).not.toHaveBeenCalled();
+    expect(storageMock.createAuditEvent).not.toHaveBeenCalled();
+  });
+
+  it("gives access to a login linked to no house, such as someone who moved out of another (positive control)", async () => {
+    actAs(STAFF, RA_WEST);
+    storageMock.getUserByEmailInsensitive.mockResolvedValue({ ...leader("jane", "jane.doe@example.com"), isActive: false, propertyId: null });
+    storageMock.grantResidentPortalAccess.mockResolvedValue({
+      user: { ...leader("jane", "jane.doe@example.com") },
+      created: false,
+      previous: { ...leader("jane", "jane.doe@example.com"), isActive: false, propertyId: null },
+    });
+    expect((await GRANT()).status).toBe(200);
+    expect(storageMock.grantResidentPortalAccess).toHaveBeenCalled();
+  });
+
   it("removes access only from the login this house gave it to", async () => {
     actAs(STAFF, RA_WEST);
     storageMock.getUserByEmailInsensitive.mockResolvedValue({ ...leader("jane", "jane.doe@example.com"), propertyId: "prop-east" });
