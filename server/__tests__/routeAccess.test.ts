@@ -10566,6 +10566,118 @@ describe("every field that names a stored file checks the caller stored it", () 
   });
 });
 
+/**
+ * Replacing a file on an edit (#269). The old file stays readable by whoever
+ * uploaded it for as long as it sits in the bucket, so a billing edit or a
+ * house photo edit hands the file the record dropped to the same cleanup a
+ * delete uses. The first test of each kind is also the positive control: it
+ * shows the file store spy fires, so every "not removed" below means
+ * something.
+ */
+describe("replacing a stored file on an edit removes the one it replaced", () => {
+  const OLD_KEY = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.pdf";
+  const NEW_KEY = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.pdf";
+  const OLD_FILE = `/uploads/${OLD_KEY}`;
+  const NEW_FILE = `/uploads/${NEW_KEY}`;
+  const HOUSE = { id: "prop-1", name: "Cleveland House", address: "1 Main St", region: "West Central", ownership: "owned" };
+  const BILLING = { id: "bill-1", companyName: "Acme", email: "a@acme.test", phone: "555", invoiceCost: "10.00", region: "West Central" };
+
+  interface Edit {
+    name: string;
+    field: string;
+    path: string;
+    write: keyof typeof storageMock;
+    arrange: (current: string | null) => void;
+  }
+
+  const edits: Edit[] = [
+    ...(["contractInvoiceUrl", "coiUrl", "w9Url"] as const).map((field): Edit => ({
+      name: `a billing record's ${field}`,
+      field,
+      path: "/api/billing/bill-1",
+      write: "updateBillingRecord",
+      arrange: (current) => storageMock.getBillingRecord.mockResolvedValue({ ...BILLING, [field]: current }),
+    })),
+    {
+      name: "a house's photoUrl",
+      field: "photoUrl",
+      path: "/api/properties/prop-1",
+      write: "updateProperty",
+      arrange: (current) => storageMock.getProperty.mockResolvedValue({ ...HOUSE, photoUrl: current }),
+    },
+  ];
+
+  const arrange = (e: Edit, current: string | null) => {
+    actAs(ADMIN);
+    storageMock[e.write].mockImplementation(async (_id: string, patch: object) => ({ id: "x", ...patch }));
+    storageMock.getUploadByStorageKey.mockResolvedValue({ id: "u-new", storageKey: NEW_KEY, uploadedBy: ADMIN.id });
+    e.arrange(current);
+  };
+  const edit = (e: Edit, value: string | null) => request("PATCH", e.path, { body: { [e.field]: value } });
+
+  it.each(edits)("$name: removes the old file and its upload record when a new one replaces it", async (e) => {
+    arrange(e, OLD_FILE);
+    expect((await edit(e, NEW_FILE)).status).toBe(200);
+    expect(storageMock[e.write]).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ [e.field]: NEW_FILE }));
+    expect(fileStoreMock.removeUpload.mock.calls).toEqual([[OLD_KEY]]);
+    expect(storageMock.deleteUpload.mock.calls).toEqual([[OLD_KEY]]);
+  });
+
+  it.each(edits)("$name: removes the old file when the edit clears it", async (e) => {
+    arrange(e, OLD_FILE);
+    expect((await edit(e, null)).status).toBe(200);
+    expect(fileStoreMock.removeUpload.mock.calls).toEqual([[OLD_KEY]]);
+  });
+
+  it.each(edits)("$name: removes nothing when the same file is sent again", async (e) => {
+    arrange(e, OLD_FILE);
+    expect((await edit(e, OLD_FILE)).status).toBe(200);
+    expect(storageMock[e.write]).toHaveBeenCalled();
+    expect(storageMock.findUploadReferences).not.toHaveBeenCalled();
+    expect(fileStoreMock.removeUpload).not.toHaveBeenCalled();
+    expect(storageMock.deleteUpload).not.toHaveBeenCalled();
+  });
+
+  it.each(edits)("$name: removes nothing when the edit leaves the field alone", async (e) => {
+    arrange(e, OLD_FILE);
+    const other = e.field === "photoUrl" ? { name: "Renamed House" } : { companyName: "Acme Co" };
+    expect((await request("PATCH", e.path, { body: other })).status).toBe(200);
+    expect(storageMock[e.write]).toHaveBeenCalled();
+    expect(fileStoreMock.removeUpload).not.toHaveBeenCalled();
+  });
+
+  it.each(edits)("$name: keeps the old file when another record still points at it", async (e) => {
+    arrange(e, OLD_FILE);
+    storageMock.findUploadReferences.mockResolvedValue([{ kind: "billingRecord", record: { id: "bill-2" } }]);
+    expect((await edit(e, NEW_FILE)).status).toBe(200);
+    expect(storageMock.findUploadReferences).toHaveBeenCalledWith(OLD_FILE);
+    expect(fileStoreMock.removeUpload).not.toHaveBeenCalled();
+    expect(storageMock.deleteUpload).not.toHaveBeenCalled();
+  });
+
+  it.each(edits)("$name: removes nothing when the edit is refused", async (e) => {
+    arrange(e, OLD_FILE);
+    storageMock.getUploadByStorageKey.mockResolvedValue({ id: "u-new", storageKey: NEW_KEY, uploadedBy: "u-somebody-else" });
+    expect((await edit(e, NEW_FILE)).status).toBe(400);
+    expect(storageMock[e.write]).not.toHaveBeenCalled();
+    expect(fileStoreMock.removeUpload).not.toHaveBeenCalled();
+  });
+
+  it.each(edits)("$name: still answers 200 when the file store fails, because the edit is already saved", async (e) => {
+    arrange(e, OLD_FILE);
+    fileStoreMock.removeUpload.mockRejectedValue(new Error("bucket unreachable"));
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      expect((await edit(e, NEW_FILE)).status).toBe(200);
+      expect(storageMock[e.write]).toHaveBeenCalled();
+      expect(fileStoreMock.removeUpload).toHaveBeenCalledWith(OLD_KEY);
+      expect(storageMock.deleteUpload).not.toHaveBeenCalled();
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Guards on deletes and lists that no other test names
 //
