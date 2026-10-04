@@ -4325,7 +4325,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // residentId is not editable: moving a deduction between people is two
       // separate acts on two separate balances, and the trail should say so.
-      const body = insertDepositDeductionSchema.partial().omit({ residentId: true }).parse(req.body);
+      // walkthroughItemId is not editable either: an item takes one charge
+      // group only (#262), and re-pointing a deduction would defeat that.
+      const body = insertDepositDeductionSchema.partial().omit({ residentId: true, walkthroughItemId: true }).parse(req.body);
 
       const updated = await storage.updateDepositDeduction(req.params.id, body);
       const resident = await storage.getResident(existing.residentId);

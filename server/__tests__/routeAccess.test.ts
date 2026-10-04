@@ -9221,6 +9221,29 @@ describe("the deposit deduction ledger", () => {
     expect(patch).not.toHaveProperty("residentId");
   });
 
+  it("does not let an edit attach a deduction to a walkthrough item", async () => {
+    // A charged item takes one charge group only (#262). The edit schema
+    // strips the field, so a second charge cannot be reached by re-pointing
+    // an existing deduction at an item that already has one. The amount in
+    // the same body is the positive control: the update does run, without
+    // the item.
+    westLead();
+    storageMock.getDepositDeduction.mockResolvedValue({
+      id: "ded-1", residentId: "res-a", description: "x", amount: "10.00", region: "West Central",
+    });
+    storageMock.updateDepositDeduction.mockImplementation(async (_id, patch) => ({
+      id: "ded-1", residentId: "res-a", description: "x", amount: "10.00", ...patch,
+    }));
+    const { status } = await request("PATCH", "/api/deposit-deductions/ded-1", {
+      body: { walkthroughItemId: "item-already-charged", amount: 5 },
+    });
+    expect(status).toBe(200);
+    expect(storageMock.updateDepositDeduction).toHaveBeenCalledTimes(1);
+    const [, patch] = storageMock.updateDepositDeduction.mock.calls[0];
+    expect(patch).toHaveProperty("amount");
+    expect(patch).not.toHaveProperty("walkthroughItemId");
+  });
+
   // The positive control, and the audit event the spec asks for on an edit.
   it("records an audit event when a deduction is changed", async () => {
     westLead();
