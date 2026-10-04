@@ -39,7 +39,8 @@ function isLocalConnection(url: string): boolean {
  *   disable     no encryption; appropriate for a database on this machine
  *
  * Setting this explicitly also overrides any `sslmode` in the connection string,
- * so the deployment configuration has the final say.
+ * so the deployment configuration has the final say. `pg` itself would let the
+ * URL win, so `resolveConnection` removes the `sslmode` before the pool sees it.
  */
 function resolveSsl(url: string): pg.PoolConfig["ssl"] {
   const configured = process.env.DATABASE_SSL?.trim().toLowerCase();
@@ -60,6 +61,38 @@ function resolveSsl(url: string): pg.PoolConfig["ssl"] {
   }
 
   return isLocalConnection(url) ? false : { rejectUnauthorized: true };
+}
+
+/**
+ * Removes `sslmode` from the connection string's query. `pg` reads it off the
+ * URL and overwrites the `ssl` option with it, so a pasted `?sslmode=disable`
+ * would give an unencrypted connection whatever DATABASE_SSL says. Only the
+ * query is rewritten, so credentials in the rest of the string are untouched.
+ */
+function withoutSslmode(url: string): string {
+  const queryStart = url.indexOf("?");
+  if (queryStart === -1) return url;
+
+  const kept = url
+    .slice(queryStart + 1)
+    .split("&")
+    .filter((param) => param.split("=")[0].toLowerCase() !== "sslmode");
+  const base = url.slice(0, queryStart);
+  return kept.length > 0 ? `${base}?${kept.join("&")}` : base;
+}
+
+/**
+ * The connection string and TLS option the pool is built from. When
+ * DATABASE_SSL is set it is the only word on TLS; when it is not, the URL is
+ * left as given and the default above applies.
+ */
+export function resolveConnection(url: string): {
+  connectionString: string;
+  ssl: pg.PoolConfig["ssl"];
+} {
+  const ssl = resolveSsl(url);
+  const overridden = Boolean(process.env.DATABASE_SSL?.trim());
+  return { connectionString: overridden ? withoutSslmode(url) : url, ssl };
 }
 
 /**
@@ -85,8 +118,7 @@ function resolvePoolSize(): number {
 }
 
 export const pool = new Pool({
-  connectionString,
-  ssl: resolveSsl(connectionString),
+  ...resolveConnection(connectionString),
   max: resolvePoolSize(),
   // Managed providers hang up on connections left sitting; letting them go
   // first avoids handing a half-dead connection to the next request.
