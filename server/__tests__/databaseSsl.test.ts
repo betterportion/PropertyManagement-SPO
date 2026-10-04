@@ -5,6 +5,7 @@
  * `?sslmode=disable` gave an unencrypted connection whatever DATABASE_SSL said.
  */
 import { describe, it, expect, beforeAll, afterEach, vi } from "vitest";
+import { createRequire } from "node:module";
 
 let resolveConnection: typeof import("../db").resolveConnection;
 
@@ -16,6 +17,14 @@ beforeAll(async () => {
   ({ resolveConnection } = await import("../db"));
   vi.unstubAllEnvs();
 }, 60_000);
+
+// pg's own parameter handling, the second route: what the driver would really
+// connect with for a resolved connection, rather than our reading of the URL.
+const ConnectionParameters = createRequire(import.meta.url)("pg/lib/connection-parameters");
+
+function driverSsl(resolved: ReturnType<typeof resolveConnection>) {
+  return new ConnectionParameters({ ...resolved }).ssl;
+}
 
 function resolveFor(url: string, databaseSsl: string | undefined) {
   vi.stubEnv("DATABASE_SSL", databaseSsl as string);
@@ -73,5 +82,62 @@ describe("resolveConnection", () => {
     expect(() => resolveFor("postgresql://u:p@db.example.com/app", "verify-full")).toThrow(
       /DATABASE_SSL must be one of/,
     );
+  });
+
+  // Each of these is read off the URL by pg-connection-string and replaces the
+  // ssl option, so each has to go when DATABASE_SSL speaks.
+  const TLS_PARAMS = [
+    "ssl=0",
+    "ssl=false",
+    "ssl=no-verify",
+    "SSL=0",
+    "sslcert=/tmp/client.crt",
+    "sslkey=/tmp/client.key",
+    "sslrootcert=/tmp/ca.crt",
+    "uselibpqcompat=true",
+    "sslnegotiation=direct",
+  ];
+
+  it.each(TLS_PARAMS)("drops %s so DATABASE_SSL=require still verifies the certificate", (param) => {
+    const resolved = resolveFor(`postgresql://u:p@db.example.com:5432/app?${param}`, "require");
+    expect(resolved.connectionString).toBe("postgresql://u:p@db.example.com:5432/app");
+    expect(driverSsl(resolved)).toEqual({ rejectUnauthorized: true });
+  });
+
+  it("is not overridden by ssl=0 when the driver reads the resolved connection", () => {
+    const resolved = resolveFor(
+      "postgresql://u:p@db.example.com:5432/app?ssl=0&sslmode=disable&uselibpqcompat=true",
+      "require",
+    );
+    expect(driverSsl(resolved)).toEqual({ rejectUnauthorized: true });
+  });
+
+  it("drops every TLS parameter at once and keeps the others in order", () => {
+    const { connectionString } = resolveFor(
+      "postgresql://u:p@db.example.com:5432/app?a=b&sslcert=x&application_name=spo&SSLROOTCERT=y&ssl=0&sslkey=z&uselibpqcompat=true&sslmode=disable&connect_timeout=5&sslnegotiation=direct",
+      "require",
+    );
+    expect(connectionString).toBe(
+      "postgresql://u:p@db.example.com:5432/app?a=b&application_name=spo&connect_timeout=5",
+    );
+  });
+
+  it("leaves a password containing %3F and %26 untouched", () => {
+    const { connectionString } = resolveFor(
+      "postgresql://u:p%3Fssl%3D0%26x@db.example.com:5432/app?ssl=0&a=b",
+      "require",
+    );
+    expect(connectionString).toBe("postgresql://u:p%3Fssl%3D0%26x@db.example.com:5432/app?a=b");
+  });
+
+  it("does not touch a parameter whose name merely contains ssl, or whose value does", () => {
+    const url = "postgresql://u:p@db.example.com:5432/app?options=ssl&mysslmode=1&a=ssl=0";
+    expect(resolveFor(url, "require").connectionString).toBe(url);
+  });
+
+  it("leaves every TLS parameter alone when DATABASE_SSL is not set", () => {
+    const url =
+      "postgresql://u:p@db.example.com:5432/app?ssl=0&sslcert=x&sslkey=y&sslrootcert=z&uselibpqcompat=true&sslmode=require";
+    expect(resolveFor(url, undefined).connectionString).toBe(url);
   });
 });

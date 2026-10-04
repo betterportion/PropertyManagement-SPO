@@ -38,9 +38,11 @@ function isLocalConnection(url: string): boolean {
  *               certificate is signed by its own authority, and only knowingly
  *   disable     no encryption; appropriate for a database on this machine
  *
- * Setting this explicitly also overrides any `sslmode` in the connection string,
- * so the deployment configuration has the final say. `pg` itself would let the
- * URL win, so `resolveConnection` removes the `sslmode` before the pool sees it.
+ * Setting this explicitly also overrides every TLS parameter in the connection
+ * string (`ssl`, `sslmode`, `sslcert`, `sslkey`, `sslrootcert`, `uselibpqcompat`
+ * and `sslnegotiation`), so the deployment configuration has the final say. `pg`
+ * itself would let the URL win, so `resolveConnection` removes them before the
+ * pool sees it.
  */
 function resolveSsl(url: string): pg.PoolConfig["ssl"] {
   const configured = process.env.DATABASE_SSL?.trim().toLowerCase();
@@ -64,19 +66,38 @@ function resolveSsl(url: string): pg.PoolConfig["ssl"] {
 }
 
 /**
- * Removes `sslmode` from the connection string's query. `pg` reads it off the
- * URL and overwrites the `ssl` option with it, so a pasted `?sslmode=disable`
- * would give an unencrypted connection whatever DATABASE_SSL says. Only the
- * query is rewritten, so credentials in the rest of the string are untouched.
+ * The query parameters pg-connection-string (pg 8.23 / 2.14) reads off a URL and
+ * lets replace the `ssl` option: `ssl` itself (`ssl=0` is plaintext), `sslmode`,
+ * the three certificate paths (any one swaps `ssl` for an object built from
+ * them), `uselibpqcompat` (loosens what `sslmode` verifies) and `sslnegotiation`
+ * (`direct` turns `ssl` on as plain `true`). Lowercase; names are compared
+ * case-insensitively.
  */
-function withoutSslmode(url: string): string {
+const TLS_QUERY_PARAMS = new Set([
+  "ssl",
+  "sslmode",
+  "sslcert",
+  "sslkey",
+  "sslrootcert",
+  "uselibpqcompat",
+  "sslnegotiation",
+]);
+
+/**
+ * Removes the TLS parameters above from the connection string's query. `pg`
+ * applies them over the `ssl` option, so a pasted `?ssl=0` or `?sslmode=disable`
+ * would give an unencrypted or unverified connection whatever DATABASE_SSL says.
+ * Only the query is rewritten, so credentials in the rest of the string are
+ * untouched; other parameters keep their order.
+ */
+function withoutTlsParams(url: string): string {
   const queryStart = url.indexOf("?");
   if (queryStart === -1) return url;
 
   const kept = url
     .slice(queryStart + 1)
     .split("&")
-    .filter((param) => param.split("=")[0].toLowerCase() !== "sslmode");
+    .filter((param) => !TLS_QUERY_PARAMS.has(param.split("=")[0].toLowerCase()));
   const base = url.slice(0, queryStart);
   return kept.length > 0 ? `${base}?${kept.join("&")}` : base;
 }
@@ -92,7 +113,7 @@ export function resolveConnection(url: string): {
 } {
   const ssl = resolveSsl(url);
   const overridden = Boolean(process.env.DATABASE_SSL?.trim());
-  return { connectionString: overridden ? withoutSslmode(url) : url, ssl };
+  return { connectionString: overridden ? withoutTlsParams(url) : url, ssl };
 }
 
 /**
