@@ -119,7 +119,7 @@ import { buildRegionSummaries, type RegionStaff } from "./regionSummary";
 import { fromCents, returnedExceedsHeld, splitEvenly, toCents } from "@shared/depositLedger";
 import { hasBegunEverywhere } from "@shared/dueDates";
 import { fiscalYearLabel } from "@shared/fiscalYear";
-import { HOUSE_PORTAL_ACCOUNT_LIMIT } from "@shared/residents";
+import { HOUSE_PORTAL_ACCOUNT_LIMIT, isCurrentResident } from "@shared/residents";
 import { closeDepartedHouseholdLogins } from "./householdLogins";
 import { MAX_SNOOZE_DAYS, MAX_SNOOZE_MONTHS } from "@shared/assetLifecycle";
 import { randomBytes, randomUUID, timingSafeEqual } from "crypto";
@@ -3661,6 +3661,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const validatedData = insertResidentSchema.partial().parse(editable);
       // A person's edit: the sheet sync flags it if the sheet later changes it.
       const resident = await storage.updateResident(req.params.id, validatedData, { by: ctx.user.email ?? null, at: new Date() });
+      // A stop date ends household login access and rent charging, so changing
+      // it is on the record, old and new, never a silent overwrite (#260).
+      if (validatedData.moveOutDate !== undefined) {
+        const stopDay = (d: Date | null) => (d && !Number.isNaN(d.getTime()) ? d.toISOString().slice(0, 10) : null);
+        const from = stopDay(existing.moveOutDate);
+        const to = stopDay(validatedData.moveOutDate);
+        if (from !== to) {
+          const change = to === null ? `Cleared the stop date (was ${from})` : from === null ? `Set the stop date to ${to}` : `Changed the stop date from ${from} to ${to}`;
+          recordAuditEvent(ctx, {
+            action: AUDIT_ACTIONS.RESIDENT_STOP_DATE_CHANGED,
+            entityType: "resident",
+            entityId: existing.id,
+            summary: `${change} for ${existing.firstName} ${existing.lastName} at ${existing.buildingAddress}`,
+            details: { from, to, propertyId: existing.propertyId, region: existing.region },
+          });
+        }
+      }
       // Marked moved out, or a stop date already past: their household login ends now.
       await closeDepartedHouseholdLogins({ propertyId: existing.propertyId });
       res.json(resident);
@@ -3733,7 +3750,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
       if (moveOutDate > tomorrow) {
         return res.status(400).json({
-          message: "Record a move-out on or after the day they leave. To plan ahead, set their stop date on the roster instead.",
+          message: "Record a move-out on or after the day they leave. To plan ahead, set their stop date from Edit on their roster record instead.",
         });
       }
 
@@ -3906,7 +3923,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const roster = await storage.getResidentsByProperty(property.id);
-      const current = roster.filter((r) => r.isActive);
+      // Current means active and not past the stop date: nothing flips
+      // isActive when a stop date passes (#260).
+      const current = roster.filter((r) => isCurrentResident(r));
       const created = [];
       for (const resident of current) {
         const existing = await storage.getRentPaymentForResidentPeriod(resident.id, period);

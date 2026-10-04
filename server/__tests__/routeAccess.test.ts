@@ -7172,6 +7172,26 @@ describe("resident finances (regional leads only)", () => {
     expect(storageMock.createRentPayment).toHaveBeenCalledWith(expect.objectContaining({ residentId: "res-b", amount: "450" }));
   });
 
+  it("skips an active resident whose stop date has passed, and still charges one leaving later (#260)", async () => {
+    actAs(STAFF, { canViewFinancials: true, canManageFinancials: true, allowedRegions: ["West Central"] });
+    storageMock.getProperty.mockResolvedValue(WEST_PROPERTY);
+    storageMock.getResidentsByProperty.mockResolvedValue([
+      { ...WEST_RESIDENT, id: "res-stopped", isActive: true, moveOutDate: new Date("2020-01-31T00:00:00Z") },
+      { ...WEST_RESIDENT, id: "res-leaving", isActive: true, moveOutDate: new Date("2099-01-31T00:00:00Z") },
+    ]);
+    storageMock.getRentPaymentForResidentPeriod.mockResolvedValue(undefined);
+    storageMock.createRentPayment.mockImplementation(async (data: Record<string, unknown>) => ({ id: "new", ...data }));
+
+    const { status, body } = await request("POST", "/api/rent-payments/generate", {
+      body: { propertyId: WEST_PROPERTY.id, period: "2026-08", amount: 450 },
+    });
+
+    expect(status).toBe(200);
+    expect(body.created).toBe(1);
+    expect(storageMock.createRentPayment).toHaveBeenCalledTimes(1);
+    expect(storageMock.createRentPayment).toHaveBeenCalledWith(expect.objectContaining({ residentId: "res-leaving" }));
+  });
+
   it.each(["2026-13", "2026-00"])("refuses to generate HH fees for month %s (#163)", async (period) => {
     actAs(STAFF, { canViewFinancials: true, canManageFinancials: true, allowedRegions: ["West Central"] });
     storageMock.getProperty.mockResolvedValue(WEST_PROPERTY);
@@ -8861,6 +8881,70 @@ describe("resident roster sync", () => {
     const { status } = await request("PATCH", "/api/residents/r-1", { body: { notes: "Quiet" } });
     expect(status).toBe(200);
     expect(storageMock.updateResident).toHaveBeenCalledWith("r-1", expect.anything(), { by: STAFF.email, at: expect.any(Date) });
+  });
+});
+
+describe("recording a planned departure on the roster (#260)", () => {
+  const ROW = { id: "r-1", firstName: "Jane", lastName: "Doe", email: "jane@example.com", propertyId: "prop-west", region: "West Central", buildingAddress: "1 Main St", isActive: true, moveOutDate: null as Date | null };
+  const JANE_LOGIN = { id: "u-jane", email: "jane@example.com", role: "resident", isActive: true, propertyId: "prop-west" };
+  const stopAudits = () => storageMock.createAuditEvent.mock.calls.filter((c) => c[0]?.action === "resident.stop_date_changed");
+
+  beforeEach(() => {
+    actAs(STAFF, { canManageProperties: true, allowedRegions: ["West Central"] });
+    storageMock.getResident.mockResolvedValue(ROW);
+    storageMock.updateResident.mockImplementation(async (id: string, patch: Record<string, unknown>) => ({ ...ROW, id, ...patch }));
+    storageMock.getResidentsByProperty.mockResolvedValue([ROW]);
+    storageMock.getActiveResidentAccountsByProperty.mockResolvedValue([JANE_LOGIN]);
+    storageMock.deactivateAndUnlinkUser.mockResolvedValue({});
+  });
+
+  it("saves a stop date, audits it as set, and leaves the login alone while it is still ahead", async () => {
+    const { status } = await request("PATCH", "/api/residents/r-1", { body: { moveOutDate: "2099-05-20" } });
+    expect(status).toBe(200);
+    expect(storageMock.updateResident).toHaveBeenCalledWith("r-1", expect.objectContaining({ moveOutDate: new Date("2099-05-20") }), { by: STAFF.email, at: expect.any(Date) });
+    expect(stopAudits()).toHaveLength(1);
+    expect(stopAudits()[0][0]).toMatchObject({ entityType: "resident", entityId: "r-1", details: expect.objectContaining({ from: null, to: "2099-05-20" }) });
+    expect(stopAudits()[0][0].summary).toMatch(/Jane Doe/);
+    expect(storageMock.deactivateAndUnlinkUser).not.toHaveBeenCalled();
+  });
+
+  it("says old and new when it changes a recorded stop date", async () => {
+    storageMock.getResident.mockResolvedValue({ ...ROW, moveOutDate: new Date("2099-05-20T00:00:00Z") });
+    await request("PATCH", "/api/residents/r-1", { body: { moveOutDate: "2099-06-30" } });
+    expect(stopAudits()).toHaveLength(1);
+    expect(stopAudits()[0][0].summary).toMatch(/2099-05-20/);
+    expect(stopAudits()[0][0].summary).toMatch(/2099-06-30/);
+    expect(stopAudits()[0][0].details).toMatchObject({ from: "2099-05-20", to: "2099-06-30" });
+  });
+
+  it("audits clearing a recorded stop date, with the date it removed", async () => {
+    storageMock.getResident.mockResolvedValue({ ...ROW, moveOutDate: new Date("2099-05-20T00:00:00Z") });
+    await request("PATCH", "/api/residents/r-1", { body: { moveOutDate: null } });
+    expect(stopAudits()).toHaveLength(1);
+    expect(stopAudits()[0][0].details).toMatchObject({ from: "2099-05-20", to: null });
+    expect(stopAudits()[0][0].summary).toMatch(/2099-05-20/);
+  });
+
+  it("records no stop-date event when the date is the same, or the edit does not carry one", async () => {
+    storageMock.getResident.mockResolvedValue({ ...ROW, moveOutDate: new Date("2099-05-20T00:00:00Z") });
+    await request("PATCH", "/api/residents/r-1", { body: { moveOutDate: "2099-05-20" } });
+    await request("PATCH", "/api/residents/r-1", { body: { notes: "Quiet" } });
+    expect(stopAudits()).toHaveLength(0);
+  });
+
+  it("ends the household login straight away when the date set has already passed", async () => {
+    storageMock.getResidentsByProperty.mockResolvedValue([{ ...ROW, moveOutDate: new Date("2020-01-31T00:00:00Z") }]);
+    const { status } = await request("PATCH", "/api/residents/r-1", { body: { moveOutDate: "2020-01-31" } });
+    expect(status).toBe(200);
+    expect(storageMock.deactivateAndUnlinkUser).toHaveBeenCalledWith("u-jane");
+  });
+
+  it("refuses a resident in another region, changing and auditing nothing", async () => {
+    storageMock.getResident.mockResolvedValue({ ...ROW, region: "East Central" });
+    const { status } = await request("PATCH", "/api/residents/r-1", { body: { moveOutDate: "2099-05-20" } });
+    expect(status).toBe(403);
+    expect(storageMock.updateResident).not.toHaveBeenCalled();
+    expect(stopAudits()).toHaveLength(0);
   });
 });
 

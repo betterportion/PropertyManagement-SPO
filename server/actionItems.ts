@@ -32,6 +32,7 @@ import { summarizeSetup, setupRowsByProperty } from "@shared/propertySetup";
 import { assetLifecycle } from "@shared/assetLifecycle";
 import { depositReturnDeadline, fromCents, runningBalance } from "@shared/depositLedger";
 import { isPastDue } from "@shared/dueDates";
+import { isCurrentResident } from "@shared/residents";
 import type { ActionItemCategory, ActionItemSource } from "@shared/actionItems";
 import { isQuickBooksStale, QUICKBOOKS_STALE_AFTER_HOURS, type QuickBooksHealth } from "@shared/quickbooks";
 import { budgetPace } from "@shared/budgetPace";
@@ -331,7 +332,10 @@ export function buildActionItems(inputs: ActionItemInputs, now: Date = new Date(
       : null;
 
     // Somebody still living there with no departure planned needs nothing.
-    const hasLeft = resident ? !resident.isActive : false;
+    // Left means switched off or past their stop date (isCurrentResident):
+    // nothing flips isActive when a stop date passes, so the flag alone would
+    // leave a departed resident's deposit "soon" and never overdue (#260).
+    const hasLeft = resident ? !isCurrentResident(resident, now) : false;
     const leavingSoon =
       movingOut !== null && !Number.isNaN(movingOut.getTime()) && movingOut <= depositHorizon;
     if (!hasLeft && !leavingSoon) continue;

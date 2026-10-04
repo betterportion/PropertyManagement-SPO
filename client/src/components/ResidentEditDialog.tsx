@@ -39,6 +39,7 @@ const schema = z.object({
   phone: z.string().optional(),
   roomName: z.string().optional(),
   moveInDate: z.string().optional(),
+  moveOutDate: z.string().optional(),
   notes: z.string().optional(),
 });
 type Values = z.infer<typeof schema>;
@@ -70,6 +71,7 @@ export default function ResidentEditDialog({
       phone: resident.phone ?? "",
       roomName: resident.roomName ?? "",
       moveInDate: toDateInput(resident.moveInDate),
+      moveOutDate: toDateInput(resident.moveOutDate),
       notes: resident.notes ?? "",
     },
   });
@@ -84,6 +86,7 @@ export default function ResidentEditDialog({
         phone: resident.phone ?? "",
         roomName: resident.roomName ?? "",
         moveInDate: toDateInput(resident.moveInDate),
+        moveOutDate: toDateInput(resident.moveOutDate),
         notes: resident.notes ?? "",
       });
     }
@@ -98,6 +101,9 @@ export default function ResidentEditDialog({
         phone: values.phone?.trim() || null,
         roomName: values.roomName?.trim() || null,
         moveInDate: values.moveInDate || null,
+        // Sent only when changed, so saving some other field never rewrites a
+        // recorded stop date. The server audits the change, old and new.
+        ...((values.moveOutDate ?? "") !== toDateInput(resident.moveOutDate) ? { moveOutDate: values.moveOutDate || null } : {}),
         notes: values.notes?.trim() || null,
       }),
     onSuccess: () => {
@@ -174,6 +180,18 @@ export default function ResidentEditDialog({
                 <FormMessage />
               </FormItem>
             )} />
+            {resident.isActive && (
+              <FormField control={form.control} name="moveOutDate" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Stop date <span className="text-muted-foreground text-xs">(optional)</span></FormLabel>
+                  <FormControl><Input type="date" {...field} data-testid="input-edit-resident-stopdate" /></FormControl>
+                  <p className="text-xs text-muted-foreground">
+                    The day they plan to leave. After it, their household login and HH fee charges stop. Changes are recorded in the activity trail. To record someone who has already left, use Move out.
+                  </p>
+                  <FormMessage />
+                </FormItem>
+              )} />
+            )}
             <FormField control={form.control} name="notes" render={({ field }) => (
               <FormItem>
                 <FormLabel>Notes <span className="text-muted-foreground text-xs">(optional)</span></FormLabel>

@@ -42,4 +42,17 @@ describe("depositsToSettle", () => {
     // Positive control: the same deposits do list once the residents are known.
     expect(depositsToSettle(held, moved, []).map((x) => x.deposit.id)).toEqual(["dA"]);
   });
+
+  it("treats an active row whose stop date has passed as moved out (#260)", () => {
+    const now = new Date("2026-08-15T12:00:00Z");
+    const residents = [
+      { id: "past", isActive: true, moveOutDate: new Date("2026-08-14T00:00:00Z") },
+      { id: "today", isActive: true, moveOutDate: new Date("2026-08-15T00:00:00Z") },
+      { id: "later", isActive: true, moveOutDate: new Date("2026-09-01T00:00:00Z") },
+      { id: "none", isActive: true, moveOutDate: null },
+    ];
+    const held = ["past", "today", "later", "none"].map((id) => deposit(`d-${id}`, id, "held"));
+    // Only the one whose stop date is before today; the stop day itself still counts as living there.
+    expect(depositsToSettle(held, residents, [], now).map((x) => x.deposit.id)).toEqual(["d-past"]);
+  });
 });
