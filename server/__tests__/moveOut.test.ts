@@ -161,6 +161,19 @@ describe("deposit follow-through", () => {
     expect(item.overdue).toBe(true);
   });
 
+  it("does not call a deposit overdue on its deadline day, only once that day has ended (the dueDates rule)", () => {
+    // March 1 move-out plus 31 days: the deadline day is April 1.
+    const house = { depositReturnDays: 31 };
+    for (const evening of ["2027-03-31T23:30:00Z", "2027-04-01T17:00:00Z", "2027-04-02T05:00:00Z"]) {
+      const [item] = items({ property: house, now: new Date(evening) });
+      expect(item.title, evening).toBe("Deposit to return");
+      expect(item.overdue, evening).toBe(false);
+    }
+    const [late] = items({ property: house, now: new Date("2027-04-02T13:00:00Z") });
+    expect(late.title).toBe("Deposit overdue — 1 day past the return deadline");
+    expect(late.overdue).toBe(true);
+  });
+
   it("with no deadline anywhere, escalates by days since the move-out, and says no deadline is set", () => {
     // Nine days after a March 1 move-out: under the escalation threshold.
     expect(DEPOSIT_ESCALATE_AFTER_DAYS).toBe(14);

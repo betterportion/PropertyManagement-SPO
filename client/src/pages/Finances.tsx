@@ -76,7 +76,8 @@ export default function Finances() {
 
   const { data: payments = [], isLoading: rentLoading } = useQuery<RentPayment[]>({ queryKey: ["/api/rent-payments"] });
   const { data: deposits = [], isLoading: depLoading } = useQuery<SecurityDeposit[]>({ queryKey: ["/api/security-deposits"] });
-  const { data: residents = [] } = useQuery<Resident[]>({ queryKey: ["/api/residents"] });
+  const { data: residentsData } = useQuery<Resident[]>({ queryKey: ["/api/residents"] });
+  const residents = residentsData ?? [];
   const { data: properties = [] } = useQuery<Property[]>({ queryKey: ["/api/properties"] });
   const { data: deductions = [] } = useQuery<DepositDeduction[]>({ queryKey: ["/api/deposit-deductions"] });
 
@@ -337,7 +338,7 @@ export default function Finances() {
   const failedPayments = outstandingPayments.filter((p) => p.status === "failed");
   // Held or statement sent, for somebody who has gone, at the balance after
   // deductions -- the dashboard's rule (lib/depositsToSettle.ts).
-  const toSettle = depositsToSettle(inRegion(deposits), residents, deductions);
+  const toSettle = depositsToSettle(inRegion(deposits), residentsData, deductions);
 
   const renderOutstanding = () => {
     if (outstandingPayments.length === 0 && toSettle.length === 0) {
