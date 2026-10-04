@@ -69,10 +69,12 @@ The daily jobs log to the hosting provider's log stream. Nobody watches that log
   - **Turn off utilities at lease end:** two weeks before a rented house's lease ends, per house. Skipped when the house is renewing.
 
   Each task has a unique key, so it is created once. A cadence more than 60 days in the past is not back-filled.
+
+  The renew-or-leave task closes itself: the daily run marks it done once the house's renewal decision is no longer "undecided", and also when the renewal date changes (the changed date gets a new task and the old one is closed, so there is never a stale pair).
 - **What SPO must do:**
   - [ ] Keep each rented house's lease dates and renewal decision up to date on the property page. Owner: each RA.
 - **Needs:** nothing beyond the database.
-- **How to check it's working:** the tasks appear on the Tasks page on the dates above. The server log says `[seasonal] Created N recurring reminder task(s)`.
+- **How to check it's working:** the tasks appear on the Tasks page on the dates above. The server log says `[seasonal] Created N recurring reminder task(s)`, and `[seasonal] Closed N lease renewal reminder(s) that no longer apply` when it closes any.
 - **When it fails:** the error goes to the server log and the job tries again the next day. Nobody is notified.
 - **Status:** built.
 

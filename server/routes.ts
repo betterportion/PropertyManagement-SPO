@@ -1301,6 +1301,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   }
 
+  /**
+   * The stored files an edit drops: each named field the edit changes (or
+   * clears) whose current value is an upload. Handed to
+   * `removeDeletedRecordFiles` after the save, which keeps any file another
+   * record still points at. A field the edit leaves out, or resends
+   * unchanged, drops nothing.
+   */
+  function replacedFileUrls(
+    existing: Record<string, unknown>,
+    incoming: Record<string, unknown>,
+    fields: readonly string[],
+  ): string[] {
+    return fields.flatMap((field) => {
+      const before = existing[field];
+      const after = incoming[field];
+      if (after === undefined || typeof before !== "string" || before === "") return [];
+      return after === before ? [] : [before];
+    });
+  }
+
   app.get('/api/maintenance-requests/:id/comments', isAuthenticated, async (req: any, res) => {
     try {
       const ctx = await requireActiveUser(req, res);
@@ -6248,6 +6268,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       await requireOwnUploads(ctx, validatedData, BILLING_DOCUMENT_FIELDS, existingRecord);
 
       const record = await storage.updateBillingRecord(req.params.id, validatedData);
+      await removeDeletedRecordFiles(replacedFileUrls(existingRecord, validatedData, BILLING_DOCUMENT_FIELDS));
 
       recordAuditEvent(ctx, {
         action: AUDIT_ACTIONS.BILLING_RECORD_UPDATED,
@@ -6382,6 +6403,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       const property = await storage.updateProperty(req.params.id, updateData);
+      await removeDeletedRecordFiles(replacedFileUrls(existingProperty, validatedData, ["photoUrl"]));
 
       // Properties now carry document references -- the lease link and the
       // front-of-house photo -- and CLAUDE.md's standing rule is that anything

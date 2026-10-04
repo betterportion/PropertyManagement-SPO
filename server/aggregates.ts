@@ -138,8 +138,10 @@ export function contractorLoad(
     const request = byId.get(link.requestId);
     if (!request) continue;
     const existing = perContact.get(link.contactId);
-    if (existing) existing.requests.push(request);
-    else perContact.set(link.contactId, { requests: [request] });
+    if (!existing) perContact.set(link.contactId, { requests: [request] });
+    // One job is one job however many link rows say so (a double-click once
+    // made two); counted twice it reads as a repeat visit.
+    else if (!existing.requests.includes(request)) existing.requests.push(request);
   }
 
   const rows: ContractorLoad[] = [];
