@@ -14,6 +14,7 @@ import { describe, it, expect } from "vitest";
 import { BANKING_DETAILS_MESSAGE, containsBankingDetails } from "@shared/bankingDetails";
 import {
   insertDepositDeductionSchema,
+  insertPropertyBudgetSchema,
   insertRentPaymentSchema,
   insertSecurityDepositSchema,
 } from "@shared/schema";
@@ -139,6 +140,8 @@ describe("the finance fields that carry the rule", () => {
     ["deposit close-out reference", insertSecurityDepositSchema.partial(), { closeoutReference: CARD }],
     ["deposit earlier notes", insertSecurityDepositSchema.partial(), { deductionsNotes: CARD }],
     ["deduction description", insertDepositDeductionSchema.partial(), { description: CARD }],
+    // Shown to the household, unlike the other money notes (#258).
+    ["startup budget notes", insertPropertyBudgetSchema.partial(), { notes: CARD }],
   ];
 
   it.each(fields)("refuses a card number in the %s", (_name, schema, body) => {

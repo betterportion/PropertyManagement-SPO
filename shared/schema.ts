@@ -1963,7 +1963,8 @@ export const insertPropertyBudgetSchema = createInsertSchema(propertyBudgets)
   .extend({
     year: z.coerce.number().int().min(2000, "Use a four-digit year").max(2100),
     amount: nonNegativeAmount,
-    notes: z.string().trim().max(1000).nullish(),
+    // Returned to a household leader with the hub, so it takes the finance-text rule (#258).
+    notes: z.string().trim().max(1000).pipe(financeText).nullish(),
   });
 
 export type PropertyBudget = typeof propertyBudgets.$inferSelect;
