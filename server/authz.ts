@@ -29,6 +29,7 @@ import { getUserId } from "./auth";
 import { normalizeRegion, normalizeRegions } from "./migrateRegions";
 import { isClosedMaintenanceStatus, type Property, type Upload, type User, type UserPermissions } from "@shared/schema";
 import type { ActionItemSource } from "@shared/actionItems";
+import { isCurrentResident } from "@shared/residents";
 
 /** Names of the boolean permission columns on the user_permissions table. */
 export type PermissionName =
@@ -394,11 +395,7 @@ export function isCurrentRosterMember(
   login: { email: string | null; propertyId: string | null },
   now: Date = new Date(),
 ): boolean {
-  if (!row.isActive || !rosterRowSpeaksFor(row, login)) return false;
-  if (!row.moveOutDate) return true;
-  const stop = new Date(row.moveOutDate);
-  if (Number.isNaN(stop.getTime())) return false;
-  return stop.toISOString().slice(0, 10) >= now.toISOString().slice(0, 10);
+  return isCurrentResident(row, now) && rosterRowSpeaksFor(row, login);
 }
 
 /**
