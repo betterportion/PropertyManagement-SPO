@@ -6,11 +6,13 @@
  * is where one could be typed, so the API refuses two narrow shapes there:
  *
  *   1. A card number: typed the way a card is (one unbroken run of 13 to 19
- *      digits, four groups of four, or Amex's 4-6-5), starting with an
- *      issuer's digit (2 to 6), not four numbers counting up by one (a list
- *      of check numbers), and passing the Luhn check.
- *   2. A banking word -- routing, acct, account (number / no / # / is), ABA
- *      -- right next to a run of 6 or more digits that is not a date.
+ *      digits, four groups of four, or Amex's 4-6-5, with spaces, dashes,
+ *      dots or slashes between the groups), starting with an issuer's digit
+ *      (2 to 6), not four numbers counting up by one (a list of check
+ *      numbers), and passing the Luhn check.
+ *   2. A banking word -- routing, acct, a/c, account (number / no / # / is),
+ *      checking, savings, ABA -- right next to a run of 6 or more digits
+ *      that is not a date.
  *
  * Deliberately NOT "any long run of digits": QuickBooks and Ramp transaction
  * numbers and check numbers can be that long, and a rule that refuses real
@@ -29,12 +31,19 @@ export const BANKING_DETAILS_MESSAGE =
 /** What the finance forms show under each of these fields. */
 export const BANKING_DETAILS_HELP = "Amounts, dates and processor references only. Never account, routing or card numbers.";
 
-/** Digit groups joined by single spaces or dashes: "4111 1111-1111 1111". */
-const DIGIT_RUN = /\d+(?:[ -]\d+)*/g;
+/**
+ * What a card's groups are joined by as typed or pasted: spaces (a non-breaking
+ * one is what copying from a PDF gives), dashes, dots or slashes, in any mix
+ * and any number (#257).
+ */
+const SEP = "[ .\\/\\u00a0-]+";
+
+/** Digit groups joined by those separators: "4111 1111-1111.1111". */
+const DIGIT_RUN = new RegExp(`\\d+(?:${SEP}\\d+)*`, "g");
 
 /** The negative lookahead skips a date typed after the word ("acct 2026-09-29"). */
 const BANKING_WORD_NEXT_TO_NUMBER =
-  /\b(?:routing|acct|aba|account)(?:\s*(?:#|no\b|number\b))?(?:\s*is\b)?[\s:#.-]*(?!(?:\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4})\b)\d(?:[ -]?\d){5,}/i;
+  /\b(?:routing|acct|aba|account|a\/c|checking|savings)(?:\s*(?:#|no\b|number\b))?(?:\s*is\b)?[\s:#.-]*(?!(?:\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4})\b)\d(?:[ .\u00a0-]?\d){5,}/i;
 
 /** The Luhn checksum every card number carries. */
 function passesLuhn(digits: string): boolean {
@@ -54,16 +63,20 @@ function passesLuhn(digits: string): boolean {
  * The ways a card number is typed: one unbroken run, four groups of four
  * (with a short fifth group on a 17-19 digit card), or Amex's 4-6-5.
  */
-const CARD_SHAPES = [/^\d{13,19}$/, /^\d{4}(?:[ -]\d{4}){3}(?:[ -]\d{1,3})?$/, /^\d{4}[ -]\d{6}[ -]\d{5}$/];
+const CARD_SHAPES = [
+  /^\d{13,19}$/,
+  new RegExp(`^\\d{4}(?:${SEP}\\d{4}){3}(?:${SEP}\\d{1,3})?$`),
+  new RegExp(`^\\d{4}${SEP}\\d{6}${SEP}\\d{5}$`),
+];
 
 /** "2036 2037 2038 2039": check numbers written in a row, which no card is. */
 function countsUpByOne(candidate: string): boolean {
-  const groups = candidate.split(/[ -]/).map(Number);
+  const groups = candidate.split(new RegExp(SEP)).map(Number);
   return groups.length >= 4 && groups.every((group, i) => i === 0 || group === groups[i - 1] + 1);
 }
 
 function looksLikeCard(candidate: string): boolean {
-  const digits = candidate.replace(/[ -]/g, "");
+  const digits = candidate.replace(/\D/g, "");
   return (
     CARD_SHAPES.some((shape) => shape.test(candidate)) &&
     /^[2-6]/.test(digits) &&
@@ -80,11 +93,11 @@ function looksLikeCard(candidate: string): boolean {
  * keep a list of check numbers ("checks 2036 2037 2038 2039") from counting as one.
  */
 function runHoldsCardNumber(run: string): boolean {
-  const groups = run.match(/[ -]?\d+/g) ?? [];
+  const groups = run.match(new RegExp(`(?:${SEP})?\\d+`, "g")) ?? [];
   for (let start = 0; start < groups.length; start++) {
     for (let end = start + 1; end <= groups.length; end++) {
-      const candidate = groups.slice(start, end).join("").replace(/^[ -]/, "");
-      if (candidate.replace(/[ -]/g, "").length > 19) break;
+      const candidate = groups.slice(start, end).join("").replace(new RegExp(`^${SEP}`), "");
+      if (candidate.replace(/\D/g, "").length > 19) break;
       if (looksLikeCard(candidate)) return true;
     }
   }
