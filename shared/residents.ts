@@ -28,6 +28,28 @@ export function residentsActiveOn<T extends Pick<Resident, "moveInDate" | "moveO
 }
 
 /**
+ * Whether a roster row still counts as living in the house: active, and its
+ * stop date, if any, has not passed -- the stop day itself still counts.
+ * Compared as UTC calendar days, the way stop dates are stored; an unreadable
+ * stop date fails closed.
+ *
+ * The nightly job switches off a departed login, not the roster row, so
+ * `isActive` alone stays true past a stop date until somebody records the
+ * move-out. One rule for the access check (`isCurrentRosterMember`), the
+ * household mail-out and its recipient list. Pure.
+ */
+export function isCurrentResident(
+  row: { isActive: boolean; moveOutDate?: Date | string | null },
+  now: Date = new Date(),
+): boolean {
+  if (!row.isActive) return false;
+  if (!row.moveOutDate) return true;
+  const stop = new Date(row.moveOutDate);
+  if (Number.isNaN(stop.getTime())) return false;
+  return stop.toISOString().slice(0, 10) >= now.toISOString().slice(0, 10);
+}
+
+/**
  * How many household members of one house may have portal access at once:
  * the household leader and their stewards. An RA grants it from the roster
  * (server/routes.ts, /api/residents/:id/portal-access).

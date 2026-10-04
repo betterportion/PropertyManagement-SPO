@@ -16,6 +16,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { serverMessage } from "@/lib/serverMessage";
+import { isCurrentResident } from "@shared/residents";
 import type { Property, Resident } from "@shared/schema";
 
 /**
@@ -44,7 +45,9 @@ export default function EmailHouseholdDialog({
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
 
-  const active = residents.filter((resident) => resident.isActive);
+  // The server applies the same rule (`householdEmail`): a row past its stop
+  // date is still `isActive` until somebody records the move-out.
+  const active = residents.filter((resident) => isCurrentResident(resident));
 
   const send = useMutation({
     mutationFn: async () =>

@@ -103,6 +103,29 @@ describe("emailing a household", () => {
     ]);
   });
 
+  it("skips an active resident whose stop date has passed, and keeps today's (#259)", () => {
+    // The nightly job switches off the LOGIN, not the roster row, so a row
+    // past its stop date stays isActive until somebody records the move-out.
+    const day = 24 * 60 * 60 * 1000;
+    const now = Date.now();
+    const messages = householdEmail(
+      [
+        { email: "alice@example.com", isActive: true, moveOutDate: null },
+        { email: "left@example.com", isActive: true, moveOutDate: new Date(now - day) },
+        { email: "today@example.com", isActive: true, moveOutDate: new Date(now) },
+        { email: "soon@example.com", isActive: true, moveOutDate: new Date(now + day) },
+      ],
+      "Cleveland House",
+      "New door code",
+      "See the portal",
+    );
+    expect(messages.map((message) => message.to)).toEqual([
+      "alice@example.com",
+      "today@example.com",
+      "soon@example.com",
+    ]);
+  });
+
   it("skips anybody with no usable address rather than failing the whole send", () => {
     const messages = householdEmail(
       [...residents, { email: "", isActive: true }, { email: "nope", isActive: true }],
