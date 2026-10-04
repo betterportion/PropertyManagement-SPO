@@ -4141,6 +4141,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return resident;
   }
 
+  /**
+   * One walkthrough item is charged once. The worksheet's "already charged"
+   * skip lives in the browser, so two tabs or two finance staff could each
+   * charge the same item; the server is what refuses the second (#262).
+   * Passes (and does nothing) for a charge with no walkthrough item.
+   */
+  async function requireItemNotCharged(res: any, walkthroughItemId: string | null | undefined) {
+    if (!walkthroughItemId) return true;
+    const existing = await storage.getDepositDeductionsByWalkthroughItem(walkthroughItemId);
+    if (existing.length === 0) return true;
+    res.status(409).json({ message: "That walkthrough item has already been charged. Edit or delete the earlier charge instead." });
+    return false;
+  }
+
   /** One line for the trail. Names the person and the amount, as money should. */
   const deductionSummary = (
     verb: string,
@@ -4173,6 +4187,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const resident = await residentForDeduction(res, ctx, body.residentId);
       if (!resident) return;
+
+      if (!(await requireItemNotCharged(res, body.walkthroughItemId))) return;
 
       // The region and the house come from the resident, and the actor from
       // the session. None of the three is ever taken from the body.
@@ -4256,6 +4272,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       if (!requireRegion(res, ctx, property.region)) return;
 
+      if (!(await requireItemNotCharged(res, body.walkthroughItemId))) return;
+
       // Everybody charged has to actually live here. Without this a split
       // becomes a way to write a deduction against somebody in a region the
       // caller cannot reach.
@@ -4327,7 +4345,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // residentId is not editable: moving a deduction between people is two
       // separate acts on two separate balances, and the trail should say so.
-      const body = insertDepositDeductionSchema.partial().omit({ residentId: true }).parse(req.body);
+      // walkthroughItemId is not editable either: an item takes one charge
+      // group only (#262), and re-pointing a deduction would defeat that.
+      const body = insertDepositDeductionSchema.partial().omit({ residentId: true, walkthroughItemId: true }).parse(req.body);
 
       const updated = await storage.updateDepositDeduction(req.params.id, body);
       const resident = await storage.getResident(existing.residentId);

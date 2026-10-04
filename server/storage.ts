@@ -404,6 +404,7 @@ export interface IStorage {
   getAllDepositDeductions(): Promise<DepositDeduction[]>;
   getDepositDeduction(id: string): Promise<DepositDeduction | undefined>;
   getDepositDeductionsByResident(residentId: string): Promise<DepositDeduction[]>;
+  getDepositDeductionsByWalkthroughItem(walkthroughItemId: string): Promise<DepositDeduction[]>;
   createDepositDeduction(
     deduction: InsertDepositDeduction & DepositDeductionOwnedFields,
   ): Promise<DepositDeduction>;
@@ -2317,6 +2318,13 @@ export class DatabaseStorage implements IStorage {
       .from(depositDeductions)
       .where(eq(depositDeductions.residentId, residentId))
       .orderBy(desc(depositDeductions.chargeDate));
+  }
+
+  async getDepositDeductionsByWalkthroughItem(walkthroughItemId: string): Promise<DepositDeduction[]> {
+    return await db
+      .select()
+      .from(depositDeductions)
+      .where(eq(depositDeductions.walkthroughItemId, walkthroughItemId));
   }
 
   async createDepositDeduction(

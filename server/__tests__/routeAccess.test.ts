@@ -8354,6 +8354,27 @@ describe("startup budgets", () => {
     );
   });
 
+  it("refuses a card number in the budget notes, without writing (#258)", async () => {
+    // These notes are returned to a household leader, so they take the same
+    // finance-text rule as every other money note.
+    actAs(STAFF, { canManageProperties: true, allowedRegions: ["West Central"] });
+    const { status, body } = await request("PUT", "/api/properties/prop-west/budget", {
+      body: { year: 2026, amount: 2500, notes: "4111 1111 1111 1111" },
+    });
+    expect(status).toBe(400);
+    expect(JSON.stringify(body)).toContain("QuickBooks or Ramp reference");
+    expect(storageMock.upsertPropertyBudget).not.toHaveBeenCalled();
+  });
+
+  it("still takes ordinary budget notes (#258 positive control)", async () => {
+    actAs(STAFF, { canManageProperties: true, allowedRegions: ["West Central"] });
+    const { status } = await request("PUT", "/api/properties/prop-west/budget", {
+      body: { year: 2026, amount: 2500, notes: "Includes two mattresses, Ramp txn 4829301756" },
+    });
+    expect(status).toBe(200);
+    expect(storageMock.upsertPropertyBudget).toHaveBeenCalledTimes(1);
+  });
+
   it("takes the region from the house, never the body", async () => {
     actAs(STAFF, { canManageProperties: true, allowedRegions: ["West Central"] });
     const { status } = await request("PUT", "/api/properties/prop-west/budget", {
@@ -9004,6 +9025,7 @@ describe("the deposit deduction ledger", () => {
     storageMock.getProperty.mockResolvedValue(WEST_PROPERTY);
     storageMock.getResidentsByProperty.mockResolvedValue([ALICE_RESIDENT]);
     storageMock.getAllDepositDeductions.mockResolvedValue([]);
+    storageMock.getDepositDeductionsByWalkthroughItem.mockResolvedValue([]);
     storageMock.createDepositDeduction.mockImplementation(async (d) => ({ id: "ded-1", ...d }));
     storageMock.createDepositDeductions.mockImplementation(async (rows) =>
       rows.map((row: Record<string, unknown>, index: number) => ({ id: `ded-${index}`, ...row })),
@@ -9018,6 +9040,25 @@ describe("the deposit deduction ledger", () => {
     amount: 75,
     chargeDate: "2026-06-01",
   };
+
+  // ── One walkthrough item is charged once (#262) ──────────────────────────
+  it("refuses a second charge for a walkthrough item already charged, without writing", async () => {
+    westLead();
+    storageMock.getDepositDeductionsByWalkthroughItem.mockResolvedValue([{ id: "ded-0", walkthroughItemId: "item-1" }]);
+    const { status } = await deduct({ ...validDeduction, walkthroughItemId: "item-1" });
+    expect(status).toBe(409);
+    expect(storageMock.createDepositDeduction).not.toHaveBeenCalled();
+    expect(storageMock.createAuditEvent).not.toHaveBeenCalled();
+  });
+
+  it("charges a walkthrough item the first time (positive control)", async () => {
+    westLead();
+    storageMock.getDepositDeductionsByWalkthroughItem.mockResolvedValue([]);
+    const { status } = await deduct({ ...validDeduction, walkthroughItemId: "item-1" });
+    expect(status).toBe(200);
+    expect(storageMock.getDepositDeductionsByWalkthroughItem).toHaveBeenCalledWith("item-1");
+    expect(storageMock.createDepositDeduction).toHaveBeenCalledTimes(1);
+  });
 
   // ── Residents never see any of this ──────────────────────────────────────
 
@@ -9180,6 +9221,29 @@ describe("the deposit deduction ledger", () => {
     expect(patch).not.toHaveProperty("residentId");
   });
 
+  it("does not let an edit attach a deduction to a walkthrough item", async () => {
+    // A charged item takes one charge group only (#262). The edit schema
+    // strips the field, so a second charge cannot be reached by re-pointing
+    // an existing deduction at an item that already has one. The amount in
+    // the same body is the positive control: the update does run, without
+    // the item.
+    westLead();
+    storageMock.getDepositDeduction.mockResolvedValue({
+      id: "ded-1", residentId: "res-a", description: "x", amount: "10.00", region: "West Central",
+    });
+    storageMock.updateDepositDeduction.mockImplementation(async (_id, patch) => ({
+      id: "ded-1", residentId: "res-a", description: "x", amount: "10.00", ...patch,
+    }));
+    const { status } = await request("PATCH", "/api/deposit-deductions/ded-1", {
+      body: { walkthroughItemId: "item-already-charged", amount: 5 },
+    });
+    expect(status).toBe(200);
+    expect(storageMock.updateDepositDeduction).toHaveBeenCalledTimes(1);
+    const [, patch] = storageMock.updateDepositDeduction.mock.calls[0];
+    expect(patch).toHaveProperty("amount");
+    expect(patch).not.toHaveProperty("walkthroughItemId");
+  });
+
   // The positive control, and the audit event the spec asks for on an edit.
   it("records an audit event when a deduction is changed", async () => {
     westLead();
@@ -9241,6 +9305,7 @@ describe("splitting a common-area charge across a house", () => {
       id === "prop-west" ? WEST_PROPERTY : id === "prop-east" ? EAST_PROPERTY : undefined,
     );
     storageMock.getResidentsByProperty.mockResolvedValue(HOUSE);
+    storageMock.getDepositDeductionsByWalkthroughItem.mockResolvedValue([]);
     storageMock.createDepositDeductions.mockImplementation(async (rows) =>
       rows.map((row: Record<string, unknown>, index: number) => ({ id: `ded-${index}`, ...row })),
     );
@@ -9266,6 +9331,24 @@ describe("splitting a common-area charge across a house", () => {
     westLead();
     expect((await split({ ...validSplit, propertyId: "prop-east" })).status).toBe(403);
     expect(storageMock.createDepositDeductions).not.toHaveBeenCalled();
+  });
+
+  it("refuses a split for a walkthrough item already charged, without writing (#262)", async () => {
+    westLead();
+    storageMock.getDepositDeductionsByWalkthroughItem.mockResolvedValue([{ id: "ded-0", walkthroughItemId: "item-1" }]);
+    const { status } = await split({ ...validSplit, walkthroughItemId: "item-1" });
+    expect(status).toBe(409);
+    expect(storageMock.createDepositDeductions).not.toHaveBeenCalled();
+    expect(storageMock.createAuditEvent).not.toHaveBeenCalled();
+  });
+
+  it("splits a walkthrough item the first time (positive control, #262)", async () => {
+    westLead();
+    storageMock.getDepositDeductionsByWalkthroughItem.mockResolvedValue([]);
+    const { status } = await split({ ...validSplit, walkthroughItemId: "item-1" });
+    expect(status).toBe(200);
+    expect(storageMock.getDepositDeductionsByWalkthroughItem).toHaveBeenCalledWith("item-1");
+    expect(storageMock.createDepositDeductions).toHaveBeenCalledTimes(1);
   });
 
   it("refuses a split naming the same person twice, without writing (#163)", async () => {
