@@ -353,7 +353,41 @@ Render does not run migrations for you, and this project does not run them at st
 DATABASE_URL="<direct connection string>" npm run db:migrate
 ```
 
-Do this **before** deploying code that depends on the new columns. Render's shell on a paid instance can run it, or run it from a laptop with the direct connection string.
+Render's shell on a paid instance can run it, or run it from a laptop with the direct connection string.
+
+**The order, every time a change adds a file to `migrations/`:**
+
+1. On production, take the safety copy first (next heading).
+2. Run `db:migrate`.
+3. Only then let the new code deploy.
+
+**Migrate before the code, never after.** Code that expects a new column or index fails against a database that does not have it yet. The example that caught us: migration `0042_request_contact_unique_link` adds a unique index, and the new "link a contractor to a request" code relies on that index (`onConflictDoNothing` on `request_contacts`). Deploy the code first and every link-contact call answers 500 until someone runs the migration (#264, #282). Running the migration first is safe for the code that is still live, because these migrations only add things (inference: a migration that drops or renames a column would break the old code during the gap, so a pull request with one needs a developer's plan for the order).
+
+#### Safety copy before every production `db:migrate`
+
+A migration that fails halfway rolls itself back and leaves the database as it was. One that finishes but does the wrong thing cannot be undone from inside the portal, so take a copy of the database first, **every time, however small the migration looks**. This is the same dump as in step 11's rehearsal, with the date in the file name:
+
+```bash
+pg_dump --no-owner --no-acl --schema=public --schema=drizzle \
+  "<production direct connection string>" > spo-pre-migrate-YYYY-MM-DD.sql
+```
+
+Replace `YYYY-MM-DD` with today's date (add `-2` if it is the second one that day). Then check it before going on: the file should be megabytes, not zero bytes (`ls -lh spo-pre-migrate-*.sql`), and its last lines should say `PostgreSQL database dump complete` (`tail -n 3 spo-pre-migrate-YYYY-MM-DD.sql`). If `pg_dump` stops with a message that its version is older than the server's, install a newer `pg_dump` rather than carrying on without a copy.
+
+The file holds every resident's name and email and the finance rows. Keep it somewhere private, not in the repository or a chat, and delete it once the migration has been live and fine for a week. Run the dump immediately before the migration: whatever is entered between the dump and the migration is lost if you restore from it.
+
+#### Auto-deploy: off on production, on for staging
+
+- **Production: switch off the service's auto-deploy setting** so that merging to `main` does not ship code by itself. With it on, the new code goes live the moment it merges, possibly before anyone has run `db:migrate`, which is the failure above. With it off, a person deploys on purpose, after the migration. The exact menu wording in Render's dashboard has not been checked (the runbook does not name it); look for the auto-deploy setting in the production service's settings and confirm it shows as off.
+- **Staging** auto-deploys from `main` (reported in issue #273; not checked in Render). That is fine there, because nobody's real data is at risk, but it means staging can run new code before its migration. Run `db:migrate` against staging **before merging** a change that adds a migration file, or accept a few minutes of errors on staging.
+
+#### Going back after a bad deploy
+
+Migrations only go forward: there are no "down" files, so nothing undoes one.
+
+- **No migration ran since the earlier deploy:** rolling the service back to that earlier deploy in Render is safe. (The deploys list on the service is where an earlier deploy is chosen; exact button wording not checked.)
+- **A migration ran since then:** do **not** roll the code back on its own. The old code meets a database it was not written for. The way back is the safety copy taken just before that migration, restored as a whole database, which **loses everything entered since the copy was taken**. Follow "Restoring production for real" in step 11. Its second step uses Supabase's daily backup; the safety copy is a plain SQL file, loaded the way step 11's rehearsal step 2 loads it, into an empty database. Loading it over the live production database means emptying the `public` and `drizzle` schemas first, which this runbook has not rehearsed, so ask a developer to do it with you.
+- If the fix is small, a new migration and a new deploy going forward is usually better than either.
 
 ---
 
@@ -485,7 +519,8 @@ Repeat steps 1, 2, 3, 5 and 6 with **separate resources**:
 - a **separate Supabase project** (not a second bucket in the staging project), on a **paid tier** so it has daily backups and does not pause,
 - a **separate Google OAuth client**, with the production redirect URI (External, In production, exactly as in step 5),
 - a **separate Render service**, on a paid instance so it does not sleep, still at **one instance**,
-- a **fresh `SESSION_SECRET`**.
+- a **fresh `SESSION_SECRET`**,
+- **auto-deploy switched off** on that Render service (see "Auto-deploy" under step 6's "Migrations on deploy").
 
 Separate projects, not shared ones. A shared database means a staging mistake damages real data; a shared OAuth client means a staging redirect URI is trusted in production.
 
@@ -535,7 +570,8 @@ A backup nobody has restored is a guess. Once, before real data, restore both ha
    ```
 3. **Files:** copy the bucket backup into the scratch bucket, the other way round: `rclone copy spo-backup:spo-uploads spo-scratch:uploads`.
 4. **Check it:** run the portal locally against the scratch project (step 4's variables, with the scratch database, URL and service role key). Sign in, open a walkthrough with photos and a billing record with a document, and confirm both display. `select count(*) from uploads;` should be close to the number of objects in the scratch bucket (new uploads since the last copy account for any gap).
-5. Write down the date, how long it took, and anything that did not go as written, and correct this section to match. Then delete the scratch project, and the test records from production.
+5. **Rehearse the safety copy too.** Take the pre-migrate dump from "Migrations on deploy" on production, with its file name, and load that file into a second scratch project the way step 2 does. Check it loads without errors and the portal runs against it. Note how long the dump took.
+6. Write down the date, how long it took, and anything that did not go as written, and correct this section to match. Then delete the scratch project, and the test records from production.
 
 ### Restoring production for real
 
@@ -638,6 +674,7 @@ If a later move is from a portal that already holds data: agree a quiet window; 
 - **A Workspace domain restriction refusing leaders** ("This portal only accepts SPO accounts") — `OIDC_ALLOWED_DOMAINS` is set. Remove it and restart.
 - **Files not appearing** — check `STORAGE_DRIVER=supabase` and the service role key.
 - **Data lost or damaged** — restore from backup (step 11).
+- **A bad deploy**: see "Going back after a bad deploy" under step 6's "Migrations on deploy" before rolling anything back.
 
 ---
 
