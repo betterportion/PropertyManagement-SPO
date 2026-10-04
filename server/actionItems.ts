@@ -361,7 +361,7 @@ export function buildActionItems(inputs: ActionItemInputs, now: Date = new Date(
     // with no deadline, by how long since they left.
     const daysSince = (from: Date) => Math.floor((now.getTime() - from.getTime()) / DAY_MS);
     let title = leavingSoon && !hasLeft ? "Deposit to return soon" : "Deposit to return";
-    if (hasLeft && deadline && deadline < now) {
+    if (hasLeft && deadline && isPastDue(deadline, now)) {
       const late = Math.max(1, daysSince(deadline));
       title = `Deposit overdue — ${late} day${late === 1 ? "" : "s"} past the return deadline`;
     } else if (hasLeft && !deadline && movingOut && daysSince(movingOut) >= DEPOSIT_ESCALATE_AFTER_DAYS) {
