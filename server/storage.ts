@@ -1872,13 +1872,11 @@ export class DatabaseStorage implements IStorage {
   }
 
   async linkContactToRequest(requestId: string, contactId: string): Promise<void> {
-    const existing = await db
-      .select()
-      .from(requestContacts)
-      .where(and(eq(requestContacts.requestId, requestId), eq(requestContacts.contactId, contactId)));
-    if (existing.length === 0) {
-      await db.insert(requestContacts).values({ requestId, contactId });
-    }
+    // The unique index makes a double-click a no-op rather than a second row.
+    await db
+      .insert(requestContacts)
+      .values({ requestId, contactId })
+      .onConflictDoNothing({ target: [requestContacts.requestId, requestContacts.contactId] });
   }
 
   async unlinkContactFromRequest(requestId: string, contactId: string): Promise<void> {

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 
 // dueSeasonalTasks is pure, but its module pulls in the storage layer (and thus
 // the db) for the generator/job; stub the db so the import doesn't require a
@@ -166,6 +166,7 @@ describe("the lease renewal reminder in the region summary (#162)", () => {
   async function generatedTasks(): Promise<Task[]> {
     vi.spyOn(storage, "getAllProperties").mockResolvedValue([house]);
     vi.spyOn(storage, "getTaskBySourceKey").mockResolvedValue(undefined);
+    vi.spyOn(storage, "getAllTasks").mockResolvedValue([]);
     const created: Task[] = [];
     vi.spyOn(storage, "createTask").mockImplementation(async (task) => {
       const row = { id: `t${created.length}`, ...task } as Task;
@@ -210,5 +211,76 @@ describe("the lease renewal reminder in the region summary (#162)", () => {
     const specs = dueSeasonalTasks(regionsOnly, utc(2026, 5, 1));
     const summer = specs.find((s) => s.sourceKey.startsWith("utilities-summer:"));
     expect(summer?.category).toBe("safety");
+  });
+});
+
+describe("closing a lease renewal reminder that no longer applies (#263)", () => {
+  // The generator, not dueSeasonalTasks: clearing is a write to the open task,
+  // so only a run against a storage mock can show it happened.
+  const NOW = new Date("2026-08-15T00:00:00Z");
+  const house = (over: Record<string, unknown> = {}) =>
+    ({
+      id: "p1",
+      name: "Cleveland House",
+      region: "West Central",
+      ownership: "rented",
+      renewalDecision: "undecided",
+      leaseEndDate: new Date("2027-06-30T00:00:00Z"),
+      leaseRenewalDate: new Date("2026-09-15T00:00:00Z"),
+      ...over,
+    }) as unknown as Property;
+  const task = (sourceKey: string, status: "open" | "done" = "open") =>
+    ({ id: `t-${sourceKey}`, sourceKey, status, category: "property" }) as Task;
+
+  async function run(properties: Property[], tasks: Task[]) {
+    vi.spyOn(storage, "getAllProperties").mockResolvedValue(properties);
+    vi.spyOn(storage, "getAllTasks").mockResolvedValue(tasks);
+    vi.spyOn(storage, "getTaskBySourceKey").mockImplementation(async (key) => tasks.find((t) => t.sourceKey === key));
+    const createTask = vi.spyOn(storage, "createTask").mockImplementation(async (t) => ({ id: "new", ...t }) as Task);
+    const updateTask = vi.spyOn(storage, "updateTask").mockImplementation(async (id, data) => ({ id, ...data }) as Task);
+    await generateSeasonalTasks(NOW);
+    return { createTask, updateTask };
+  }
+
+  afterEach(() => vi.restoreAllMocks());
+
+  it("marks the open reminder done once the decision is recorded", async () => {
+    const open = task("lease-renewal:p1:2026-09-15");
+    const { updateTask } = await run([house({ renewalDecision: "renewing" })], [open]);
+    expect(updateTask).toHaveBeenCalledTimes(1);
+    expect(updateTask).toHaveBeenCalledWith(open.id, expect.objectContaining({ status: "done", completedAt: expect.any(Date) }));
+  });
+
+  it("does the same for a decision to leave", async () => {
+    const open = task("lease-renewal:p1:2026-09-15");
+    const { updateTask } = await run([house({ renewalDecision: "not_renewing" })], [open]);
+    expect(updateTask).toHaveBeenCalledWith(open.id, expect.objectContaining({ status: "done" }));
+  });
+
+  it("leaves the reminder open while the decision is still undecided (positive control)", async () => {
+    const { updateTask, createTask } = await run([house()], [task("lease-renewal:p1:2026-09-15")]);
+    expect(updateTask).not.toHaveBeenCalled();
+    expect(createTask).not.toHaveBeenCalledWith(expect.objectContaining({ sourceKey: "lease-renewal:p1:2026-09-15" }));
+  });
+
+  it("closes the old reminder and raises one for the new date when the renewal date moves", async () => {
+    const old = task("lease-renewal:p1:2026-09-15");
+    const { updateTask, createTask } = await run([house({ leaseRenewalDate: new Date("2026-10-01T00:00:00Z") })], [old]);
+    expect(updateTask).toHaveBeenCalledWith(old.id, expect.objectContaining({ status: "done" }));
+    expect(createTask).toHaveBeenCalledWith(expect.objectContaining({ sourceKey: "lease-renewal:p1:2026-10-01" }));
+  });
+
+  it("does not touch a reminder that is already done, or other kinds of task", async () => {
+    const { updateTask } = await run(
+      [house({ renewalDecision: "renewing" })],
+      [task("lease-renewal:p1:2026-09-15", "done"), task("utilities-lease:p1:2027-06-30"), task("walkthrough:apr:West Central:2026")],
+    );
+    expect(updateTask).not.toHaveBeenCalled();
+  });
+
+  it("is idempotent: a second run over the now-done task writes nothing", async () => {
+    const done = { ...task("lease-renewal:p1:2026-09-15"), status: "done" } as Task;
+    const { updateTask } = await run([house({ renewalDecision: "renewing" })], [done]);
+    expect(updateTask).not.toHaveBeenCalled();
   });
 });

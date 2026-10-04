@@ -77,6 +77,16 @@ const utc = (year: number, month1: number, day: number) => new Date(Date.UTC(yea
 const daysBefore = (date: Date, n: number) => new Date(date.getTime() - n * DAY_MS);
 const isoDay = (date: Date) => date.toISOString().slice(0, 10);
 
+const LEASE_RENEWAL_KEY_PREFIX = "lease-renewal:";
+
+/**
+ * The date a house's renew-or-leave decision is against: the renewal date when
+ * there is one, and the lease END otherwise.
+ */
+const decisionDate = (lease: SeasonalLease): Date => lease.leaseRenewalDate ?? lease.leaseEndDate;
+const leaseRenewalKey = (lease: SeasonalLease): string =>
+  `${LEASE_RENEWAL_KEY_PREFIX}${lease.propertyId}:${isoDay(decisionDate(lease))}`;
+
 /** True while `now` is on or after the appear date and still inside the window. */
 function inCreateWindow(appear: Date, now: Date): boolean {
   return now >= appear && now.getTime() - appear.getTime() <= SEASONAL_CREATE_WINDOW_DAYS * DAY_MS;
@@ -128,15 +138,14 @@ export function dueSeasonalTasks(inputs: SeasonalInputs, now: Date): SeasonalTas
   // has already settled.
   for (const lease of inputs.rentedLeases) {
     if (lease.renewalDecision !== "undecided") continue;
-    // The renewal date when there is one, and the lease END otherwise: a house
-    // that never had a decision date still has a lease that runs out, and that
-    // is the date the decision is actually against.
-    const decisionBy = lease.leaseRenewalDate ?? lease.leaseEndDate;
+    // A house that never had a decision date still has a lease that runs out,
+    // and that is the date the decision is actually against.
+    const decisionBy = decisionDate(lease);
     if (!decisionBy) continue;
     const appear = daysBefore(decisionBy, LEASE_RENEWAL_NOTICE_DAYS);
     if (inCreateWindow(appear, now)) {
       specs.push({
-        sourceKey: `lease-renewal:${lease.propertyId}:${isoDay(decisionBy)}`,
+        sourceKey: leaseRenewalKey(lease),
         category: "property",
         title: `Renew or leave? — ${lease.name}`,
         notes:
@@ -165,7 +174,26 @@ export function dueSeasonalTasks(inputs: SeasonalInputs, now: Date): SeasonalTas
   return specs;
 }
 
-/** Creates any due reminder that is not already on file. Returns how many. */
+/**
+ * Marks done every open lease-renewal reminder that no longer applies, so the
+ * promise in its notes ("record the decision so this reminder clears") holds.
+ * A reminder applies only while its house is a rented lease still `undecided`
+ * and its key still names that house's current decision date: a moved renewal
+ * date raises a new reminder (a new key), and the old one is closed here rather
+ * than left open beside it. Returns how many were closed.
+ */
+async function closeStaleLeaseRenewalTasks(rentedLeases: SeasonalLease[], now: Date): Promise<number> {
+  const liveKeys = new Set(rentedLeases.filter((l) => l.renewalDecision === "undecided").map(leaseRenewalKey));
+  const open = (await storage.getAllTasks()).filter(
+    (t) => t.status === "open" && t.sourceKey?.startsWith(LEASE_RENEWAL_KEY_PREFIX) && !liveKeys.has(t.sourceKey),
+  );
+  for (const task of open) {
+    await storage.updateTask(task.id, { status: "done", completedBy: null, completedAt: now });
+  }
+  return open.length;
+}
+
+/** Creates any due reminder that is not already on file, and closes lease-renewal reminders that no longer apply. Returns how many were created. */
 export async function generateSeasonalTasks(now: Date): Promise<number> {
   const properties = await storage.getAllProperties();
   const regions = Array.from(new Set(properties.map((p) => p.region).filter((r): r is string => !!r)));
@@ -179,6 +207,9 @@ export async function generateSeasonalTasks(now: Date): Promise<number> {
       leaseRenewalDate: p.leaseRenewalDate ? new Date(p.leaseRenewalDate) : null,
       renewalDecision: p.renewalDecision,
     }));
+
+  const closed = await closeStaleLeaseRenewalTasks(rentedLeases, now);
+  if (closed > 0) console.info(`[seasonal] Closed ${closed} lease renewal reminder(s) that no longer apply`);
 
   let created = 0;
   for (const spec of dueSeasonalTasks({ regions, rentedLeases }, now)) {
