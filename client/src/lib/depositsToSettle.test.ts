@@ -35,4 +35,11 @@ describe("depositsToSettle", () => {
     );
     expect(list).toEqual([]);
   });
+
+  it("lists nothing while the residents list is unavailable, rather than calling everyone a former resident", () => {
+    const held = [deposit("dA", "a", "held"), deposit("dHere", "here", "held")];
+    expect(depositsToSettle(held, undefined, [])).toEqual([]);
+    // Positive control: the same deposits do list once the residents are known.
+    expect(depositsToSettle(held, moved, []).map((x) => x.deposit.id)).toEqual(["dA"]);
+  });
 });

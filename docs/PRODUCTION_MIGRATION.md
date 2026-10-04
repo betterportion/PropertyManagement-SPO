@@ -149,6 +149,8 @@ In the Supabase dashboard, **Storage → New bucket**:
 
 **The bucket must be private.** This is the single most important setting in this document. The portal holds W-9s, certificates of insurance, contract invoices and photographs of people's homes. A public bucket makes every one of those readable by anyone who knows or guesses the URL, with no sign-in — and because storage keys are the only thing protecting them, nothing else in the app can compensate.
 
+The server also checks this for you. At startup with `STORAGE_DRIVER=supabase` it asks Supabase whether the bucket is public, and **refuses to start** (the deploy fails and the previous version keeps serving) if the answer is yes. If Supabase cannot be reached or does not answer within 5 seconds, the server starts anyway and logs `Could not confirm the "uploads" storage bucket is private`; treat that line as a reason to check the bucket by hand (step 7's `curl` test), because the check only stops a bucket it can see is public.
+
 The app never relies on bucket-level access rules. It checks permissions itself and then issues a short-lived signed link, which is why the bucket can stay locked down.
 
 Then collect two values from **Project Settings → API**:
@@ -383,7 +385,7 @@ curl -s -o /dev/null -w '%{http_code}\n' \
   https://<ref>.supabase.co/storage/v1/object/public/uploads/<key>
 ```
 
-- [ ] It is refused (a 400 or 404), not `200`. A `200` means the bucket is public: switch it to private at once (step 3).
+- [ ] It is refused (a 400 or 404), not `200`. A `200` means the bucket is public: switch it to private at once (step 3). The server's own startup check should already have refused to boot on a public bucket, so a `200` here also means that check did not run or could not reach Supabase; look for its warning in the logs.
 
 ---
 
@@ -543,6 +545,73 @@ A backup nobody has restored is a guess. Once, before real data, restore both ha
 4. Start the service, run the step 7 checks, and open a few recent photos and documents.
 
 - [ ] **Who restores, and how they are reached:** ______. Name a second person.
+
+### Restore one record (a resident deleted by mistake)
+
+Use this when somebody deleted one resident and everything else in the portal is fine. The whole-database restore above would bring the resident back but throw away every other change made since the backup, so do not use it for this. This section is about a **resident**; a deleted maintenance request, walkthrough or invoice works the same way with its own tables, but the table list below is only for residents.
+
+**Not yet rehearsed.** Practise it once before the pilot: in production, add a test resident with an HH fee, a deposit and a move-out photo, wait for a backup and a bucket copy to include them, delete the resident in the portal, then follow these steps. Correct this section to match what actually happened.
+
+**What a resident delete takes with it.** Deleting a resident removes, in the same moment, these rows (all are tied to the resident in `shared/schema.ts` with `onDelete: "cascade"`): `resident_sheet_links`, `move_out_checklists`, `move_out_photos`, `rent_payments` (shown as "HH fees"), `security_deposits`, `deposit_deductions` and `resident_documents` (the HH Paperwork checklist). Also, the files in the move-out photos are removed from the bucket and their `uploads` rows deleted (`server/uploadCleanup.ts`), so the database rows and the files are restored separately. None of those seven tables points at another, so once the `residents` row is back they can load in any order. The `residents` row must be loaded first; `pg_dump` normally writes tables in that dependency order, so check in step 4 that the `residents` line comes before the others.
+
+**What this does not bring back:**
+- Anything about this resident entered after the backup you restore from. Pick the newest backup from before the deletion.
+- The link from an asset to this resident (`assets.assigned_resident_id`) and from a roster review item (`roster_review_items.resident_id`). The database sets these to empty when a resident is deleted. Re-pick the resident on the asset if it mattered.
+- The resident's portal login, if they had one. It was probably switched off when they left the roster; ask their RA to give portal access again.
+- An audit trail entry for the restore. This is done in the database directly, so write the date and what you restored in your own notes. The original `resident.deleted` entry stays in the activity trail.
+
+**Before you start.** Work out the resident's name and house, and check the daily resident sheet sync has not already added them back as a new row (look at the house's roster). If it has, stop and ask a developer: restoring would create a second copy. (This is inference from how the sync works; it has not been tried.)
+
+In the commands, `<scratch connection string>` and `<production connection string>` are the **direct** connection strings from step 1 for the scratch project and production. Mixing them up is the one dangerous mistake here, because step 3 deletes rows. **Step 3 must only ever be run against the scratch project.** Read the line twice before pressing Enter.
+
+1. **Restore a backup from before the deletion into the scratch project**, database and files, exactly as in "Rehearse a restore" steps 1 to 3 above (create the scratch project and its private bucket, restore the database, copy the bucket backup in). If you rehearsed recently and that scratch project still exists, delete it and start again, so it holds the right day's backup.
+
+2. **Find the resident's id** in the scratch database. Change the last name:
+   ```bash
+   psql "<scratch connection string>" -c "select id, first_name, last_name, email, property_id from residents where last_name ilike 'Smith%';"
+   ```
+   Copy the `id` of the right person. Below it is written `<resident id>`.
+
+3. **In the scratch database only,** remove everybody else, so what is left is just this resident. Deleting the other residents also removes their fees, deposits and paperwork from the scratch copy (the same cascade), and the second command keeps only the files this resident's move-out photos use:
+   ```bash
+   psql "<scratch connection string>" -v ON_ERROR_STOP=1 -c "delete from residents where id <> '<resident id>';"
+   psql "<scratch connection string>" -v ON_ERROR_STOP=1 -c "delete from uploads where storage_key not in (select substr(image_url, 10) from move_out_photos);"
+   ```
+
+4. **Dump the remaining rows** into a file. `pg_dump` can only dump whole tables, not chosen rows, which is why step 3 trimmed them first. `--on-conflict-do-nothing` means a row production already has is skipped rather than causing an error:
+   ```bash
+   pg_dump --data-only --column-inserts --on-conflict-do-nothing \
+     --table=public.residents \
+     --table=public.resident_sheet_links \
+     --table=public.move_out_checklists \
+     --table=public.move_out_photos \
+     --table=public.rent_payments \
+     --table=public.security_deposits \
+     --table=public.deposit_deductions \
+     --table=public.resident_documents \
+     --table=public.uploads \
+     "<scratch connection string>" > restore-one-resident.sql
+   ```
+   Open the file in a text editor and check it looks right: one `INSERT INTO public.residents` line, with the right name and email, and lines for the other tables that belong to that person. If it holds more than one resident, step 3 did not work; do not load it.
+
+5. **Load it into production** in one go. `--single-transaction` means that if anything fails, nothing is loaded; `ON_ERROR_STOP=1` makes it stop at the first failure:
+   ```bash
+   psql "<production connection string>" -v ON_ERROR_STOP=1 --single-transaction -f restore-one-resident.sql
+   ```
+   If it fails with a message about a foreign key, the most likely cause is that the house (or an RA's account recorded on a fee) was deleted since the backup. Nothing was loaded; stop and ask a developer.
+
+6. **Copy the files back** from the bucket backup (not from scratch), only the ones this resident's photos use. First list their storage keys from the scratch database, then copy just those. `--files-from` is what stops other people's deliberately deleted files coming back with them:
+   ```bash
+   psql "<scratch connection string>" -X -A -t -c "select substr(image_url, 10) from move_out_photos;" > restore-keys.txt
+   rclone copy --files-from restore-keys.txt spo-backup:spo-uploads spo-prod:uploads
+   ```
+   A file that was uploaded after the last bucket copy and then deleted cannot come back; the photo's row will exist but the image will not show. Say so to the RA.
+
+7. **Check it in the portal.** Open the resident: the HH fees, the deposit and deductions, the HH Paperwork checklist and the move-out photos should all be there, and a photo should display. You can also compare counts, for example `select count(*) from rent_payments where resident_id = '<resident id>';`, between the scratch and production databases (a row that production already held is skipped on load, so a count in production can be higher, never lower).
+
+8. **Delete the scratch project, and the two files** (`restore-one-resident.sql`, `restore-keys.txt`). They hold a resident's name, email and finance rows.
+
+**Not tested.** The tables, cascade and column names above are read from `shared/schema.ts` and `server/storage.ts`, and every `pg_dump` and `psql` option was checked against `--help` for version 16. None of it has been run against a real database or a real backup, and `rclone` was not available to check `--files-from` or the copy. The `pg_dump` output itself, and how production reacts to loading it, are unverified until the rehearsal in the first paragraph is done.
 
 ---
 

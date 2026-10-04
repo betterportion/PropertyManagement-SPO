@@ -1963,7 +1963,8 @@ export const insertPropertyBudgetSchema = createInsertSchema(propertyBudgets)
   .extend({
     year: z.coerce.number().int().min(2000, "Use a four-digit year").max(2100),
     amount: nonNegativeAmount,
-    notes: z.string().trim().max(1000).nullish(),
+    // Returned to a household leader with the hub, so it takes the finance-text rule (#258).
+    notes: z.string().trim().max(1000).pipe(financeText).nullish(),
   });
 
 export type PropertyBudget = typeof propertyBudgets.$inferSelect;
@@ -2151,11 +2152,16 @@ export type AuditEvent = typeof auditLog.$inferSelect;
 export type InsertAuditEvent = z.infer<typeof insertAuditEventSchema>;
 
 // Request Contacts (join table for linking maintenance contacts to requests)
-export const requestContacts = pgTable("request_contacts", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  requestId: varchar("request_id").notNull().references(() => maintenanceRequests.id, { onDelete: "cascade" }),
-  contactId: varchar("contact_id").notNull().references(() => maintenanceContacts.id, { onDelete: "cascade" }),
-  createdAt: timestamp("created_at").defaultNow(),
-});
+export const requestContacts = pgTable(
+  "request_contacts",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    requestId: varchar("request_id").notNull().references(() => maintenanceRequests.id, { onDelete: "cascade" }),
+    contactId: varchar("contact_id").notNull().references(() => maintenanceContacts.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at").defaultNow(),
+  },
+  // One link per contractor per request: a second row would count as a callback.
+  (table) => [uniqueIndex("IDX_request_contact_link").on(table.requestId, table.contactId)],
+);
 
 export type RequestContact = typeof requestContacts.$inferSelect;

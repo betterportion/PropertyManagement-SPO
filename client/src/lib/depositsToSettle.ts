@@ -22,9 +22,12 @@ export interface DepositToSettle {
 
 export function depositsToSettle(
   deposits: SecurityDeposit[],
-  residents: Pick<Resident, "id" | "isActive">[],
+  residents: Pick<Resident, "id" | "isActive">[] | undefined,
   deductions: Pick<DepositDeduction, "residentId" | "amount">[],
 ): DepositToSettle[] {
+  // "Not in the list" means moved out, so with no list (refused, failed or
+  // still loading) show nothing rather than every deposit as a former resident.
+  if (!residents) return [];
   const stillHere = new Set(residents.filter((r) => r.isActive).map((r) => r.id));
   return deposits
     .filter((d) => OUTSTANDING.has(d.status) && !stillHere.has(d.residentId))

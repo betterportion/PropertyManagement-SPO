@@ -16,6 +16,7 @@
  */
 import type { MaintenanceRequest, MaintenanceRequestComment } from "@shared/schema";
 import type { OutboundEmail } from "./email";
+import { isCurrentResident } from "@shared/residents";
 
 /**
  * A conservative check that there is somewhere to send.
@@ -107,8 +108,10 @@ export function maintenanceStatusEmail(
  *
  * Two rules, both load-bearing:
  *
- *   - **Active residents only.** A mail-out to people who moved out last
- *     spring is the kind of mistake that gets a tool abandoned.
+ *   - **Current residents only.** A mail-out to people who moved out last
+ *     spring is the kind of mistake that gets a tool abandoned. "Current"
+ *     is `isCurrentResident`: active, and a stop date that has not passed,
+ *     since the roster row stays active until the move-out is recorded.
  *   - **One message per person**, never one addressed to the whole list, so
  *     nobody's address is disclosed to the rest of the house.
  *
@@ -116,14 +119,18 @@ export function maintenanceStatusEmail(
  * the other seven people still need to hear about the boiler.
  */
 export function householdEmail(
-  residents: readonly { email: string | null | undefined; isActive: boolean }[],
+  residents: readonly {
+    email: string | null | undefined;
+    isActive: boolean;
+    moveOutDate?: Date | string | null;
+  }[],
   propertyName: string,
   subject: string,
   body: string,
 ): OutboundEmail[] {
   const messages: OutboundEmail[] = [];
   for (const resident of residents) {
-    if (!resident.isActive) continue;
+    if (!isCurrentResident(resident)) continue;
     const to = usableAddress(resident.email);
     if (!to) continue;
     messages.push({

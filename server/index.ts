@@ -2,7 +2,7 @@ import express from "express";
 import type { Server } from "http";
 import { log } from "./logger";
 import { logError } from "./errors";
-import { isProduction, validateConfiguration } from "./config";
+import { isProduction, validateConfiguration, verifyStorageBucketIsPrivate } from "./config";
 import { securityHeaders } from "./security";
 
 // Set once the server is listening, so a shutdown can stop accepting new
@@ -149,6 +149,9 @@ app.use((req, res, next) => {
   // misconfigured deployment gets one clear report naming every missing value
   // instead of whichever module happened to load first.
   validateConfiguration();
+  // The one boot check that reaches the network; it only stops the boot on a
+  // definite "public" answer (see verifyStorageBucketIsPrivate).
+  await verifyStorageBucketIsPrivate();
 
   const { registerRoutes } = await import("./routes");
   const { registerHealthRoutes } = await import("./health");
