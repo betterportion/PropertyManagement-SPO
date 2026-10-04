@@ -26,6 +26,14 @@ describe("a card number", () => {
     "paid by card 4111 1111 1111 1111 on the 3rd",
     "378282246310005", // 15-digit Amex test number
     "3782 822463 10005", // the same Amex number, grouped 4-6-5 as printed
+    // The other ways one is typed or pasted (#257).
+    "4111.1111.1111.1111",
+    "4111  1111  1111  1111", // double spaces
+    "4111/1111/1111/1111",
+    "4111\u00a01111\u00a01111\u00a01111", // non-breaking spaces, what a PDF copy gives
+    "4111 1111-1111.1111", // mixed separators
+    "3782.822463.10005", // Amex 4-6-5 with dots
+    "card 4111.1111.1111.1111 on the 3rd",
   ])("is refused: %s", (text) => {
     expect(containsBankingDetails(text)).toBe(true);
   });
@@ -61,6 +69,9 @@ describe("a processor or check reference", () => {
     "checks 2036 2037 2038 2039",
     "checks 4009 4010 4011 4012",
     "411 1111 1111 1111 1", // a card's digits, but not grouped the way a card is
+    "checks 2036.2037.2038.2039", // counting up by one, whatever the separator
+    "4111.1111.1111.1112", // fails the Luhn check
+    "paid 250.00 on 2026.09.30", // an amount and a date
   ])("passes: %s", (text) => {
     expect(containsBankingDetails(text)).toBe(false);
   });
@@ -79,6 +90,11 @@ describe("a banking word next to a number", () => {
     "bank account 123456789",
     "account number is 123456789",
     "account 123456789",
+    "a/c 123456789",
+    "A/C no. 12345678",
+    "checking 123456789",
+    "savings account 123456789",
+    "acct 123.456.789",
   ])("is refused: %s", (text) => {
     expect(containsBankingDetails(text)).toBe(true);
   });
@@ -93,6 +109,8 @@ describe("a banking word next to a number", () => {
     "acct 2026-09-29", // a date is not an account number
     "acct 09-29-2026",
     "account 09/29/2026",
+    "checking in with the resident 2026-09-29",
+    "savings 250", // too short to be an account number
   ])("passes: %s", (text) => {
     expect(containsBankingDetails(text)).toBe(false);
   });
