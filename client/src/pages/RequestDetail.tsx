@@ -38,7 +38,7 @@ import {
  * It is registered in both role switches at the same path, the way the
  * walkthrough page is, and decides nothing about access itself: it fetches
  * `GET /api/maintenance-requests/:id` and shows whatever comes back. The
- * server's request read rule -- ownership or house for a resident, region for
+ * server's request read rule -- their own house for a resident, region for
  * staff -- is the only thing between a reader and a request, and a 403 from
  * it is what the access-denied state below reports.
  */

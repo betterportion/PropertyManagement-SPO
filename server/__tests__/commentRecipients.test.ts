@@ -54,11 +54,16 @@ const candidate = (u: User, p: Partial<UserPermissions> | null = null): CommentC
   permissions: p ? permissions(p) : null,
 });
 
-// The household of house A: the leader, the steward, and the unlinked
-// person who filed the request.
+// The household of house A: the leader, the steward, and the third account
+// at the house, who filed the request.
 const ALICE = candidate(user({ id: "u-alice", email: "alice@example.com", propertyId: "prop-a" }));
 const BOB = candidate(user({ id: "u-bob", email: "bob@example.com", propertyId: "prop-a" }));
-const EVE = candidate(user({ id: "u-eve", email: "eve@example.com" }));
+const EVE = candidate(user({ id: "u-eve", email: "eve@example.com", propertyId: "prop-a" }));
+// Filed the same request but no current roster row speaks for her at the
+// house (no link), or her login is linked to another house: #267, ownership
+// alone is not a way in.
+const EVE_UNLINKED = candidate(user({ id: "u-eve-2", email: "eve@example.com" }));
+const EVE_ELSEWHERE = candidate(user({ id: "u-eve-3", email: "eve@example.com", propertyId: "prop-b" }));
 // Somebody else's house.
 const CAROL = candidate(user({ id: "u-carol", email: "carol@example.com", propertyId: "prop-b" }));
 
@@ -100,7 +105,7 @@ const recipientsOf = (
   });
 
 describe("who a comment is emailed to", () => {
-  it("sends a shared comment to both of the house's accounts and the unlinked submitter, plus staff", () => {
+  it("sends a shared comment to all three of the house's accounts, the submitter among them, plus staff", () => {
     expect(recipientsOf(BY_SARAH)).toEqual([
       "alice@example.com",
       "bob@example.com",
@@ -168,6 +173,12 @@ describe("who a comment is emailed to", () => {
     const gone = (c: CommentCandidate) => ({ ...c, user: { ...c.user, isActive: false } });
     const to = recipientsOf(BY_SARAH, { candidates: [gone(BOB), gone(TOM), ALICE] });
     expect(to).toEqual(["alice@example.com"]);
+  });
+
+  it("never emails a submitter who is not at the request's house, linked elsewhere or not at all", () => {
+    expect(recipientsOf(BY_SARAH, { candidates: [EVE_UNLINKED, EVE_ELSEWHERE] })).toEqual([]);
+    // Positive control: the same address, linked to the request's house.
+    expect(recipientsOf(BY_SARAH, { candidates: [EVE] })).toEqual(["eve@example.com"]);
   });
 
   it("never emails a resident about a project, even a shared comment on their own house", () => {

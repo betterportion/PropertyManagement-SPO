@@ -510,26 +510,29 @@ function isRepair(type: string | null | undefined): boolean {
  *     on their own house through. Projects and capital projects carry bid
  *     amounts and contract terms (ADR-0001), and a household leader must
  *     never see them -- not even one they are recorded as having submitted;
- *   - a resident may read repairs they submitted, regardless of region and
- *     regardless of age — that is their own report, and somebody must be able
- *     to read back what they themselves filed;
- *   - and repairs filed for the house their account is linked to, which is
- *     how the two resident accounts on a property share one repair history —
- *     but on that path, only while the request is open or was closed within
- *     RESIDENT_CLOSED_REQUEST_DAYS;
+ *   - a resident reads only repairs filed for the house their account is
+ *     linked to and a current roster row speaks for: there is no region
+ *     branch and no email-only branch. A repair they filed themselves at that
+ *     house is readable whatever its age, because that is their own report;
+ *     a housemate's is readable only while it is open or was closed within
+ *     RESIDENT_CLOSED_REQUEST_DAYS. A repair they filed somewhere else -- as
+ *     staff before a demotion, or at a house they have since left -- is not
+ *     theirs to read back (#267), and neither are its later shared comments
+ *     and photos, which inherit this rule;
  *   - staff need canViewMaintenance or canManageMaintenance, and are then
  *     bound by their allowed regions, with no time limit and no type limit. Staff keep the full history; this narrowing is
  *     resident-only.
  *
- * The time dimension is on the HOUSE path alone. Putting it on the ownership
- * path too would hide somebody's own report from them, which nobody asked for.
- * The type dimension is on BOTH resident paths, which is why it sits above
- * them rather than inside either.
+ * The time dimension is on the HOUSEMATE path alone. Putting it on a
+ * resident's own filing at their own house would hide their own report from
+ * them, which nobody asked for. The type rule and the house match apply to
+ * every resident read, which is why they sit above the ownership check
+ * rather than inside it.
  *
  * `residentHouse` is the caller's house from residentHouseAddress, resolved
  * once by the route rather than per record. It defaults to null — no house
- * claim — so a call site that never passes it keeps the old email-only
- * behaviour rather than silently widening.
+ * claim — which refuses every resident read, so a call site that never
+ * passes it fails closed rather than silently widening.
  */
 export function canReadMaintenanceRequest(
   ctx: AuthContext,
@@ -541,10 +544,13 @@ export function canReadMaintenanceRequest(
   if (ctx.isResident) {
     // Repairs only. First, so neither path below can let a project through.
     if (!isRepair(request.type)) return false;
+    // Only at their own house, whoever filed it. Ownership alone is not a way
+    // in: a demoted regional administrator is still `submittedBy` of repairs
+    // in other houses and regions (#267).
+    if (!isOwnHouse(residentHouse, request.buildingAddress)) return false;
     // Their own submission, whatever its age.
     if (ownsRecord(ctx, request.submittedBy)) return true;
     // A housemate's, only while it is open or recently closed.
-    if (!isOwnHouse(residentHouse, request.buildingAddress)) return false;
     if (!isClosedMaintenanceStatus(request.status)) return true;
     return withinResidentWindow(request.completedDate, now);
   }
@@ -747,8 +753,8 @@ export function canReadComment(
  * Whether the user may post a comment with this visibility on a request: may
  * read the request, AND (is staff OR posting shared). That is the whole of
  * the household's write path: a resident posts shared on the requests they
- * may read -- own house or own submission, a repair, inside the 120-day
- * window -- and nothing else. The create route forces shared for a resident
+ * may read -- a repair at their own house, inside the 120-day window unless
+ * they filed it themselves -- and nothing else. The create route forces shared for a resident
  * before asking, so the internal branch is never reached from that tier.
  * Kept as its own rule rather than an alias of canReadComment because reading
  * and posting are two grants that happen to agree today.

@@ -1192,7 +1192,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Vendor contact details are only reachable through a request the caller
-      // is already allowed to read: residents through ownership or their house,
+      // is already allowed to read: residents through their own house,
       // staff through region. Previously any signed-in user could read the
       // contacts on any request by guessing its ID.
       if (!requireMaintenanceRequestAccess(res, ctx, request, await residentHouseAddress(ctx))) return;
@@ -1363,8 +1363,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // composer has no visibility control, so a body marked internal from
       // that tier is a client mistake, not a grant -- forced here rather
       // than refused, the way the resident create route forces the type.
-      // canPostComment then decides the rest: own house (or own submission),
-      // a repair, inside the 120-day window.
+      // canPostComment then decides the rest: own house,
+      // a repair, inside the 120-day window unless they filed it.
       const isInternal = ctx.isResident ? false : (parsed.isInternal ?? true);
       const residentHouse = await residentHouseAddress(ctx);
       if (!canPostComment(ctx, request, { isInternal }, residentHouse)) {
@@ -3094,7 +3094,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // The file on a comment (see "Request threads" above). Its own route rather
   // than /api/upload-doc because that one refuses residents outright, and a
   // household may attach a photo to the shared comment it may post. The
-  // permission is the whole post rule -- own house or own submission, in
+  // permission is the whole post rule -- own house, in
   // region for staff, a repair, inside the 120-day window -- run before multer
   // reads a byte. Shared is the visibility asked about because it is the one
   // both tiers may post; staff who may post internal may post shared too, so

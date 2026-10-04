@@ -646,14 +646,19 @@ describe("one resident reading another resident's request", () => {
     expect((await get("/api/maintenance-requests/req-west")).status).toBe(403);
   });
 
-  it("still lets them read their own", async () => {
-    actAs(BOB, ALL_MAINTENANCE);
-    storageMock.getMaintenanceRequest.mockResolvedValue(EAST_REQUEST); // Bob's
-    expect((await get("/api/maintenance-requests/req-east")).status).toBe(200);
+  // Changed by #267: "their own" now means their own at the house their
+  // account is linked to. WEST_REQUEST has no house, so these fixtures give it
+  // Alice's (1 Main St); the same request at another house is in the #267
+  // block below.
+  it("still lets them read their own at their own house", async () => {
+    actAsAliceAtMainSt(ALL_MAINTENANCE);
+    storageMock.getMaintenanceRequest.mockResolvedValue({ ...WEST_REQUEST, buildingAddress: "1 Main St" }); // Alice's
+    expect((await get("/api/maintenance-requests/req-west")).status).toBe(200);
   });
 
-  it("filters the list down to their own requests", async () => {
-    actAs(ALICE, ALL_MAINTENANCE);
+  it("filters the list down to their own house's requests", async () => {
+    actAsAliceAtMainSt(ALL_MAINTENANCE);
+    storageMock.getAllMaintenanceRequests.mockResolvedValue([{ ...WEST_REQUEST, buildingAddress: "1 Main St" }, EAST_REQUEST]);
     const { body } = await get("/api/maintenance-requests");
     expect(body.map((r: { id: string }) => r.id)).toEqual(["req-west"]);
   });
@@ -802,6 +807,201 @@ describe("a household leader opening a request from its page", () => {
     const { status, body } = await get("/api/maintenance-request-photos");
     expect(status).toBe(200);
     expect(body.map((p: { id: string }) => p.id)).toEqual(["ph-recent"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// What a resident filed is theirs only at their own house (#267)
+// ---------------------------------------------------------------------------
+
+/**
+ * A regional administrator demoted to a resident keeps a permissions row with
+ * canViewMaintenance, and `submittedBy` still names them on every repair they
+ * filed while staff, in other houses and other regions. The ownership path
+ * used to be an email match alone, so all of it, and every later shared
+ * comment and photo, stayed readable. Now a request somebody filed is
+ * readable back only at the house their account is linked to and a current
+ * roster row speaks for. These cases pin it at every route a resident reaches
+ * a request through, each beside a positive control on the same account.
+ */
+describe("a demoted regional administrator and the repairs they filed as staff (#267)", () => {
+  const HOUSE_A = "1 Main St";
+  const HOUSE_ELSEWHERE = "9 Elm St";
+  const PROPERTY_A = { id: "prop-a", name: "Cleveland House", region: "West Central", address: HOUSE_A };
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  const daysAgo = (days: number) => new Date(Date.now() - days * DAY_MS).toISOString();
+
+  /** Filed while Alice was staff, at a house in a region she no longer reaches. */
+  const FILED_ELSEWHERE = {
+    id: "req-elsewhere",
+    title: "Furnace out",
+    region: "East Central",
+    buildingAddress: HOUSE_ELSEWHERE,
+    submittedBy: ALICE.email,
+    status: "pending",
+    type: "request",
+  };
+  /** Filed by her at the house she now lives in, closed far beyond the 120-day window. */
+  const FILED_HERE_LONG_AGO = {
+    id: "req-here-old",
+    title: "Porch light",
+    region: "West Central",
+    buildingAddress: HOUSE_A,
+    submittedBy: ALICE.email,
+    status: "completed",
+    completedDate: daysAgo(400),
+    type: "request",
+  };
+
+  const KEY = "0123456789abcdef0123456789abcdef.jpg";
+  const SHARED = (requestId: string) => ({
+    id: `c-${requestId}`,
+    requestId,
+    body: "Plumber is coming Thursday at 9.",
+    isInternal: false,
+    authorUserId: STAFF.id,
+  });
+
+  const ATTACH = (id: string) => `/api/maintenance-requests/${id}/attachments`;
+  const aPdf = () => {
+    const form = new FormData();
+    form.append("file", new Blob([new TextEncoder().encode("%PDF-1.4\n%quote\n")], { type: "application/pdf" }), "quote.pdf");
+    return form;
+  };
+
+  beforeEach(() => {
+    // The ex-RA: a resident login linked to house A, on its roster (the
+    // default roster mock), and still holding canViewMaintenance.
+    actAs({ ...ALICE, propertyId: "prop-a" } as typeof ALICE, ALL_MAINTENANCE);
+    storageMock.getProperty.mockResolvedValue(PROPERTY_A);
+    storageMock.getMaintenanceRequest.mockImplementation(async (id: string) =>
+      [FILED_ELSEWHERE, FILED_HERE_LONG_AGO].find((r) => r.id === id),
+    );
+    storageMock.getAllMaintenanceRequests.mockResolvedValue([FILED_ELSEWHERE, FILED_HERE_LONG_AGO]);
+    storageMock.getMaintenanceRequestComments.mockImplementation(async (id: string) => [SHARED(id)]);
+    storageMock.createMaintenanceRequestComment.mockImplementation(async (c: unknown) => ({ id: "c-new", ...(c as object) }));
+    storageMock.getAllMaintenanceRequestPhotos.mockResolvedValue([
+      { id: "ph-elsewhere", requestId: FILED_ELSEWHERE.id, imageUrl: "/uploads/elsewhere.png" },
+      { id: "ph-here", requestId: FILED_HERE_LONG_AGO.id, imageUrl: "/uploads/here.png" },
+    ]);
+  });
+
+  it("lists only the one she filed at her own house, not the one filed elsewhere", async () => {
+    const { status, body } = await get("/api/maintenance-requests");
+    expect(status).toBe(200);
+    expect(body.map((r: { id: string }) => r.id)).toEqual(["req-here-old"]);
+  });
+
+  it("refuses the detail of the one filed elsewhere, and sends none of it", async () => {
+    const { status, body } = await get("/api/maintenance-requests/req-elsewhere");
+    expect(status).toBe(403);
+    expect(body).not.toHaveProperty("title");
+  });
+
+  it("opens the one she filed at her own house even though it closed over 120 days ago (positive control)", async () => {
+    const { status, body } = await get("/api/maintenance-requests/req-here-old");
+    expect(status).toBe(200);
+    expect(body.id).toBe("req-here-old");
+  });
+
+  it("refuses the contractors on the one filed elsewhere before they are loaded", async () => {
+    expect((await get("/api/maintenance-requests/req-elsewhere/contacts")).status).toBe(403);
+    expect(storageMock.getRequestContacts).not.toHaveBeenCalled();
+    expect((await get("/api/maintenance-requests/req-here-old/contacts")).status).toBe(200);
+    expect(storageMock.getRequestContacts).toHaveBeenCalledWith("req-here-old");
+  });
+
+  it("sends the photos on the own-house request only", async () => {
+    const { status, body } = await get("/api/maintenance-request-photos");
+    expect(status).toBe(200);
+    expect(body.map((p: { id: string }) => p.id)).toEqual(["ph-here"]);
+  });
+
+  it("refuses the thread of the one filed elsewhere before the comments are loaded, and sends the own-house thread", async () => {
+    expect((await get("/api/maintenance-requests/req-elsewhere/comments")).status).toBe(403);
+    expect(storageMock.getMaintenanceRequestComments).not.toHaveBeenCalled();
+    const own = await get("/api/maintenance-requests/req-here-old/comments");
+    expect(own.status).toBe(200);
+    expect(own.body.map((c: { id: string }) => c.id)).toEqual(["c-req-here-old"]);
+  });
+
+  it("refuses a comment on the one filed elsewhere, and writes nothing", async () => {
+    const refused = await request("POST", "/api/maintenance-requests/req-elsewhere/comments", { body: { body: "Hello?", isInternal: false } });
+    expect(refused.status).toBe(403);
+    expect(storageMock.createMaintenanceRequestComment).not.toHaveBeenCalled();
+    const accepted = await request("POST", "/api/maintenance-requests/req-here-old/comments", { body: { body: "Hello?", isInternal: false } });
+    expect(accepted.status).toBe(201);
+    expect(storageMock.createMaintenanceRequestComment).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses an attachment to the one filed elsewhere before the parser reads a byte, and stores nothing", async () => {
+    const refused = await fetch(`${baseUrl}${ATTACH("req-elsewhere")}`, { method: "POST", body: aPdf() });
+    expect(refused.status).toBe(403);
+    expect(multerEntered).not.toHaveBeenCalled();
+    expect(fileStoreMock.putUpload).not.toHaveBeenCalled();
+    const accepted = await fetch(`${baseUrl}${ATTACH("req-here-old")}`, { method: "POST", body: aPdf() });
+    expect(accepted.status).toBe(200);
+    expect(multerEntered).toHaveBeenCalled();
+    expect(fileStoreMock.putUpload).toHaveBeenCalled();
+  });
+
+  it("serves no file that hangs off the one filed elsewhere, whichever record points at it", async () => {
+    storageMock.getUploadByStorageKey.mockResolvedValue({ storageKey: KEY, uploadedBy: STAFF.id });
+    const elsewhere = [
+      [{ kind: "maintenanceRequest", record: FILED_ELSEWHERE }],
+      [{ kind: "maintenanceRequestPhoto", record: { id: "ph-elsewhere", requestId: FILED_ELSEWHERE.id } }],
+      [{ kind: "maintenanceRequestComment", record: SHARED(FILED_ELSEWHERE.id) }],
+    ];
+    for (const found of elsewhere) {
+      storageMock.findUploadReferences.mockResolvedValue(found);
+      expect((await get(`/uploads/${KEY}`)).status).toBe(403);
+    }
+    expect(fileStoreMock.openUploadStream).not.toHaveBeenCalled();
+
+    // Positive control: the same three kinds on the own-house request serve.
+    const here = [
+      [{ kind: "maintenanceRequest", record: FILED_HERE_LONG_AGO }],
+      [{ kind: "maintenanceRequestPhoto", record: { id: "ph-here", requestId: FILED_HERE_LONG_AGO.id } }],
+      [{ kind: "maintenanceRequestComment", record: SHARED(FILED_HERE_LONG_AGO.id) }],
+    ];
+    for (const found of here) {
+      fileStoreMock.openUploadStream.mockResolvedValue(Readable.from([Buffer.from("file-bytes")]));
+      storageMock.findUploadReferences.mockResolvedValue(found);
+      expect((await fetch(`${baseUrl}/uploads/${KEY}`)).status).toBe(200);
+    }
+    expect(fileStoreMock.openUploadStream).toHaveBeenCalledTimes(3);
+  });
+
+  it("leaves staff alone: a regional administrator in the region still reads it", async () => {
+    actAs(STAFF, { ...ALL_MAINTENANCE, allowedRegions: ["East Central"] });
+    const { status, body } = await get("/api/maintenance-requests/req-elsewhere");
+    expect(status).toBe(200);
+    expect(body.id).toBe("req-elsewhere");
+  });
+
+  it("does not email her a shared comment on the one filed elsewhere, while the own-house one still reaches her", async () => {
+    actAs(ADMIN);
+    storageMock.getAllUsersWithPermissions.mockResolvedValue([
+      { user: { ...ALICE, propertyId: "prop-a", commentEmailsEnabled: true }, permissions: ALL_MAINTENANCE },
+    ]);
+    storageMock.getAllProperties.mockResolvedValue([PROPERTY_A]);
+    storageMock.getAllResidents.mockResolvedValue([
+      { id: "r-alice", email: ALICE.email, propertyId: "prop-a", isActive: true, moveOutDate: null },
+    ]);
+    const addressed = () => sendEmailMock.mock.calls.map(([message]) => message.to);
+
+    await request("POST", "/api/maintenance-requests/req-elsewhere/comments", { body: { body: "Booked.", isInternal: false } });
+    expect(addressed()).toEqual([]);
+
+    await request("POST", "/api/maintenance-requests/req-here-old/comments", { body: { body: "Booked.", isInternal: false } });
+    expect(addressed()).toEqual([ALICE.email]);
+  });
+
+  it("fails closed when no current roster row speaks for her: even the own-house request she filed is refused", async () => {
+    storageMock.getResidentsByProperty.mockResolvedValue([]);
+    expect((await get("/api/maintenance-requests/req-here-old")).status).toBe(403);
+    const { body } = await get("/api/maintenance-requests");
+    expect(body).toEqual([]);
   });
 });
 
@@ -988,21 +1188,34 @@ describe("the thread on a request", () => {
     expect(storageMock.createMaintenanceRequestComment).not.toHaveBeenCalled();
   });
 
-  // The unlinked-ownership path, through the route rather than only the
-  // unit: an account with no house link at all, recorded as the request's
-  // own submitter on a house that is not theirs. Ownership carries the
-  // post exactly as it carries the read, and the "always shared" rule for
-  // this tier still applies on top of it.
-  it("posts an unlinked resident's own submission on another house as shared, even when the body says internal", async () => {
+  // The ownership path, through the route rather than only the unit. Changed
+  // by #267: it carries the post only at the resident's own house, where it
+  // also lifts the 120-day window; the "always shared" rule for this tier
+  // still applies on top of it.
+  it("posts a leader's own submission at their own house, closed long ago, as shared, even when the body says internal", async () => {
+    const daysAgo = (n: number) => new Date(Date.now() - n * 24 * 60 * 60 * 1000);
+    leaderOfHouseA();
+    storageMock.getMaintenanceRequest.mockResolvedValue({
+      ...OWN_HOUSE_OPEN,
+      submittedBy: ALICE.email,
+      status: "completed",
+      completedDate: daysAgo(400),
+    });
+    storageMock.createMaintenanceRequestComment.mockImplementation(async (c: unknown) => ({ id: "c-new", ...(c as object) }));
+    const { status } = await post("/api/maintenance-requests/req-own-open/comments", { body: "My own report.", isInternal: true });
+    expect(status).toBe(201);
+    expect(storageMock.createMaintenanceRequestComment).toHaveBeenCalledWith(
+      expect.objectContaining({ isInternal: false, authorUserId: ALICE.id }),
+    );
+  });
+
+  it("refuses an unlinked resident a request they submitted on another house, and writes nothing", async () => {
     const EVE = { id: "u-eve", email: "eve@example.com", role: "resident", isActive: true };
     actAs(EVE);
     storageMock.getMaintenanceRequest.mockResolvedValue({ ...OTHER_HOUSE_OPEN, submittedBy: EVE.email });
-    storageMock.createMaintenanceRequestComment.mockImplementation(async (c: unknown) => ({ id: "c-new", ...(c as object) }));
-    const { status } = await post("/api/maintenance-requests/req-other-open/comments", { body: "My own report.", isInternal: true });
-    expect(status).toBe(201);
-    expect(storageMock.createMaintenanceRequestComment).toHaveBeenCalledWith(
-      expect.objectContaining({ isInternal: false, authorUserId: EVE.id }),
-    );
+    const { status } = await post("/api/maintenance-requests/req-other-open/comments", { body: "My own report.", isInternal: false });
+    expect(status).toBe(403);
+    expect(storageMock.createMaintenanceRequestComment).not.toHaveBeenCalled();
   });
 
   // The positive control's mirror: the same unlinked account gets nothing on
@@ -1255,18 +1468,19 @@ describe("the thread on a request", () => {
     });
 
     // The unlinked submitter: an account with no propertyId who filed the
-    // request itself. Reachable through ownsRecord, not the house match, so
-    // she must hear about a shared comment and never an internal one --
-    // exactly the EVE case commentRecipients.test.ts proves at the pure-
-    // function level, here through the real route.
-    it("emails a resident who submitted the request but has no house link, on a shared comment only", async () => {
+    // request itself. Changed by #267: she used to hear about a shared
+    // comment through ownsRecord alone; ownership is no longer a way in, so
+    // she hears about neither kind, while the house's own accounts still do
+    // (the positive control in the same test).
+    it("does not email a resident who submitted the request but has no house link", async () => {
       const EVE = { id: "u-eve", email: "eve@example.com", role: "resident", isActive: true, propertyId: null, ...on };
       storageMock.getMaintenanceRequest.mockResolvedValue({ ...OWN_HOUSE_OPEN, submittedBy: EVE.email });
       storageMock.getAllUsersWithPermissions.mockResolvedValue([...candidates, { user: EVE, permissions: null }]);
 
       const shared = await post("/api/maintenance-requests/req-own-open/comments", { body: "Shared note.", isInternal: false });
       expect(shared.status).toBe(201);
-      expect(addressed()).toContain("eve@example.com");
+      expect(addressed()).toContain("bob@example.com");
+      expect(addressed()).not.toContain("eve@example.com");
 
       sendEmailMock.mockClear();
       const internal = await post("/api/maintenance-requests/req-own-open/comments", { body: "Internal note." });
@@ -3135,11 +3349,13 @@ describe("downloading someone else's file", () => {
     expect((await get(`/uploads/${KEY}`)).status).toBe(403);
   });
 
-  it("lets the resident who submitted the request read its photo", async () => {
-    actAs(ALICE, ALL_MAINTENANCE);
+  // Changed by #267: the submitter reads the photo at the house their account
+  // is linked to (WEST_REQUEST has no house, so it is given Alice's).
+  it("lets the resident who submitted the request read its photo at their own house", async () => {
+    actAsAliceAtMainSt(ALL_MAINTENANCE);
     storageMock.getUploadByStorageKey.mockResolvedValue({ storageKey: KEY, uploadedBy: STAFF.id });
     storageMock.findUploadReferences.mockResolvedValue([
-      { kind: "maintenanceRequest", record: WEST_REQUEST },
+      { kind: "maintenanceRequest", record: { ...WEST_REQUEST, buildingAddress: "1 Main St" } },
     ]);
 
     const res = await fetch(`${baseUrl}/uploads/${KEY}`);
@@ -10250,9 +10466,9 @@ describe("maintenance request photos", () => {
     );
   });
 
-  it("shows a resident only their own request's photos", async () => {
-    actAs(ALICE, ALL_MAINTENANCE);
-    storageMock.getAllMaintenanceRequests.mockResolvedValue([WEST_REQUEST, EAST_REQUEST]); // west = Alice's, east = Bob's
+  it("shows a resident only their own house's request photos", async () => {
+    actAsAliceAtMainSt(ALL_MAINTENANCE);
+    storageMock.getAllMaintenanceRequests.mockResolvedValue([{ ...WEST_REQUEST, buildingAddress: "1 Main St" }, EAST_REQUEST]); // west = Alice's, east = Bob's
     storageMock.getAllMaintenanceRequestPhotos.mockResolvedValue([
       { id: "ph-west", requestId: "req-west", imageUrl: "/uploads/a.png" },
       { id: "ph-east", requestId: "req-east", imageUrl: "/uploads/b.png" },
@@ -10264,9 +10480,9 @@ describe("maintenance request photos", () => {
   });
 
   it("lets a resident delete a photo they added but not one on another resident's request", async () => {
-    actAs(ALICE, ALL_MAINTENANCE);
+    actAsAliceAtMainSt(ALL_MAINTENANCE);
     storageMock.getMaintenanceRequestPhoto.mockResolvedValue({ id: "ph-west", requestId: "req-west", uploadedBy: ALICE.email });
-    storageMock.getMaintenanceRequest.mockResolvedValue(WEST_REQUEST);
+    storageMock.getMaintenanceRequest.mockResolvedValue({ ...WEST_REQUEST, buildingAddress: "1 Main St" });
     expect((await request("DELETE", "/api/maintenance-request-photos/ph-west", {})).status).toBe(200);
 
     storageMock.getMaintenanceRequestPhoto.mockResolvedValue({ id: "ph-east", requestId: "req-east", uploadedBy: BOB.email });
