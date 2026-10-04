@@ -149,6 +149,8 @@ In the Supabase dashboard, **Storage → New bucket**:
 
 **The bucket must be private.** This is the single most important setting in this document. The portal holds W-9s, certificates of insurance, contract invoices and photographs of people's homes. A public bucket makes every one of those readable by anyone who knows or guesses the URL, with no sign-in — and because storage keys are the only thing protecting them, nothing else in the app can compensate.
 
+The server also checks this for you. At startup with `STORAGE_DRIVER=supabase` it asks Supabase whether the bucket is public, and **refuses to start** (the deploy fails and the previous version keeps serving) if the answer is yes. If Supabase cannot be reached or does not answer within 5 seconds, the server starts anyway and logs `Could not confirm the "uploads" storage bucket is private`; treat that line as a reason to check the bucket by hand (step 7's `curl` test), because the check only stops a bucket it can see is public.
+
 The app never relies on bucket-level access rules. It checks permissions itself and then issues a short-lived signed link, which is why the bucket can stay locked down.
 
 Then collect two values from **Project Settings → API**:
@@ -383,7 +385,7 @@ curl -s -o /dev/null -w '%{http_code}\n' \
   https://<ref>.supabase.co/storage/v1/object/public/uploads/<key>
 ```
 
-- [ ] It is refused (a 400 or 404), not `200`. A `200` means the bucket is public: switch it to private at once (step 3).
+- [ ] It is refused (a 400 or 404), not `200`. A `200` means the bucket is public: switch it to private at once (step 3). The server's own startup check should already have refused to boot on a public bucket, so a `200` here also means that check did not run or could not reach Supabase; look for its warning in the logs.
 
 ---
 

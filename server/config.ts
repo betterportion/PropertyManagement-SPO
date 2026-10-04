@@ -1,5 +1,5 @@
 import { resolveStorageDriverName } from "./objectStorage";
-import { readSupabaseConfigFromEnv } from "./objectStorage/supabase";
+import { isBucketPublic, readSupabaseConfigFromEnv } from "./objectStorage/supabase";
 
 export const isProduction = process.env.NODE_ENV === "production";
 
@@ -407,6 +407,61 @@ function checkStorage(problems: string[]): void {
     console.warn(
       "[config] STORAGE_DRIVER=local in production. Uploaded files are written to this " +
         "server's filesystem and will be lost if the host replaces it on deploy.",
+    );
+  }
+}
+
+/**
+ * How long the boot waits for Supabase to say whether the bucket is public. The
+ * answer is a safety check, not a requirement, so it must never hold a deploy.
+ */
+const BUCKET_CHECK_TIMEOUT_MS = 5_000;
+
+/**
+ * With the Supabase driver, refuses to start when the uploads bucket is public.
+ *
+ * **Why:** the driver assumes a private bucket. A public one serves every file
+ * at a permanent public URL, bypassing the authorization in front of
+ * `/uploads`, and nothing else in the app would notice.
+ *
+ * **Fails closed only on a definite answer.** This is the one boot check that
+ * talks to the network, so "Supabase did not tell us" (unreachable, slow, an
+ * error reply) logs a warning and lets the server start: refusing there would
+ * turn a Supabase blip into a restart loop, which is worse than the status quo.
+ * Only `public: true` stops the boot.
+ *
+ * Call after `validateConfiguration()`, which reports missing variables; this
+ * does nothing for the local driver or an incomplete Supabase configuration.
+ */
+export async function verifyStorageBucketIsPrivate(
+  timeoutMs: number = BUCKET_CHECK_TIMEOUT_MS,
+): Promise<void> {
+  let config;
+  try {
+    if (resolveStorageDriverName() !== "supabase") return;
+    config = readSupabaseConfigFromEnv();
+  } catch {
+    return;
+  }
+
+  let isPublic: boolean;
+  try {
+    isPublic = await isBucketPublic(config, timeoutMs);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    console.warn(
+      `[config] Could not confirm the "${config.bucket}" storage bucket is private (${reason}). ` +
+        "Starting anyway; check in the Supabase dashboard that Public bucket is off.",
+    );
+    return;
+  }
+
+  if (isPublic) {
+    throw new Error(
+      `The server cannot start because the Supabase storage bucket "${config.bucket}" is public.\n\n` +
+        "  It must be private: otherwise every uploaded file is readable by anyone with its\n" +
+        "  address, without signing in. In the Supabase dashboard open Storage, edit the bucket,\n" +
+        "  turn Public bucket off, then restart the server.",
     );
   }
 }

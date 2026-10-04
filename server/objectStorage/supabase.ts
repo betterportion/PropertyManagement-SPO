@@ -46,19 +46,52 @@ export function readSupabaseConfigFromEnv(): SupabaseFileStoreConfig {
   return { url: url!, serviceRoleKey: serviceRoleKey!, bucket };
 }
 
+function createStorageClient(config: SupabaseFileStoreConfig): StorageClient {
+  const base = `${config.url.replace(/\/+$/, "")}/storage/v1`;
+  return new StorageClient(base, {
+    apikey: config.serviceRoleKey,
+    Authorization: `Bearer ${config.serviceRoleKey}`,
+  });
+}
+
+/**
+ * Asks Supabase whether the bucket is public. Throws when it cannot get a
+ * definite answer (the service is unreachable, slow, refuses the request, or
+ * replies with something unexpected), so a caller can tell "public" from "not
+ * known" and decide each separately.
+ */
+export async function isBucketPublic(
+  config: SupabaseFileStoreConfig,
+  timeoutMs: number,
+): Promise<boolean> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    const { data, error } = await Promise.race([
+      createStorageClient(config).getBucket(config.bucket),
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`Supabase did not answer within ${timeoutMs} ms`)),
+          timeoutMs,
+        );
+      }),
+    ]);
+    if (error) throw new Error(error.message);
+    if (typeof data?.public !== "boolean") {
+      throw new Error("Supabase's reply did not say whether the bucket is public");
+    }
+    return data.public;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export function createSupabaseFileStore(config: SupabaseFileStoreConfig): FileStore {
   let client: StorageClient | null = null;
 
   // Built on first use so that importing this module, or starting the app with
   // a different driver selected, never needs Supabase credentials.
   function bucket() {
-    if (!client) {
-      const base = `${config.url.replace(/\/+$/, "")}/storage/v1`;
-      client = new StorageClient(base, {
-        apikey: config.serviceRoleKey,
-        Authorization: `Bearer ${config.serviceRoleKey}`,
-      });
-    }
+    client ??= createStorageClient(config);
     return client.from(config.bucket);
   }
 
