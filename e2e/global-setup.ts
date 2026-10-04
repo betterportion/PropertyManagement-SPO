@@ -127,6 +127,13 @@ export default async function globalSetup() {
       );
     }
 
+    // Link the account to that same house. The in-app submit route files a
+    // resident's request against the house their account is linked to and a
+    // current roster row speaks for, so without the link it answers 400.
+    if (homeProperty) {
+      await pool.query(`UPDATE users SET property_id = $1 WHERE id = $2`, [homeProperty.id, "e2e-resident"]);
+    }
+
     // Give the resident a request they own, so their dashboard has content.
     const owned = await pool.query(
       `SELECT id FROM maintenance_requests WHERE submitted_by = $1 LIMIT 1`,

@@ -2733,9 +2733,10 @@ describe("submitting a maintenance request", () => {
     actAs(ALICE, ALL_MAINTENANCE);
     storageMock.getActiveResidentByEmail.mockResolvedValue({ region: "East Central", buildingAddress: "9 Elm St" });
 
-    const { status } = await request("POST", "/api/maintenance-requests", { body });
+    const { status, body: resBody } = await request("POST", "/api/maintenance-requests", { body });
 
     expect(status).toBe(400);
+    expect(resBody.message).toMatch(/house on file/i);
     expect(storageMock.createMaintenanceRequest).not.toHaveBeenCalled();
   });
 
