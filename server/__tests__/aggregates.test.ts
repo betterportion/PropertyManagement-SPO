@@ -185,6 +185,20 @@ describe("how much work a contractor has been called back for", () => {
     expect(load.find((row) => row.contactId === "c2")!.open).toBe(1);
   });
 
+  it("counts a contractor linked twice to one request once, with no false callback (#264)", () => {
+    // A double-click once made two link rows for one job. Same request, same
+    // room, same category: without dedupe that reads as a repeat visit.
+    const load = contractorLoad(
+      [
+        { contactId: "c1", requestId: "a" },
+        { contactId: "c1", requestId: "a" },
+      ],
+      [request({ id: "a", location: "Kitchen", category: "Plumbing", status: "pending" })],
+    );
+    expect(load).toHaveLength(1);
+    expect(load[0]).toMatchObject({ contactId: "c1", total: 1, open: 1, callbacks: 0 });
+  });
+
   it("counts a repeat visit to the same room as a callback", () => {
     // This is the number worth having: "called back to the same problem" is a
     // different claim from "did a lot of jobs".
