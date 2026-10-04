@@ -146,3 +146,41 @@ describe("sign-in re-links an existing account only for a verified email", () =>
     expect(upsertUser).toHaveBeenCalledWith(expect.objectContaining({ id: "google-sub-new", email: "Jane.Doe@Example.com" }));
   });
 });
+
+// CLAUDE.md "Login": a claim the provider omits stays `undefined`, never
+// `null`. Drizzle's conflict-update skips `undefined` but writes `null`
+// through, so a `?? null` mapping would blank every stored name and avatar on
+// a sign-in whose token carries no such claims.
+describe("sign-in leaves an omitted profile claim undefined, never null", () => {
+  const savedFields = () => {
+    expect(upsertUser).toHaveBeenCalledTimes(1);
+    return upsertUser.mock.calls[0][0] as Record<string, unknown>;
+  };
+
+  it("passes a present claim through, under either provider's spelling (positive control)", async () => {
+    await recordSignIn(
+      { sub: "google-sub-new", email: "jr@spo.org", email_verified: true, given_name: "Jay", family_name: "Arr", picture: "https://example.com/a.png" },
+      [],
+    );
+
+    expect(savedFields()).toMatchObject({ firstName: "Jay", lastName: "Arr", profileImageUrl: "https://example.com/a.png" });
+  });
+
+  it("leaves name and picture undefined when the token has none of them", async () => {
+    await recordSignIn({ sub: "google-sub-new", email: "jr@spo.org", email_verified: true }, []);
+
+    const saved = savedFields();
+    expect(saved.firstName).toBeUndefined();
+    expect(saved.lastName).toBeUndefined();
+    expect(saved.profileImageUrl).toBeUndefined();
+  });
+
+  it("leaves only the missing claims undefined when some are present", async () => {
+    await recordSignIn({ sub: "google-sub-new", email: "jr@spo.org", email_verified: true, given_name: "Jay" }, []);
+
+    const saved = savedFields();
+    expect(saved.firstName).toBe("Jay");
+    expect(saved.lastName).toBeUndefined();
+    expect(saved.profileImageUrl).toBeUndefined();
+  });
+});

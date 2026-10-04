@@ -101,3 +101,27 @@ export const uploadRateLimit = rateLimit({
   keyGenerator: userOrIpKey,
   message: { message: "Too many uploads. Please wait a few minutes and try again." },
 });
+
+/**
+ * Sign-in limit, for `/api/login` and `/api/callback` (one counter for both).
+ *
+ * Those two routes are open to anybody, and each hit costs something: a
+ * `/api/login` stores a seven-day session row, and a request under a new Host
+ * header registers a passport strategy that is never released. Keyed by
+ * address, since nobody is signed in yet. This is availability protection, not
+ * a password lockout; the identity provider does that.
+ *
+ * **Why 100 per 15 minutes:** one sign-in is two requests (login, then the
+ * callback), so this allows 50 sign-ins from one address in 15 minutes. A
+ * whole office behind one public IP signing in at the start of a shift stays
+ * well under it; a script hammering the route does not. Relies on `trust proxy`
+ * so `req.ip` is the visitor, not the reverse proxy.
+ */
+export const signInRateLimit = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 100,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  keyGenerator: (req) => `ip:${ipKeyGenerator(req.ip ?? "")}`,
+  message: { message: "Too many sign-in attempts. Please wait a few minutes and try again." },
+});

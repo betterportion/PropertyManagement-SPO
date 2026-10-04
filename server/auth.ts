@@ -10,6 +10,7 @@ import { storage } from "./storage";
 import { authProvider, isProduction } from "./config";
 import { HttpError } from "./errors";
 import { recordAuditEvent, AUDIT_ACTIONS } from "./audit";
+import { signInRateLimit } from "./security";
 
 /**
  * Login is standard OpenID Connect. Which provider is in use is decided
@@ -291,7 +292,7 @@ export async function setupAuth(app: Express) {
   passport.serializeUser((user: Express.User, cb) => cb(null, user));
   passport.deserializeUser((user: Express.User, cb) => cb(null, user));
 
-  app.get("/api/login", (req, res, next) => {
+  app.get("/api/login", signInRateLimit, (req, res, next) => {
     ensureStrategy(req);
     passport.authenticate(strategyNameFor(req.hostname), {
       prompt: "login consent",
@@ -299,7 +300,7 @@ export async function setupAuth(app: Express) {
     })(req, res, next);
   });
 
-  app.get("/api/callback", (req, res, next) => {
+  app.get("/api/callback", signInRateLimit, (req, res, next) => {
     ensureStrategy(req);
     passport.authenticate(strategyNameFor(req.hostname), (error: unknown, user: Express.User | false) => {
       // A refused sign-in lands on the sign-in page with the reason, not on a
