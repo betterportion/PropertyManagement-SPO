@@ -191,6 +191,19 @@ const DISABLED = { id: "u-gone", email: "gone@example.com", role: "regional_admi
 
 const ALL_MAINTENANCE = { canViewMaintenance: true, canManageMaintenance: true };
 
+/**
+ * Alice linked to 1 Main St (West Central). The default roster mock in
+ * beforeEach puts a signed-in resident on their own house's roster, so
+ * residentHouse resolves once getProperty answers for the link.
+ */
+const ALICE_AT_MAIN_ST = { ...ALICE, propertyId: "prop-main" };
+function actAsAliceAtMainSt(permissions?: Record<string, unknown>) {
+  actAs(ALICE_AT_MAIN_ST, permissions);
+  storageMock.getProperty.mockImplementation(async (id: string) =>
+    id === "prop-main" ? { id: "prop-main", address: "1 Main St", region: "West Central" } : undefined,
+  );
+}
+
 /** Signs in as `user`, with the permissions row (if any) they hold. */
 function actAs(
   user: { id: string; email: string; role: string; isActive: boolean },
@@ -2681,9 +2694,54 @@ describe("submitting a maintenance request", () => {
     location: "Kitchen",
   };
 
-  it("files a resident's request against their roster house, ignoring region/submitter in the body", async () => {
+  // Every read of a resident's repairs goes through residentHouse (the linked
+  // house, spoken for by a current roster row). Filing used to take the newest
+  // active roster row with the login's email instead, so a resident on two
+  // rosters filed into the other house: its household and RA saw the report,
+  // their own house's did not (#266).
+  it("files against the house the login is linked to, not the newest roster row with its email", async () => {
+    actAsAliceAtMainSt(ALL_MAINTENANCE);
+    // The newest active roster row with Alice's email is at ANOTHER house.
+    storageMock.getActiveResidentByEmail.mockResolvedValue({ region: "East Central", buildingAddress: "9 Elm St" });
+    storageMock.createMaintenanceRequest.mockImplementation(async (data: Record<string, unknown>) => ({ id: "new", ...data }));
+
+    const { status } = await request("POST", "/api/maintenance-requests", { body });
+
+    expect(status).toBe(200);
+    expect(storageMock.createMaintenanceRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ region: "West Central", buildingAddress: "1 Main St", submittedBy: ALICE.email }),
+    );
+    const created = storageMock.createMaintenanceRequest.mock.calls[0][0];
+    expect(created.buildingAddress).not.toBe("9 Elm St");
+  });
+
+  it("refuses with a plain message, and files nothing, when no current roster row speaks for the linked house", async () => {
+    actAsAliceAtMainSt(ALL_MAINTENANCE);
+    // Linked to the house, but the roster there no longer carries Alice. The
+    // email lookup would still find her on another roster.
+    storageMock.getResidentsByProperty.mockResolvedValue([]);
+    storageMock.getActiveResidentByEmail.mockResolvedValue({ region: "East Central", buildingAddress: "9 Elm St" });
+
+    const { status, body: resBody } = await request("POST", "/api/maintenance-requests", { body });
+
+    expect(status).toBe(400);
+    expect(resBody.message).toMatch(/house on file/i);
+    expect(storageMock.createMaintenanceRequest).not.toHaveBeenCalled();
+  });
+
+  it("refuses a resident login linked to no house, and files nothing", async () => {
     actAs(ALICE, ALL_MAINTENANCE);
-    storageMock.getActiveResidentByEmail.mockResolvedValue({ region: "West Central", buildingAddress: "1 Main St" });
+    storageMock.getActiveResidentByEmail.mockResolvedValue({ region: "East Central", buildingAddress: "9 Elm St" });
+
+    const { status, body: resBody } = await request("POST", "/api/maintenance-requests", { body });
+
+    expect(status).toBe(400);
+    expect(resBody.message).toMatch(/house on file/i);
+    expect(storageMock.createMaintenanceRequest).not.toHaveBeenCalled();
+  });
+
+  it("files a resident's request against their roster house, ignoring region/submitter in the body", async () => {
+    actAsAliceAtMainSt(ALL_MAINTENANCE);
     storageMock.createMaintenanceRequest.mockImplementation(async (data: Record<string, unknown>) => ({ id: "new", ...data }));
 
     const { status } = await request("POST", "/api/maintenance-requests", {
@@ -2702,8 +2760,7 @@ describe("submitting a maintenance request", () => {
   it("files a resident's request as a repair whatever type the body claims", async () => {
     // A resident can never file a project: the type is forced server-side,
     // the same way region and submitter are.
-    actAs(ALICE, ALL_MAINTENANCE);
-    storageMock.getActiveResidentByEmail.mockResolvedValue({ region: "West Central", buildingAddress: "1 Main St" });
+    actAsAliceAtMainSt(ALL_MAINTENANCE);
     storageMock.createMaintenanceRequest.mockImplementation(async (data: Record<string, unknown>) => ({ id: "new", ...data }));
 
     const { status } = await request("POST", "/api/maintenance-requests", { body: { ...body, type: "capex" } });
@@ -2717,8 +2774,7 @@ describe("submitting a maintenance request", () => {
   // A resident reports a problem; whether it is in hand or done is staff's
   // call. A request filed already closed would never show as open work.
   it("files a resident's request as pending whatever status the body claims, with no close date", async () => {
-    actAs(ALICE, ALL_MAINTENANCE);
-    storageMock.getActiveResidentByEmail.mockResolvedValue({ region: "West Central", buildingAddress: "1 Main St" });
+    actAsAliceAtMainSt(ALL_MAINTENANCE);
     storageMock.createMaintenanceRequest.mockImplementation(async (data: Record<string, unknown>) => ({ id: "new", ...data }));
 
     for (const status of ["completed", "in_progress", "cancelled"]) {
@@ -2743,8 +2799,7 @@ describe("submitting a maintenance request", () => {
   });
 
   it("files a resident's request as a repair when the body says nothing about type", async () => {
-    actAs(ALICE, ALL_MAINTENANCE);
-    storageMock.getActiveResidentByEmail.mockResolvedValue({ region: "West Central", buildingAddress: "1 Main St" });
+    actAsAliceAtMainSt(ALL_MAINTENANCE);
     storageMock.createMaintenanceRequest.mockImplementation(async (data: Record<string, unknown>) => ({ id: "new", ...data }));
 
     expect((await request("POST", "/api/maintenance-requests", { body })).status).toBe(200);
@@ -2767,7 +2822,6 @@ describe("submitting a maintenance request", () => {
 
   it("refuses a resident who is not on any house roster, with a helpful message", async () => {
     actAs(ALICE, ALL_MAINTENANCE);
-    storageMock.getActiveResidentByEmail.mockResolvedValue(undefined);
 
     const { status, body: resBody } = await request("POST", "/api/maintenance-requests", { body });
 
@@ -3425,6 +3479,8 @@ describe("what reaches the audit log", () => {
 
     it("in an account created with no email", async () => {
       actAs(ADMIN);
+      // The id is new: only the admin's own account exists.
+      storageMock.getUser.mockImplementation(async (id: string) => (id === ADMIN.id ? ADMIN : undefined));
       storageMock.upsertUser.mockImplementation(async (data: Record<string, unknown>) => ({ user: { ...data, id: noEmail.id } }));
 
       const { status } = await request("POST", "/api/users", {
@@ -9509,6 +9565,8 @@ describe("linking a resident account to a property", () => {
 
   it("records a re-link, not a new account, when the email already had an account", async () => {
     actAs(ADMIN);
+    // The new id is unclaimed; the old account is found by its email, not its id.
+    storageMock.getUser.mockImplementation(async (id: string) => (id === ADMIN.id ? ADMIN : undefined));
     storageMock.upsertUser.mockImplementation(async (data: Record<string, unknown>) => ({
       user: { id: "u-new", ...data },
       relinkedFrom: { id: "u-old", email: "steward@example.com", role: "regional_administrator" },
@@ -9537,6 +9595,56 @@ describe("linking a resident account to a property", () => {
     expect(status).toBe(200);
     expect(storageMock.createAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ action: "user.created" }));
     expect(storageMock.createAuditEvent).not.toHaveBeenCalledWith(expect.objectContaining({ action: "user.relinked" }));
+  });
+
+  // POST /api/users writes the role and house of whatever id it is given
+  // (upsertUser conflict-updates them) and records only user.created, so an
+  // id that already belongs to an account is refused: a role or house change
+  // goes through the routes that reset the permissions row and audit it (#268).
+  describe("creating an account with an id that is already taken", () => {
+    /** Alice's account exists; no other id does. */
+    function aliceExists() {
+      storageMock.getUser.mockImplementation(async (id: string) => (id === ADMIN.id ? ADMIN : id === ALICE.id ? ALICE : undefined));
+      storageMock.upsertUser.mockImplementation(async (data: Record<string, unknown>) => ({ user: { ...data } }));
+    }
+
+    it("refuses with a 409 and writes nothing", async () => {
+      actAs(ADMIN);
+      aliceExists();
+
+      const { status, body } = await request("POST", "/api/users", {
+        body: { id: ALICE.id, email: ALICE.email, role: "admin", propertyId: "prop-west" },
+      });
+
+      expect(status).toBe(409);
+      expect(body.message).toMatch(/already exists/i);
+      expect(storageMock.upsertUser).not.toHaveBeenCalled();
+      expect(storageMock.upsertUserPermissions).not.toHaveBeenCalled();
+      expect(storageMock.createAuditEvent).not.toHaveBeenCalled();
+    });
+
+    // Positive control: the same request for an id nobody holds reaches
+    // upsertUser, so the "not called" above cannot be a typo.
+    it("creates the account when the id is new, passing the id on", async () => {
+      actAs(ADMIN);
+      aliceExists();
+
+      const { status } = await request("POST", "/api/users", { body: { id: "u-brand-new", email: "new@example.com", role: "resident" } });
+
+      expect(status).toBe(200);
+      expect(storageMock.getUser).toHaveBeenCalledWith("u-brand-new");
+      expect(storageMock.upsertUser).toHaveBeenCalledWith(expect.objectContaining({ id: "u-brand-new", email: "new@example.com" }));
+    });
+
+    it("creates the account when no id is sent -- what Settings does", async () => {
+      actAs(ADMIN);
+      aliceExists();
+
+      const { status } = await request("POST", "/api/users", { body: { email: "new@example.com", role: "resident" } });
+
+      expect(status).toBe(200);
+      expect(storageMock.upsertUser).toHaveBeenCalledTimes(1);
+    });
   });
 
   it("lets an admin move an existing resident account to a house", async () => {
@@ -10124,8 +10232,7 @@ describe("maintenance request photos", () => {
   const body = { title: "Leaky tap", description: "drips", category: "plumbing", priority: "medium", location: "Kitchen" };
 
   it("attaches only the submitter's own uploads to their new request", async () => {
-    actAs(ALICE, ALL_MAINTENANCE);
-    storageMock.getActiveResidentByEmail.mockResolvedValue({ region: "West Central", buildingAddress: "1 Main St" });
+    actAsAliceAtMainSt(ALL_MAINTENANCE);
     storageMock.createMaintenanceRequest.mockImplementation(async (d: Record<string, unknown>) => ({ id: "req-new", ...d }));
     // "mine.png" belongs to Alice; "theirs.png" belongs to someone else.
     storageMock.getUploadByStorageKey.mockImplementation(async (key: string) =>
@@ -10489,7 +10596,7 @@ describe("every field that names a stored file checks the caller stored it", () 
       field: "photoUrl",
       body: (url) => ({ ...REQUEST_BODY, photoUrl: url }),
       write: "createMaintenanceRequest",
-      setup: () => storageMock.getActiveResidentByEmail.mockResolvedValue({ region: "West Central", buildingAddress: "1 Main St" }),
+      setup: () => actAsAliceAtMainSt(ALL_MAINTENANCE),
     },
     {
       name: "a staff request, photoUrl",
@@ -10892,7 +10999,7 @@ describe("account and permission changes are admins' alone", () => {
 
   it("lets an admin do each (positive control)", async () => {
     actAs(ADMIN);
-    storageMock.getUser.mockImplementation(async (id: string) => (id === ADMIN.id ? ADMIN : TARGET));
+    storageMock.getUser.mockImplementation(async (id: string) => (id === ADMIN.id ? ADMIN : id === TARGET.id ? TARGET : undefined));
     expect((await get("/api/users")).status).toBe(200);
     expect((await request("PATCH", "/api/users/u-target/status", { body: { isActive: false } })).status).toBe(200);
     expect(storageMock.updateUserActiveStatus).toHaveBeenCalledWith("u-target", false);

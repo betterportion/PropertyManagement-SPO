@@ -669,8 +669,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!requireAdmin(res, ctx)) return;
 
       const validatedData = insertUserSchema.parse(req.body);
+      // upsertUser conflict-updates role, house and active status on an id
+      // that exists, without the permissions reset or the role-change event
+      // the role route gives. An existing account is changed through those
+      // routes, so an id that is already taken is refused before any write.
+      const requestedId: string | undefined = req.body.id || undefined;
+      if (requestedId && (await storage.getUser(requestedId))) {
+        return res.status(409).json({
+          message:
+            "An account with that ID already exists. To change its role or house, use the settings for that account instead.",
+        });
+      }
       const { user, relinkedFrom } = await storage.upsertUser({
-        id: req.body.id || undefined,
+        id: requestedId,
         ...validatedData,
       });
 
@@ -935,11 +946,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       if (ctx.isResident) {
         // A resident never chooses a region or a house -- they cannot even see
-        // the property list. Their request is filed against the house they are
-        // on the roster for, matched by their login email. Region and building
-        // come from that record, exactly as they do for rent and deposits.
-        const residency = await storage.getActiveResidentByEmail(submittedBy);
-        if (!residency) {
+        // the property list. Their request is filed against the house their
+        // account is linked to and a current roster row speaks for -- the same
+        // house every read of their repairs resolves (residentHouse), so what
+        // they file is what they and their household read back. Looking the
+        // roster up by email alone would file a resident on two rosters into
+        // whichever row is newest.
+        const house = await residentHouse(ctx);
+        if (!house) {
           return res.status(400).json({
             message:
               "We couldn't find your house on file. Ask your house director to add you to a house, then try again.",
@@ -971,8 +985,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           ...validatedData,
           type: "request",
           status: "pending",
-          region: residency.region,
-          buildingAddress: residency.buildingAddress,
+          region: house.region,
+          buildingAddress: house.address,
           submittedBy,
         });
         await attachRequestPhotos(ctx, request.id, req.body?.photoUrls);
