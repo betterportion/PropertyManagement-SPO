@@ -102,6 +102,7 @@ import {
   type InsertMaintenanceRequest,
   type MaintenanceRequest,
   type MaintenanceRequestComment,
+  type User,
   WALKTHROUGH_CONDITION_LABEL,
   UPLOAD_URL_PATTERN,
 } from "@shared/schema";
@@ -126,7 +127,7 @@ import { randomBytes, randomUUID, timingSafeEqual } from "crypto";
 import { contractorLoad, recurringIssues } from "./aggregates";
 import { onEmailOutcome, sendEmail, type OutboundEmail } from "./email";
 import { commentEmail, householdEmail, maintenanceReceivedEmail, maintenanceStatusEmail } from "./notifications";
-import { commentRecipients } from "./commentRecipients";
+import { commentRecipients, submitterMayRead, type CommentCandidate } from "./commentRecipients";
 import { readAppUrlFromEnv, readQuickBooksConfigFromEnv } from "./config";
 import { quickBooksHealth, runQuickBooksSync, withQuickBooks } from "./quickbooksSync";
 import { createQuickBooksApi, QuickBooksConnectionLostError, QuickBooksRequestError } from "./quickbooks/api";
@@ -783,6 +784,54 @@ export async function registerRoutes(app: Express): Promise<Server> {
   }
 
   /**
+   * The accounts, with their permissions, and the house each resident login
+   * belongs to -- what any "may this account read this request?" decision
+   * about somebody who is not the caller needs. Three queries, never one per
+   * person. A login gets its house only while a current roster row there
+   * speaks for it, the same house rule as every read.
+   */
+  async function loadAccountsAndHouses(): Promise<{
+    candidates: CommentCandidate[];
+    houseAddressOf: (user: User) => string | undefined;
+  }> {
+    const [candidates, properties, roster] = await Promise.all([
+      storage.getAllUsersWithPermissions(),
+      storage.getAllProperties(),
+      storage.getAllResidents(),
+    ]);
+    const addressById = new Map(properties.map((property) => [property.id, property.address]));
+    return {
+      candidates,
+      houseAddressOf: (user) =>
+        user.propertyId && roster.some((row) => isCurrentRosterMember(row, user))
+          ? addressById.get(user.propertyId)
+          : undefined,
+    };
+  }
+
+  /**
+   * Emails the person a request names as its submitter -- the acknowledgement
+   * on filing, the note on a status change -- but only while that account may
+   * still read the request (#290), the same rule the comment email applies.
+   * `build` is the pure message builder. A failure working out the recipient
+   * is logged and sends nothing: fail closed, and never fail the request.
+   */
+  async function emailSubmitter(
+    request: MaintenanceRequest,
+    build: (request: MaintenanceRequest) => OutboundEmail | null,
+  ): Promise<void> {
+    try {
+      const message = build(request);
+      if (!message) return;
+      if (!submitterMayRead({ request, ...(await loadAccountsAndHouses()) })) return;
+      notify(message);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      log(`submitter email skipped for request ${request.id}: ${detail}`, "email");
+    }
+  }
+
+  /**
    * Emails the people who can see a comment that was just posted.
    *
    * Who they are is one pure function (commentRecipients.ts) over the whole
@@ -794,24 +843,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
    */
   async function emailThreadAbout(request: MaintenanceRequest, comment: MaintenanceRequestComment): Promise<void> {
     try {
-      const [candidates, thread, properties, roster] = await Promise.all([
-        storage.getAllUsersWithPermissions(),
+      const [{ candidates, houseAddressOf }, thread] = await Promise.all([
+        loadAccountsAndHouses(),
         storage.getMaintenanceRequestComments(request.id),
-        storage.getAllProperties(),
-        storage.getAllResidents(),
       ]);
-      const addressById = new Map(properties.map((property) => [property.id, property.address]));
       const recipients = commentRecipients({
         request,
         comment,
         candidates,
         participantIds: thread.map((entry) => entry.authorUserId),
-        // The same house rule as every read: a login gets its house only while
-        // a current roster row there speaks for it.
-        houseAddressOf: (user) =>
-          user.propertyId && roster.some((row) => isCurrentRosterMember(row, user))
-            ? addressById.get(user.propertyId)
-            : undefined,
+        houseAddressOf,
       });
       const appUrl = readAppUrlFromEnv().url;
       for (const { email } of recipients) {
@@ -993,7 +1034,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // One of the things JotForm used to do that the portal should do
         // natively: without it, filing a request feels like putting a note in
         // a drawer.
-        notify(maintenanceReceivedEmail(request));
+        await emailSubmitter(request, maintenanceReceivedEmail);
         return res.json(request);
       }
 
@@ -1022,7 +1063,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Staff filing on somebody's behalf: the acknowledgement still goes to
       // whoever submittedBy names, which for a staff-filed request is the
       // staff member themselves.
-      notify(maintenanceReceivedEmail(request));
+      await emailSubmitter(request, maintenanceReceivedEmail);
       res.json(request);
     } catch (error) {
       sendError(res, error, "Failed to create maintenance request");
@@ -1149,7 +1190,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         // Same condition as the audit event, deliberately: an edit to a
         // description must not email anybody about nothing.
-        notify(maintenanceStatusEmail(request, existingRequest.status));
+        await emailSubmitter(request, (updated) => maintenanceStatusEmail(updated, existingRequest.status));
       }
 
       res.json(request);
@@ -2453,7 +2494,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      notify(maintenanceReceivedEmail(request));
+      await emailSubmitter(request, maintenanceReceivedEmail);
       res.status(201).json(request);
     } catch (error) {
       sendError(res, error, "Failed to raise a request from this item");

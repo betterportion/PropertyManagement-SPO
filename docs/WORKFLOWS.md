@@ -85,6 +85,7 @@ The daily jobs log to the hosting provider's log stream. Nobody watches that log
 - **What the portal does:** sends plain-text email through Resend (`server/email.ts`; wording in `server/notifications.ts`):
   - **Request received:** to the person who filed a maintenance request.
   - **Status changed:** to the person who filed it.
+  - Both go only while that person's account may still open the request: a resident who filed it at a house that is not theirs now (for example a demoted regional administrator) gets nothing (`submitterMayRead` in `server/commentRecipients.ts`).
   - **New comment:** to the people who can see the request: staff who have posted in the thread, the region's RAs, and (for a shared comment) the residents. Internal comments go to staff only. Never sent to the comment's author, or to anyone who has switched comment email off (`server/commentRecipients.ts`).
   - **Email the household:** staff write to a house's residents from the property page.
 

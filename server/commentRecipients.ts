@@ -24,7 +24,13 @@
  * every thread nationally would land in one inbox.
  */
 import type { User, UserPermissions } from "@shared/schema";
-import { authContextFor, canReadComment, hasPermission, type RequestAccessFields } from "./authz";
+import {
+  authContextFor,
+  canReadComment,
+  canReadMaintenanceRequest,
+  hasPermission,
+  type RequestAccessFields,
+} from "./authz";
 
 /** One account as the candidate list carries it: the row plus its permissions row, if any. */
 export interface CommentCandidate {
@@ -89,4 +95,40 @@ export function commentRecipients({
   }
 
   return Array.from(recipients.values());
+}
+
+export interface SubmitterReadInput {
+  request: RequestAccessFields;
+  candidates: readonly CommentCandidate[];
+  houseAddressOf: CommentRecipientsInput["houseAddressOf"];
+  now?: Date;
+}
+
+/**
+ * Whether the account behind a request's `submittedBy` may still open it: the
+ * gate in front of the acknowledgement and status emails, which are addressed
+ * to that email. The same read rule as every other reader and as the comment
+ * email above (canReadMaintenanceRequest, through authContextFor), so a
+ * demoted regional administrator is not told about a repair she filed in
+ * another house (#290).
+ *
+ * `submittedBy` is an email, so the account is found by address, case aside.
+ * Fails closed: no active account holding it means no email, and so does any
+ * account that cannot read the request. Comment-email preferences do not
+ * apply; that switch is for comment email.
+ */
+export function submitterMayRead({
+  request,
+  candidates,
+  houseAddressOf,
+  now = new Date(),
+}: SubmitterReadInput): boolean {
+  const address = request.submittedBy?.trim().toLowerCase();
+  if (!address) return false;
+  return candidates.some(({ user, permissions }) => {
+    if (!user.isActive || user.email?.trim().toLowerCase() !== address) return false;
+    const ctx = authContextFor(user, permissions);
+    const house = ctx.isResident && user.propertyId ? (houseAddressOf(user) ?? null) : null;
+    return canReadMaintenanceRequest(ctx, request, house, now);
+  });
 }
