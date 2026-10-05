@@ -519,9 +519,15 @@ describe("canReadMaintenanceRequest", () => {
   // Every fixture a resident is expected to read says `type: "request"`
   // outright: the type rule fails closed on a missing type, so a fixture
   // that stayed silent about it would be refused for the wrong reason.
-  it("lets a resident read their own request, whatever region it is in", () => {
+  // Changed by #267: "whatever region it is in" used to be the rule; the
+  // request now has to be at the house the account is linked to.
+  it("lets a resident read their own request at their own house", () => {
     expect(
-      canReadMaintenanceRequest(resident, { region: "South East", submittedBy: "alice@example.com", type: "request" }),
+      canReadMaintenanceRequest(
+        resident,
+        { region: "South East", submittedBy: "alice@example.com", buildingAddress: "1 Main St", type: "request" },
+        "1 Main St",
+      ),
     ).toBe(true);
   });
 
@@ -598,16 +604,18 @@ describe("canReadMaintenanceRequest — housemates", () => {
     expect(canReadMaintenanceRequest(resident, bobsRequestAtHouseA, HOUSE_B)).toBe(false);
   });
 
-  it("keeps the email match working even when no house is resolved", () => {
-    // The house match is added alongside ownership, never in place of it: an
-    // account with no property link still sees its own submissions.
+  it("does not let the email match stand in for the house when none is resolved", () => {
+    // Changed by #267. The email match used to work with no house at all, so
+    // an account with no property link still read its own submissions
+    // anywhere. Ownership now only lifts the 120-day window at the house the
+    // account is linked to; with no house claim nothing is readable.
     expect(
       canReadMaintenanceRequest(
         resident,
         { region: "South East", submittedBy: "alice@example.com", buildingAddress: HOUSE_A, type: "request" },
         null,
       ),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it("refuses a housemate claim when the account has no linked house", () => {
@@ -655,9 +663,10 @@ describe("canReadMaintenanceRequest — the closed-request window on the house p
    * one only for a while afterwards. Michael asked for less than the whole
    * history, and this is the narrowing.
    *
-   * The time dimension applies to the HOUSE path only. What somebody filed
-   * themselves they can always read back — that is their own report, not a
-   * housemate's history — and nothing here touches staff at all.
+   * The time dimension applies to a housemate's request only. What somebody
+   * filed themselves at their own house they can always read back — that is
+   * their own report, not a housemate's history — and nothing here touches
+   * staff at all.
    */
   const HOUSE_A = "123 Main St, Saint Paul, MN 55101";
   const NOW = new Date("2026-08-15T00:00:00Z");
@@ -761,7 +770,9 @@ describe("canReadMaintenanceRequest — the closed-request window on the house p
     ).toBe(true);
   });
 
-  it("still shows a resident their own old request even with no house link", () => {
+  it("no longer shows a resident their own old request with no house link", () => {
+    // Changed by #267: the exemption from the window is for their own filing
+    // at their own house, not for an email match on its own.
     expect(
       canReadMaintenanceRequest(
         resident,
@@ -773,7 +784,7 @@ describe("canReadMaintenanceRequest — the closed-request window on the house p
         null,
         NOW,
       ),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it("leaves staff alone: full history, however old", () => {
@@ -803,6 +814,91 @@ describe("canReadMaintenanceRequest — the closed-request window on the house p
     // A named constant, so the server rule and anything describing it to a
     // resident cannot drift.
     expect(RESIDENT_CLOSED_REQUEST_DAYS).toBe(120);
+  });
+});
+
+describe("canReadMaintenanceRequest — what a resident filed is theirs only at their own house (#267)", () => {
+  /**
+   * The ownership path used to be an email match alone, so a demoted RA kept
+   * reading every repair they filed as staff, in every region, with its later
+   * shared comments. It now needs the house match too: a request somebody
+   * filed is readable back only while it is at the house their account is
+   * linked to and a current roster row speaks for. The 120-day window stays
+   * on the HOUSE path; their own request at their own house has no age limit.
+   */
+  const HOUSE_A = "123 Main St, Saint Paul, MN 55101";
+  const HOUSE_B = "456 Oak Ave, Saint Paul, MN 55104";
+  const NOW = new Date("2026-08-15T00:00:00Z");
+  const daysAgo = (n: number) => new Date(NOW.getTime() - n * 24 * 60 * 60 * 1000);
+  const resident = context({ role: "resident", email: "alice@example.com" });
+
+  const alicesRequest = (over: Record<string, unknown> = {}) => ({
+    region: "South East",
+    submittedBy: "alice@example.com",
+    buildingAddress: HOUSE_A,
+    status: "pending" as string,
+    completedDate: null as Date | null,
+    type: "request",
+    ...over,
+  });
+
+  it("refuses a repair they filed at another house in another region", () => {
+    const filedAsStaffElsewhere = alicesRequest({ region: "West Central", buildingAddress: HOUSE_B });
+    expect(canReadMaintenanceRequest(resident, filedAsStaffElsewhere, HOUSE_A, NOW)).toBe(false);
+  });
+
+  it("refuses it even when the resident holds that region, which never was a way in", () => {
+    const withRegion = context({ role: "resident", email: "alice@example.com", allowedRegions: ["West Central"] });
+    const filedAsStaffElsewhere = alicesRequest({ region: "West Central", buildingAddress: HOUSE_B });
+    expect(canReadMaintenanceRequest(withRegion, filedAsStaffElsewhere, HOUSE_A, NOW)).toBe(false);
+  });
+
+  it("still reads a repair they filed at their own house (positive control)", () => {
+    expect(canReadMaintenanceRequest(resident, alicesRequest(), HOUSE_A, NOW)).toBe(true);
+  });
+
+  it("still reads their own request at their own house closed far beyond the window", () => {
+    const old = alicesRequest({ status: "completed", completedDate: daysAgo(RESIDENT_CLOSED_REQUEST_DAYS * 5) });
+    expect(canReadMaintenanceRequest(resident, old, HOUSE_A, NOW)).toBe(true);
+  });
+
+  it("still reads their own closed request at their own house with no close date", () => {
+    const undated = alicesRequest({ status: "completed", completedDate: null });
+    expect(canReadMaintenanceRequest(resident, undated, HOUSE_A, NOW)).toBe(true);
+  });
+
+  it("fails closed with no house claim: no link or no current roster row means no ownership read", () => {
+    expect(canReadMaintenanceRequest(resident, alicesRequest(), null, NOW)).toBe(false);
+  });
+
+  it("fails closed on a request with no building address, rather than matching empty to empty", () => {
+    expect(canReadMaintenanceRequest(resident, alicesRequest({ buildingAddress: "" }), "", NOW)).toBe(false);
+    expect(canReadMaintenanceRequest(resident, alicesRequest({ buildingAddress: null }), HOUSE_A, NOW)).toBe(false);
+  });
+
+  it("applies the house match exactly: drift in case or whitespace never reads", () => {
+    expect(canReadMaintenanceRequest(resident, alicesRequest(), HOUSE_A.toUpperCase(), NOW)).toBe(false);
+    expect(canReadMaintenanceRequest(resident, alicesRequest(), `  ${HOUSE_A}  `, NOW)).toBe(false);
+  });
+
+  it("keeps the type rule above the ownership path", () => {
+    expect(canReadMaintenanceRequest(resident, alicesRequest({ type: "project" }), HOUSE_A, NOW)).toBe(false);
+  });
+
+  it("leaves staff alone: a staff submitter reads by region, with or without a house", () => {
+    const staff = context({ allowedRegions: ["West Central"], permissions: { canViewMaintenance: true } });
+    const theirs = alicesRequest({ region: "West Central", buildingAddress: HOUSE_B });
+    expect(canReadMaintenanceRequest(staff, theirs, null, NOW)).toBe(true);
+    expect(canReadMaintenanceRequest(context({ role: "admin" }), theirs, null, NOW)).toBe(true);
+  });
+
+  it("carries to comments: no shared comment on such a request reads or posts", () => {
+    const filedAsStaffElsewhere = alicesRequest({ region: "West Central", buildingAddress: HOUSE_B });
+    expect(canReadComment(resident, filedAsStaffElsewhere, { isInternal: false }, HOUSE_A, NOW)).toBe(false);
+    expect(canPostComment(resident, filedAsStaffElsewhere, { isInternal: false }, HOUSE_A, NOW)).toBe(false);
+    // Positive control on the same two functions: at the own house they work.
+    expect(canReadComment(resident, alicesRequest(), { isInternal: false }, HOUSE_A, NOW)).toBe(true);
+    expect(canPostComment(resident, alicesRequest(), { isInternal: false }, HOUSE_A, NOW)).toBe(true);
   });
 });
 
@@ -1407,9 +1503,18 @@ describe("canReadComment", () => {
     expect(canReadComment(unlinked, housemateRequest, INTERNAL, null)).toBe(false);
   });
 
-  it("lets an unlinked resident read shared, and only shared, on their own submission", () => {
+  // Changed by #267: ownership no longer stands in for the house, so the
+  // tier rule on a resident's own submission is asserted on a linked account
+  // at its own house, and the unlinked account is refused outright.
+  it("lets a household account read shared, and only shared, on its own submission at its own house", () => {
     const ownRequest = { ...housemateRequest, submittedBy: "alice@example.com" };
-    expect(canReadComment(unlinked, ownRequest, SHARED, null)).toBe(true);
+    expect(canReadComment(household, ownRequest, SHARED, HOUSE_A)).toBe(true);
+    expect(canReadComment(household, ownRequest, INTERNAL, HOUSE_A)).toBe(false);
+  });
+
+  it("refuses an unlinked resident everything on their own submission too", () => {
+    const ownRequest = { ...housemateRequest, submittedBy: "alice@example.com" };
+    expect(canReadComment(unlinked, ownRequest, SHARED, null)).toBe(false);
     expect(canReadComment(unlinked, ownRequest, INTERNAL, null)).toBe(false);
   });
 
@@ -1471,11 +1576,20 @@ describe("canPostComment", () => {
     expect(canPostComment(household, housemateRequest, SHARED, HOUSE_B)).toBe(false);
   });
 
-  it("refuses an unlinked resident a housemate's request, and allows shared on their own", () => {
+  // Changed by #267: an unlinked resident no longer posts on their own
+  // submission (ownership alone is not a way in); a linked one does, shared
+  // only, at their own house.
+  it("refuses an unlinked resident a housemate's request and their own submission alike", () => {
     expect(canPostComment(unlinked, housemateRequest, SHARED, null)).toBe(false);
     const ownRequest = { ...housemateRequest, submittedBy: "alice@example.com" };
-    expect(canPostComment(unlinked, ownRequest, SHARED, null)).toBe(true);
+    expect(canPostComment(unlinked, ownRequest, SHARED, null)).toBe(false);
     expect(canPostComment(unlinked, ownRequest, INTERNAL, null)).toBe(false);
+  });
+
+  it("lets a household account post shared, and only shared, on its own submission at its own house", () => {
+    const ownRequest = { ...housemateRequest, submittedBy: "alice@example.com" };
+    expect(canPostComment(household, ownRequest, SHARED, HOUSE_A)).toBe(true);
+    expect(canPostComment(household, ownRequest, INTERNAL, HOUSE_A)).toBe(false);
   });
 
   it("refuses a household account once the request closed more than 120 days ago", () => {
@@ -1493,10 +1607,10 @@ describe("canPostComment", () => {
     for (const type of ["project", "capex"]) {
       expect(canPostComment(household, { ...housemateRequest, type }, SHARED, HOUSE_A)).toBe(false);
       expect(canPostComment(household, { ...housemateRequest, type }, INTERNAL, HOUSE_A)).toBe(false);
-      expect(canPostComment(unlinked, { ...housemateRequest, type, submittedBy: "alice@example.com" }, SHARED, null)).toBe(false);
+      expect(canPostComment(household, { ...housemateRequest, type, submittedBy: "alice@example.com" }, SHARED, HOUSE_A)).toBe(false);
     }
     // Positive control: the same house, the same submitter, a repair.
-    expect(canPostComment(unlinked, { ...housemateRequest, submittedBy: "alice@example.com" }, SHARED, null)).toBe(true);
+    expect(canPostComment(household, { ...housemateRequest, submittedBy: "alice@example.com" }, SHARED, HOUSE_A)).toBe(true);
   });
 
   it("leaves staff posting on every type in their regions", () => {

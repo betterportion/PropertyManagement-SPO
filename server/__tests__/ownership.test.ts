@@ -16,11 +16,12 @@
  * silently break the gate — these tests will catch that regression too, because
  * the mocked data uses realistic email values.
  *
- * Alongside the email match, a resident account linked to a property (via
- * users.propertyId) may read every request filed for that house, so the two
- * resident accounts on a property share one repair history. The house match
- * is additive: it never replaces the email comparison, and an account with no
- * property link falls back to email-only.
+ * A resident account linked to a property (via users.propertyId, and spoken
+ * for by a current roster row there) may read every request filed for that
+ * house, so the two resident accounts on a property share one repair history.
+ * Since #267 the email match is not a second way in: it only lifts the
+ * 120-day window on a request the resident filed at their own house. An
+ * account with no property link reads nothing, its own submissions included.
  */
 
 import {
@@ -287,7 +288,7 @@ describe("GET /api/maintenance-requests/:id — ownership gate", () => {
 
   it("returns 403 for a resident account with no linked house", async () => {
     // Dave has an account but nobody has linked it to a property. No link
-    // means no house claim — the gate falls back to email-only ownership.
+    // means no house claim, and with none a resident reads nothing (#267).
     actAsResident(DAVE_ID, DAVE_EMAIL, null);
 
     const { status } = await getJson("/api/maintenance-requests/req-1");
@@ -575,7 +576,8 @@ describe("GET /api/maintenance-requests — the closed-request window", () => {
   });
 
   it("still gives a resident their own old closed request", async () => {
-    // The window narrows the housemate path, not the ownership one.
+    // The window narrows a housemate's request, not one they filed themselves
+    // at their own house.
     const alicesOld = { ...bobsClosedRequest("req-mine", 400), submittedBy: ALICE_EMAIL };
     mockGetAllRequests.mockResolvedValue([alicesOld]);
     actAsResident(ALICE_ID, ALICE_EMAIL, PROPERTY_A.id);

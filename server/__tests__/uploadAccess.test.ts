@@ -222,12 +222,30 @@ describe("canReadUpload, through a billing record", () => {
 });
 
 describe("canReadUpload, through a maintenance request", () => {
-  it("lets the resident who submitted it see the photo, regardless of region", async () => {
+  // Changed by #267: "regardless of region" used to be the rule, because the
+  // email match alone was enough. The resident who submitted it now sees the
+  // photo only at the house their account is linked to.
+  it("lets the resident who submitted it see the photo at their own house", async () => {
+    const HOUSE_A = "123 Main St, Saint Paul, MN 55101";
     findUploadReferences.mockResolvedValue([
-      requestReference("Chicago", "staff@example.com"),
+      requestReference("Chicago", "staff@example.com", HOUSE_A),
     ]);
+    getProperty.mockResolvedValue({ id: "prop-a", address: HOUSE_A });
     const ctx = context({ role: "resident" });
+    (ctx.user as { propertyId?: string }).propertyId = "prop-a";
     expect(await canReadUpload(ctx, KEY, undefined)).toBe(true);
+  });
+
+  it("does not let the resident who submitted it see the photo at another house, or with no house", async () => {
+    const HOUSE_A = "123 Main St, Saint Paul, MN 55101";
+    findUploadReferences.mockResolvedValue([
+      requestReference("Chicago", "staff@example.com", "456 Oak Ave, Saint Paul, MN 55104"),
+    ]);
+    getProperty.mockResolvedValue({ id: "prop-a", address: HOUSE_A });
+    const linked = context({ role: "resident" });
+    (linked.user as { propertyId?: string }).propertyId = "prop-a";
+    expect(await canReadUpload(linked, KEY, undefined)).toBe(false);
+    expect(await canReadUpload(context({ role: "resident" }), KEY, undefined)).toBe(false);
   });
 
   it("does not let a different resident see it", async () => {
