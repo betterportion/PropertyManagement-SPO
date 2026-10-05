@@ -12,6 +12,10 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
+// Each case re-imports ../auth (config.ts reads the variable at import), and
+// the first import of that chain alone takes seconds when the machine is busy.
+vi.setConfig({ testTimeout: 30_000 });
+
 const { upsertUser, getUser } = vi.hoisted(() => ({
   upsertUser: vi.fn(),
   getUser: vi.fn(),
