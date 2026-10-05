@@ -9155,6 +9155,40 @@ describe("recording a planned departure on the roster (#260)", () => {
     expect(storageMock.deactivateAndUnlinkUser).toHaveBeenCalledWith("u-jane");
   });
 
+  describe("switching a resident active or inactive on the roster edit (#291)", () => {
+    const activeAudits = () => storageMock.createAuditEvent.mock.calls.filter((c) => c[0]?.action === "resident.active_changed");
+
+    it("audits a flip to inactive, with old and new, the resident and the house, and no request body", async () => {
+      const { status } = await request("PATCH", "/api/residents/r-1", { body: { isActive: false, notes: "private note text" } });
+      expect(status).toBe(200);
+      expect(activeAudits()).toHaveLength(1);
+      expect(activeAudits()[0][0]).toMatchObject({
+        entityType: "resident",
+        entityId: "r-1",
+        details: { from: true, to: false, residentId: "r-1", propertyId: "prop-west", region: "West Central" },
+      });
+      expect(activeAudits()[0][0].summary).toMatch(/Jane Doe/);
+      expect(activeAudits()[0][0].summary).toMatch(/1 Main St/);
+      expect(JSON.stringify(activeAudits()[0][0])).not.toContain("private note text");
+    });
+
+    it("audits a flip back to active", async () => {
+      storageMock.getResident.mockResolvedValue({ ...ROW, isActive: false });
+      await request("PATCH", "/api/residents/r-1", { body: { isActive: true } });
+      expect(activeAudits()).toHaveLength(1);
+      expect(activeAudits()[0][0].details).toMatchObject({ from: false, to: true });
+    });
+
+    it("records nothing when isActive is sent unchanged, or the edit does not mention it (positive control: a flip does record)", async () => {
+      await request("PATCH", "/api/residents/r-1", { body: { isActive: true } });
+      await request("PATCH", "/api/residents/r-1", { body: { notes: "Quiet" } });
+      expect(activeAudits()).toHaveLength(0);
+
+      await request("PATCH", "/api/residents/r-1", { body: { isActive: false } });
+      expect(activeAudits()).toHaveLength(1);
+    });
+  });
+
   it("refuses a resident in another region, changing and auditing nothing", async () => {
     storageMock.getResident.mockResolvedValue({ ...ROW, region: "East Central" });
     const { status } = await request("PATCH", "/api/residents/r-1", { body: { moveOutDate: "2099-05-20" } });
