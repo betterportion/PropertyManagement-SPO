@@ -10,6 +10,7 @@
  * deposit: a shortfall for finance to decide, not a refund.
  */
 import { fromCents, runningBalance } from "@shared/depositLedger";
+import { isCurrentResident } from "@shared/residents";
 import type { DepositDeduction, Resident, SecurityDeposit } from "@shared/schema";
 
 const OUTSTANDING = new Set(["held", "statement_sent"]);
@@ -22,13 +23,15 @@ export interface DepositToSettle {
 
 export function depositsToSettle(
   deposits: SecurityDeposit[],
-  residents: Pick<Resident, "id" | "isActive">[] | undefined,
+  residents: (Pick<Resident, "id" | "isActive"> & Partial<Pick<Resident, "moveOutDate">>)[] | undefined,
   deductions: Pick<DepositDeduction, "residentId" | "amount">[],
+  now: Date = new Date(),
 ): DepositToSettle[] {
   // "Not in the list" means moved out, so with no list (refused, failed or
   // still loading) show nothing rather than every deposit as a former resident.
   if (!residents) return [];
-  const stillHere = new Set(residents.filter((r) => r.isActive).map((r) => r.id));
+  // Moved out means switched off or past the stop date: the dashboard's rule.
+  const stillHere = new Set(residents.filter((r) => isCurrentResident(r, now)).map((r) => r.id));
   return deposits
     .filter((d) => OUTSTANDING.has(d.status) && !stillHere.has(d.residentId))
     .map((deposit) => ({

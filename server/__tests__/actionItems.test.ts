@@ -92,6 +92,34 @@ describe("when a deposit has to go back", () => {
     expect(items.filter((i) => i.source === "deposit")).toHaveLength(1);
   });
 
+  it("treats an active row whose stop date has passed as moved out (#260)", () => {
+    // Nothing flips isActive when a stop date passes, so the row stays active.
+    // It must still read as somebody who has left: titled "to return", not
+    // "to return soon", and due now rather than never.
+    const items = buildActionItems({
+      ...empty,
+      properties: [property({ id: "p1", ownership: "owned", leaseRenewalDate: null, depositReturnDays: null })],
+      deposits: [deposit({ propertyId: "p1" })],
+      residents: [resident({ id: "res-gone", propertyId: "p1", isActive: true, moveOutDate: days(-3) })],
+    }, NOW);
+    const item = items.find((i) => i.source === "deposit")!;
+    expect(item.title).toBe("Deposit to return");
+    expect(item.overdue).toBe(true);
+    expect(item.dueDate).toBe(NOW.toISOString());
+  });
+
+  it("still counts the stop day itself as living there (positive control for #260)", () => {
+    const items = buildActionItems({
+      ...empty,
+      properties: [property({ id: "p1", ownership: "owned", leaseRenewalDate: null, depositReturnDays: null })],
+      deposits: [deposit({ propertyId: "p1" })],
+      residents: [resident({ id: "res-gone", propertyId: "p1", isActive: true, moveOutDate: NOW })],
+    }, NOW);
+    const item = items.find((i) => i.source === "deposit")!;
+    expect(item.title).toBe("Deposit to return soon");
+    expect(item.overdue).toBe(false);
+  });
+
   it("stays quiet about a move-out further out than the warning window", () => {
     const items = buildActionItems({
       ...empty,

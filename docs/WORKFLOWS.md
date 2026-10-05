@@ -240,6 +240,8 @@ The details below are the agreed intent. Each entry is filled in properly in the
   - That frees one of the house's 3 places.
   - Both changes are audited as access history, kept indefinitely.
   - **Move out** takes only a date that has arrived. A planned leaving date is the roster's stop date, which keeps them in until that day.
+  - **An RA records a planned leaving date** with the Stop date field in Edit resident (active residents only). Changing it is audited as `resident.stop_date_changed` with the old and new date, and ends the login right away if the date has already passed.
+  - **A passed stop date means "has left" everywhere**, even though the row stays active until Move out is recorded: the household login, the dashboard's "Deposit to return" item, Finances' "Deposits to settle" and the HH fee Generate button (which skips them) all use `isCurrentResident` (`shared/residents.ts`).
   - If they come back, the RA gives access again from their resident page.
 - **What SPO must do:** nothing.
 - **Status:** built.
