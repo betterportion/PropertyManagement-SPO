@@ -3678,6 +3678,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
           });
         }
       }
+      // Switching a resident inactive ends their household login, stops HH fee
+      // generation and moves their deposit to "Deposits to settle", so a change
+      // is on the record, once, old and new (#291). Move out and portal access
+      // do not come through here and audit their own changes.
+      if (validatedData.isActive !== undefined && validatedData.isActive !== existing.isActive) {
+        recordAuditEvent(ctx, {
+          action: AUDIT_ACTIONS.RESIDENT_ACTIVE_CHANGED,
+          entityType: "resident",
+          entityId: existing.id,
+          summary: `Marked ${existing.firstName} ${existing.lastName} at ${existing.buildingAddress} ${validatedData.isActive ? "active" : "inactive"}`,
+          details: { from: existing.isActive, to: validatedData.isActive, residentId: existing.id, propertyId: existing.propertyId, region: existing.region },
+        });
+      }
       // Marked moved out, or a stop date already past: their household login ends now.
       await closeDepartedHouseholdLogins({ propertyId: existing.propertyId });
       res.json(resident);
