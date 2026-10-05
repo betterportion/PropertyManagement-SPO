@@ -17,7 +17,7 @@ vi.mock("../db", () => ({ db: {}, pool: {} }));
 vi.mock("../auth", () => ({ getUserId: vi.fn() }));
 vi.mock("../storage", () => ({ storage: {} }));
 
-import { commentRecipients, type CommentCandidate } from "../commentRecipients";
+import { commentRecipients, submitterMayRead, type CommentCandidate } from "../commentRecipients";
 
 const HOUSE_A = "1 Main St";
 const HOUSE_B = "2 River Rd";
@@ -235,5 +235,60 @@ describe("who a comment is emailed to", () => {
       houseAddressOf,
     });
     expect(recipients).toHaveLength(1);
+  });
+});
+
+// Who may still open a request their address is on (#290): the gate in front
+// of the acknowledgement and status emails. REPAIR is at HOUSE_A, in West
+// Central, submitted by eve@example.com.
+describe("submitterMayRead", () => {
+  const may = (candidates: CommentCandidate[], over: Partial<typeof REPAIR> = {}) =>
+    submitterMayRead({ request: { ...REPAIR, ...over }, candidates, houseAddressOf });
+
+  it("is true for a submitter at her own house (positive control)", () => {
+    expect(may([EVE])).toBe(true);
+  });
+
+  it("is false when the request is at another house, whoever filed it", () => {
+    expect(may([EVE_ELSEWHERE])).toBe(false);
+    expect(may([EVE], { buildingAddress: HOUSE_B })).toBe(false);
+  });
+
+  it("is false for a login linked to no house", () => {
+    expect(may([EVE_UNLINKED])).toBe(false);
+  });
+
+  it("is false when no account holds the address, or the account is switched off", () => {
+    expect(may([ALICE, BOB])).toBe(false);
+    expect(may([candidate(user({ id: "u-eve", email: "eve@example.com", propertyId: "prop-a", isActive: false }))])).toBe(false);
+    expect(may([])).toBe(false);
+  });
+
+  it("is false when the request names no submitter", () => {
+    expect(may([EVE], { submittedBy: "" })).toBe(false);
+  });
+
+  it("is false for a project on her own house: the repairs-only type rule applies", () => {
+    expect(may([EVE], { type: "project" })).toBe(false);
+  });
+
+  it("matches the address regardless of case and spaces", () => {
+    expect(may([EVE], { submittedBy: " Eve@Example.COM " })).toBe(true);
+  });
+
+  it("is true if any account on the address may read it", () => {
+    expect(may([EVE_UNLINKED, EVE])).toBe(true);
+  });
+
+  it("is true for staff who cover the region and an admin, false for staff outside it or without the flag", () => {
+    expect(may([TOM], { submittedBy: "tom@example.com" })).toBe(true);
+    expect(may([NAT], { submittedBy: "nat@example.com" })).toBe(true);
+    expect(may([UMA], { submittedBy: "uma@example.com" })).toBe(false);
+    expect(may([VIC], { submittedBy: "vic@example.com" })).toBe(false);
+  });
+
+  it("does not look at the comment-email switch", () => {
+    const off = candidate(user({ id: "u-eve", email: "eve@example.com", propertyId: "prop-a", commentEmailsEnabled: false }));
+    expect(may([off])).toBe(true);
   });
 });

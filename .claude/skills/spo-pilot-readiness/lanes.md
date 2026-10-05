@@ -46,7 +46,7 @@ Finish with a coverage list: every item in your lane below, marked checked
 - Every row of `routes.md` against CLAUDE.md "Authorization model": the three layers, the admin bypass, the region helpers. A row whose guards differ from its neighbours' pattern gets traced to the handler's end.
 - Region scoping on lists, single reads, creates, updates (`requireRegionMove`) and deletes; references to another record (`requireInvoiceReferences`, `resolveContactLink`).
 - Summaries: `/api/action-items`, `/api/region-summary`, tasks through `canSeeTask`.
-- Residents: the maintenance read rule (type, ownership or house, the 120-day window) in list, detail and photo routes; "Resident access to walkthroughs" (tier gate, house match, prior years, the item PATCH allow-list); the shared-comment path in "Request threads".
+- Residents: the maintenance read rule (type, house, and the 120-day window on a housemate's request; a resident's own filing counts only at their own house) in list, detail and photo routes; "Resident access to walkthroughs" (tier gate, house match, prior years, the item PATCH allow-list); the shared-comment path in "Request threads".
 - Account lifecycle: deactivation mid-session, `permissionsAfterRoleChange`, `upsertUser` re-linking by email (who can pre-create an account that captures a stranger's first sign-in), `users.propertyId` changes.
 - CLAUDE.md "Identity" and "Login": `getUserId` the only reader of claims, the callback URL, session expiry.
 

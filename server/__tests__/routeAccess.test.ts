@@ -4977,6 +4977,32 @@ describe("residents completing their own house's walkthrough", () => {
     expect(storageMock.createUpload).not.toHaveBeenCalled();
   });
 
+  // The acknowledgement goes to the RA who raised it, through the same read
+  // rule as every other email about a request (#290). The negative is paired
+  // with the positive control in the line above it.
+  it("acknowledges the RA who raised a repair from an item only while her account can read it", async () => {
+    const west = { canViewWalkthroughs: true, canManageMaintenance: true, canViewMaintenance: true, allowedRegions: ["West Central"] };
+    actAs(STAFF, west);
+    ownHouse();
+    storageMock.getProperty.mockResolvedValue(PROPERTY_A);
+    storageMock.getMaintenanceRequestByWalkthroughItem.mockResolvedValue(undefined);
+    storageMock.getWalkthroughPhotosByRoom.mockResolvedValue([]);
+    storageMock.getAllProperties.mockResolvedValue([PROPERTY_A]);
+    storageMock.getAllResidents.mockResolvedValue([]);
+    storageMock.createMaintenanceRequest.mockImplementation(async (data: Record<string, unknown>) => ({ id: "req-1", ...data }));
+
+    storageMock.getAllUsersWithPermissions.mockResolvedValue([{ user: { ...STAFF, commentEmailsEnabled: true }, permissions: west }]);
+    expect((await request("POST", "/api/walkthrough-items/item-a/maintenance-request", { body: {} })).status).toBe(201);
+    expect(sendEmailMock.mock.calls.map(([message]) => message.to)).toEqual([STAFF.email]);
+
+    sendEmailMock.mockClear();
+    storageMock.getAllUsersWithPermissions.mockResolvedValue([
+      { user: { ...STAFF, commentEmailsEnabled: true }, permissions: { ...west, allowedRegions: ["East Central"] } },
+    ]);
+    expect((await request("POST", "/api/walkthrough-items/item-a/maintenance-request", { body: {} })).status).toBe(201);
+    expect(sendEmailMock).not.toHaveBeenCalled();
+  });
+
   it("refuses staff without a walkthrough grant before the item is read", async () => {
     // The write is also a walkthrough read; the view grant is checked with
     // the other guards, ahead of every storage call.
@@ -11715,6 +11741,189 @@ describe("a record outside the caller's regions is refused by id on every route 
       const { status } = await request("DELETE", "/api/resource-links/l-1");
       expect(status).toBe(200);
       expect(storageMock.deleteResourceLink).toHaveBeenCalledWith("l-1");
+    });
+  });
+});
+
+// The acknowledgement and status emails go to `submittedBy`, so they follow
+// the same read rule as everything else on a request (#290): a submitter who
+// could not open the request gets nothing about it. Each negative is paired
+// with a positive control in the same describe, so a spy that never fires
+// cannot make a refusal pass.
+describe("acknowledgement and status emails follow the read rule", () => {
+  const HOUSE_A = "1 Main St";
+  const HOUSE_B = "2 River Rd";
+  const PROPERTY_A = { id: "prop-a", name: "Cleveland House", region: "West Central", address: HOUSE_A };
+  const PROPERTY_B = { id: "prop-b", name: "River House", region: "West Central", address: HOUSE_B };
+  const on = { commentEmailsEnabled: true };
+
+  // A demoted regional administrator: a resident now, linked to house A, who
+  // is still `submittedBy` of repairs elsewhere.
+  const EVE = { id: "u-eve", email: "eve@example.com", role: "resident", isActive: true, propertyId: "prop-a", ...on };
+  const EVE_ROSTER = { id: "r-eve", email: EVE.email, propertyId: "prop-a", isActive: true, moveOutDate: null };
+
+  const REPAIR_AT = (buildingAddress: string, submittedBy = EVE.email) => ({
+    id: "req-1",
+    title: "Blinds fell down",
+    location: "Bedroom",
+    priority: "medium",
+    region: "West Central",
+    buildingAddress,
+    submittedBy,
+    status: "pending",
+    type: "request",
+  });
+
+  const sentTo = () => sendEmailMock.mock.calls.map(([message]) => message.to);
+  const templates = () => sendEmailMock.mock.calls.map(([message]) => message.template);
+
+  beforeEach(() => {
+    storageMock.getAllProperties.mockResolvedValue([PROPERTY_A, PROPERTY_B]);
+    storageMock.getAllResidents.mockResolvedValue([EVE_ROSTER]);
+    storageMock.getAllUsersWithPermissions.mockResolvedValue([{ user: EVE, permissions: null }]);
+    storageMock.updateMaintenanceRequest.mockImplementation(async (_id: string, patch: object) => ({
+      ...(await storageMock.getMaintenanceRequest()),
+      ...patch,
+    }));
+  });
+
+  describe("when staff change a status", () => {
+    const moveOn = () => request("PATCH", "/api/maintenance-requests/req-1", { body: { status: "completed" } });
+
+    it("emails a submitter at her own house (positive control)", async () => {
+      actAs(ADMIN);
+      storageMock.getMaintenanceRequest.mockResolvedValue(REPAIR_AT(HOUSE_A));
+      expect((await moveOn()).status).toBe(200);
+      expect(sentTo()).toEqual([EVE.email]);
+      expect(templates()).toEqual(["maintenance_status"]);
+    });
+
+    it("sends nothing to a submitter whose request is at another house", async () => {
+      actAs(ADMIN);
+      storageMock.getMaintenanceRequest.mockResolvedValue(REPAIR_AT(HOUSE_B));
+      expect((await moveOn()).status).toBe(200);
+      expect(sendEmailMock).not.toHaveBeenCalled();
+    });
+
+    it("sends nothing to a submitter linked to no house", async () => {
+      actAs(ADMIN);
+      storageMock.getMaintenanceRequest.mockResolvedValue(REPAIR_AT(HOUSE_A));
+      storageMock.getAllUsersWithPermissions.mockResolvedValue([{ user: { ...EVE, propertyId: null }, permissions: null }]);
+      expect((await moveOn()).status).toBe(200);
+      expect(sendEmailMock).not.toHaveBeenCalled();
+    });
+
+    it("sends nothing when no current roster row speaks for the submitter's house link", async () => {
+      actAs(ADMIN);
+      storageMock.getMaintenanceRequest.mockResolvedValue(REPAIR_AT(HOUSE_A));
+      storageMock.getAllResidents.mockResolvedValue([{ ...EVE_ROSTER, isActive: false }]);
+      expect((await moveOn()).status).toBe(200);
+      expect(sendEmailMock).not.toHaveBeenCalled();
+    });
+
+    it("sends nothing when no account holds the submitter's address, or the account is switched off", async () => {
+      actAs(ADMIN);
+      storageMock.getMaintenanceRequest.mockResolvedValue(REPAIR_AT(HOUSE_A));
+      storageMock.getAllUsersWithPermissions.mockResolvedValue([]);
+      expect((await moveOn()).status).toBe(200);
+      storageMock.getAllUsersWithPermissions.mockResolvedValue([{ user: { ...EVE, isActive: false }, permissions: null }]);
+      expect((await moveOn()).status).toBe(200);
+      expect(sendEmailMock).not.toHaveBeenCalled();
+    });
+
+    it("matches the submitter's address regardless of case", async () => {
+      actAs(ADMIN);
+      storageMock.getMaintenanceRequest.mockResolvedValue(REPAIR_AT(HOUSE_A, "Eve@Example.com"));
+      expect((await moveOn()).status).toBe(200);
+      expect(sentTo()).toEqual(["Eve@Example.com"]);
+    });
+
+    it("still emails a staff submitter: a regional administrator in her region, and an admin by the bypass", async () => {
+      actAs(ADMIN);
+      storageMock.getMaintenanceRequest.mockResolvedValue(REPAIR_AT(HOUSE_B, "staff@example.com"));
+      storageMock.getAllUsersWithPermissions.mockResolvedValue([
+        { user: { ...STAFF, ...on }, permissions: { ...ALL_MAINTENANCE, allowedRegions: ["West Central"] } },
+      ]);
+      expect((await moveOn()).status).toBe(200);
+      expect(sentTo()).toEqual(["staff@example.com"]);
+
+      sendEmailMock.mockClear();
+      storageMock.getMaintenanceRequest.mockResolvedValue(REPAIR_AT(HOUSE_B, "admin@example.com"));
+      storageMock.getAllUsersWithPermissions.mockResolvedValue([{ user: { ...ADMIN, ...on }, permissions: null }]);
+      expect((await moveOn()).status).toBe(200);
+      expect(sentTo()).toEqual(["admin@example.com"]);
+    });
+
+    it("sends nothing to a staff submitter whose region no longer covers the request", async () => {
+      actAs(ADMIN);
+      storageMock.getMaintenanceRequest.mockResolvedValue(REPAIR_AT(HOUSE_B, "staff@example.com"));
+      storageMock.getAllUsersWithPermissions.mockResolvedValue([
+        { user: { ...STAFF, ...on }, permissions: { ...ALL_MAINTENANCE, allowedRegions: ["East Central"] } },
+      ]);
+      expect((await moveOn()).status).toBe(200);
+      expect(sendEmailMock).not.toHaveBeenCalled();
+    });
+
+    it("fails closed, and still answers 200, when the recipient cannot be worked out", async () => {
+      actAs(ADMIN);
+      storageMock.getMaintenanceRequest.mockResolvedValue(REPAIR_AT(HOUSE_A));
+      storageMock.getAllUsersWithPermissions.mockRejectedValue(new Error("database gone"));
+      expect((await moveOn()).status).toBe(200);
+      expect(sendEmailMock).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("when a request is filed", () => {
+    const body = {
+      title: "Leaky tap",
+      description: "The kitchen tap drips overnight.",
+      category: "plumbing",
+      priority: "medium",
+      location: "Kitchen",
+    };
+
+    beforeEach(() => {
+      storageMock.createMaintenanceRequest.mockImplementation(async (data: object) => ({ id: "new", ...data }));
+    });
+
+    it("acknowledges a resident at her own house (positive control)", async () => {
+      actAs(EVE, ALL_MAINTENANCE);
+      storageMock.getProperty.mockImplementation(async (id: string) => (id === "prop-a" ? PROPERTY_A : undefined));
+      storageMock.getResidentsByProperty.mockResolvedValue([EVE_ROSTER]);
+      expect((await request("POST", "/api/maintenance-requests", { body })).status).toBe(200);
+      expect(sentTo()).toEqual([EVE.email]);
+      expect(templates()).toEqual(["maintenance_received"]);
+    });
+
+    it("sends no acknowledgement to a resident when the account list does not answer, and still files", async () => {
+      actAs(EVE, ALL_MAINTENANCE);
+      storageMock.getProperty.mockImplementation(async (id: string) => (id === "prop-a" ? PROPERTY_A : undefined));
+      storageMock.getResidentsByProperty.mockResolvedValue([EVE_ROSTER]);
+      storageMock.getAllUsersWithPermissions.mockRejectedValue(new Error("database gone"));
+      expect((await request("POST", "/api/maintenance-requests", { body })).status).toBe(200);
+      expect(storageMock.createMaintenanceRequest).toHaveBeenCalled();
+      expect(sendEmailMock).not.toHaveBeenCalled();
+    });
+
+    it("acknowledges staff who file, an admin by the bypass (positive control)", async () => {
+      actAs(ADMIN);
+      storageMock.getPropertyByAddress.mockResolvedValue(PROPERTY_B);
+      storageMock.getAllUsersWithPermissions.mockResolvedValue([{ user: { ...ADMIN, ...on }, permissions: null }]);
+      expect((await request("POST", "/api/maintenance-requests", { body: { ...body, region: "West Central", buildingAddress: HOUSE_B } })).status).toBe(200);
+      expect(sentTo()).toEqual([ADMIN.email]);
+    });
+
+    it("sends no acknowledgement when the filer's account cannot read what was filed, and still files", async () => {
+      // The session says she reaches West Central; her stored permissions row,
+      // which the email decision reads, no longer does.
+      actAs(STAFF, { ...ALL_MAINTENANCE, allowedRegions: ["West Central"] });
+      storageMock.getPropertyByAddress.mockResolvedValue(PROPERTY_B);
+      storageMock.getAllUsersWithPermissions.mockResolvedValue([
+        { user: { ...STAFF, ...on }, permissions: { ...ALL_MAINTENANCE, allowedRegions: ["East Central"] } },
+      ]);
+      expect((await request("POST", "/api/maintenance-requests", { body: { ...body, region: "West Central", buildingAddress: HOUSE_B } })).status).toBe(200);
+      expect(storageMock.createMaintenanceRequest).toHaveBeenCalled();
+      expect(sendEmailMock).not.toHaveBeenCalled();
     });
   });
 });
