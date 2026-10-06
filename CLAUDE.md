@@ -45,6 +45,8 @@ This portal is one of three SPO apps that will share one people layer. Read `doc
 
 **The gate is `npm run lint && npm run check && npm test && npm run build`.** Run all four before finishing. `.github/workflows/ci.yml` runs the same four on every push and pull request. `.github/workflows/e2e.yml` is a second workflow, running `npm run test:e2e` against a throwaway Postgres and a headless Chromium, and first `properties.integration.test.ts`, which `ci.yml` skips for want of a database. It is deliberately outside the gate: it needs a database and a browser, which is exactly what the four checks above are built not to need.
 
+`.github/workflows/slack-notice.yml` posts a line to the team's Slack channel when `main` moves or an issue is opened, closed or reopened, worded by `scripts/slack-notice.ts`. It is off until the `SLACK_WEBHOOK_URL` repository secret is set, never fails a run, and speaks only for issues written by somebody with access to the repository, because the repository is public. The webhook address is a credential: it lives in that secret and nowhere else.
+
 The linter catches mistakes, not style — formatting rules are off on purpose, so nothing here should ever produce a large reformatting diff. The 8 remaining warnings are React Compiler advice; one is in the generated `components/ui/` files, the rest in our own components and pages. Clearing them is issue #37.
 
 The tests are weighted towards authorization. If you change anything in `server/authz.ts`, in a route's guards, or in who may read an upload, add a test for it in `server/__tests__/authz.test.ts` (the rule on its own) or `server/__tests__/routeAccess.test.ts` (the rule over real HTTP, through the real login guard).
