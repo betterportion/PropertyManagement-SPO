@@ -86,7 +86,8 @@ if [ "$pending" -gt 0 ]; then
   while [ -e "$dump_file" ]; do dump_file="$BACKUP_DIR/spo-pre-migrate-$(date +%F)-$n.sql"; n=$((n + 1)); done
   pg_dump --no-owner --no-acl --schema=public --schema=drizzle "$DB_URL" > "$dump_file"
   [ -s "$dump_file" ] || fail "the safety copy $dump_file is empty. Nothing was migrated."
-  tail -n 3 "$dump_file" | grep -q "PostgreSQL database dump complete" \
+  # pg_dump 17.6 and later end the file with a \unrestrict line after this marker.
+  tail -n 10 "$dump_file" | grep -q "PostgreSQL database dump complete" \
     || fail "the safety copy $dump_file did not finish. Nothing was migrated."
   echo "Saved $dump_file ($(du -h "$dump_file" | cut -f1)). It holds residents' details: keep it private and delete it after a week."
 

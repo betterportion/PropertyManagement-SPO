@@ -374,7 +374,7 @@ pg_dump --no-owner --no-acl --schema=public --schema=drizzle \
   "<production direct connection string>" > spo-pre-migrate-YYYY-MM-DD.sql
 ```
 
-Replace `YYYY-MM-DD` with today's date (add `-2` if it is the second one that day). Then check it before going on: the file should be megabytes, not zero bytes (`ls -lh spo-pre-migrate-*.sql`), and its last lines should say `PostgreSQL database dump complete` (`tail -n 3 spo-pre-migrate-YYYY-MM-DD.sql`). If `pg_dump` stops with a message that its version is older than the server's, install a newer `pg_dump` rather than carrying on without a copy.
+Replace `YYYY-MM-DD` with today's date (add `-2` if it is the second one that day). Then check it before going on: the file should be megabytes, not zero bytes (`ls -lh spo-pre-migrate-*.sql`), and its last lines should say `PostgreSQL database dump complete` (`tail -n 10 spo-pre-migrate-YYYY-MM-DD.sql`; `pg_dump` 17.6 and later put a `\unrestrict` line after it, so it is not the very last line). If `pg_dump` stops with a message that its version is older than the server's, install a newer `pg_dump` rather than carrying on without a copy. A dump from those versions starts with a `\restrict` line, so load it with a `psql` at least as new (17.6 or later), which understands that line.
 
 The file holds every resident's name and email and the finance rows. Keep it somewhere private, not in the repository or a chat, and delete it once the migration has been live and fine for a week. Run the dump immediately before the migration: whatever is entered between the dump and the migration is lost if you restore from it.
 
