@@ -58,7 +58,12 @@ step "Checking the database"
 server_major=$(psql "$DB_URL" -X -A -t -c "show server_version_num" | cut -c1-2)
 dump_major=$(pg_dump --version | sed -nE 's/.* ([0-9]+)\..*/\1/p')
 [ "$dump_major" -ge "$server_major" ] || fail "pg_dump is version $dump_major but the database is Postgres $server_major. Install postgresql-client-$server_major so the safety copy can be taken."
-applied=$(psql "$DB_URL" -X -A -t -c "select case when to_regclass('drizzle.__drizzle_migrations') is null then 0 else (select count(*) from drizzle.__drizzle_migrations) end")
+# Two queries, not one: Postgres resolves every table a query names before running it,
+# so counting the history table fails on a database that has never been migrated.
+applied=0
+if [ "$(psql "$DB_URL" -X -A -t -c "select to_regclass('drizzle.__drizzle_migrations') is not null")" = t ]; then
+  applied=$(psql "$DB_URL" -X -A -t -c "select count(*) from drizzle.__drizzle_migrations")
+fi
 in_repo=$(node -p 'require("./migrations/meta/_journal.json").entries.length')
 pending=$((in_repo - applied))
 [ "$pending" -ge 0 ] || fail "the database has $applied migrations but this checkout has only $in_repo. It is ahead of the code; ask a developer."
