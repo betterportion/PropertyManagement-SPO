@@ -159,7 +159,7 @@ The details below are the agreed intent. Each entry is filled in properly in the
 - **Purpose:** stewardship. Prompt steady, incremental improvement to every owned house, rather than leaving budget unspent.
 - **Trigger:** date-based, worked out whenever the dashboard or Tasks page loads (`repairBudgetItems` in `server/actionItems.ts`; the pace rule is in `shared/budgetPace.ts`).
 - **What the portal does:**
-  - **Admin dashboard:** a "Repair & maintenance budget" section between Regions and Needs attention. Each region shows its budget, spend, % used and how many houses are behind pace, and opens to list its houses.
+  - **Admin dashboard:** a "Repair & maintenance budget" section between Regions and Needs attention. Each region shows its budget, spend, % used and how many houses are behind pace, and opens to list its houses. With no owned house on file the section says "No owned houses yet" rather than disappearing.
   - **Regional administrator's dashboard:** their own houses.
   - **Each owned house:** a budget page (`/properties/<id>/budget`) with budget, spend, % used, % of the year gone, open work and wishlist, and what was finished this year.
   - **Behind pace:** a house has spent under half the share of the year that has gone (`UNDERSPEND_PACE_RATIO`). Nobody is called behind in June or July (`UNDERSPEND_QUIET_MONTHS`).
