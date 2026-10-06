@@ -160,6 +160,12 @@ Postgres, because it needs a database and a browser that the four checks above
 deliberately do without. Run it locally when you have changed how a screen
 behaves and want to watch the whole flow work.
 
+A third workflow, `.github/workflows/slack-notice.yml`, posts a line to the
+team's Slack channel when `main` moves or an issue is opened, closed or
+reopened; `scripts/slack-notice.ts` holds the wording. It sends nothing until
+the `SLACK_WEBHOOK_URL` repository secret is set, it never fails a run, and it
+is no part of the gate.
+
 ### About the linter
 
 It is configured to catch mistakes, not to enforce a style. Formatting rules

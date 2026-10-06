@@ -1,0 +1,48 @@
+# Tells the team's Slack channel when `main` moves and when an issue is opened,
+# closed or reopened, in the portal's own words (scripts/slack-notice.ts).
+#
+# Off until the SLACK_WEBHOOK_URL repository secret is set: without it the run
+# says so and sends nothing. It never fails a run either, so a Slack outage is a
+# warning here and never a red mark on `main`.
+#
+# The repository is public and anybody can open an issue, so the script only
+# speaks for issues written by somebody with access to the repository. Nothing
+# from the event is ever placed in a command below: the script reads the event
+# file GitHub writes, which keeps a crafted issue title out of the shell.
+#
+# "Run workflow" on the Actions page sends a test message.
+name: Slack notice
+
+on:
+  push:
+    branches: [main]
+  issues:
+    types: [opened, closed, reopened]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  notify:
+    name: Post to Slack
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      # Full history, so a push can be compared with the commit before it to
+      # tell whether it changes the running portal or the database.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Node 22 runs the TypeScript file as written, so there is no install
+      # step and no dependency between an event and its notice.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Post the notice
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: node scripts/slack-notice.ts
