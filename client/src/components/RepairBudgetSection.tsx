@@ -6,9 +6,10 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 import ActionItemList from "@/components/ActionItemList";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
+import { EmptyState } from "@/components/states";
 import { formatCurrency, localToday } from "@/lib/format";
 import type { ActionItem } from "@/lib/actionItems";
-import { budgetsByRegion, houseBudgets, usedShare, type HouseBudget, type SpendResponse } from "@/lib/budgetRollup";
+import { budgetSectionState, budgetsByRegion, houseBudgets, usedShare, type HouseBudget, type SpendResponse } from "@/lib/budgetRollup";
 import { fiscalYearElapsed, fiscalYearLabel, fiscalYearOf } from "@shared/fiscalYear";
 import type { Property, RepairBudget } from "@shared/schema";
 
@@ -19,7 +20,8 @@ import type { Property, RepairBudget } from "@shared/schema";
  * focused on it (a regional administrator's own, or an admin's drill-in).
  *
  * Nothing at all for somebody without the property permission -- the budget
- * routes refuse them -- or when there are no owned houses to show.
+ * routes refuse them. With no owned house to show it says so, rather than
+ * leaving a gap where the section should be.
  */
 export default function RepairBudgetSection({
   region,
@@ -28,7 +30,8 @@ export default function RepairBudgetSection({
 }: {
   /** Show this region's houses; null for the region rollup. */
   region: string | null;
-  properties: Property[];
+  /** Undefined until the houses have loaded. */
+  properties: Property[] | undefined;
   actionItems: ActionItem[];
 }) {
   const budgetsQuery = useQuery<RepairBudget[]>({ queryKey: ["/api/repair-budgets"] });
@@ -38,12 +41,34 @@ export default function RepairBudgetSection({
   // The reader's own day, as the budget card reads it.
   const today = new Date(`${localToday()}T00:00:00.000Z`);
   const fiscalYear = fiscalYearOf(today);
-  const houses = houseBudgets(properties, budgetsQuery.data ?? [], spendQuery.data, fiscalYear, today);
+  const houses = houseBudgets(properties ?? [], budgetsQuery.data ?? [], spendQuery.data, fiscalYear, today);
   const scoped = region ? houses.filter((h) => h.property.region === region) : houses;
   const regions = budgetsByRegion(scoped);
   const alerts = actionItems.filter((i) => i.source === "budget" && (!region || i.region === region));
 
-  if (budgetsQuery.isError || scoped.length === 0) return null;
+  const state = budgetSectionState({
+    ownedHouses: scoped.length,
+    propertiesLoaded: properties !== undefined,
+    budgetsLoaded: budgetsQuery.isSuccess,
+    budgetsRefused: budgetsQuery.isError,
+  });
+  if (state === "hidden") return null;
+
+  if (state === "empty") {
+    return (
+      <div className="space-y-4" data-testid="section-repair-budget">
+        <h2 className="text-xl font-semibold tracking-tight">Repair &amp; maintenance budget</h2>
+        <Card>
+          <CardContent className="p-0">
+            <EmptyState
+              title={region ? `No owned houses in ${region}` : "No owned houses yet"}
+              description="Repair budgets are kept for houses SPO owns. Once an owned house is on file, its budget and spending show here."
+            />
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   const elapsed = Math.round(fiscalYearElapsed(fiscalYear, today) * 100);
 

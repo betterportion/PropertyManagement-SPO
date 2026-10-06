@@ -155,7 +155,7 @@ export default function AdminDashboard() {
 
           {/* Between the regions and what needs attention: how each region's
               owned houses are using their repair budget. */}
-          <RepairBudgetSection region={focusedRegion} properties={propertiesQuery.data ?? []} actionItems={actionItems} />
+          <RepairBudgetSection region={focusedRegion} properties={propertiesQuery.data} actionItems={actionItems} />
 
           <div className="space-y-4">
             <div className="flex items-center justify-between gap-3">

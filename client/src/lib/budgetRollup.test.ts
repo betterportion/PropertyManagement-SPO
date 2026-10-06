@@ -4,7 +4,7 @@
  * spend only with the budgets of the houses that reported it.
  */
 import { describe, it, expect } from "vitest";
-import { budgetsByRegion, houseBudgets, type SpendResponse } from "./budgetRollup";
+import { budgetSectionState, budgetsByRegion, houseBudgets, type SpendResponse } from "./budgetRollup";
 import type { Property, RepairBudget } from "@shared/schema";
 
 const NOW = new Date("2027-03-15T12:00:00Z");
@@ -54,5 +54,27 @@ describe("budgetsByRegion", () => {
     const rows = houseBudgets([house("a"), house("b"), house("c")], [budget("a", "11000.00"), budget("b", "10000.00"), budget("c", "10500.00")], connected(), 2027, NOW);
     const [northwest] = budgetsByRegion(rows);
     expect(northwest).toMatchObject({ region: "Northwest", budget: 31500, budgeted: 3, spent: 10000, reportingBudget: 21000, reporting: 2, behind: 1, over: 0 });
+  });
+});
+
+describe("budgetSectionState", () => {
+  const loaded = { propertiesLoaded: true, budgetsLoaded: true, budgetsRefused: false };
+
+  it("lists the houses when there is an owned one", () => {
+    expect(budgetSectionState({ ...loaded, ownedHouses: 2 })).toBe("list");
+  });
+
+  it("says there are no owned houses, once both lists have loaded", () => {
+    expect(budgetSectionState({ ...loaded, ownedHouses: 0 })).toBe("empty");
+  });
+
+  it("stays hidden until both lists have loaded, so the empty wording never flashes", () => {
+    expect(budgetSectionState({ ...loaded, ownedHouses: 0, propertiesLoaded: false })).toBe("hidden");
+    expect(budgetSectionState({ ...loaded, ownedHouses: 0, budgetsLoaded: false })).toBe("hidden");
+  });
+
+  it("stays hidden for somebody the budget routes refuse, with or without houses", () => {
+    expect(budgetSectionState({ ...loaded, ownedHouses: 0, budgetsLoaded: false, budgetsRefused: true })).toBe("hidden");
+    expect(budgetSectionState({ ...loaded, ownedHouses: 3, budgetsLoaded: false, budgetsRefused: true })).toBe("hidden");
   });
 });

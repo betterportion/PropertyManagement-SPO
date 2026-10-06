@@ -106,3 +106,29 @@ export function budgetsByRegion(houses: HouseBudget[]): RegionBudget[] {
 export function usedShare(spent: number, budget: number): number | null {
   return budget > 0 ? spent / budget : null;
 }
+
+/**
+ * What the dashboard's budget section shows. "empty" names the reason -- no
+ * owned house on file -- because a section that simply is not there reads as a
+ * feature that never arrived. Still hidden for somebody the budget routes
+ * refuse, and until both lists have loaded, so the empty wording never flashes
+ * up ahead of the houses.
+ */
+export type BudgetSectionState = "hidden" | "empty" | "list";
+
+export function budgetSectionState({
+  ownedHouses,
+  propertiesLoaded,
+  budgetsLoaded,
+  budgetsRefused,
+}: {
+  /** Owned houses in view: one region's when the dashboard is focused on it. */
+  ownedHouses: number;
+  propertiesLoaded: boolean;
+  budgetsLoaded: boolean;
+  budgetsRefused: boolean;
+}): BudgetSectionState {
+  if (budgetsRefused) return "hidden";
+  if (ownedHouses > 0) return "list";
+  return propertiesLoaded && budgetsLoaded ? "empty" : "hidden";
+}
