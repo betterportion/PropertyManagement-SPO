@@ -18,6 +18,7 @@ import {
   canDeleteComment,
   residentHouse,
   residentHouseAddress,
+  residentAccountCapProblem,
   rosterRowSpeaksFor,
   isCurrentRosterMember,
   canReadUpload,
@@ -120,7 +121,7 @@ import { buildRegionSummaries, type RegionStaff } from "./regionSummary";
 import { fromCents, returnedExceedsHeld, splitEvenly, toCents } from "@shared/depositLedger";
 import { hasBegunEverywhere } from "@shared/dueDates";
 import { fiscalYearLabel } from "@shared/fiscalYear";
-import { HOUSE_PORTAL_ACCOUNT_LIMIT, isCurrentResident } from "@shared/residents";
+import { MAX_RESIDENT_ACCOUNTS_PER_PROPERTY, isCurrentResident } from "@shared/residents";
 import { closeDepartedHouseholdLogins } from "./householdLogins";
 import { MAX_SNOOZE_DAYS, MAX_SNOOZE_MONTHS } from "@shared/assetLifecycle";
 import { randomBytes, randomUUID, timingSafeEqual } from "crypto";
@@ -515,6 +516,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!previous) {
         return res.status(404).json({ message: "User not found" });
       }
+      // Switching a resident login back on at a house takes one of its places
+      // (MAX_RESIDENT_ACCOUNTS_PER_PROPERTY), like granting it would.
+      if (isActive && !previous.isActive && previous.role === "resident" && previous.propertyId) {
+        const house = await storage.getProperty(previous.propertyId);
+        const full = residentAccountCapProblem(
+          house?.name ?? "That house",
+          await storage.getActiveResidentAccountsByProperty(previous.propertyId),
+          previous.id,
+        );
+        if (full) return res.status(409).json({ message: full });
+      }
       const user = await storage.updateUserActiveStatus(req.params.id, isActive);
 
       recordAuditEvent(ctx, {
@@ -573,6 +585,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         property = await storage.getProperty(propertyId);
         if (!property) {
           return res.status(404).json({ message: "Property not found" });
+        }
+        // Moving an active login into a house takes one of its places
+        // (MAX_RESIDENT_ACCOUNTS_PER_PROPERTY); the house it leaves gets one back.
+        if (target.isActive && target.propertyId !== propertyId) {
+          const full = residentAccountCapProblem(property.name, await storage.getActiveResidentAccountsByProperty(propertyId), target.id);
+          if (full) return res.status(409).json({ message: full });
         }
       }
 
@@ -680,6 +698,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
           message:
             "An account with that ID already exists. To change its role or house, use the settings for that account instead.",
         });
+      }
+      // A resident account linked to a house takes one of that house's places
+      // (MAX_RESIDENT_ACCOUNTS_PER_PROPERTY), admin or not. Checked before
+      // anything is written. An account created switched off takes none.
+      if (validatedData.role === "resident" && validatedData.propertyId && validatedData.isActive !== false) {
+        const house = await storage.getProperty(validatedData.propertyId);
+        if (!house) return res.status(404).json({ message: "Property not found" });
+        const full = residentAccountCapProblem(house.name, await storage.getActiveResidentAccountsByProperty(house.id));
+        if (full) return res.status(409).json({ message: full });
       }
       const { user, relinkedFrom } = await storage.upsertUser({
         id: requestedId,
@@ -5381,7 +5408,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   //
   // Nobody signs up: a household leader or steward gets in because their RA
   // gave them access from the house's roster. Staff under the property
-  // permission, in the resident's region; at most HOUSE_PORTAL_ACCOUNT_LIMIT
+  // permission, in the resident's region; at most MAX_RESIDENT_ACCOUNTS_PER_PROPERTY
   // per house. The account waits for the person's first Google sign-in with
   // the roster email (server/auth.ts recordSignIn).
 
@@ -5406,7 +5433,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         hasAccess,
         // Never an id or anything about the account beyond what the screen says.
         houseAccounts: house.map((u) => ({ name: [u.firstName, u.lastName].filter(Boolean).join(" ") || u.email, email: u.email })),
-        limit: HOUSE_PORTAL_ACCOUNT_LIMIT,
+        limit: MAX_RESIDENT_ACCOUNTS_PER_PROPERTY,
       });
     } catch (error) {
       sendError(res, error, "Failed to load portal access");
@@ -5439,14 +5466,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      const house = (await storage.getActiveResidentAccountsByProperty(resident.propertyId)).filter((u) => u.id !== existing?.id);
-      if (house.length >= HOUSE_PORTAL_ACCOUNT_LIMIT) {
-        return res.status(409).json({
-          message: `${resident.buildingAddress} already has ${HOUSE_PORTAL_ACCOUNT_LIMIT} people with access (${house
-            .map((u) => u.email)
-            .join(", ")}). Remove one first.`,
-        });
-      }
+      const full = residentAccountCapProblem(
+        resident.buildingAddress,
+        await storage.getActiveResidentAccountsByProperty(resident.propertyId),
+        existing?.id,
+      );
+      if (full) return res.status(409).json({ message: full });
 
       const { user, created, previous } = await storage.grantResidentPortalAccess({
         email,

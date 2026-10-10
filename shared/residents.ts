@@ -50,8 +50,12 @@ export function isCurrentResident(
 }
 
 /**
- * How many household members of one house may have portal access at once:
- * the household leader and their stewards. An RA grants it from the roster
- * (server/routes.ts, /api/residents/:id/portal-access).
+ * How many resident accounts one house may have switched on at once: the
+ * household leader and their stewards, with room for two leaders during the
+ * July handover and for the dorm case (brief 2.1, 2026-10-10). A data rule,
+ * not a permission: it binds admins as much as RAs, and every path that links
+ * an active resident account to a house applies it -- the RA's portal-access
+ * grant from the roster and the admin's create, move and reactivate in
+ * Settings (`residentAccountCapProblem` in server/authz.ts).
  */
-export const HOUSE_PORTAL_ACCOUNT_LIMIT = 3;
+export const MAX_RESIDENT_ACCOUNTS_PER_PROPERTY = 4;
