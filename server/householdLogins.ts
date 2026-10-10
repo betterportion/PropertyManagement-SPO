@@ -4,9 +4,9 @@
  * A household leader's or steward's login is for one house while they live
  * there. Once no current roster row at that house speaks for it -- they moved
  * out, their stop date passed, they were removed from the roster -- the login
- * is switched off and unlinked from the house, which also frees the house's
- * slot (HOUSE_PORTAL_ACCOUNT_LIMIT). Their RA can give access again if they
- * come back.
+ * is switched off and unlinked from the house, which also frees one of the
+ * house's places (MAX_RESIDENT_ACCOUNTS_PER_PROPERTY). Their RA can give
+ * access again if they come back.
  *
  * Run right after a roster change, for one house, so it is immediate, and by
  * the daily job for every house, so a stop date that simply passes is caught.

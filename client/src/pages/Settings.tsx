@@ -27,6 +27,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { insertUserSchema, type User, type UserPermissions, type Property } from "@shared/schema";
 import { REGIONS } from "@shared/regions";
 import { isResidentPermissionFlag } from "@shared/permissions";
+import { MAX_RESIDENT_ACCOUNTS_PER_PROPERTY } from "@shared/residents";
 import { serverMessage } from "@/lib/serverMessage";
 import { z } from "zod";
 import { ActivityLog } from "@/components/ActivityLog";
@@ -96,6 +97,18 @@ export default function Settings() {
     enabled: isAdmin,
   });
   const sortedProperties = [...properties].sort((a, b) => a.name.localeCompare(b.name));
+
+  // How many of a house's places are taken: its switched-on resident accounts.
+  // The server enforces the cap (MAX_RESIDENT_ACCOUNTS_PER_PROPERTY) on every
+  // path; the picker only says how full each house is before the admin picks.
+  const residentAccountsByHouse = new Map<string, number>();
+  for (const user of (users as User[] | undefined) ?? []) {
+    if (user.role === "resident" && user.isActive && user.propertyId) {
+      residentAccountsByHouse.set(user.propertyId, (residentAccountsByHouse.get(user.propertyId) ?? 0) + 1);
+    }
+  }
+  const houseOptionLabel = (house: Property) =>
+    `${house.name} (${residentAccountsByHouse.get(house.id) ?? 0} of ${MAX_RESIDENT_ACCOUNTS_PER_PROPERTY})`;
 
   useEffect(() => {
     if (userPermissionsData) {
@@ -231,7 +244,7 @@ export default function Settings() {
     },
     onError: (error) => {
       toast({
-        title: "Error",
+        title: "The account was not changed",
         description: serverMessage(error) ?? "Failed to update user status",
         variant: "destructive",
       });
@@ -270,7 +283,7 @@ export default function Settings() {
     },
     onError: (error) => {
       toast({
-        title: "Error",
+        title: "The house was not changed",
         description: serverMessage(error) ?? "Failed to update the account's house",
         variant: "destructive",
       });
@@ -294,7 +307,7 @@ export default function Settings() {
     },
     onError: (error) => {
       toast({
-        title: "Error",
+        title: "The account was not created",
         description: serverMessage(error) ?? "Failed to create user",
         variant: "destructive",
       });
@@ -457,13 +470,15 @@ export default function Settings() {
                           <SelectContent>
                             <SelectItem value="__none__">No house yet</SelectItem>
                             {sortedProperties.map((p) => (
-                              <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                              <SelectItem key={p.id} value={p.id}>{houseOptionLabel(p)}</SelectItem>
                             ))}
                           </SelectContent>
                         </Select>
-                        <p className="text-xs text-muted-foreground">
+                        <p className="text-xs text-muted-foreground" data-testid="text-house-account-limit">
                           Which house this login belongs to. It decides whose maintenance
-                          history they can see, and it survives their first sign-in.
+                          history they can see, and it survives their first sign-in. A house
+                          can have up to {MAX_RESIDENT_ACCOUNTS_PER_PROPERTY} resident accounts
+                          switched on at once; the number beside each house is how many it has.
                         </p>
                         <FormMessage />
                       </FormItem>
@@ -553,7 +568,7 @@ export default function Settings() {
                     <SelectContent>
                       <SelectItem value="__none__">No house</SelectItem>
                       {sortedProperties.map((p) => (
-                        <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                        <SelectItem key={p.id} value={p.id}>{houseOptionLabel(p)}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>

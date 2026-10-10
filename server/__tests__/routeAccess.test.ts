@@ -18,6 +18,7 @@ import { Readable } from "node:stream";
 import type { Server } from "node:http";
 import { getTableColumns } from "drizzle-orm";
 import { userPermissions } from "@shared/schema";
+import { MAX_RESIDENT_ACCOUNTS_PER_PROPERTY } from "@shared/residents";
 
 // ---------------------------------------------------------------------------
 // Doubles for everything that would otherwise need a database or a bucket
@@ -288,6 +289,9 @@ beforeEach(() => {
   fileStoreMock.createUploadSignedUrl.mockResolvedValue(null);
   fileStoreMock.openUploadStream.mockResolvedValue(Readable.from([Buffer.from("file-bytes")]));
   storageMock.getAllUsersWithPermissions.mockResolvedValue([]);
+  // No house has any resident account switched on unless a test says so, so
+  // the cap (MAX_RESIDENT_ACCOUNTS_PER_PROPERTY) lets every link through.
+  storageMock.getActiveResidentAccountsByProperty.mockResolvedValue([]);
   // By default a signed-in resident is on their own house's roster, so the
   // house rule (isCurrentRosterMember) is what the older tests assumed; the
   // departed-resident tests replace this with an inactive or past row.
@@ -9912,6 +9916,7 @@ describe("resident finances require the finance permission", () => {
 describe("linking a resident account to a property", () => {
   it("carries propertyId through account creation", async () => {
     actAs(ADMIN);
+    storageMock.getProperty.mockResolvedValue({ id: "prop-west", name: "Como House", region: "West Central" });
     storageMock.upsertUser.mockImplementation(async (data: Record<string, unknown>) => ({ user: { id: "u-new", ...data } }));
 
     const { status } = await request("POST", "/api/users", {
@@ -11513,22 +11518,24 @@ describe("household portal access is by invitation from the house's RA (#217)", 
     expect(storageMock.deactivateAndUnlinkUser).not.toHaveBeenCalled();
   });
 
-  it("refuses a 4th person at a house, naming the three who have access", async () => {
+  it("refuses a 5th person at a house, naming the four who have access", async () => {
     actAs(STAFF, RA_WEST);
     storageMock.getActiveResidentAccountsByProperty.mockResolvedValue([
-      leader("a", "a@example.com"), leader("b", "b@example.com"), leader("c", "c@example.com"),
+      leader("a", "a@example.com"), leader("b", "b@example.com"), leader("c", "c@example.com"), leader("d", "d@example.com"),
     ]);
     const { status, body } = await GRANT();
     expect(status).toBe(409);
-    expect(body.message).toContain("a@example.com, b@example.com, c@example.com");
+    expect(body.message).toContain("a@example.com, b@example.com, c@example.com, d@example.com");
     expect(storageMock.grantResidentPortalAccess).not.toHaveBeenCalled();
   });
 
-  it("still lets one of the three be given access again (they don't count against themselves)", async () => {
+  it("still lets one of the four be given access again (they don't count against themselves)", async () => {
     actAs(STAFF, RA_WEST);
     const jane = leader("jane", "jane.doe@example.com");
     storageMock.getUserByEmailInsensitive.mockResolvedValue(jane);
-    storageMock.getActiveResidentAccountsByProperty.mockResolvedValue([jane, leader("b", "b@example.com"), leader("c", "c@example.com")]);
+    storageMock.getActiveResidentAccountsByProperty.mockResolvedValue([
+      jane, leader("b", "b@example.com"), leader("c", "c@example.com"), leader("d", "d@example.com"),
+    ]);
     expect((await GRANT()).status).toBe(200);
   });
 
@@ -11959,5 +11966,175 @@ describe("acknowledgement and status emails follow the read rule", () => {
       expect(storageMock.createMaintenanceRequest).toHaveBeenCalled();
       expect(sendEmailMock).not.toHaveBeenCalled();
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Launch readiness round, Phase 1 (PROJECT_BRIEF.md 2.1 and 2.2)
+// ---------------------------------------------------------------------------
+
+describe("a house holds at most MAX_RESIDENT_ACCOUNTS_PER_PROPERTY resident accounts (brief 2.1)", () => {
+  const P = { id: "prop-p", name: "House P", address: "10 P St", region: "West Central" };
+  const Q = { id: "prop-q", name: "House Q", address: "20 Q St", region: "West Central" };
+  const account = (n: number, propertyId: string, isActive = true) => ({
+    id: `u-r${n}`, email: `r${n}@example.com`, role: "resident", isActive, propertyId,
+  });
+  /** `count` switched-on resident accounts at P and at Q. */
+  const housesHold = (atP: number, atQ: number) => {
+    storageMock.getActiveResidentAccountsByProperty.mockImplementation(async (propertyId: string) => {
+      const n = propertyId === P.id ? atP : propertyId === Q.id ? atQ : 0;
+      return Array.from({ length: n }, (_, i) => account(i + 1, propertyId));
+    });
+  };
+  const create = (n: number, propertyId: string) =>
+    request("POST", "/api/users", { body: { email: `r${n}@example.com`, firstName: `R${n}`, role: "resident", propertyId } });
+  const move = (user: ReturnType<typeof account>, propertyId: string) =>
+    request("PATCH", `/api/users/${user.id}/property`, { body: { propertyId } });
+
+  beforeEach(() => {
+    // The cap is a data rule: every test here acts as an admin, who bypasses
+    // every permission flag and must still be refused.
+    actAs(ADMIN);
+    storageMock.getProperty.mockImplementation(async (id: string) => (id === P.id ? P : id === Q.id ? Q : undefined));
+    storageMock.upsertUser.mockImplementation(async (data: Record<string, unknown>) => ({ user: { id: "u-new", ...data } }));
+    storageMock.updateUserProperty.mockImplementation(async (id: string, propertyId: string | null) => ({ id, propertyId }));
+    storageMock.updateUserActiveStatus.mockImplementation(async (id: string, isActive: boolean) => ({ id, isActive }));
+  });
+
+  it("P has 0 accounts: creating r1..r4 on P all succeed", async () => {
+    for (let n = 1; n <= MAX_RESIDENT_ACCOUNTS_PER_PROPERTY; n++) {
+      housesHold(n - 1, 0);
+      expect((await create(n, P.id)).status).toBe(200);
+    }
+    expect(storageMock.upsertUser).toHaveBeenCalledTimes(MAX_RESIDENT_ACCOUNTS_PER_PROPERTY);
+  });
+
+  it("P has 4 accounts: creating r5 on P is refused with a sentence, and the storage write never happens", async () => {
+    housesHold(4, 0);
+    const { status, body } = await create(5, P.id);
+    expect(status).toBe(409);
+    expect(body.message).toMatch(/House P already has 4 people with access/);
+    expect(body.message).toContain("r1@example.com, r2@example.com, r3@example.com, r4@example.com");
+    expect(storageMock.upsertUser).not.toHaveBeenCalled();
+    expect(storageMock.createAuditEvent).not.toHaveBeenCalled();
+  });
+
+  it("a fifth account created switched off takes no place, so it is allowed", async () => {
+    housesHold(4, 0);
+    const { status } = await request("POST", "/api/users", {
+      body: { email: "r5@example.com", role: "resident", propertyId: P.id, isActive: false },
+    });
+    expect(status).toBe(200);
+    expect(storageMock.upsertUser).toHaveBeenCalledTimes(1);
+  });
+
+  it("P has 4, Q has 2: moving r4 from P to Q succeeds", async () => {
+    housesHold(4, 2);
+    const r4 = account(4, P.id);
+    storageMock.getUser.mockImplementation(async (id: string) => (id === ADMIN.id ? ADMIN : id === r4.id ? r4 : undefined));
+    expect((await move(r4, Q.id)).status).toBe(200);
+    expect(storageMock.updateUserProperty).toHaveBeenCalledWith(r4.id, Q.id);
+  });
+
+  it("P has 4, Q has 4: moving r1 from Q to P is refused, and the account is not moved", async () => {
+    housesHold(4, 4);
+    const r1AtQ = { ...account(1, Q.id), id: "u-q1", email: "q1@example.com" };
+    storageMock.getUser.mockImplementation(async (id: string) => (id === ADMIN.id ? ADMIN : id === r1AtQ.id ? r1AtQ : undefined));
+    const { status, body } = await move(r1AtQ, P.id);
+    expect(status).toBe(409);
+    expect(body.message).toMatch(/House P already has 4 people with access/);
+    expect(storageMock.updateUserProperty).not.toHaveBeenCalled();
+    expect(storageMock.createAuditEvent).not.toHaveBeenCalled();
+  });
+
+  it("re-saving the house an account already has does not count it against itself", async () => {
+    housesHold(4, 0);
+    const r2 = account(2, P.id);
+    storageMock.getUser.mockImplementation(async (id: string) => (id === ADMIN.id ? ADMIN : id === r2.id ? r2 : undefined));
+    expect((await move(r2, P.id)).status).toBe(200);
+    expect(storageMock.updateUserProperty).toHaveBeenCalledWith(r2.id, P.id);
+  });
+
+  it("switching a resident login back on at a full house is refused, and the account stays off", async () => {
+    housesHold(4, 0);
+    const off = { ...account(9, P.id, false) };
+    storageMock.getUser.mockImplementation(async (id: string) => (id === ADMIN.id ? ADMIN : id === off.id ? off : undefined));
+    const { status, body } = await request("PATCH", `/api/users/${off.id}/status`, { body: { isActive: true } });
+    expect(status).toBe(409);
+    expect(body.message).toMatch(/House P already has 4 people with access/);
+    expect(storageMock.updateUserActiveStatus).not.toHaveBeenCalled();
+    expect(storageMock.createAuditEvent).not.toHaveBeenCalled();
+  });
+
+  it("switching one back on where there is room succeeds, and switching off never counts (positive controls)", async () => {
+    housesHold(3, 0);
+    const off = { ...account(9, P.id, false) };
+    storageMock.getUser.mockImplementation(async (id: string) => (id === ADMIN.id ? ADMIN : id === off.id ? off : undefined));
+    expect((await request("PATCH", `/api/users/${off.id}/status`, { body: { isActive: true } })).status).toBe(200);
+    expect(storageMock.updateUserActiveStatus).toHaveBeenCalledWith(off.id, true);
+
+    housesHold(4, 0);
+    const on = account(4, P.id);
+    storageMock.getUser.mockImplementation(async (id: string) => (id === ADMIN.id ? ADMIN : id === on.id ? on : undefined));
+    expect((await request("PATCH", `/api/users/${on.id}/status`, { body: { isActive: false } })).status).toBe(200);
+    expect(storageMock.updateUserActiveStatus).toHaveBeenCalledWith(on.id, false);
+  });
+});
+
+describe("two leaders on one house share its repairs and reach nothing else (brief 2.2)", () => {
+  const P = { id: "prop-p", name: "House P", address: "10 P St", region: "West Central" };
+  const Q = { id: "prop-q", name: "House Q", address: "20 Q St", region: "West Central" };
+  const r1 = { id: "u-r1", email: "r1@example.com", role: "resident", isActive: true, propertyId: P.id };
+  const r2 = { id: "u-r2", email: "r2@example.com", role: "resident", isActive: true, propertyId: P.id };
+  const r3 = { id: "u-r3", email: "r3@example.com", role: "resident", isActive: true, propertyId: Q.id };
+  const repair = (id: string, house: typeof P, submittedBy: string) => ({
+    id, title: `Repair ${id}`, region: house.region, buildingAddress: house.address, submittedBy, status: "pending", type: "request",
+  });
+  const P_REQUESTS = [repair("p-1", P, r1.email), repair("p-2", P, r2.email), repair("p-3", P, "ra@example.com")];
+  const Q_REQUESTS = [repair("q-1", Q, r3.email), repair("q-2", Q, "ra@example.com")];
+  const ids = (body: { id: string }[]) => body.map((r) => r.id).sort();
+
+  /** A leader linked to their house, with the roster speaking for them (the beforeEach default). */
+  const leader = (user: typeof r1) => {
+    actAs(user as typeof ALICE, { canViewMaintenance: true });
+    storageMock.getProperty.mockImplementation(async (id: string) => (id === P.id ? P : id === Q.id ? Q : undefined));
+    storageMock.getAllMaintenanceRequests.mockResolvedValue([...P_REQUESTS, ...Q_REQUESTS]);
+  };
+
+  it("r1 and r2, both linked to P, each read every request for P -- the same list", async () => {
+    leader(r1);
+    const first = await get("/api/maintenance-requests");
+    leader(r2);
+    const second = await get("/api/maintenance-requests");
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(ids(first.body)).toEqual(["p-1", "p-2", "p-3"]);
+    expect(ids(second.body)).toEqual(ids(first.body));
+  });
+
+  it("r1 at P reads no request for Q, in the list or on its page, and a refused page never loads the contractors", async () => {
+    leader(r1);
+    const { body } = await get("/api/maintenance-requests");
+    expect(ids(body)).not.toContain("q-1");
+    expect(ids(body)).not.toContain("q-2");
+
+    storageMock.getMaintenanceRequest.mockResolvedValue(Q_REQUESTS[0]);
+    const page = await get("/api/maintenance-requests/q-1");
+    expect(page.status).toBe(403);
+    expect(page.body).not.toHaveProperty("title");
+
+    expect((await get("/api/maintenance-requests/q-1/contacts")).status).toBe(403);
+    expect(storageMock.getRequestContacts).not.toHaveBeenCalled();
+  });
+
+  it("r3 at Q reads Q's requests and none of P's, and the contractors on their own house's request (positive control)", async () => {
+    leader(r3);
+    const { body } = await get("/api/maintenance-requests");
+    expect(ids(body)).toEqual(["q-1", "q-2"]);
+
+    storageMock.getMaintenanceRequest.mockResolvedValue(Q_REQUESTS[0]);
+    storageMock.getRequestContacts.mockResolvedValue([]);
+    expect((await get("/api/maintenance-requests/q-1/contacts")).status).toBe(200);
+    expect(storageMock.getRequestContacts).toHaveBeenCalledWith("q-1");
   });
 });
