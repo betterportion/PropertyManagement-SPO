@@ -410,16 +410,19 @@ export function isCurrentRosterMember(
  * move and reactivate in Settings. `accountId` is the account being granted,
  * moved or reactivated, so re-granting one of the house's own logins does not
  * count it against itself.
+ *
+ * The sentence is short on purpose (JR, 2026-10-12): who holds the places is
+ * already on the resident's Portal access card and in the Settings table, so
+ * the refusal says only what is wrong and what to do.
  */
 export function residentAccountCapProblem(
   houseLabel: string,
-  activeAccounts: readonly { id: string; email: string | null }[],
+  activeAccounts: readonly { id: string }[],
   accountId?: string | null,
 ): string | null {
   const others = activeAccounts.filter((account) => account.id !== accountId);
   if (others.length < MAX_RESIDENT_ACCOUNTS_PER_PROPERTY) return null;
-  const who = others.map((account) => account.email ?? "an account with no email").join(", ");
-  return `${houseLabel} already has ${MAX_RESIDENT_ACCOUNTS_PER_PROPERTY} people with access (${who}). Remove one first.`;
+  return `${houseLabel} already has ${MAX_RESIDENT_ACCOUNTS_PER_PROPERTY} logins, the most a house can have. Remove one to add another.`;
 }
 
 /**

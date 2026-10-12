@@ -11518,14 +11518,14 @@ describe("household portal access is by invitation from the house's RA (#217)", 
     expect(storageMock.deactivateAndUnlinkUser).not.toHaveBeenCalled();
   });
 
-  it("refuses a 5th person at a house, naming the four who have access", async () => {
+  it("refuses a 5th person at a house, in one plain sentence", async () => {
     actAs(STAFF, RA_WEST);
     storageMock.getActiveResidentAccountsByProperty.mockResolvedValue([
       leader("a", "a@example.com"), leader("b", "b@example.com"), leader("c", "c@example.com"), leader("d", "d@example.com"),
     ]);
     const { status, body } = await GRANT();
     expect(status).toBe(409);
-    expect(body.message).toContain("a@example.com, b@example.com, c@example.com, d@example.com");
+    expect(body.message).toBe("1 Main St already has 4 logins, the most a house can have. Remove one to add another.");
     expect(storageMock.grantResidentPortalAccess).not.toHaveBeenCalled();
   });
 
@@ -12013,8 +12013,7 @@ describe("a house holds at most MAX_RESIDENT_ACCOUNTS_PER_PROPERTY resident acco
     housesHold(4, 0);
     const { status, body } = await create(5, P.id);
     expect(status).toBe(409);
-    expect(body.message).toMatch(/House P already has 4 people with access/);
-    expect(body.message).toContain("r1@example.com, r2@example.com, r3@example.com, r4@example.com");
+    expect(body.message).toBe("House P already has 4 logins, the most a house can have. Remove one to add another.");
     expect(storageMock.upsertUser).not.toHaveBeenCalled();
     expect(storageMock.createAuditEvent).not.toHaveBeenCalled();
   });
@@ -12042,7 +12041,7 @@ describe("a house holds at most MAX_RESIDENT_ACCOUNTS_PER_PROPERTY resident acco
     storageMock.getUser.mockImplementation(async (id: string) => (id === ADMIN.id ? ADMIN : id === r1AtQ.id ? r1AtQ : undefined));
     const { status, body } = await move(r1AtQ, P.id);
     expect(status).toBe(409);
-    expect(body.message).toMatch(/House P already has 4 people with access/);
+    expect(body.message).toMatch(/House P already has 4 logins, the most a house can have\. Remove one to add another\./);
     expect(storageMock.updateUserProperty).not.toHaveBeenCalled();
     expect(storageMock.createAuditEvent).not.toHaveBeenCalled();
   });
@@ -12061,7 +12060,7 @@ describe("a house holds at most MAX_RESIDENT_ACCOUNTS_PER_PROPERTY resident acco
     storageMock.getUser.mockImplementation(async (id: string) => (id === ADMIN.id ? ADMIN : id === off.id ? off : undefined));
     const { status, body } = await request("PATCH", `/api/users/${off.id}/status`, { body: { isActive: true } });
     expect(status).toBe(409);
-    expect(body.message).toMatch(/House P already has 4 people with access/);
+    expect(body.message).toMatch(/House P already has 4 logins, the most a house can have\. Remove one to add another\./);
     expect(storageMock.updateUserActiveStatus).not.toHaveBeenCalled();
     expect(storageMock.createAuditEvent).not.toHaveBeenCalled();
   });

@@ -99,9 +99,7 @@ test.describe("a house holds four resident accounts and no more", () => {
     const fifth = await giveAccess(request, houseA, MAX_RESIDENT_ACCOUNTS_PER_PROPERTY + 1, stamp);
     expect(fifth.grant.status()).toBe(409);
     const refusal = (await fifth.grant.json()).message as string;
-    expect(refusal).toContain(`already has ${MAX_RESIDENT_ACCOUNTS_PER_PROPERTY} people with access`);
-    for (const email of emails) expect(refusal).toContain(email);
-    expect(refusal).not.toMatch(/\b(409|error)\b/i);
+    expect(refusal).toBe(`${houseA.address} already has ${MAX_RESIDENT_ACCOUNTS_PER_PROPERTY} logins, the most a house can have. Remove one to add another.`);
 
     // The card on the property page agrees with the server.
     const access = await request.get(`/api/residents/${(await (await request.get("/api/residents")).json()).find((r: { email: string }) => r.email === fifth.email).id}/portal-access`);
