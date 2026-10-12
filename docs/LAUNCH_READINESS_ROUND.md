@@ -44,6 +44,18 @@ Numbered as the audit's questions were.
 15. **The Phase 1 browser spec mints its own sessions** with the helper in `e2e/global-setup.ts`.
 16. **Phase 1 needs no migration**: the cap is a constant.
 
+Added 2026-10-12, before Phase 2:
+
+17. **The invitation wording** is the draft in `invitationEmail` (`server/notifications.ts`),
+    approved by JR and offered to SPO for changes as question 7.8 of "SPO Portal: Information
+    We Need From SPO".
+18. **"Send the invitation again"** exists on the resident's page, and every send is logged.
+19. **A scheduled invitation whose person loses access before the day is dropped**, never sent:
+    the sender checks on the day that the login is still on and still at that house.
+20. **Resend (#49) and `APP_URL` are JR's**, later. Phase 2 is built and tested without them;
+    an invitation written before email is set up goes out on the first daily run after it is.
+21. **Every grant invites**, a re-grant of somebody who had an account before included.
+
 ---
 
 ## What the Phase 0 audit found (2026-10-09)
@@ -89,7 +101,12 @@ overwritten.
 
 | Phase | PR | What landed | Migration |
 |---|---|---|---|
+| 2 | — | Invitations: `invitations` table (migration `0043_invitations`), `server/invitations.ts` (pure `selectDueInvitations` and `invitationStillStands`, `deliverInvitation`, `sendDueInvitations`, `startInvitationJob` as the sixth daily job), `invitationEmail` in `notifications.ts`, `sendOn` on the grant and on `POST /api/users`, `POST /api/residents/:id/portal-access/invitation` (send again), waiting invitations dropped on remove / deactivate / login end, the card and the Settings form, `invitations.test.ts` (brief 2.3 fixtures, boot-safety), wording test, route cases, re-link case | `0043` |
 | 1 | — | Four resident accounts per house: `MAX_RESIDENT_ACCOUNTS_PER_PROPERTY = 4`, `residentAccountCapProblem` in `server/authz.ts` applied by the grant and the three admin paths, Settings house pickers show each house's count, brief 2.1 and 2.2 fixtures in `routeAccess.test.ts`, `e2e/house-accounts.spec.ts` | — |
 
 **Phase 1 gate (manual, JR):** on desktop, add a fourth account to a house, attempt a fifth,
 read the refusal. Not yet performed.
+
+**Phase 2 gate (manual, JR):** with Resend credentials and `APP_URL` set, give your own Gmail
+portal access at a seeded house, receive the email, sign in with Google, see that house's
+requests and nothing else. Waits on #49.

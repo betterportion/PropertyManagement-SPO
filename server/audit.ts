@@ -32,6 +32,11 @@ export const AUDIT_ACTIONS_KEPT_INDEFINITELY = [
   // An existing account handed to a new login identity by the email re-link:
   // who holds an account is access history too.
   "user.relinked",
+  // When somebody was told their login was waiting, and whether the message
+  // went: the other half of "who holds an account".
+  "invitation.scheduled",
+  "invitation.sent",
+  "invitation.cancelled",
 ] as const;
 
 /**

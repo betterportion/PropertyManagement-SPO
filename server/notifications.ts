@@ -14,7 +14,7 @@
  * nothing to send, so a caller never has to distinguish "no message" from "a
  * message that failed".
  */
-import type { MaintenanceRequest, MaintenanceRequestComment } from "@shared/schema";
+import type { MaintenanceRequest, MaintenanceRequestComment, User } from "@shared/schema";
 import type { OutboundEmail } from "./email";
 import { isCurrentResident } from "@shared/residents";
 
@@ -255,6 +255,63 @@ export function moveOutStaffEmail(input: {
       `${input.residentName} is moving out of ${input.propertyName} on ${longDay(input.moveOutDay)}.\n\n` +
       `They have been sent the move-out checklist. In the portal, open their resident page to complete the move-out ` +
       `checklist (room inspected, belongings removed, keys returned), and make sure their deposit is returned on time.` +
+      SIGN_OFF,
+  };
+}
+
+export interface InvitationEmailInput {
+  to: string | null | undefined;
+  firstName: string | null | undefined;
+  /** Who gave access, as the roster or Settings knows them: "Michael Nichols". */
+  invitedByName: string;
+  /** The house's address for a household login; null for a staff account. */
+  houseAddress: string | null;
+  role: User["role"];
+  /** The portal's public address, or null for no link. From readAppUrlFromEnv. */
+  appUrl: string | null;
+}
+
+/** How a staff role reads in the invitation. */
+const ROLE_WORDS: Record<User["role"], string> = {
+  admin: "an admin",
+  regional_administrator: "a regional administrator",
+  resident: "a resident",
+};
+
+/**
+ * The invitation: your login is waiting, here is how to use it. Wording
+ * approved by JR (2026-10-12) and offered to SPO for changes in the
+ * "Information we need from SPO" document.
+ *
+ * It names who gave access and which house, points at the sign-in page when
+ * the portal's address is configured, and says which email to sign in with,
+ * because that is the one thing people get wrong. No token, no link that
+ * signs anybody in: Google is the only way in, and this is a plain-text note
+ * saying so (launch readiness 2.3).
+ */
+export function invitationEmail(input: InvitationEmailInput): OutboundEmail | null {
+  const to = usableAddress(input.to);
+  if (!to) return null;
+  const greeting = input.firstName?.trim() ? `Hi ${input.firstName.trim()},` : "Hello,";
+  const forWhat = input.houseAddress
+    ? ` for\n${input.houseAddress}.`
+    : input.role === "resident"
+      ? "."
+      : ` as ${ROLE_WORDS[input.role]}.`;
+  const whatYouCanDo =
+    input.role === "resident"
+      ? "Once you are in, you can report repairs for your house, follow the\nones your housemates reported, and fill in the walkthrough checklist."
+      : "Once you are in, you can see the houses in your region, their repairs,\nwalkthroughs and residents.";
+  return {
+    template: "invitation",
+    to,
+    subject: "Your sign-in for the SPO housing portal",
+    text:
+      `${greeting}\n\n` +
+      `${input.invitedByName} has given you access to the SPO housing portal${forWhat}\n\n` +
+      (input.appUrl ? `Sign in here: ${input.appUrl}\n` : "") +
+      `Use "Sign in with Google" with this email address: ${to}\n\n` +
+      whatYouCanDo +
       SIGN_OFF,
   };
 }

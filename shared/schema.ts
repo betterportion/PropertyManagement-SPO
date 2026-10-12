@@ -1524,6 +1524,41 @@ export const emailLog = pgTable(
 
 export type EmailLogEntry = typeof emailLog.$inferSelect;
 
+// Invitations
+//
+// The email that tells somebody their portal account is waiting for them, and
+// when it goes. The account itself is created the moment access is given (the
+// RA's portal-access grant, the admin's create user in Settings); this row only
+// decides when the email goes and records that it went (launch readiness 2.3,
+// docs/LAUNCH_READINESS_ROUND.md). Nothing in it is a credential: sign-in is
+// Google, by the account's email, and the email carries a link to the sign-in
+// page and nothing else. Follows the account through its first sign-in
+// (ON UPDATE CASCADE, like every reference to users.id).
+export const invitations = pgTable(
+  "invitations",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade", onUpdate: "cascade" }),
+    /** Where it goes: the account's email when access was given. */
+    email: varchar("email").notNull(),
+    /** The house the person was invited to, null for a staff account. Checked again on the day it is sent. */
+    propertyId: varchar("property_id").references(() => properties.id, { onDelete: "set null" }),
+    /** Who gave access, as the email names them. Plain text, so it outlives the account. */
+    invitedByName: varchar("invited_by_name").notNull(),
+    /** When the email is due: the moment access was given, or the day the RA chose. */
+    sendAt: timestamp("send_at").notNull(),
+    /** Set once the email has left; a row with it set is never sent again. */
+    sentAt: timestamp("sent_at"),
+    /** Set when the email was dropped instead: the login was switched off or moved before the day came. */
+    cancelledAt: timestamp("cancelled_at"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [index("IDX_invitations_user_id").on(table.userId), index("IDX_invitations_send_at").on(table.sendAt)],
+);
+
+export type Invitation = typeof invitations.$inferSelect;
+export type InsertInvitation = typeof invitations.$inferInsert;
+
 // Rent payments
 //
 // One row per resident per month. Rent is billed monthly (decided with SPO,

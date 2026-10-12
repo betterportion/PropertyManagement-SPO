@@ -308,6 +308,15 @@ beforeEach(() => {
   storageMock.getLastSuccessfulRosterSyncRun.mockResolvedValue(undefined);
   storageMock.getRosterReviewItems.mockResolvedValue([]);
   storageMock.getEmailLogSince.mockResolvedValue([]);
+  // Giving access writes an invitation; the defaults make that a row the
+  // sender can act on, with nothing about the invitation asserted here.
+  storageMock.createInvitation.mockImplementation(async (input: Record<string, unknown>) => ({
+    id: "inv-1", ...input, sentAt: null, cancelledAt: null, createdAt: new Date(),
+  }));
+  storageMock.getLatestInvitationForUser.mockResolvedValue(undefined);
+  storageMock.markInvitationSent.mockResolvedValue(undefined);
+  storageMock.cancelInvitation.mockResolvedValue(undefined);
+  storageMock.cancelPendingInvitations.mockResolvedValue(0);
   sendEmailMock.mockReset();
   sendEmailMock.mockResolvedValue({ sent: false, reason: "not_configured" });
 });
@@ -11589,6 +11598,184 @@ describe("household portal access is by invitation from the house's RA (#217)", 
     storageMock.getUserByEmailInsensitive.mockResolvedValue(leader("jane", "jane.doe@example.com"));
     expect((await request("DELETE", "/api/residents/r-1/portal-access")).status).toBe(200);
     expect(storageMock.deactivateAndUnlinkUser).toHaveBeenCalledWith("jane");
+  });
+});
+
+describe("the invitation goes with the access (launch readiness 2.3)", () => {
+  const ROW = {
+    id: "r-1", firstName: "Jane", lastName: "Doe", email: "jane.doe@example.com", propertyId: "prop-west",
+    region: "West Central", buildingAddress: "1 Main St", isActive: true, moveOutDate: null,
+  };
+  const JANE = { id: "u-jane", email: "jane.doe@example.com", firstName: "Jane", lastName: "Doe", role: "resident", isActive: true, propertyId: "prop-west" };
+  const HOUSE = { id: "prop-west", name: "Como House", address: "1 Main St", region: "West Central" };
+  const RA_WEST = { canManageProperties: true, allowedRegions: ["West Central"] };
+  const GRANT = (body?: unknown) => request("POST", "/api/residents/r-1/portal-access", body === undefined ? {} : { body });
+  const SEND_AGAIN = () => request("POST", "/api/residents/r-1/portal-access/invitation");
+  const sentMessages = () => sendEmailMock.mock.calls.map(([m]) => m as { template: string; to: string; text: string });
+
+  /** The RA, known by name to the invitation, and Jane's new account findable by its id. */
+  function actAsMichael(permissions: Record<string, unknown> = RA_WEST) {
+    actAs(STAFF, permissions);
+    storageMock.getUser.mockImplementation(async (id: string) =>
+      id === STAFF.id ? { ...STAFF, firstName: "Michael", lastName: "Nichols" } : id === JANE.id ? JANE : undefined,
+    );
+  }
+
+  beforeEach(() => {
+    storageMock.getResident.mockResolvedValue(ROW);
+    storageMock.getUserByEmailInsensitive.mockResolvedValue(undefined);
+    storageMock.getActiveResidentAccountsByProperty.mockResolvedValue([]);
+    storageMock.grantResidentPortalAccess.mockResolvedValue({ user: JANE, created: true });
+    storageMock.getProperty.mockResolvedValue(HOUSE);
+    storageMock.deactivateAndUnlinkUser.mockResolvedValue({});
+    sendEmailMock.mockResolvedValue({ sent: true, id: "m-1" });
+  });
+
+  it("sends the invitation as part of giving access: to the roster email, naming who gave it and the house", async () => {
+    actAsMichael();
+    const { status, body } = await GRANT();
+    expect(status).toBe(200);
+    expect(storageMock.createInvitation).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: "u-jane", email: "jane.doe@example.com", propertyId: "prop-west", invitedByName: "Michael Nichols" }),
+    );
+    expect(sentMessages()).toHaveLength(1);
+    expect(sentMessages()[0]).toMatchObject({ template: "invitation", to: "jane.doe@example.com" });
+    expect(sentMessages()[0].text).toContain("Michael Nichols has given you access to the SPO housing portal for\n1 Main St.");
+    expect(storageMock.markInvitationSent).toHaveBeenCalledWith("inv-1", expect.any(Date));
+    expect(storageMock.createAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ action: "invitation.sent", actorId: STAFF.id, entityId: "u-jane" }));
+    expect(body).toMatchObject({ hasAccess: true, invitation: { outcome: "sent" } });
+  });
+
+  it("holds a later send day for the daily run: the account exists now, nothing is sent, recorded as scheduled", async () => {
+    actAsMichael();
+    const { status, body } = await GRANT({ sendOn: "2099-08-15" });
+    expect(status).toBe(200);
+    expect(storageMock.grantResidentPortalAccess).toHaveBeenCalled();
+    expect(storageMock.createInvitation).toHaveBeenCalledWith(expect.objectContaining({ sendAt: new Date("2099-08-15T12:00:00.000Z") }));
+    expect(sendEmailMock).not.toHaveBeenCalled();
+    expect(storageMock.markInvitationSent).not.toHaveBeenCalled();
+    expect(storageMock.createAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ action: "invitation.scheduled", actorId: STAFF.id }));
+    expect(body.invitation).toMatchObject({ outcome: "scheduled", sendAt: "2099-08-15T12:00:00.000Z" });
+  });
+
+  it("refuses a send day that is not a date, giving nobody access", async () => {
+    actAsMichael();
+    expect((await GRANT({ sendOn: "next week" })).status).toBe(400);
+    expect(storageMock.grantResidentPortalAccess).not.toHaveBeenCalled();
+    expect(storageMock.createInvitation).not.toHaveBeenCalled();
+  });
+
+  it("reports an invitation that did not go, and leaves it waiting for the daily run; the access stands", async () => {
+    actAsMichael();
+    sendEmailMock.mockResolvedValue({ sent: false, reason: "not_configured" });
+    const { status, body } = await GRANT();
+    expect(status).toBe(200);
+    expect(storageMock.grantResidentPortalAccess).toHaveBeenCalled();
+    expect(storageMock.markInvitationSent).not.toHaveBeenCalled();
+    expect(storageMock.cancelInvitation).not.toHaveBeenCalled();
+    expect(body.invitation).toMatchObject({ outcome: "not_sent", reason: "not_configured" });
+  });
+
+  it("invites again from the resident's page, now, and records who did it (JR, 2026-10-12)", async () => {
+    actAsMichael();
+    storageMock.getUserByEmailInsensitive.mockResolvedValue(JANE);
+    const { status, body } = await SEND_AGAIN();
+    expect(status).toBe(200);
+    expect(storageMock.createInvitation).toHaveBeenCalledWith(expect.objectContaining({ userId: "u-jane", invitedByName: "Michael Nichols" }));
+    expect(sentMessages().map((m) => m.to)).toEqual(["jane.doe@example.com"]);
+    expect(storageMock.createAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ action: "invitation.sent", actorId: STAFF.id }));
+    expect(body.invitation).toMatchObject({ outcome: "sent" });
+  });
+
+  it("will not invite again a login that has no access at this house", async () => {
+    actAsMichael();
+    for (const account of [undefined, { ...JANE, isActive: false }, { ...JANE, propertyId: "prop-east" }]) {
+      storageMock.getUserByEmailInsensitive.mockResolvedValue(account);
+      expect((await SEND_AGAIN()).status).toBe(409);
+    }
+    expect(storageMock.createInvitation).not.toHaveBeenCalled();
+    expect(sendEmailMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["a resident, even one holding the property flags", () => actAs({ ...ALICE, propertyId: "prop-west" } as typeof ALICE, { canManageProperties: true })],
+    ["an RA from another region", () => actAs(STAFF, { canManageProperties: true, allowedRegions: ["East Central"] })],
+    ["staff without the manage-properties flag", () => actAs(STAFF, { canViewProperties: true, allowedRegions: ["West Central"] })],
+  ])("refuses %s the send-again, writing and sending nothing", async (_who, sign) => {
+    sign();
+    storageMock.getUserByEmailInsensitive.mockResolvedValue(JANE);
+    expect((await SEND_AGAIN()).status).toBe(403);
+    expect((await GRANT()).status).toBe(403);
+    expect(storageMock.createInvitation).not.toHaveBeenCalled();
+    expect(sendEmailMock).not.toHaveBeenCalled();
+  });
+
+  it("drops a waiting invitation when access is removed", async () => {
+    actAsMichael();
+    storageMock.getUserByEmailInsensitive.mockResolvedValue(JANE);
+    expect((await request("DELETE", "/api/residents/r-1/portal-access")).status).toBe(200);
+    expect(storageMock.cancelPendingInvitations).toHaveBeenCalledWith("u-jane", expect.any(Date));
+  });
+
+  it("tells the card where the invitation stands, and nothing more about it", async () => {
+    actAs(STAFF, { canViewProperties: true, allowedRegions: ["West Central"] });
+    storageMock.getUserByEmailInsensitive.mockResolvedValue(JANE);
+    storageMock.getActiveResidentAccountsByProperty.mockResolvedValue([JANE]);
+    storageMock.getLatestInvitationForUser.mockResolvedValue({
+      id: "inv-9", userId: "u-jane", email: "jane.doe@example.com", propertyId: "prop-west", invitedByName: "Michael Nichols",
+      sendAt: new Date("2099-08-15T12:00:00.000Z"), sentAt: null, cancelledAt: null, createdAt: new Date(),
+    });
+    const { status, body } = await get("/api/residents/r-1/portal-access");
+    expect(status).toBe(200);
+    expect(body.invitation).toEqual({ sendAt: "2099-08-15T12:00:00.000Z", sentAt: null, cancelledAt: null });
+  });
+
+  describe("the admin's create user invites too", () => {
+    const NEW = { id: "u-new", email: "rita@example.com", firstName: "Rita", lastName: "Ray", role: "regional_administrator", isActive: true, propertyId: null };
+
+    function actAsAnn() {
+      actAs(ADMIN);
+      storageMock.getUser.mockImplementation(async (id: string) =>
+        id === ADMIN.id ? { ...ADMIN, firstName: "Ann", lastName: "Admin" } : id === "u-new" ? NEW : undefined,
+      );
+      storageMock.upsertUser.mockImplementation(async (data: Record<string, unknown>) => ({ user: { isActive: true, ...data, id: "u-new" } }));
+    }
+
+    it("sends the invitation for a staff account, naming the role instead of a house", async () => {
+      actAsAnn();
+      const { status, body } = await request("POST", "/api/users", { body: { email: "rita@example.com", firstName: "Rita", lastName: "Ray", role: "regional_administrator" } });
+      expect(status).toBe(200);
+      expect(storageMock.createInvitation).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: "u-new", email: "rita@example.com", propertyId: null, invitedByName: "Ann Admin" }),
+      );
+      expect(sentMessages()[0].text).toContain("Ann Admin has given you access to the SPO housing portal as a regional administrator.");
+      expect(body.invitation).toMatchObject({ outcome: "sent" });
+    });
+
+    it("holds a later day, and writes no invitation for an account created switched off", async () => {
+      actAsAnn();
+      const later = await request("POST", "/api/users", { body: { email: "rita@example.com", role: "regional_administrator", sendOn: "2099-01-02" } });
+      expect(later.status).toBe(200);
+      expect(later.body.invitation).toMatchObject({ outcome: "scheduled" });
+      expect(sendEmailMock).not.toHaveBeenCalled();
+
+      const off = await request("POST", "/api/users", { body: { email: "rita@example.com", role: "regional_administrator", isActive: false } });
+      expect(off.status).toBe(200);
+      expect(off.body.invitation).toBeNull();
+      expect(storageMock.createInvitation).toHaveBeenCalledTimes(1);
+    });
+
+    it("deactivating an account drops its waiting invitation; reactivating does not", async () => {
+      actAsAnn();
+      storageMock.updateUserActiveStatus.mockImplementation(async (id: string, isActive: boolean) => ({ ...NEW, id, isActive }));
+      expect((await request("PATCH", "/api/users/u-new/status", { body: { isActive: false } })).status).toBe(200);
+      expect(storageMock.cancelPendingInvitations).toHaveBeenCalledWith("u-new", expect.any(Date));
+
+      storageMock.cancelPendingInvitations.mockClear();
+      storageMock.getUser.mockImplementation(async (id: string) => (id === ADMIN.id ? ADMIN : id === "u-new" ? { ...NEW, isActive: false } : undefined));
+      expect((await request("PATCH", "/api/users/u-new/status", { body: { isActive: true } })).status).toBe(200);
+      expect(storageMock.cancelPendingInvitations).not.toHaveBeenCalled();
+    });
   });
 });
 
