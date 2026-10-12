@@ -230,6 +230,19 @@ The details below are the agreed intent. Each entry is filled in properly in the
 - **When it fails:** the failure goes to the server log and the job tries again the next day. Already-created tasks are unaffected.
 - **Status:** built (its emails are awaiting email setup).
 
+### Invitations
+
+- **Purpose:** tell a household leader, steward or staff member that their portal login is waiting, and how to use it, without the RA writing the email.
+- **Trigger:** giving access: the RA's **Give portal access** on a resident's page, or an admin's **Create User** in Settings. Both have a "Send the invitation email on" day, which defaults to today. A **Send the invitation again** button on the resident's page sends a fresh one now.
+- **What the portal does:**
+  - Creates the account at once, whatever day is chosen; only the email waits. Today means the email goes as part of the action, and the screen says whether it went.
+  - A later day is sent by the daily invitation job (`server/invitations.ts`), the sixth in-process job. **On the day it checks again:** the email goes only if the login is still switched on and still linked to the house it was invited to. Otherwise it is dropped and never sent (an RA who removed access in between did not mean to invite them).
+  - **The wording** is `invitationEmail` in `server/notifications.ts`, approved by JR 2026-10-12 and offered to SPO for changes: who gave access, which house (or the staff role), a link to the sign-in page when `APP_URL` is set, and the email address to sign in with. No token, no magic link: Google is still the only way in.
+  - An email that did not go (email not set up, the provider refused it) keeps its row waiting and is tried again on every daily run, so invitations written before Resend is configured go out once it is. Each try is in the email log.
+  - **Sent once:** a sent invitation is never sent again by the job. Every send, scheduling and drop is in the activity trail (`invitation.sent`, `invitation.scheduled`, `invitation.cancelled`), kept indefinitely.
+- **What SPO must do:** set up email (below) and `APP_URL`, and confirm the wording (question 7.8 in "Information we need from SPO").
+- **Status:** built; the live send is the Phase 2 gate in `docs/LAUNCH_READINESS_ROUND.md`.
+
 ### Household logins end with the stay
 
 - **Purpose:** a household leader's or steward's portal login is for their house while they live there.
@@ -238,7 +251,7 @@ The details below are the agreed intent. Each entry is filled in properly in the
   - plus the daily seasonal-task run, for a stop date that simply passes.
 - **What the portal does:**
   - Once no current roster row at the house speaks for a login, it switches the login off and unlinks it from the house. A current row means active, with the same email, and its stop date not past (`server/householdLogins.ts`).
-  - That frees one of the house's 3 places.
+  - That frees one of the house's 4 places, and drops any invitation email still waiting for that login.
   - Both changes are audited as access history, kept indefinitely.
   - **Move out** takes only a date that has arrived. A planned leaving date is the roster's stop date, which keeps them in until that day.
   - **An RA records a planned leaving date** with the Stop date field in Edit resident (active residents only). Changing it is audited as `resident.stop_date_changed` with the old and new date, and ends the login right away if the date has already passed.
@@ -327,6 +340,8 @@ Everything that has to happen outside the code. Tick an item when it's done and 
 - [ ] Verify the sending domain in Resend (SPF, DKIM, DMARC DNS records). Owner: TBD
 - [ ] Set RESEND_API_KEY, EMAIL_FROM (and EMAIL_REPLY_TO). Owner: TBD
 - [ ] Approve move-out email wording and the RA checklist items. Owner: TBD
+- [ ] Approve the invitation email wording (question 7.8 in "Information we need from SPO"). Owner: TBD
+- [ ] Set APP_URL to the portal's address, so invitation and comment emails carry a link. Owner: TBD
 - [ ] Send a test email from the Email health panel and confirm it arrives. Owner: TBD
 
 ### Deposits

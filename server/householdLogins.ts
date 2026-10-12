@@ -31,7 +31,12 @@ export function departedHouseholdLogins(logins: User[], rosterByHouse: Map<strin
 
 type LoginStorage = Pick<
   IStorage,
-  "getActiveResidentAccountsByProperty" | "getAllUsers" | "getResidentsByProperty" | "getAllResidents" | "deactivateAndUnlinkUser"
+  | "getActiveResidentAccountsByProperty"
+  | "getAllUsers"
+  | "getResidentsByProperty"
+  | "getAllResidents"
+  | "deactivateAndUnlinkUser"
+  | "cancelPendingInvitations"
 >;
 
 /**
@@ -60,6 +65,8 @@ export async function closeDepartedHouseholdLogins(
     const departed = departedHouseholdLogins(logins, rosterByHouse, now);
     for (const login of departed) {
       await storage.deactivateAndUnlinkUser(login.id);
+      // An invitation still waiting for a login that has ended is dropped with it.
+      await storage.cancelPendingInvitations(login.id, now);
       // Access history, kept indefinitely. The system did it, so no actor.
       recordAuditEvent(null, {
         action: AUDIT_ACTIONS.USER_STATUS_CHANGED,

@@ -10,6 +10,7 @@ export const EMAIL_TEMPLATES = {
   household: "Email to a household",
   move_out_resident: "Move-out checklist to resident",
   move_out_staff: "Move-out heads-up to RA",
+  invitation: "Invitation to the portal",
   test: "Test email",
 } as const;
 

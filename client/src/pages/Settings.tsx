@@ -28,6 +28,8 @@ import { insertUserSchema, type User, type UserPermissions, type Property } from
 import { REGIONS } from "@shared/regions";
 import { isResidentPermissionFlag } from "@shared/permissions";
 import { MAX_RESIDENT_ACCOUNTS_PER_PROPERTY } from "@shared/residents";
+import { invitationDaySchema } from "@shared/invitations";
+import { invitationOutcomeMessage, type InvitationOutcome } from "@/lib/invitations";
 import { serverMessage } from "@/lib/serverMessage";
 import { z } from "zod";
 import { ActivityLog } from "@/components/ActivityLog";
@@ -43,6 +45,10 @@ import { formatDate, formatValue } from "@/lib/format";
 import { isPortalAccessQuery } from "@/lib/portalAccess";
 
 const ALL_REGIONS = REGIONS.map((r) => ({ id: r, name: r }));
+
+/** The account plus the day its invitation email goes (launch readiness 2.3). */
+const createUserFormSchema = insertUserSchema.extend({ sendOn: invitationDaySchema.optional() });
+const today = () => new Date().toISOString().slice(0, 10);
 
 const FEATURE_PERMISSIONS = [
   { key: "canViewMaintenance", label: "View Maintenance", section: "Maintenance" },
@@ -291,18 +297,18 @@ export default function Settings() {
   });
 
   const createUserMutation = useMutation({
-    mutationFn: async (data: z.infer<typeof insertUserSchema>) => {
-      return await apiRequest("POST", "/api/users", data);
+    mutationFn: async (data: z.infer<typeof createUserFormSchema>) => {
+      return (await (await apiRequest("POST", "/api/users", data)).json()) as { invitation: InvitationOutcome | null };
     },
-    onSuccess: () => {
+    onSuccess: ({ invitation }) => {
       queryClient.invalidateQueries({ queryKey: ["/api/users"] });
       // A new resident account linked to a house takes one of its places.
       queryClient.invalidateQueries({ predicate: isPortalAccessQuery });
       setIsAddDialogOpen(false);
       form.reset();
       toast({
-        title: "Success",
-        description: "User created successfully",
+        title: "Account created",
+        description: invitation ? invitationOutcomeMessage(invitation) : "The account is switched off, so no invitation was sent.",
       });
     },
     onError: (error) => {
@@ -314,8 +320,8 @@ export default function Settings() {
     },
   });
 
-  const form = useForm<z.infer<typeof insertUserSchema>>({
-    resolver: zodResolver(insertUserSchema),
+  const form = useForm<z.infer<typeof createUserFormSchema>>({
+    resolver: zodResolver(createUserFormSchema),
     defaultValues: {
       email: "",
       firstName: "",
@@ -323,6 +329,7 @@ export default function Settings() {
       role: "resident",
       isActive: true,
       propertyId: null,
+      sendOn: today(),
     },
   });
 
@@ -423,6 +430,23 @@ export default function Settings() {
                       <FormControl>
                         <Input {...field} value={field.value || ""} type="email" data-testid="input-email" />
                       </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="sendOn"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Send the invitation email on</FormLabel>
+                      <FormControl>
+                        <Input {...field} value={field.value ?? ""} type="date" min={today()} data-testid="input-invitation-send-on" />
+                      </FormControl>
+                      <p className="text-xs text-muted-foreground">
+                        The account is ready straight away; this is only when the email telling them goes. Today means now.
+                      </p>
                       <FormMessage />
                     </FormItem>
                   )}

@@ -32,6 +32,7 @@ import {
   moveOutPhotos,
   depositReturnRules,
   emailLog,
+  invitations,
   propertyFacts,
   residents,
   rentPayments,
@@ -100,6 +101,7 @@ import {
   type MoveOutPhoto,
   type DepositReturnRule,
   type EmailLogEntry,
+  type Invitation,
   type PropertyFacts,
   type PropertyFactsWrite,
   type MaintenanceSchedule,
@@ -579,6 +581,22 @@ export interface IStorage {
   getEmailLogSince(since: Date): Promise<EmailLogEntry[]>;
   /** Deletes up to `limit` entries older than `cutoff`; returns how many. */
   deleteEmailLogBefore(cutoff: Date, limit: number): Promise<number>;
+
+  // Invitations
+  /**
+   * Writes the invitation for an account and, in the same transaction, drops
+   * any earlier one still waiting for it, so access given twice (or scheduled,
+   * then sent now) never produces two emails.
+   */
+  createInvitation(input: { userId: string; email: string; propertyId: string | null; invitedByName: string; sendAt: Date }): Promise<Invitation>;
+  /** Every invitation neither sent nor dropped, due or not; the sender decides which are due. */
+  getPendingInvitations(): Promise<Invitation[]>;
+  /** The newest invitation written for an account, whatever became of it. */
+  getLatestInvitationForUser(userId: string): Promise<Invitation | undefined>;
+  markInvitationSent(id: string, at: Date): Promise<void>;
+  cancelInvitation(id: string, at: Date): Promise<void>;
+  /** Drops every invitation still waiting for an account; returns how many. For a login being switched off. */
+  cancelPendingInvitations(userId: string, at: Date): Promise<number>;
 
   // House facts
   getPropertyFacts(propertyId: string): Promise<PropertyFacts | undefined>;
@@ -2282,6 +2300,48 @@ export class DatabaseStorage implements IStorage {
     const doomed = db.select({ id: emailLog.id }).from(emailLog).where(lt(emailLog.createdAt, cutoff)).limit(limit);
     const removed = await db.delete(emailLog).where(inArray(emailLog.id, doomed)).returning({ id: emailLog.id });
     return removed.length;
+  }
+
+  // Invitations Implementation
+  async createInvitation(input: { userId: string; email: string; propertyId: string | null; invitedByName: string; sendAt: Date }): Promise<Invitation> {
+    return await db.transaction(async (tx) => {
+      await tx
+        .update(invitations)
+        .set({ cancelledAt: new Date() })
+        .where(and(eq(invitations.userId, input.userId), isNull(invitations.sentAt), isNull(invitations.cancelledAt)));
+      const [row] = await tx.insert(invitations).values(input).returning();
+      return row;
+    });
+  }
+
+  async getPendingInvitations(): Promise<Invitation[]> {
+    return await db
+      .select()
+      .from(invitations)
+      .where(and(isNull(invitations.sentAt), isNull(invitations.cancelledAt)))
+      .orderBy(asc(invitations.sendAt));
+  }
+
+  async getLatestInvitationForUser(userId: string): Promise<Invitation | undefined> {
+    const [row] = await db.select().from(invitations).where(eq(invitations.userId, userId)).orderBy(desc(invitations.createdAt)).limit(1);
+    return row;
+  }
+
+  async markInvitationSent(id: string, at: Date): Promise<void> {
+    await db.update(invitations).set({ sentAt: at }).where(and(eq(invitations.id, id), isNull(invitations.sentAt)));
+  }
+
+  async cancelInvitation(id: string, at: Date): Promise<void> {
+    await db.update(invitations).set({ cancelledAt: at }).where(and(eq(invitations.id, id), isNull(invitations.sentAt), isNull(invitations.cancelledAt)));
+  }
+
+  async cancelPendingInvitations(userId: string, at: Date): Promise<number> {
+    const rows = await db
+      .update(invitations)
+      .set({ cancelledAt: at })
+      .where(and(eq(invitations.userId, userId), isNull(invitations.sentAt), isNull(invitations.cancelledAt)))
+      .returning({ id: invitations.id });
+    return rows.length;
   }
 
   // House facts Implementation

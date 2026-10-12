@@ -113,6 +113,27 @@ describe("upsertUser email re-linking", () => {
     expect(relinkedFrom).toEqual({ id: "u-precreated", email: "steward@example.com", role: "resident" });
   });
 
+  it("an invited household leader lands in their house on first sign-in, with the household grants (launch readiness 2.3)", async () => {
+    // Exactly the row the RA's portal-access grant writes: a placeholder id,
+    // the roster email, the house, and the household permissions row.
+    const invited = { ...PRE_CREATED, id: "placeholder-uuid", commentEmailsEnabled: true, firstName: "Jane", lastName: "Doe" };
+    const grants = { ...PERMISSIONS_ROW, userId: "placeholder-uuid", canCompleteWalkthroughs: true, canViewResourceHub: true };
+    selectQueue.push([invited], [{ ...grants, userId: "google-sub-456" }]);
+
+    const { user, relinkedFrom } = await storage.upsertUser({
+      id: "google-sub-456",
+      email: "steward@example.com",
+      firstName: "Jane",
+      lastName: "Doe",
+    });
+
+    expect(relinkedFrom).toEqual({ id: "placeholder-uuid", email: "steward@example.com", role: "resident" });
+    expect(user.propertyId).toBe("prop-west");
+    expect(updated.find((row) => row.id === "google-sub-456")).toMatchObject({ role: "resident", isActive: true, propertyId: "prop-west" });
+    // The grants came across with the row (ON UPDATE CASCADE); nothing is rewritten.
+    expect(inserted).toEqual([]);
+  });
+
   it("reports no re-link when the account found by email already has this id", async () => {
     selectQueue.push([{ ...PRE_CREATED, id: "oidc-sub-123" }], [PERMISSIONS_ROW]);
 
