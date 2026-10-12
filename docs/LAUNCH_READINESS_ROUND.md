@@ -101,12 +101,32 @@ overwritten.
 
 | Phase | PR | What landed | Migration |
 |---|---|---|---|
+| 3 | — | The close-out: `request_closeouts` + `request_closeout_contacts` (migration `0044_request_closeouts`), `shared/closeouts.ts` (questions, body schema, `closeoutProblem` sentence shared by server and screen), `server/contractorSummary.ts` (pure, the 2.4 fixture in `contractorSummary.test.ts`), the prompt in `MaintenanceEditDialog`, `GET /api/contacts/:id/closeouts` and the "How their jobs went" card, `GET /api/maintenance-requests/:id/closeout` and the request page's card, route cases, `e2e/closeout-mobile.spec.ts` (nine interactions) | `0044` |
 | 2 | — | Invitations: `invitations` table (migration `0043_invitations`), `server/invitations.ts` (pure `selectDueInvitations` and `invitationStillStands`, `deliverInvitation`, `sendDueInvitations`, `startInvitationJob` as the sixth daily job), `invitationEmail` in `notifications.ts`, `sendOn` on the grant and on `POST /api/users`, `POST /api/residents/:id/portal-access/invitation` (send again), waiting invitations dropped on remove / deactivate / login end, the card and the Settings form, `invitations.test.ts` (brief 2.3 fixtures, boot-safety), wording test, route cases, re-link case | `0043` |
 | 1 | — | Four resident accounts per house: `MAX_RESIDENT_ACCOUNTS_PER_PROPERTY = 4`, `residentAccountCapProblem` in `server/authz.ts` applied by the grant and the three admin paths, Settings house pickers show each house's count, brief 2.1 and 2.2 fixtures in `routeAccess.test.ts`, `e2e/house-accounts.spec.ts` | — |
 
 **Phase 1 gate (manual, JR):** on desktop, add a fourth account to a house, attempt a fifth,
 read the refusal. Not yet performed.
 
+**Phase 2 screens approved by JR 2026-10-12** (PR #303, stacked on #302).
+
 **Phase 2 gate (manual, JR):** with Resend credentials and `APP_URL` set, give your own Gmail
 portal access at a seeded house, receive the email, sign in with Google, see that house's
 requests and nothing else. Waits on #49.
+
+**Phase 3 gate (manual, JR):** on a phone, complete a seeded request with a linked contractor,
+then open that contractor's page and read the counts. Screenshots first.
+
+---
+
+## Waiting on people (kept current; the agent cannot do these)
+
+| # | Who | What | Blocks |
+|---|---|---|---|
+| H1 | JR | Phase 1 manual gate on desktop: add a fourth account to a house, attempt a fifth, read the refusal. Then merge #302. | Merging #303 and later PRs (stacked) |
+| H2 | JR | Merge #303 once #302 is in (retarget it to `main` first). | Phase 3 PR's base |
+| H3 | JR, paused | Resend: verify the sending domain, set `RESEND_API_KEY`, `EMAIL_FROM` (#49). Paused by JR 2026-10-12. | The Phase 2 live-email gate; every automated email |
+| H4 | JR | Set `APP_URL` to the portal's address. | Links in invitation and comment email |
+| H5 | JR | Phase 2 live gate: invite your own Gmail, receive the email, sign in, see the right house. | Nothing in code; confirms the whole path |
+| H6 | SPO (Joseph) | Answer "SPO Portal: Information We Need From SPO", including 7.8 (the invitation wording). | Final wording; nothing in code |
+| H7 | JR | Approve the Phase 3 screenshots when they arrive, then the Phase 3 phone gate. | Merging Phase 3 |

@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
+import { CLOSEOUT_QUESTIONS, isGoodAnswer, type CloseoutQuestionKey } from "@shared/closeouts";
 import { Link, useParams } from "wouter";
 import { ArrowLeft, Mail, Phone, Trash2 } from "lucide-react";
 
@@ -46,6 +47,21 @@ const REQUEST_STATUS: Record<string, { label: string; variant: "warning" | "info
   cancelled: { label: "Cancelled", variant: "secondary" },
 };
 
+/** What GET /api/contacts/:id/closeouts answers (server/contractorSummary.ts). */
+interface ContractorSummaryView {
+  answered: number;
+  counts: Array<{ key: CloseoutQuestionKey; label: string; yes: number; of: number }>;
+  history: Array<{
+    requestId: string;
+    title: string;
+    buildingAddress: string;
+    completedAt: string;
+    note: string | null;
+    completedByName: string | null;
+    answers: Record<CloseoutQuestionKey, boolean | null>;
+  }>;
+}
+
 export default function ContactDetail() {
   const params = useParams<{ id: string }>();
   const contactId = params.id;
@@ -61,6 +77,10 @@ export default function ContactDetail() {
   });
   const notesQuery = useQuery<ContactNote[]>({
     queryKey: ["/api/contacts", contactId, "notes"],
+    enabled: !!contactId,
+  });
+  const closeoutsQuery = useQuery<ContractorSummaryView>({
+    queryKey: ["/api/contacts", contactId, "closeouts"],
     enabled: !!contactId,
   });
   const invoicesQuery = useQuery<Invoice[]>({ queryKey: ["/api/invoices"] });
@@ -232,6 +252,58 @@ export default function ContactDetail() {
                     </li>
                   ))}
                 </ul>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card data-testid="card-contact-closeouts">
+            <CardHeader>
+              <CardTitle>How their jobs went</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {/* Counts and the dated history, never an average: "7 of 9"
+                  tells the next RA something a 3.8 does not (launch
+                  readiness 2.4). */}
+              {closeoutsQuery.isLoading ? (
+                <LoadingState message="Loading their close-outs..." />
+              ) : !closeoutsQuery.data || closeoutsQuery.data.history.length === 0 ? (
+                <EmptyState
+                  title="No completed job has been closed out with them yet"
+                  description="When a request they are linked to is marked completed, the RA answers four quick questions. The counts start with the first one."
+                />
+              ) : (
+                <>
+                  <ul className="grid gap-2 sm:grid-cols-2" data-testid="list-closeout-counts">
+                    {closeoutsQuery.data.counts.map((count) => (
+                      <li key={count.key} className="rounded-md border border-border px-3 py-2 text-sm" data-testid={`text-closeout-count-${count.key}`}>
+                        {count.label}: <span className="font-semibold">{count.yes} of {count.of}</span>
+                      </li>
+                    ))}
+                  </ul>
+                  <ul className="space-y-3" data-testid="list-closeout-history">
+                    {closeoutsQuery.data.history.map((job) => (
+                      <li key={job.requestId} className="rounded-md border border-border p-3 text-sm" data-testid={`row-closeout-${job.requestId}`}>
+                        <Link href={`/maintenance/${job.requestId}`} className="font-medium underline-offset-2 hover:underline">
+                          {job.title}
+                        </Link>
+                        <p className="text-xs text-muted-foreground">
+                          {job.buildingAddress} · completed {formatDate(job.completedAt)}
+                          {job.completedByName ? ` by ${job.completedByName}` : ""}
+                        </p>
+                        <p className="mt-1 flex flex-wrap gap-1">
+                          {CLOSEOUT_QUESTIONS.map(({ key, rollup }) =>
+                            job.answers[key] === null ? null : (
+                              <Badge key={key} variant={isGoodAnswer(key, job.answers[key]) ? "success" : "outline"}>
+                                {rollup}: {job.answers[key] ? "yes" : "no"}
+                              </Badge>
+                            ),
+                          )}
+                        </p>
+                        {job.note && <p className="mt-2 whitespace-pre-line">{job.note}</p>}
+                      </li>
+                    ))}
+                  </ul>
+                </>
               )}
             </CardContent>
           </Card>

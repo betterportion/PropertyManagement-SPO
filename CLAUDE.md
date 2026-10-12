@@ -65,7 +65,7 @@ Design notes for individual features live in `.claude/rules/`. Each file loads o
 | File | Sections |
 |---|---|
 | `walkthroughs.md` | The walkthrough template · The walkthrough screen · The flagged-items list · Photo comparison · Walkthrough conditions |
-| `maintenance.md` | Where a maintenance request is, and who fixed it · Request threads · Request types · Projects and bids · Rollups over maintenance history · Outbound email |
+| `maintenance.md` | Where a maintenance request is, and who fixed it · Request threads · Request types · Projects and bids · Rollups over maintenance history · The close-out · Outbound email |
 | `resource-hub.md` | The resource hub · House facts and access codes |
 | `deposits.md` | Deposits (including the move-out damages worksheet) |
 | `assets-and-setup.md` | Asset lifecycle and snooze · The property setup checklist |

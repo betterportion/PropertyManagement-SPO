@@ -13,6 +13,7 @@ import { RequestBids } from "@/components/RequestBids";
 import { RequestProjectCard } from "@/components/RequestProjectCard";
 import RequestThread from "@/components/RequestThread";
 import { useAuth } from "@/hooks/useAuth";
+import { CLOSEOUT_QUESTIONS, isGoodAnswer, type CloseoutQuestionKey } from "@shared/closeouts";
 import { requestRefusalMessage, type RequestAccessUser } from "@/lib/requestAccess";
 import { isForbiddenError } from "@/lib/authUtils";
 import { formatDate, formatValue } from "@/lib/format";
@@ -42,6 +43,13 @@ import {
  * staff -- is the only thing between a reader and a request, and a 403 from
  * it is what the access-denied state below reports.
  */
+
+/** What GET /api/maintenance-requests/:id/closeout answers. */
+type RequestCloseoutView = Record<CloseoutQuestionKey, boolean | null> & {
+  note: string | null;
+  completedAt: string;
+  completedByName: string | null;
+};
 
 /** The shape of `/api/auth/user` this page reads. */
 interface RequestUser {
@@ -105,6 +113,13 @@ export default function RequestDetail() {
   const commentsQuery = useQuery<MaintenanceRequestComment[]>({
     queryKey: ["/api/maintenance-requests", requestId, "comments"],
     enabled: !!requestId,
+  });
+
+  // The close-out, for staff: what the RA recorded when it was completed.
+  const closeoutQuery = useQuery<RequestCloseoutView | null>({
+    queryKey: ["/api/maintenance-requests", requestId, "closeout"],
+    enabled: !!requestId && isStaffAccount(user as RequestUser | null),
+    retry: false,
   });
 
   // Where a repair raised from a walkthrough came from, so the page can link
@@ -337,6 +352,38 @@ export default function RequestDetail() {
             )}
           </CardContent>
         </Card>
+
+        {isStaff && closeoutQuery.data && (
+          <Card data-testid="card-request-closeout">
+            <CardHeader>
+              <CardTitle>Close-out</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2 text-sm">
+              <p className="text-muted-foreground">
+                Completed {formatDate(closeoutQuery.data.completedAt)}
+                {closeoutQuery.data.completedByName ? ` by ${closeoutQuery.data.completedByName}` : ""}
+              </p>
+              {CLOSEOUT_QUESTIONS.some(({ key }) => closeoutQuery.data?.[key] !== null) && (
+                <ul className="flex flex-wrap gap-1">
+                  {CLOSEOUT_QUESTIONS.map(({ key, rollup }) =>
+                    closeoutQuery.data?.[key] === null ? null : (
+                      <li key={key}>
+                        <Badge variant={isGoodAnswer(key, closeoutQuery.data?.[key]) ? "success" : "outline"} data-testid={`badge-closeout-${key}`}>
+                          {rollup}: {closeoutQuery.data?.[key] ? "yes" : "no"}
+                        </Badge>
+                      </li>
+                    ),
+                  )}
+                </ul>
+              )}
+              {closeoutQuery.data.note ? (
+                <p className="whitespace-pre-line" data-testid="text-closeout-note">{closeoutQuery.data.note}</p>
+              ) : (
+                <p className="text-muted-foreground">No note was left.</p>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
         {/* The project fields and the bids, on a project or a capital project
             and for staff. A resident never gets here for one -- the server
