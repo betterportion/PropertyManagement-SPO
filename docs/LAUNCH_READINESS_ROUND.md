@@ -124,9 +124,9 @@ then open that contractor's page and read the counts. Screenshots first.
 | # | Who | What | Blocks |
 |---|---|---|---|
 | H1 | JR | Phase 1 manual gate on desktop: add a fourth account to a house, attempt a fifth, read the refusal. Then merge #302. | Merging #303 and later PRs (stacked) |
-| H2 | JR | Merge #303 once #302 is in (retarget it to `main` first). | Phase 3 PR's base |
+| H2 | JR | Merge #303 once #302 is in (retarget it to `main` first), then #304 the same way. | The stack |
 | H3 | JR, paused | Resend: verify the sending domain, set `RESEND_API_KEY`, `EMAIL_FROM` (#49). Paused by JR 2026-10-12. | The Phase 2 live-email gate; every automated email |
 | H4 | JR | Set `APP_URL` to the portal's address. | Links in invitation and comment email |
 | H5 | JR | Phase 2 live gate: invite your own Gmail, receive the email, sign in, see the right house. | Nothing in code; confirms the whole path |
 | H6 | SPO (Joseph) | Answer "SPO Portal: Information We Need From SPO", including 7.8 (the invitation wording). | Final wording; nothing in code |
-| H7 | JR | Approve the Phase 3 screenshots when they arrive, then the Phase 3 phone gate. | Merging Phase 3 |
+| H7 | JR | Approve the Phase 3 screenshots (Close-out Review page, PR #304), then the Phase 3 phone gate. | Merging #304 |
