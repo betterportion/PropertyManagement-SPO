@@ -2,8 +2,9 @@
  * The financial-data rule, enforced on the free text of finance records (#51).
  *
  * The portal must never hold a card number or a bank account or routing
- * number. Five free-text fields on HH fees and deposits are where one could
- * be typed, so the API refuses two narrow shapes there: a Luhn-valid card
+ * number. The free-text fields on HH fees, deposits, startup budgets, a
+ * house's deposit terms, a resident's roster row and the move-out checklist
+ * are where one could be typed, so the API refuses two narrow shapes there: a Luhn-valid card
  * number, and a banking word right next to a long number. Anything else --
  * a check number, a long QuickBooks or Ramp transaction number -- must still
  * pass, or people learn to work around the rule.
@@ -14,8 +15,11 @@ import { describe, it, expect } from "vitest";
 import { BANKING_DETAILS_MESSAGE, containsBankingDetails } from "@shared/bankingDetails";
 import {
   insertDepositDeductionSchema,
+  insertMoveOutChecklistSchema,
   insertPropertyBudgetSchema,
+  insertPropertySchema,
   insertRentPaymentSchema,
+  insertResidentSchema,
   insertSecurityDepositSchema,
 } from "@shared/schema";
 
@@ -142,6 +146,11 @@ describe("the finance fields that carry the rule", () => {
     ["deduction description", insertDepositDeductionSchema.partial(), { description: CARD }],
     // Shown to the household, unlike the other money notes (#258).
     ["startup budget notes", insertPropertyBudgetSchema.partial(), { notes: CARD }],
+    // The remaining money notes, from the pilot audit (#219).
+    ["house deposit notes", insertPropertySchema.partial(), { depositNotes: CARD }],
+    ["resident notes", insertResidentSchema.partial(), { notes: CARD }],
+    ["move-out damage notes", insertMoveOutChecklistSchema.partial(), { damageNotes: CARD }],
+    ["move-out notes", insertMoveOutChecklistSchema.partial(), { notes: CARD }],
   ];
 
   it.each(fields)("refuses a card number in the %s", (_name, schema, body) => {
