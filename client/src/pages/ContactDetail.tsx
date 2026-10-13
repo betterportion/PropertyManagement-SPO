@@ -199,6 +199,7 @@ export default function ContactDetail() {
                     value={draft}
                     maxLength={2000}
                     placeholder="What happened, and what the next RA should know. e.g. Came out same day for the burst pipe; will not do tile."
+                    aria-label="New note about this contractor"
                     onChange={(event) => setDraft(event.target.value)}
                     data-testid="textarea-contact-note"
                   />

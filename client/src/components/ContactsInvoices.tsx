@@ -74,6 +74,7 @@ export default function ContactsInvoices({ contacts, invoices, onEditContact }: 
                     variant="ghost"
                     size="icon"
                     onClick={() => onEditContact?.(contact.id)}
+                    aria-label={`Edit ${contact.name}`}
                     data-testid={`button-edit-contact-${contact.id}`}
                   >
                     <Pencil className="h-4 w-4" />
