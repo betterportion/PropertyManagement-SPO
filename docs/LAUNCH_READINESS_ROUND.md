@@ -130,4 +130,4 @@ then open that contractor's page and read the counts. Screenshots first.
 | H5 | JR | Phase 2 live gate: invite your own Gmail, receive the email, sign in, see the right house. | Nothing in code; confirms the whole path |
 | H6 | SPO (Joseph) | Answer "SPO Portal: Information We Need From SPO", including 7.8 (the invitation wording). | Final wording; nothing in code |
 | H7 | JR | Phase 3 phone gate: complete a request with a contractor linked, read the counts on the contractor's page. Screens approved 2026-10-13. | Merging #304 |
-| H8 | JR | Decide whether contractor trust for incoming RAs (sort or surface the close-out counts, never a score) is v2 or not at all: #305. Raised 2026-10-13, deliberately after launch. | Nothing; v2 |
+| H8 | JR, decided | Contractor trust for incoming RAs (sort or surface the close-out counts, never a score): JR chose v2 on 2026-10-13, tracked as #305. Not in this round. | Nothing |
