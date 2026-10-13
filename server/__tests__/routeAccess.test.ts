@@ -4772,6 +4772,43 @@ describe("residents completing their own house's walkthrough", () => {
     );
   });
 
+  // The date decides which inspection is the live one for the house, and
+  // move-in and move-out are staff events, so a leader's start is an
+  // additional inspection dated now whatever the body says (#219).
+  it("starts an additional inspection dated now, whatever type and date the body carries", async () => {
+    leaderOfHouseA();
+    seedsNothing();
+    storageMock.createWalkthrough.mockImplementation(async (w: Record<string, unknown>) => ({ id: "wt-new", ...w }));
+    const before = Date.now();
+
+    const { status } = await request("POST", "/api/walkthroughs", {
+      body: { propertyId: "prop-a", type: "move_in", walkthroughDate: "2031-01-01" },
+    });
+
+    expect(status).toBe(200);
+    const written = storageMock.createWalkthrough.mock.calls[0][0];
+    expect(written.type).toBe("additional");
+    expect(written.walkthroughDate.getTime()).toBeGreaterThanOrEqual(before);
+    expect(written.walkthroughDate.getTime()).toBeLessThanOrEqual(Date.now());
+  });
+
+  // The positive control: the same body from staff keeps its type and date.
+  it("while staff choose the type and the date", async () => {
+    actAs(STAFF, { canViewWalkthroughs: true, canManageWalkthroughs: true, allowedRegions: ["West Central"] });
+    storageMock.getProperty.mockResolvedValue(PROPERTY_A);
+    seedsNothing();
+    storageMock.createWalkthrough.mockImplementation(async (w: Record<string, unknown>) => ({ id: "wt-new", ...w }));
+
+    const { status } = await request("POST", "/api/walkthroughs", {
+      body: { propertyId: "prop-a", type: "move_in", walkthroughDate: "2031-01-01" },
+    });
+
+    expect(status).toBe(200);
+    expect(storageMock.createWalkthrough).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "move_in", walkthroughDate: new Date("2031-01-01") }),
+    );
+  });
+
   it("reads the national room-type list, which is what the add-a-room picker needs", async () => {
     leaderOfHouseA();
     storageMock.getAllWalkthroughTemplateRooms.mockResolvedValue([{ id: "t-bath", name: "Bathroom" }]);

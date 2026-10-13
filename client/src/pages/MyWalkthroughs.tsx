@@ -14,13 +14,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Container, PageHeader, PageStack, Section } from "@/components/layout/page";
 import { EmptyState, LoadingState } from "@/components/states";
 import { useAuth } from "@/hooks/useAuth";
 import { useStartWalkthrough } from "@/hooks/useStartWalkthrough";
-import { formatDate, localToday } from "@/lib/format";
+import { formatDate } from "@/lib/format";
 import {
   WALKTHROUGH_STATUS_BADGE,
   WALKTHROUGH_TYPE_LABEL,
@@ -45,7 +43,11 @@ import type { Walkthrough } from "@shared/schema";
  * shows what it is given and never filters again, so the two cannot drift.
  */
 
-/** A leader starts an additional inspection; move-in and move-out are staff events. */
+/**
+ * A leader starts an additional inspection; move-in and move-out are staff
+ * events. The server sets both the type and the date (today) for a resident
+ * whatever is sent, so there is no date to pick here (#219).
+ */
 const RESIDENT_WALKTHROUGH_TYPE: Walkthrough["type"] = "additional";
 
 export default function MyWalkthroughs() {
@@ -53,7 +55,6 @@ export default function MyWalkthroughs() {
   const { user } = useAuth();
 
   const [isStartOpen, setIsStartOpen] = useState(false);
-  const [newDate, setNewDate] = useState(localToday());
 
   const typedUser = user as WalkthroughUser | null;
 
@@ -102,10 +103,7 @@ export default function MyWalkthroughs() {
         action={
           <Button
             variant="primary"
-            onClick={() => {
-              setNewDate(localToday());
-              setIsStartOpen(true);
-            }}
+            onClick={() => setIsStartOpen(true)}
             data-testid="button-start-first-walkthrough"
           >
             <Plus className="h-4 w-4" />
@@ -167,10 +165,7 @@ export default function MyWalkthroughs() {
               canComplete && propertyId && history.length > 0 ? (
                 <Button
                   variant="primary"
-                  onClick={() => {
-                    setNewDate(localToday());
-                    setIsStartOpen(true);
-                  }}
+                  onClick={() => setIsStartOpen(true)}
                   data-testid="button-start-walkthrough"
                 >
                   <Plus className="h-4 w-4" />
@@ -187,25 +182,13 @@ export default function MyWalkthroughs() {
               <DialogHeader>
                 <DialogTitle>Start a walkthrough</DialogTitle>
                 <DialogDescription>
-                  This starts a new inspection of your house. Last year's is kept as it was.
+                  This starts a new inspection of your house.
                 </DialogDescription>
               </DialogHeader>
 
-              <div className="space-y-2">
-                <Label htmlFor="walkthrough-date">Date</Label>
-                <Input
-                  id="walkthrough-date"
-                  type="date"
-                  value={newDate}
-                  onChange={(event) => setNewDate(event.target.value)}
-                  data-testid="input-walkthrough-date"
-                />
-                {!newDate && (
-                  <p className="text-sm text-muted-foreground" data-testid="text-start-disabled-reason">
-                    Choose a date to start.
-                  </p>
-                )}
-              </div>
+              <p className="text-sm text-muted-foreground" data-testid="text-start-dated-today">
+                It is dated today, {formatDate(new Date())}.
+              </p>
 
               <DialogFooter>
                 <Button variant="secondary" onClick={() => setIsStartOpen(false)}>
@@ -213,15 +196,8 @@ export default function MyWalkthroughs() {
                 </Button>
                 <Button
                   variant="primary"
-                  disabled={!newDate || startWalkthrough.isPending}
-                  onClick={() =>
-                    propertyId &&
-                    startWalkthrough.mutate({
-                      propertyId,
-                      type: RESIDENT_WALKTHROUGH_TYPE,
-                      walkthroughDate: newDate,
-                    })
-                  }
+                  disabled={startWalkthrough.isPending}
+                  onClick={() => propertyId && startWalkthrough.mutate({ propertyId, type: RESIDENT_WALKTHROUGH_TYPE })}
                   data-testid="button-confirm-start-walkthrough"
                 >
                   {startWalkthrough.isPending ? "Starting…" : "Start"}

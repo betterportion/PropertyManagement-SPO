@@ -23,7 +23,8 @@ import type { Walkthrough } from "@shared/schema";
 export interface StartWalkthroughInput {
   propertyId: string;
   type: Walkthrough["type"];
-  walkthroughDate: string;
+  /** Staff choose it; a leader's start is dated by the server, today. */
+  walkthroughDate?: string;
 }
 
 export function useStartWalkthrough(onStarted?: () => void) {
