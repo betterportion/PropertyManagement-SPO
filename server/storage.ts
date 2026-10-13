@@ -41,6 +41,9 @@ import {
   maintenanceSchedules,
   tasks,
   requestContacts,
+  requestCloseouts,
+  requestCloseoutContacts,
+  type RequestCloseout,
   type User,
   type UpsertUser,
   type UserPermissions,
@@ -435,6 +438,21 @@ export interface IStorage {
   // Contractor history
   /** Every maintenance request this vendor was linked to, newest first. */
   getRequestsForContact(contactId: string): Promise<MaintenanceRequest[]>;
+
+  // Request close-outs (launch readiness 2.4)
+  /**
+   * Writes the close-out for a request, replacing an earlier one (completing
+   * again edits it), and records the contractors linked at that moment.
+   * One transaction.
+   */
+  upsertRequestCloseout(
+    requestId: string,
+    data: Omit<RequestCloseout, "id" | "requestId" | "completedAt" | "updatedAt">,
+    contactIds: readonly string[],
+  ): Promise<RequestCloseout>;
+  getRequestCloseout(requestId: string): Promise<(RequestCloseout & { contactIds: string[] }) | undefined>;
+  /** Every close-out that named this contractor, with its request; the route filters by the request's region. */
+  getCloseoutsForContact(contactId: string): Promise<{ closeout: RequestCloseout; request: MaintenanceRequest }[]>;
   getContactNotes(contactId: string): Promise<ContactNote[]>;
   getContactNote(id: string): Promise<ContactNote | undefined>;
   createContactNote(
@@ -2441,6 +2459,48 @@ export class DatabaseStorage implements IStorage {
       .from(contactNotes)
       .where(eq(contactNotes.contactId, contactId))
       .orderBy(desc(contactNotes.createdAt));
+  }
+
+  // Request close-outs Implementation
+  async upsertRequestCloseout(
+    requestId: string,
+    data: Omit<RequestCloseout, "id" | "requestId" | "completedAt" | "updatedAt">,
+    contactIds: readonly string[],
+  ): Promise<RequestCloseout> {
+    return await db.transaction(async (tx) => {
+      const now = new Date();
+      const [row] = await tx
+        .insert(requestCloseouts)
+        .values({ ...data, requestId, completedAt: now, updatedAt: now })
+        .onConflictDoUpdate({ target: requestCloseouts.requestId, set: { ...data, completedAt: now, updatedAt: now } })
+        .returning();
+      await tx.delete(requestCloseoutContacts).where(eq(requestCloseoutContacts.closeoutId, row.id));
+      const unique = Array.from(new Set(contactIds));
+      if (unique.length > 0) {
+        await tx.insert(requestCloseoutContacts).values(unique.map((contactId) => ({ closeoutId: row.id, contactId })));
+      }
+      return row;
+    });
+  }
+
+  async getRequestCloseout(requestId: string): Promise<(RequestCloseout & { contactIds: string[] }) | undefined> {
+    const [row] = await db.select().from(requestCloseouts).where(eq(requestCloseouts.requestId, requestId)).limit(1);
+    if (!row) return undefined;
+    const links = await db
+      .select({ contactId: requestCloseoutContacts.contactId })
+      .from(requestCloseoutContacts)
+      .where(eq(requestCloseoutContacts.closeoutId, row.id));
+    return { ...row, contactIds: links.map((l) => l.contactId) };
+  }
+
+  async getCloseoutsForContact(contactId: string): Promise<{ closeout: RequestCloseout; request: MaintenanceRequest }[]> {
+    return await db
+      .select({ closeout: requestCloseouts, request: maintenanceRequests })
+      .from(requestCloseoutContacts)
+      .innerJoin(requestCloseouts, eq(requestCloseoutContacts.closeoutId, requestCloseouts.id))
+      .innerJoin(maintenanceRequests, eq(requestCloseouts.requestId, maintenanceRequests.id))
+      .where(eq(requestCloseoutContacts.contactId, contactId))
+      .orderBy(desc(requestCloseouts.completedAt));
   }
 
   async getContactNote(id: string): Promise<ContactNote | undefined> {

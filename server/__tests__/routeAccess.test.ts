@@ -11779,6 +11779,157 @@ describe("the invitation goes with the access (launch readiness 2.3)", () => {
   });
 });
 
+describe("the close-out on completion (launch readiness 2.4)", () => {
+  const OPEN = { ...WEST_REQUEST, id: "req-west", status: "in_progress", buildingAddress: "1 Main St" };
+  const DAVE = { id: "c-dave", name: "Dave", company: "Dave's Plumbing", service: "Plumbing", region: "West Central" };
+  const FULL = { firstVisit: true, quoteMatched: true, callback: false, wouldUseAgain: true, note: "Same day, tidy." };
+  const COMPLETE = (closeout?: unknown) =>
+    request("PATCH", "/api/maintenance-requests/req-west", { body: closeout === undefined ? { status: "completed" } : { status: "completed", closeout } });
+  const westLead = () => actAs(STAFF, { ...ALL_MAINTENANCE, canViewContacts: true, allowedRegions: ["West Central"] });
+
+  beforeEach(() => {
+    westLead();
+    storageMock.getMaintenanceRequest.mockResolvedValue(OPEN);
+    storageMock.getPropertyByAddress.mockResolvedValue(undefined);
+    storageMock.updateMaintenanceRequest.mockImplementation(async (_id: string, patch: object) => ({ ...OPEN, ...patch }));
+    storageMock.upsertRequestCloseout.mockImplementation(async (requestId: string, data: object) => ({ id: "co-1", requestId, ...data }));
+    storageMock.createMaintenanceRequestComment.mockImplementation(async (c: object) => ({ id: "cm-1", ...c }));
+    storageMock.getMaintenanceRequestComments.mockResolvedValue([]);
+    storageMock.getAllUsersWithPermissions.mockResolvedValue([]);
+    storageMock.getAllProperties.mockResolvedValue([]);
+  });
+
+  it("completes a request with no contractor with every field empty, recording that nothing was asked", async () => {
+    expect((await COMPLETE()).status).toBe(200);
+    expect(storageMock.updateMaintenanceRequest).toHaveBeenCalledWith("req-west", expect.objectContaining({ status: "completed" }));
+    expect(storageMock.upsertRequestCloseout).toHaveBeenCalledWith(
+      "req-west",
+      expect.objectContaining({ firstVisit: null, quoteMatched: null, callback: null, wouldUseAgain: null, note: null, completedByEmail: STAFF.email }),
+      [],
+    );
+    expect(storageMock.createMaintenanceRequestComment).not.toHaveBeenCalled();
+  });
+
+  it("refuses to complete a request with a contractor until the four and the note are there, in a sentence, writing nothing", async () => {
+    storageMock.getRequestContacts.mockResolvedValue([DAVE]);
+    const nothing = await COMPLETE();
+    expect(nothing.status).toBe(400);
+    expect(nothing.body.message).toBe("Before this request is marked completed, answer the four questions about Dave's Plumbing and add a note on how it went.");
+    const oneMissing = await COMPLETE({ ...FULL, callback: null });
+    expect(oneMissing.status).toBe(400);
+    expect(oneMissing.body.message).toBe('Before this request is marked completed, answer "Needed a callback" about Dave\'s Plumbing.');
+    const noNote = await COMPLETE({ ...FULL, note: "   " });
+    expect(noNote.status).toBe(400);
+    expect(noNote.body.message).toBe("Before this request is marked completed, add a note on how it went with Dave's Plumbing.");
+    expect(storageMock.updateMaintenanceRequest).not.toHaveBeenCalled();
+    expect(storageMock.upsertRequestCloseout).not.toHaveBeenCalled();
+    expect(storageMock.createAuditEvent).not.toHaveBeenCalled();
+  });
+
+  it("records the four and the note against the contractors linked at that moment, and what was done as an internal comment (positive control)", async () => {
+    storageMock.getRequestContacts.mockResolvedValue([DAVE, { ...DAVE, id: "c-acme", company: "Acme Electric" }]);
+    const { status } = await COMPLETE({ ...FULL, whatWasDone: "Replaced the trap and the supply line." });
+    expect(status).toBe(200);
+    expect(storageMock.upsertRequestCloseout).toHaveBeenCalledWith(
+      "req-west",
+      expect.objectContaining({ firstVisit: true, quoteMatched: true, callback: false, wouldUseAgain: true, note: "Same day, tidy." }),
+      ["c-dave", "c-acme"],
+    );
+    expect(storageMock.createMaintenanceRequestComment).toHaveBeenCalledWith(
+      expect.objectContaining({ requestId: "req-west", body: "Replaced the trap and the supply line.", isInternal: true, authorUserId: STAFF.id, attachmentUrl: null }),
+    );
+    // The status change is still the only audit event: a close-out is neither access, money nor a document.
+    expect(storageMock.createAuditEvent.mock.calls.map(([e]) => e.action)).toEqual(["maintenance_request.status_changed"]);
+  });
+
+  it("lets what was done be shared, and refuses a file somebody else uploaded before anything is written", async () => {
+    storageMock.getRequestContacts.mockResolvedValue([]);
+    storageMock.getUploadByStorageKey.mockResolvedValue({ storageKey: "k1", uploadedBy: "somebody-else", originalName: "texts.png" });
+    const foreign = await COMPLETE({ whatWasDone: "See the texts.", attachmentUrl: "/uploads/k1", attachmentName: "texts.png" });
+    expect(foreign.status).toBe(400);
+    expect(storageMock.updateMaintenanceRequest).not.toHaveBeenCalled();
+
+    storageMock.getUploadByStorageKey.mockResolvedValue({ storageKey: "k1", uploadedBy: STAFF.id, originalName: "texts.png" });
+    const own = await COMPLETE({ whatWasDone: "See the texts.", whatWasDoneInternal: false, attachmentUrl: "/uploads/k1", attachmentName: "texts.png" });
+    expect(own.status).toBe(200);
+    expect(storageMock.createMaintenanceRequestComment).toHaveBeenCalledWith(
+      expect.objectContaining({ isInternal: false, attachmentUrl: "/uploads/k1", attachmentName: "texts.png" }),
+    );
+  });
+
+  it("asks nothing on cancelled, on a re-save of a completed request, or on any other edit", async () => {
+    storageMock.getRequestContacts.mockResolvedValue([DAVE]);
+    expect((await request("PATCH", "/api/maintenance-requests/req-west", { body: { status: "cancelled" } })).status).toBe(200);
+    expect((await request("PATCH", "/api/maintenance-requests/req-west", { body: { title: "Leaky tap, kitchen" } })).status).toBe(200);
+    storageMock.getMaintenanceRequest.mockResolvedValue({ ...OPEN, status: "completed" });
+    expect((await COMPLETE()).status).toBe(200);
+    expect(storageMock.getRequestContacts).not.toHaveBeenCalled();
+    expect(storageMock.upsertRequestCloseout).not.toHaveBeenCalled();
+  });
+
+  it("is staff work: a resident holding the flag, with a full close-out, is refused with nothing written", async () => {
+    actAs({ ...ALICE, propertyId: "prop-main" } as typeof ALICE, ALL_MAINTENANCE);
+    expect((await COMPLETE(FULL)).status).toBe(403);
+    expect(storageMock.updateMaintenanceRequest).not.toHaveBeenCalled();
+    expect(storageMock.upsertRequestCloseout).not.toHaveBeenCalled();
+  });
+
+  describe("reading a close-out", () => {
+    const ROW = { id: "co-1", requestId: "req-west", firstVisit: true, quoteMatched: true, callback: false, wouldUseAgain: true, note: "Same day, tidy.", completedAt: new Date("2027-01-05T00:00:00Z"), completedByName: "Michael Nichols", contactIds: ["c-dave"] };
+
+    it("gives staff in the region the request's close-out, and null when there is none", async () => {
+      storageMock.getRequestCloseout.mockResolvedValue(ROW);
+      const { status, body } = await get("/api/maintenance-requests/req-west/closeout");
+      expect(status).toBe(200);
+      expect(body).toMatchObject({ firstVisit: true, note: "Same day, tidy.", completedByName: "Michael Nichols" });
+      storageMock.getRequestCloseout.mockResolvedValue(undefined);
+      expect((await get("/api/maintenance-requests/req-west/closeout")).body).toBeNull();
+    });
+
+    it("refuses a resident on their own house's request, and staff out of region, without reading it", async () => {
+      actAs({ ...ALICE, propertyId: "prop-main" } as typeof ALICE, ALL_MAINTENANCE);
+      expect((await get("/api/maintenance-requests/req-west/closeout")).status).toBe(403);
+      actAs(STAFF, { ...ALL_MAINTENANCE, allowedRegions: ["East Central"] });
+      expect((await get("/api/maintenance-requests/req-west/closeout")).status).toBe(403);
+      expect(storageMock.getRequestCloseout).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("the contractor page's counts", () => {
+    const closeoutRow = (n: number, region: string, answers: object = {}) => ({
+      closeout: { id: `co-${n}`, requestId: `req-${n}`, firstVisit: true, quoteMatched: true, callback: false, wouldUseAgain: true, note: `Job ${n}`, completedAt: new Date(Date.UTC(2027, 0, n)), completedByName: "RA", ...answers },
+      request: { id: `req-${n}`, title: `Repair ${n}`, buildingAddress: "1 Main St", region },
+    });
+
+    beforeEach(() => {
+      storageMock.getMaintenanceContact.mockImplementation(async (id: string) => (id === "c-dave" ? DAVE : undefined));
+    });
+
+    it("counts only the close-outs on requests the caller may read, by the request's region", async () => {
+      storageMock.getCloseoutsForContact.mockResolvedValue([
+        closeoutRow(1, "West Central", { firstVisit: false }),
+        closeoutRow(2, "West Central"),
+        closeoutRow(3, "East Central"),
+      ]);
+      const { status, body } = await get("/api/contacts/c-dave/closeouts");
+      expect(status).toBe(200);
+      expect(body.answered).toBe(2);
+      expect(body.counts[0]).toEqual({ key: "firstVisit", label: "Finished on first visit", yes: 1, of: 2 });
+      expect(body.history.map((j: { requestId: string }) => j.requestId)).toEqual(["req-2", "req-1"]);
+    });
+
+    it("refuses a resident, staff without the contacts flag, and a contractor out of region, reading nothing", async () => {
+      actAs({ ...ALICE, propertyId: "prop-main" } as typeof ALICE, ALL_MAINTENANCE);
+      expect((await get("/api/contacts/c-dave/closeouts")).status).toBe(403);
+      actAs(STAFF, { ...ALL_MAINTENANCE, allowedRegions: ["West Central"] });
+      expect((await get("/api/contacts/c-dave/closeouts")).status).toBe(403);
+      actAs(STAFF, { canViewContacts: true, allowedRegions: ["East Central"] });
+      expect((await get("/api/contacts/c-dave/closeouts")).status).toBe(403);
+      expect(storageMock.getCloseoutsForContact).not.toHaveBeenCalled();
+    });
+  });
+});
+
 describe("a household login ends with the stay (JR, 2026-10-01)", () => {
   const ROW = { id: "r-1", firstName: "Jane", lastName: "Doe", email: "jane@example.com", propertyId: "prop-west", region: "West Central", buildingAddress: "1 Main St", isActive: true, moveOutDate: null };
   const JANE_LOGIN = { id: "u-jane", email: "jane@example.com", role: "resident", isActive: true, propertyId: "prop-west" };

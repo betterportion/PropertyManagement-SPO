@@ -126,6 +126,8 @@ import { MAX_RESIDENT_ACCOUNTS_PER_PROPERTY, isCurrentResident } from "@shared/r
 import { closeDepartedHouseholdLogins } from "./householdLogins";
 import { deliverInvitation, type DeliveryOutcome } from "./invitations";
 import { invitationRequestSchema, invitationSendAt } from "@shared/invitations";
+import { closeoutFromClientSchema, closeoutProblem, type CloseoutFromClient } from "@shared/closeouts";
+import { contractorSummary } from "./contractorSummary";
 import { MAX_SNOOZE_DAYS, MAX_SNOOZE_MONTHS } from "@shared/assetLifecycle";
 import { randomBytes, randomUUID, timingSafeEqual } from "crypto";
 import { contractorLoad, recurringIssues } from "./aggregates";
@@ -1197,6 +1199,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const problem = projectFieldsProblem(nextType, validatedData, existingRequest);
       if (problem) return res.status(400).json({ message: problem });
 
+      // The close-out (launch readiness 2.4): asked on the move to completed
+      // and only then; a cancellation or a re-save of a completed request
+      // asks nothing. With a contractor linked, the four answers and the note
+      // are required, and the refusal is the sentence the screen shows.
+      // Checked here, before anything is written, so a refusal leaves the
+      // status where it was. "What was done" is a thread comment, so its file
+      // is checked the way a comment's is.
+      const completing = validatedData.status === "completed" && existingRequest.status !== "completed";
+      const closeout: CloseoutFromClient | undefined = completing && req.body?.closeout !== undefined ? closeoutFromClientSchema.parse(req.body.closeout) : undefined;
+      const contractors = completing ? await storage.getRequestContacts(existingRequest.id) : [];
+      if (completing) {
+        const closeoutRefusal = closeoutProblem(closeout, contractors.map((c) => c.company || c.name));
+        if (closeoutRefusal) return res.status(400).json({ message: closeoutRefusal });
+      }
+      const whatWasDoneFile = completing ? await ownUploadFromClient(ctx, closeout?.attachmentUrl, closeout?.attachmentName) : null;
+
       // A project turned back into a repair drops its project fields, so a
       // repair never carries a cost. Its bids stay in their table, unreachable
       // until it is a project again -- a type change is not a delete.
@@ -1224,6 +1242,42 @@ export async function registerRoutes(app: Express): Promise<Server> {
           summary: `Changed the contract link on "${existingRequest.title}" (${existingRequest.buildingAddress})`,
           details: { field: "contractUrl", cleared: writes.contractUrl === null, region: existingRequest.region },
         });
+      }
+
+      if (completing) {
+        // One row per request, overwritten if it is completed again; the four
+        // are null with no contractor to answer them about. Not audited: a
+        // close-out is neither access, money nor a document.
+        const asked = contractors.length > 0;
+        await storage.upsertRequestCloseout(
+          existingRequest.id,
+          {
+            firstVisit: asked ? (closeout?.firstVisit ?? null) : null,
+            quoteMatched: asked ? (closeout?.quoteMatched ?? null) : null,
+            callback: asked ? (closeout?.callback ?? null) : null,
+            wouldUseAgain: asked ? (closeout?.wouldUseAgain ?? null) : null,
+            note: closeout?.note?.trim() || null,
+            completedByEmail: ctx.user.email ?? null,
+            completedByName: [ctx.user.firstName, ctx.user.lastName].filter(Boolean).join(" ") || null,
+          },
+          contractors.map((c) => c.id),
+        );
+        const whatWasDone = closeout?.whatWasDone?.trim() ?? "";
+        if (whatWasDone || whatWasDoneFile) {
+          const comment = await storage.createMaintenanceRequestComment({
+            body: commentBodyFromClient(whatWasDone || `Attached: ${whatWasDoneFile?.name}`),
+            isInternal: closeout?.whatWasDoneInternal ?? true,
+            attachmentUrl: whatWasDoneFile?.url ?? null,
+            attachmentName: whatWasDoneFile?.name ?? null,
+            relaySource: null,
+            relayContactId: null,
+            requestId: existingRequest.id,
+            authorUserId: ctx.userId,
+            authorEmail: ctx.user.email ?? null,
+            authorName: [ctx.user.firstName, ctx.user.lastName].filter(Boolean).join(" ") || null,
+          });
+          await emailThreadAbout(request, comment);
+        }
       }
 
       // Only a status change is recorded. Every other edit is ordinary work,
@@ -1424,6 +1478,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return after === before ? [] : [before];
     });
   }
+
+  // The close-out, for the request page. Staff only: the four facts are
+  // about a contractor, and the note is the RA's.
+  app.get('/api/maintenance-requests/:id/closeout', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      const request = await requestForThread(req, res);
+      if (!request) return;
+      if (!requireMaintenanceRequestAccess(res, ctx, request, null)) return;
+      const closeout = await storage.getRequestCloseout(request.id);
+      res.json(closeout ?? null);
+    } catch (error) {
+      sendError(res, error, "Failed to fetch the close-out");
+    }
+  });
 
   app.get('/api/maintenance-requests/:id/comments', isAuthenticated, async (req: any, res) => {
     try {
@@ -6185,6 +6256,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(filterByRegion(ctx, await storage.getRequestsForContact(contact.id)));
     } catch (error) {
       sendError(res, error, "Failed to fetch this contractor's requests");
+    }
+  });
+
+  // Counts and the dated history from their close-outs (launch readiness
+  // 2.4), never a score. Cut to the requests the caller may read, by the
+  // request's region, before anything is counted.
+  app.get('/api/contacts/:id/closeouts', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canViewContacts", "canManageContacts")) return;
+
+      const contact = await contactForHistory(req, res, ctx);
+      if (!contact) return;
+
+      const rows = filterByRelatedRegion(ctx, await storage.getCloseoutsForContact(contact.id), (row) => row.request.region);
+      res.json(contractorSummary(rows));
+    } catch (error) {
+      sendError(res, error, "Failed to fetch this contractor's close-outs");
     }
   });
 

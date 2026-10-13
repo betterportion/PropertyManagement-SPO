@@ -2201,3 +2201,45 @@ export const requestContacts = pgTable(
 );
 
 export type RequestContact = typeof requestContacts.$inferSelect;
+
+// Request close-outs (launch readiness 2.4, docs/LAUNCH_READINESS_ROUND.md)
+//
+// What the RA records when a request is marked completed: four yes/no facts
+// about the contractor's work and a note. One row per request, written when
+// it is completed and overwritten if it is completed again; reopening leaves
+// it in place. The four answers are null when no contractor was linked at
+// completion, since there was nobody to answer them about. The contractors
+// linked at that moment are kept in request_closeout_contacts, so a link
+// added or removed later does not move the answers to somebody else. Never a
+// rating: counts and the dated history are what the contractor page shows.
+// "What was done" is a thread comment, not a column here.
+export const requestCloseouts = pgTable("request_closeouts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  requestId: varchar("request_id").notNull().unique().references(() => maintenanceRequests.id, { onDelete: "cascade" }),
+  firstVisit: boolean("first_visit"),
+  quoteMatched: boolean("quote_matched"),
+  callback: boolean("callback"),
+  wouldUseAgain: boolean("would_use_again"),
+  note: text("note"),
+  completedAt: timestamp("completed_at").defaultNow().notNull(),
+  // Who recorded it, as plain columns: the row outlives the account.
+  completedByEmail: varchar("completed_by_email"),
+  completedByName: varchar("completed_by_name"),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const requestCloseoutContacts = pgTable(
+  "request_closeout_contacts",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    closeoutId: varchar("closeout_id").notNull().references(() => requestCloseouts.id, { onDelete: "cascade" }),
+    contactId: varchar("contact_id").notNull().references(() => maintenanceContacts.id, { onDelete: "cascade" }),
+  },
+  (table) => [
+    uniqueIndex("IDX_request_closeout_contact").on(table.closeoutId, table.contactId),
+    index("IDX_request_closeout_contacts_contact").on(table.contactId),
+  ],
+);
+
+export type RequestCloseout = typeof requestCloseouts.$inferSelect;
+export type InsertRequestCloseout = typeof requestCloseouts.$inferInsert;
