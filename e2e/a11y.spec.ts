@@ -67,6 +67,39 @@ test.describe("accessibility", () => {
     expect(violations, JSON.stringify(violations.map((v) => v.id), null, 2)).toEqual([]);
   });
 
+  // #165: a control in a table row has to say whose it is, not only its
+  // current value, or a screen reader hears "switch, on" twenty times.
+  test("the settings page has no serious violations, and each account's controls are named", async ({ page }) => {
+    await page.goto("/settings");
+    await expect(page.getByRole("heading", { name: "User Management" })).toBeVisible();
+    await expect(page.locator('[data-testid^="switch-status-"]').first()).toBeVisible();
+    await expect(page.getByRole("switch", { name: /^Account status for / }).first()).toBeVisible();
+    await expect(page.getByRole("combobox", { name: /^Role of / }).first()).toBeVisible();
+    if ((await page.locator('[data-testid^="select-property-"]').count()) > 0) {
+      await expect(page.getByRole("combobox", { name: /^House for / }).first()).toBeVisible();
+    }
+    const violations = await seriousViolations(page);
+    expect(violations, JSON.stringify(violations.map((v) => v.id), null, 2)).toEqual([]);
+  });
+
+  test("the contacts page has no serious violations, and the pencil says whom it edits", async ({ page }) => {
+    await page.goto("/contacts");
+    await expect(page.getByRole("heading", { name: "Maintenance Contacts & Invoices" })).toBeVisible();
+    await expect(page.locator('[data-testid^="button-edit-contact-"]').first()).toBeVisible();
+    await expect(page.getByRole("button", { name: /^Edit / }).first()).toBeVisible();
+    const violations = await seriousViolations(page);
+    expect(violations, JSON.stringify(violations.map((v) => v.id), null, 2)).toEqual([]);
+  });
+
+  test("a contact page has no serious violations, and the note box is named", async ({ page }) => {
+    await page.goto("/contacts");
+    await page.locator('[data-testid^="text-contact-name-"]').first().click();
+    await expect(page).toHaveURL(/\/contacts\/[^/]+$/);
+    await expect(page.getByRole("textbox", { name: "New note about this contractor" })).toBeVisible();
+    const violations = await seriousViolations(page);
+    expect(violations, JSON.stringify(violations.map((v) => v.id), null, 2)).toEqual([]);
+  });
+
   test("the assets gallery has no serious violations", async ({ page }) => {
     await page.goto("/assets");
     await page.getByTestId("button-view-gallery").click();

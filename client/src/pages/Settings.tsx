@@ -521,7 +521,7 @@ export default function Settings() {
                   }
                   disabled={updateRoleMutation.isPending}
                 >
-                  <SelectTrigger className="w-32" data-testid={`select-role-${user.id}`}>
+                  <SelectTrigger className="w-32" aria-label={`Role of ${user.email ?? "this account"}`} data-testid={`select-role-${user.id}`}>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -547,7 +547,7 @@ export default function Settings() {
                     }
                     disabled={updatePropertyMutation.isPending}
                   >
-                    <SelectTrigger className="w-40" data-testid={`select-property-${user.id}`}>
+                    <SelectTrigger className="w-40" aria-label={`House for ${user.email ?? "this account"}`} data-testid={`select-property-${user.id}`}>
                       <SelectValue placeholder="No house" />
                     </SelectTrigger>
                     <SelectContent>
@@ -571,6 +571,7 @@ export default function Settings() {
                     checked={user.isActive}
                     onCheckedChange={(checked) => updateStatusMutation.mutate({ id: user.id, isActive: checked })}
                     disabled={updateStatusMutation.isPending}
+                    aria-label={`Account status for ${user.email ?? "this account"}`}
                     data-testid={`switch-status-${user.id}`}
                   />
                   <Badge variant={user.isActive ? "success" : "secondary"}>{user.isActive ? "Active" : "Inactive"}</Badge>

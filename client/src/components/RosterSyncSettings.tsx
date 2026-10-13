@@ -184,7 +184,7 @@ export default function RosterSyncSettings() {
                 For the current spreadsheet, before the master sheet exists: the same columns and the same rules. Preview first.
               </p>
               <div className="flex flex-wrap items-center gap-2">
-                <input ref={fileInput} type="file" accept=".csv" className="text-sm" data-testid="input-roster-csv" />
+                <input ref={fileInput} type="file" accept=".csv" className="text-sm" aria-label="Roster CSV file" data-testid="input-roster-csv" />
                 <Button
                   variant="secondary"
                   disabled={csv.isPending}
