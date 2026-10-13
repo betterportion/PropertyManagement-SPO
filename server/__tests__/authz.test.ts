@@ -410,6 +410,32 @@ describe("requireRegionMove", () => {
     expect(requireRegionMove(response(), ctx(), "West Central", "West Central")).toBe(true);
   });
 
+  it("allows an edit that leaves the region out", () => {
+    expect(requireRegionMove(response(), ctx(), "West Central", undefined)).toBe(true);
+  });
+
+  // A blank region used to slip past as "no move" and then be written, so the
+  // record left every RA's region at once (#219). It is a move to nowhere.
+  it.each([
+    ["an empty string", ""],
+    ["null", null],
+  ])("refuses blanking the region (%s) with a 400 that says to choose one", (_label, blank) => {
+    const res = response();
+    expect(requireRegionMove(res, ctx(), "West Central", blank)).toBe(false);
+    expect(res.sent.status).toBe(400);
+    expect(res.sent.message).toMatch(/choose a region/i);
+  });
+
+  it("refuses blanking the region for an admin too: it is bad data, not a reach question", () => {
+    const res = response();
+    expect(requireRegionMove(res, context({ role: "admin" }), "West Central", "")).toBe(false);
+    expect(res.sent.status).toBe(400);
+  });
+
+  it("still lets an admin move a record anywhere real", () => {
+    expect(requireRegionMove(response(), context({ role: "admin" }), "West Central", "East Central")).toBe(true);
+  });
+
   it("allows an edit that does not mention the region at all", () => {
     expect(requireRegionMove(response(), ctx(), "West Central", undefined)).toBe(true);
   });

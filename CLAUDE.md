@@ -158,7 +158,7 @@ Non-admins only see records in their `allowedRegions`.
 - `filterByRegion(ctx, items)` — filters a list. It takes the whole context, not a region list, and applies the admin bypass itself, so callers pass `ctx` straight through rather than testing `ctx.isAdmin` first. **Returns an empty array when the user's `allowedRegions` is empty or null**, which is deliberate: no regions means no access, not all access. The literal string `"all"` in the list means every region.
 - `filterByRelatedRegion(ctx, items, regionOf)` — the same rule for records whose region lives on a related record, such as an asset photo inheriting its asset's region.
 - `requireRegion(res, ctx, region)` — single-record check before create or delete.
-- `requireRegionMove(res, ctx, existingRegion, incomingRegion)` — on update, checks *both*, so a record cannot be moved into a region the user cannot reach.
+- `requireRegionMove(res, ctx, existingRegion, incomingRegion)` — on update, checks *both*, so a record cannot be moved into a region the user cannot reach. A region sent blank is a move to nowhere and is refused with a 400 for everyone, admins included (#219); leaving it out of the edit means unchanged.
 
 **A walkthrough room or photo takes its region from its walkthrough**, never from the body or the room's loose `propertyId` (`walkthroughScope` / `roomScope` in `routes.ts`): the create routes overwrite the body's region, house and property from the walkthrough, the edit routes cannot move a room to another walkthrough or a photo to another room, and room edit and delete check the walkthrough's region. The photo's own `region` is what every later read of it trusts, so it has to be written honestly.
 

@@ -6496,6 +6496,43 @@ describe("recording a change to a property's documents", () => {
   });
 });
 
+describe("a house edit with a blank region (#219)", () => {
+  const WEST = { id: "prop-1", name: "Cleveland House", address: "1 Main St", region: "West Central", ownership: "rented", leaseDocumentUrl: null, photoUrl: null };
+
+  beforeEach(() => {
+    storageMock.getProperty.mockResolvedValue(WEST);
+    storageMock.updateProperty.mockImplementation(async (_id, patch) => ({ ...WEST, ...patch }));
+  });
+
+  // The cascade in storage.updateProperty would copy the blank onto the roster,
+  // fees, deposits, walkthroughs, requests and invoices, and no RA could see
+  // any of it until an admin set the region back. The check has to refuse it
+  // before the write, for an admin as much as for anybody.
+  it("is refused with a 400 before anything is written, even for an admin", async () => {
+    actAs(ADMIN);
+    const { status, body } = await request("PATCH", "/api/properties/prop-1", { body: { region: "", bedrooms: 5 } });
+    expect(status).toBe(400);
+    expect(body.message).toMatch(/choose a region/i);
+    expect(storageMock.updateProperty).not.toHaveBeenCalled();
+  });
+
+  it("is refused for a regional administrator in the house's own region", async () => {
+    actAs(STAFF, { canViewProperties: true, canManageProperties: true, allowedRegions: ["West Central"] });
+    const { status } = await request("PATCH", "/api/properties/prop-1", { body: { region: "" } });
+    expect(status).toBe(400);
+    expect(storageMock.updateProperty).not.toHaveBeenCalled();
+  });
+
+  // The positive control: the same edit with the region left out, and with a
+  // real one, both reach the write.
+  it("while an edit that leaves the region out, or names a real one, is saved", async () => {
+    actAs(ADMIN);
+    expect((await request("PATCH", "/api/properties/prop-1", { body: { bedrooms: 5 } })).status).toBe(200);
+    expect((await request("PATCH", "/api/properties/prop-1", { body: { region: "East Central" } })).status).toBe(200);
+    expect(storageMock.updateProperty).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe("links a property stores and later renders as an href", () => {
   const base = {
     name: "New House",
