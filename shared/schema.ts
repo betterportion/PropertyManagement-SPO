@@ -45,7 +45,26 @@ const nonNegativeInt = z.coerce
   .min(0, "Must be 0 or greater");
 
 /** A calendar date or timestamp. Accepts the date string a form sends. */
-const dateFromClient = z.coerce.date();
+/**
+ * A date as a client sends it: a calendar day ("2026-02-28") or an instant.
+ *
+ * `z.coerce.date()` alone is `new Date(value)`, which turns null into 1970
+ * and rolls an impossible day over ("2026-02-30" became March 2), so a blank
+ * required date was saved as the epoch and a typo as a real date (#219). A
+ * null is missing, and a day that does not exist on the calendar is refused
+ * rather than guessed. Where null is allowed, `.nullish()` still takes it:
+ * that wrapper answers before this runs.
+ */
+const dateFromClient = z.preprocess((value) => {
+  if (value === null) return undefined;
+  if (typeof value !== "string") return value;
+  const day = /^(\d{4})-(\d{2})-(\d{2})(?:$|T)/.exec(value.trim());
+  if (!day) return value;
+  const [year, month, dayOfMonth] = day.slice(1).map(Number);
+  const check = new Date(Date.UTC(year, month - 1, dayOfMonth));
+  const exists = check.getUTCFullYear() === year && check.getUTCMonth() === month - 1 && check.getUTCDate() === dayOfMonth;
+  return exists ? value : "not a calendar day";
+}, z.coerce.date({ required_error: "Enter a date", invalid_type_error: "Enter a real date" }));
 
 /**
  * A link the portal stores and later renders into an `href`.
