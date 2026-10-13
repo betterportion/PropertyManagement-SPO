@@ -1120,6 +1120,8 @@ export const insertPropertySchema = createInsertSchema(properties)
     leaseRenewalDate: dateFromClient.nullish(),
     depositAmount: nonNegativeAmount.nullish(),
     depositReturnDays: nonNegativeInt.nullish(),
+    // Money notes, so the finance-text rule applies (#51, #219).
+    depositNotes: financeText.nullish(),
   });
 
 /**
@@ -1355,6 +1357,9 @@ export const insertResidentSchema = createInsertSchema(residents)
     depositAmountOverride: nonNegativeAmount.nullish(),
     moveInDate: dateFromClient.nullish(),
     moveOutDate: dateFromClient.nullish(),
+    // Where a deposit return or a charge gets explained, so the finance-text
+    // rule applies (#51, #219).
+    notes: financeText.nullish(),
   });
 
 export type Resident = typeof residents.$inferSelect;
@@ -1466,10 +1471,11 @@ export type MoveOutChecklist = typeof moveOutChecklists.$inferSelect;
 
 export const insertMoveOutChecklistSchema = z.object({
   roomInspected: z.boolean(),
-  damageNotes: z.string().trim().max(2000).nullish().transform((v) => v || null),
+  // Both feed the damages worksheet, so the finance-text rule applies (#51, #219).
+  damageNotes: z.string().trim().max(2000).pipe(financeText).nullish().transform((v) => v || null),
   belongingsRemoved: z.boolean(),
   keysReturned: z.boolean(),
-  notes: z.string().trim().max(2000).nullish().transform((v) => v || null),
+  notes: z.string().trim().max(2000).pipe(financeText).nullish().transform((v) => v || null),
   /** True to record it complete; refused unless all three checks are ticked. */
   complete: z.boolean().default(false),
 });
