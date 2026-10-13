@@ -3730,6 +3730,28 @@ describe("what reaches the audit log", () => {
     expect(storageMock.createAuditEvent).not.toHaveBeenCalled();
   });
 
+  // submittedBy is the email the resident read rule matches, so rewriting it
+  // on an edit would hand the request, its thread and its photos to whoever
+  // holds that address (#219). The edit dialog resends the whole form, so the
+  // field is dropped, not refused: the rest of the edit still lands.
+  it("keeps who filed a request fixed at filing: an edit's submittedBy is dropped and the rest saved", async () => {
+    actAs(STAFF, { ...ALL_MAINTENANCE, allowedRegions: ["West Central"] });
+    storageMock.getMaintenanceRequest.mockResolvedValue(WEST_REQUEST);
+    storageMock.updateMaintenanceRequest.mockImplementation(async (_id: string, data: Record<string, unknown>) => ({ ...WEST_REQUEST, ...data }));
+
+    const { status, body } = await patch("/api/maintenance-requests/req-west", {
+      description: "Now dripping faster",
+      submittedBy: BOB.email,
+    });
+
+    expect(status).toBe(200);
+    expect(storageMock.updateMaintenanceRequest).toHaveBeenCalledTimes(1);
+    const written = storageMock.updateMaintenanceRequest.mock.calls[0][1];
+    expect(written).toMatchObject({ description: "Now dripping faster" });
+    expect(written).not.toHaveProperty("submittedBy");
+    expect(body.submittedBy).toBe(ALICE.email);
+  });
+
   it("records nothing at all when the action was refused", async () => {
     actAs(ALICE);
     storageMock.getUser.mockResolvedValue(ALICE);

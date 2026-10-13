@@ -1130,7 +1130,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Maintenance request not found" });
       }
 
-      const validatedData = insertMaintenanceRequestSchema.partial().parse(req.body);
+      // Who filed it is fixed at filing (#219): submittedBy is the email the
+      // resident read rule matches, so an edit that rewrote it would hand
+      // the request, its thread and its photos to another household's
+      // reader. The edit dialog resends the whole form, so it is dropped
+      // here rather than refused.
+      const validatedData = insertMaintenanceRequestSchema.omit({ submittedBy: true }).partial().parse(req.body);
       await requireOwnUploads(ctx, validatedData, ["photoUrl"], existingRequest);
 
       // As on create, a region follows the house. A new address must be a
