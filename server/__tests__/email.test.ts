@@ -28,6 +28,9 @@ vi.mock("resend", () => ({
   },
 }));
 
+const { logMock } = vi.hoisted(() => ({ logMock: vi.fn() }));
+vi.mock("../logger", () => ({ log: logMock }));
+
 import { sendEmail, isEmailConfigured } from "../email";
 import { readAppUrlFromEnv, readEmailConfigFromEnv } from "../config";
 
@@ -44,6 +47,7 @@ function stubEmailEnv(vars: Partial<Record<"RESEND_API_KEY" | "EMAIL_FROM" | "EM
 
 beforeEach(() => {
   sendMock.mockReset();
+  logMock.mockReset();
   constructedWith.key = undefined;
   stubEmailEnv({});
 });
@@ -236,5 +240,50 @@ describe("sendEmail", () => {
     sendMock.mockRejectedValue(new Error("network down"));
 
     await expect(sendEmail(message)).resolves.toEqual({ sent: false, reason: "send_failed" });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// What the server log says (#219)
+// ---------------------------------------------------------------------------
+
+describe("the server log line", () => {
+  const message = {
+    template: "comment" as const,
+    to: "jane@example.edu",
+    subject: "1472 Cleveland Ave N: Leaky kitchen tap",
+    text: "Jane Doe wrote: the tap still drips.",
+  };
+
+  const logged = () => logMock.mock.calls.map(([line]) => String(line)).join("\n");
+
+  it("names the template, never the subject or the recipient, when email is off", async () => {
+    await sendEmail(message);
+    expect(logged()).toContain('"comment"');
+    expect(logged()).not.toContain("Cleveland");
+    expect(logged()).not.toContain("Leaky");
+    expect(logged()).not.toContain("jane@");
+    expect(logged()).not.toContain("Jane Doe");
+  });
+
+  it("names the template and the error's kind, never the subject, the recipient or the provider's text, when a send fails", async () => {
+    stubEmailEnv(VALID_ENV);
+    sendMock.mockResolvedValue({ data: null, error: { name: "validation_error", message: "jane@example.edu is not a valid address" } });
+    await sendEmail(message);
+    expect(logged()).toContain('"comment"');
+    expect(logged()).toContain("validation_error");
+    expect(logged()).not.toContain("Cleveland");
+    expect(logged()).not.toContain("jane@");
+  });
+
+  it("the same when the provider throws", async () => {
+    stubEmailEnv(VALID_ENV);
+    sendMock.mockRejectedValue(Object.assign(new Error("ECONNRESET to jane@example.edu"), { name: "FetchError" }));
+    await sendEmail(message);
+    expect(logged()).toContain('"comment"');
+    expect(logged()).toContain("FetchError");
+    expect(logged()).not.toContain("Cleveland");
+    expect(logged()).not.toContain("jane@");
+    expect(logged()).not.toContain("ECONNRESET");
   });
 });

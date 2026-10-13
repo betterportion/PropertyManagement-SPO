@@ -19,6 +19,11 @@
  *     send resolves to { sent: false, reason: "not_configured" }. The day
  *     the variables appear, sends start working with no code change.
  *
+ * The server log says which template was skipped or failed and the error's
+ * kind, never the subject or the recipient: a subject names a house or a
+ * request, and the log is read by people the email log's access rules do
+ * not cover (#219).
+ *
  * Messages are plain text on purpose: nothing sent so far needs markup, and
  * plain text cannot smuggle in tracking or broken rendering. Content rules
  * follow the audit log's: amounts and names are fine, credentials and
@@ -86,7 +91,7 @@ export function isEmailConfigured(): boolean {
 export async function sendEmail(message: OutboundEmail): Promise<SendEmailResult> {
   const config = readEmailConfigFromEnv();
   if (!config.configured) {
-    log(`email not configured; skipped "${message.subject}" to ${message.to}`, "email");
+    log(`email not configured; skipped the "${message.template}" email`, "email");
     report(message, "not_configured");
     return { sent: false, reason: "not_configured" };
   }
@@ -102,7 +107,7 @@ export async function sendEmail(message: OutboundEmail): Promise<SendEmailResult
     });
 
     if (error) {
-      log(`send failed for "${message.subject}" to ${message.to}: ${error.message}`, "email");
+      log(`the "${message.template}" email was not sent (${errorClassOf(error)})`, "email");
       report(message, "failed", errorClassOf(error));
       return { sent: false, reason: "send_failed" };
     }
@@ -110,8 +115,7 @@ export async function sendEmail(message: OutboundEmail): Promise<SendEmailResult
     report(message, "sent");
     return { sent: true, id: data?.id ?? null };
   } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
-    log(`send threw for "${message.subject}" to ${message.to}: ${detail}`, "email");
+    log(`the "${message.template}" email was not sent (${errorClassOf(error)})`, "email");
     report(message, "failed", errorClassOf(error));
     return { sent: false, reason: "send_failed" };
   }
