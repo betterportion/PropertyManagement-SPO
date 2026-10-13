@@ -19,6 +19,11 @@ export const AUDIT_ACTIONS = {
   USER_PERMISSIONS_CHANGED: "user.permissions_changed",
   USER_PROPERTY_CHANGED: "user.property_changed",
   USER_RELINKED: "user.relinked",
+  // The invitation email: scheduled for a later day, sent, or dropped because
+  // the login was switched off or moved before the day came. Access history.
+  INVITATION_SCHEDULED: "invitation.scheduled",
+  INVITATION_SENT: "invitation.sent",
+  INVITATION_CANCELLED: "invitation.cancelled",
   MAINTENANCE_STATUS_CHANGED: "maintenance_request.status_changed",
   MAINTENANCE_DOCUMENTS_CHANGED: "maintenance_request.documents_changed",
   INVOICE_CREATED: "invoice.created",
@@ -79,6 +84,9 @@ export const AUDIT_ACTION_LABELS: Record<AuditAction, string> = {
   "user.permissions_changed": "Permissions changed",
   "user.property_changed": "House link changed",
   "user.relinked": "Account linked to a new sign-in",
+  "invitation.scheduled": "Invitation scheduled",
+  "invitation.sent": "Invitation sent",
+  "invitation.cancelled": "Invitation dropped",
   "maintenance_request.status_changed": "Maintenance request status changed",
   "maintenance_request.documents_changed": "Project contract link changed",
   "invoice.created": "Invoice created",

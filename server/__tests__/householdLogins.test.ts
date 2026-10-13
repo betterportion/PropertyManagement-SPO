@@ -45,12 +45,15 @@ describe("closeDepartedHouseholdLogins", () => {
     getAllUsers: vi.fn(async () => [login()]),
     getAllResidents: vi.fn(async () => rows),
     deactivateAndUnlinkUser: vi.fn(async () => ({})),
+    cancelPendingInvitations: vi.fn(async () => 0),
   });
 
   it("switches the login off and unlinks it, recording both as access history", async () => {
     const s = storage([row({ isActive: false })]);
     expect(await closeDepartedHouseholdLogins({ propertyId: "p1" }, NOW, s as never)).toBe(1);
     expect(s.deactivateAndUnlinkUser).toHaveBeenCalledWith("u-jane");
+    // An invitation still waiting for the login goes with it (launch readiness 2.3).
+    expect(s.cancelPendingInvitations).toHaveBeenCalledWith("u-jane", NOW);
     expect(createAuditEvent.mock.calls.map(([e]) => e.action)).toEqual(["user.status_changed", "user.property_changed"]);
   });
 
@@ -72,6 +75,7 @@ describe("closeDepartedHouseholdLogins", () => {
     expect(await closeDepartedHouseholdLogins({ propertyId: "p1" }, NOW, s as never)).toBe(0);
     expect(await closeDepartedHouseholdLogins("all", NOW, s as never)).toBe(0);
     expect(s.deactivateAndUnlinkUser).not.toHaveBeenCalled();
+    expect(s.cancelPendingInvitations).not.toHaveBeenCalled();
   });
 
   it("never throws: a storage failure is logged and the caller carries on", async () => {

@@ -11,6 +11,7 @@ import { describe, it, expect } from "vitest";
 import {
   commentEmail,
   householdEmail,
+  invitationEmail,
   maintenanceReceivedEmail,
   maintenanceStatusEmail,
 } from "../notifications";
@@ -243,5 +244,62 @@ describe("telling somebody a comment was posted", () => {
 
   it("sends nothing about an empty comment", () => {
     expect(build({ body: "   " })).toBeNull();
+  });
+});
+
+
+describe("invitationEmail (launch readiness 2.3)", () => {
+  const input = {
+    to: "jane@example.edu",
+    firstName: "Jane",
+    invitedByName: "Michael Nichols",
+    houseAddress: "1472 Cleveland Ave N",
+    role: "resident" as const,
+    appUrl: "https://housing.spo.org",
+  };
+
+  it("says exactly what JR approved (2026-10-12): who, which house, the sign-in page and the email to use", () => {
+    const message = invitationEmail(input);
+    expect(message).toMatchObject({ template: "invitation", to: "jane@example.edu", subject: "Your sign-in for the SPO housing portal" });
+    expect(message?.text).toBe(
+      "Hi Jane,\n" +
+        "\n" +
+        "Michael Nichols has given you access to the SPO housing portal for\n" +
+        "1472 Cleveland Ave N.\n" +
+        "\n" +
+        "Sign in here: https://housing.spo.org\n" +
+        'Use "Sign in with Google" with this email address: jane@example.edu\n' +
+        "\n" +
+        "Once you are in, you can report repairs for your house, follow the\n" +
+        "ones your housemates reported, and fill in the walkthrough checklist.\n" +
+        "\n" +
+        "Saint Paul's Outreach housing\n" +
+        "This mailbox is not monitored — reply to your RA or household leader.",
+    );
+  });
+
+  it("names the role instead of a house for a staff account", () => {
+    const text = invitationEmail({ ...input, houseAddress: null, role: "regional_administrator" })?.text ?? "";
+    expect(text).toContain("has given you access to the SPO housing portal as a regional administrator.");
+    expect(text).toContain("see the houses in your region");
+    expect(text).not.toContain("housemates");
+  });
+
+  it("leaves the link out until the portal's address is set, and still says which email to use", () => {
+    const text = invitationEmail({ ...input, appUrl: null })?.text ?? "";
+    expect(text).not.toContain("Sign in here");
+    expect(text).toContain('Use "Sign in with Google" with this email address: jane@example.edu');
+  });
+
+  it("greets somebody with no first name plainly, and sends nothing to no address", () => {
+    expect(invitationEmail({ ...input, firstName: null })?.text.startsWith("Hello,\n")).toBe(true);
+    expect(invitationEmail({ ...input, to: "" })).toBeNull();
+    expect(invitationEmail({ ...input, to: "not an address" })).toBeNull();
+  });
+
+  it("carries no credential: no token, no password, only the sign-in page", () => {
+    const text = invitationEmail(input)?.text ?? "";
+    expect(text.match(/https?:\/\/\S+/g)).toEqual(["https://housing.spo.org"]);
+    expect(text.toLowerCase()).not.toMatch(/token|password|code/);
   });
 });

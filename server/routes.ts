@@ -104,6 +104,7 @@ import {
   type MaintenanceRequest,
   type MaintenanceRequestComment,
   type User,
+  type Invitation,
   WALKTHROUGH_CONDITION_LABEL,
   UPLOAD_URL_PATTERN,
 } from "@shared/schema";
@@ -123,6 +124,8 @@ import { hasBegunEverywhere } from "@shared/dueDates";
 import { fiscalYearLabel } from "@shared/fiscalYear";
 import { MAX_RESIDENT_ACCOUNTS_PER_PROPERTY, isCurrentResident } from "@shared/residents";
 import { closeDepartedHouseholdLogins } from "./householdLogins";
+import { deliverInvitation, type DeliveryOutcome } from "./invitations";
+import { invitationRequestSchema, invitationSendAt } from "@shared/invitations";
 import { MAX_SNOOZE_DAYS, MAX_SNOOZE_MONTHS } from "@shared/assetLifecycle";
 import { randomBytes, randomUUID, timingSafeEqual } from "crypto";
 import { contractorLoad, recurringIssues } from "./aggregates";
@@ -540,6 +543,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (full) return res.status(409).json({ message: full });
       }
       const user = await storage.updateUserActiveStatus(req.params.id, isActive);
+      // A login switched off is not invited to sign in on a day that has not come.
+      if (!isActive) await storage.cancelPendingInvitations(req.params.id, new Date());
 
       recordAuditEvent(ctx, {
         action: AUDIT_ACTIONS.USER_STATUS_CHANGED,
@@ -720,6 +725,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const full = residentAccountCapProblem(house.name, await storage.getActiveResidentAccountsByProperty(house.id));
         if (full) return res.status(409).json({ message: full });
       }
+      const { sendOn } = invitationRequestSchema.parse(req.body);
       const { user, relinkedFrom } = await storage.upsertUser({
         id: requestedId,
         ...validatedData,
@@ -746,7 +752,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
             },
       );
 
-      res.json(user);
+      // The invitation rides on the account (launch readiness 2.3): a switched-on
+      // account with an email gets one, now or on the day chosen. A switched-off
+      // one does not; reactivating it later is the moment to invite.
+      const invitation = user.isActive && user.email ? await inviteAccount(ctx, user, sendOn) : null;
+      res.json({ ...user, invitation });
     } catch (error) {
       sendError(res, error, "Failed to create user");
     }
@@ -5441,11 +5451,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         storage.getActiveResidentAccountsByProperty(resident.propertyId),
       ]);
       const hasAccess = !!account && account.isActive && account.propertyId === resident.propertyId;
+      const invitation = hasAccess ? await storage.getLatestInvitationForUser(account.id) : undefined;
       res.json({
         hasAccess,
         // Never an id or anything about the account beyond what the screen says.
         houseAccounts: house.map((u) => ({ name: [u.firstName, u.lastName].filter(Boolean).join(" ") || u.email, email: u.email })),
         limit: MAX_RESIDENT_ACCOUNTS_PER_PROPERTY,
+        invitation: invitation ? invitationView(invitation) : null,
       });
     } catch (error) {
       sendError(res, error, "Failed to load portal access");
@@ -5458,6 +5470,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!ctx) return;
       const resident = await residentForMoveOut(req, res, ctx, "manage");
       if (!resident) return;
+      const { sendOn } = invitationRequestSchema.parse(req.body ?? {});
 
       const today = new Date().toISOString().slice(0, 10);
       const stopped = resident.moveOutDate && new Date(resident.moveOutDate).toISOString().slice(0, 10) < today;
@@ -5527,9 +5540,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
         summary: `Set ${email}'s household permissions: maintenance, walkthroughs, resources`,
         details: { canViewMaintenance: true, canCompleteWalkthroughs: true, canViewResourceHub: true },
       });
-      res.json({ hasAccess: true });
+      // Every grant invites, a re-grant included (JR, 2026-10-12): the person
+      // who had an account before still needs telling it is back on.
+      const invitation = await inviteAccount(ctx, user, sendOn);
+      res.json({ hasAccess: true, invitation });
     } catch (error) {
       sendError(res, error, "Failed to give portal access");
+    }
+  });
+
+  // "Send the invitation again": students lose emails. Same permission as the
+  // grant, and only for a login this house gave access to. Goes now, whatever
+  // day the earlier one was scheduled for, and that earlier one is dropped.
+  app.post('/api/residents/:id/portal-access/invitation', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      const resident = await residentForMoveOut(req, res, ctx, "manage");
+      if (!resident) return;
+      const account = await portalAccountFor(resident);
+      if (!account || !account.isActive || account.propertyId !== resident.propertyId) {
+        return res.status(409).json({ message: "Give them portal access first; the invitation goes with it." });
+      }
+      const invitation = await inviteAccount(ctx, account, undefined);
+      res.json({ hasAccess: true, invitation });
+    } catch (error) {
+      sendError(res, error, "Failed to send the invitation");
     }
   });
 
@@ -5545,6 +5581,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.json({ hasAccess: false });
       }
       await storage.deactivateAndUnlinkUser(account.id);
+      await storage.cancelPendingInvitations(account.id, new Date());
       recordAuditEvent(ctx, {
         action: AUDIT_ACTIONS.USER_STATUS_CHANGED,
         entityType: "user",
@@ -5569,6 +5606,48 @@ export async function registerRoutes(app: Express): Promise<Server> {
   //
   // The RA's record that a room was checked when somebody left. Staff only,
   // under the property permission (the roster's own), in the resident's region.
+
+  /** What a screen is told about an invitation: its three dates and nothing else. */
+  function invitationView(invitation: Invitation) {
+    return { sendAt: invitation.sendAt, sentAt: invitation.sentAt, cancelledAt: invitation.cancelledAt };
+  }
+
+  /**
+   * Writes the invitation for an account whose access was just given and, when
+   * it is due now, sends it as part of the action so the RA's screen can say
+   * whether it went. A later day is left to the daily run and recorded as
+   * scheduled. A send that does not go is an outcome the screen reports, never
+   * a failure of the grant that already happened.
+   */
+  async function inviteAccount(ctx: AuthContext, account: User, sendOn: string | undefined) {
+    const now = new Date();
+    const invitation = await storage.createInvitation({
+      userId: account.id,
+      email: (account.email as string).trim().toLowerCase(),
+      propertyId: account.role === "resident" ? (account.propertyId ?? null) : null,
+      invitedByName: [ctx.user.firstName, ctx.user.lastName].filter(Boolean).join(" ") || (ctx.user.email as string),
+      sendAt: invitationSendAt(sendOn, now),
+    });
+    let delivery: DeliveryOutcome | { outcome: "scheduled" };
+    if (invitation.sendAt.getTime() > now.getTime()) {
+      recordAuditEvent(ctx, {
+        action: AUDIT_ACTIONS.INVITATION_SCHEDULED,
+        entityType: "user",
+        entityId: account.id,
+        summary: `Scheduled ${invitation.email}'s invitation for ${invitation.sendAt.toISOString().slice(0, 10)}`,
+        details: { invitationId: invitation.id, sendAt: invitation.sendAt.toISOString(), propertyId: invitation.propertyId },
+      });
+      delivery = { outcome: "scheduled" };
+    } else {
+      try {
+        delivery = await deliverInvitation(invitation, ctx, now);
+      } catch (error) {
+        logError("Failed to send an invitation after giving access", error);
+        delivery = { outcome: "not_sent", reason: "send_failed" };
+      }
+    }
+    return { ...invitationView(invitation), ...delivery };
+  }
 
   async function residentForMoveOut(req: any, res: any, ctx: AuthContext, need: "view" | "manage") {
     if (!requireStaff(res, ctx)) return undefined;
