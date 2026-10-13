@@ -104,7 +104,7 @@ export default function PortalAccessCard({ resident, canManage }: { resident: Re
             </Button>
           ))}
         {canManage && full && (
-          <p className="text-sm text-muted-foreground">This house already has {data.limit} people with access. Remove one first.</p>
+          <p className="text-sm text-muted-foreground">This house already has {data.limit} logins, the most a house can have. Remove one to add another.</p>
         )}
       </CardContent>
 

@@ -248,7 +248,7 @@ Accounts are waiting for people because somebody made them:
 
 - **The first admin** — by SQL, once, below.
 - **Staff** (admins and RAs) — an admin creates them in **Settings**, then sets their permissions and regions.
-- **Household leaders and stewards** — their RA opens the resident's page and uses **Portal access → Give portal access**, which uses the email on the roster. At most **3** switched-on household logins per house. The RA needs the "manage properties" permission for that house's region.
+- **Household leaders and stewards** — their RA opens the resident's page and uses **Portal access → Give portal access**, which uses the email on the roster. At most **4** switched-on household logins per house. The RA needs the "manage properties" permission for that house's region.
 
 The email has to be the exact address the person signs in to Google with. If someone is turned away, compare the two; an alias or a different Gmail will not match.
 

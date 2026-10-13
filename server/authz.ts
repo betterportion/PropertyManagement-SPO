@@ -29,7 +29,7 @@ import { getUserId } from "./auth";
 import { normalizeRegion, normalizeRegions } from "./migrateRegions";
 import { isClosedMaintenanceStatus, type Property, type Upload, type User, type UserPermissions } from "@shared/schema";
 import type { ActionItemSource } from "@shared/actionItems";
-import { isCurrentResident } from "@shared/residents";
+import { isCurrentResident, MAX_RESIDENT_ACCOUNTS_PER_PROPERTY } from "@shared/residents";
 
 /** Names of the boolean permission columns on the user_permissions table. */
 export type PermissionName =
@@ -396,6 +396,33 @@ export function isCurrentRosterMember(
   now: Date = new Date(),
 ): boolean {
   return isCurrentResident(row, now) && rosterRowSpeaksFor(row, login);
+}
+
+/**
+ * The cap on resident accounts at one house (brief 2.1, 2026-10-10): at most
+ * MAX_RESIDENT_ACCOUNTS_PER_PROPERTY active resident accounts may be linked to
+ * a property at once. Returns the sentence to refuse with, or null when the
+ * house has room.
+ *
+ * A data rule, not a permission, so there is deliberately no admin bypass
+ * here. Every writer that links an active resident account to a house calls
+ * it before writing: the RA's portal-access grant, and the admin's create,
+ * move, reactivate and role change in Settings. `accountId` is the account
+ * being granted, moved, reactivated or made a resident again, so re-granting
+ * one of the house's own logins does not count it against itself.
+ *
+ * The sentence is short on purpose (JR, 2026-10-12): who holds the places is
+ * already on the resident's Portal access card and in the Settings table, so
+ * the refusal says only what is wrong and what to do.
+ */
+export function residentAccountCapProblem(
+  houseLabel: string,
+  activeAccounts: readonly { id: string }[],
+  accountId?: string | null,
+): string | null {
+  const others = activeAccounts.filter((account) => account.id !== accountId);
+  if (others.length < MAX_RESIDENT_ACCOUNTS_PER_PROPERTY) return null;
+  return `${houseLabel} already has ${MAX_RESIDENT_ACCOUNTS_PER_PROPERTY} logins, the most a house can have. Remove one to add another.`;
 }
 
 /**

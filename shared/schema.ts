@@ -100,9 +100,10 @@ export const users = pgTable("users", {
   lastName: varchar("last_name"),
   profileImageUrl: varchar("profile_image_url"),
   role: varchar("role", { enum: ["admin", "regional_administrator", "resident"] }).notNull().default("resident"),
-  // Which house a resident account belongs to. The two resident logins per
-  // property (steward and household leader) both point at their house; staff
-  // accounts leave it null. Deleting a property unlinks the accounts rather
+  // Which house a resident account belongs to. The resident logins of one
+  // property (household leader and stewards, at most
+  // MAX_RESIDENT_ACCOUNTS_PER_PROPERTY switched on at once) all point at their
+  // house; staff accounts leave it null. Deleting a property unlinks the accounts rather
   // than deleting them, so the people keep their history.
   propertyId: varchar("property_id").references(() => properties.id, { onDelete: "set null" }),
   isActive: boolean("is_active").notNull().default(true),
@@ -138,7 +139,7 @@ export const userPermissions = pgTable("user_permissions", {
   canViewFinancials: boolean("can_view_financials").notNull().default(false),
   canManageFinancials: boolean("can_manage_financials").notNull().default(false),
   // Walkthrough completion by a resident-tier account -- the household leader
-  // and the steward, the only two residents per property who ever have a login.
+  // and the stewards, the only residents of a property who ever have a login.
   // Deliberately separate from canManageWalkthroughs: that flag is the staff
   // grant and carries region scope, this one carries none and is only ever
   // house-scoped. Granted by hand per account; no role gets it by default.
