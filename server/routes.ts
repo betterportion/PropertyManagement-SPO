@@ -1926,9 +1926,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // so a walkthrough cannot be filed into a region its author cannot see.
       // Nor does the status: every walkthrough starts as a draft, and only the
       // submit and review routes move it on.
+      // A household leader starts an additional inspection dated now (#219):
+      // move-in and move-out are staff events, and the date decides which
+      // inspection is the live one for the house (isCurrentWalkthrough), so
+      // a date of the leader's choosing could lock them out of the real one
+      // or backdate a new one into read-only. Neither comes from the body.
       const { status: _status, ...startBody } = req.body ?? {};
       const validatedData = insertWalkthroughSchema.parse({
         ...startBody,
+        ...(ctx.isResident ? { type: "additional", walkthroughDate: new Date() } : {}),
         region: property.region,
         buildingAddress: property.address,
         performedBy: ctx.user.email ?? null,
