@@ -468,6 +468,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // The Settings select never sends the current role, but the API can; a
       // no-op must not reset the row the way the old code did.
       if (previous.role === validatedData.role) return res.json(previous);
+      // A staff account keeps its house link through a role change, so making
+      // an active one a resident again takes one of that house's places
+      // (MAX_RESIDENT_ACCOUNTS_PER_PROPERTY), like linking it would.
+      if (validatedData.role === "resident" && previous.isActive && previous.propertyId) {
+        const house = await storage.getProperty(previous.propertyId);
+        const full = residentAccountCapProblem(
+          house?.name ?? "That house",
+          await storage.getActiveResidentAccountsByProperty(previous.propertyId),
+          previous.id,
+        );
+        if (full) return res.status(409).json({ message: full });
+      }
 
       const nextPermissions = permissionsAfterRoleChange(req.params.id, previous.role, validatedData.role);
       const existingPermissions = nextPermissions ? await storage.getUserPermissions(req.params.id) : undefined;

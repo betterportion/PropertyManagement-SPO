@@ -12078,6 +12078,28 @@ describe("a house holds at most MAX_RESIDENT_ACCOUNTS_PER_PROPERTY resident acco
     expect((await request("PATCH", `/api/users/${on.id}/status`, { body: { isActive: false } })).status).toBe(200);
     expect(storageMock.updateUserActiveStatus).toHaveBeenCalledWith(on.id, false);
   });
+
+  // A promotion leaves the house link in place, so promote one of four, add a
+  // fourth, demote the first back: without this check that is a fifth.
+  it("making a staff account still linked to a full house a resident again is refused, and the role is not changed", async () => {
+    housesHold(4, 0);
+    const promoted = { ...account(9, P.id), role: "regional_administrator" };
+    storageMock.getUser.mockImplementation(async (id: string) => (id === ADMIN.id ? ADMIN : id === promoted.id ? promoted : undefined));
+    const { status, body } = await request("PATCH", `/api/users/${promoted.id}/role`, { body: { role: "resident" } });
+    expect(status).toBe(409);
+    expect(body.message).toBe("House P already has 4 logins, the most a house can have. Remove one to add another.");
+    expect(storageMock.updateUserRole).not.toHaveBeenCalled();
+    expect(storageMock.createAuditEvent).not.toHaveBeenCalled();
+  });
+
+  it("the same demotion where the house has room succeeds (positive control)", async () => {
+    housesHold(3, 0);
+    const promoted = { ...account(9, P.id), role: "regional_administrator" };
+    storageMock.getUser.mockImplementation(async (id: string) => (id === ADMIN.id ? ADMIN : id === promoted.id ? promoted : undefined));
+    storageMock.updateUserRole.mockImplementation(async (id: string, role: string) => ({ ...promoted, id, role }));
+    expect((await request("PATCH", `/api/users/${promoted.id}/role`, { body: { role: "resident" } })).status).toBe(200);
+    expect(storageMock.updateUserRole).toHaveBeenCalledWith(promoted.id, "resident", expect.anything());
+  });
 });
 
 describe("two leaders on one house share its repairs and reach nothing else (brief 2.2)", () => {

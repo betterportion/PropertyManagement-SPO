@@ -14,8 +14,9 @@ Numbered as the audit's questions were.
    renamed from `HOUSE_PORTAL_ACCOUNT_LIMIT = 3` (which had landed with invite-only sign-in,
    #217, PR #220, 2026-10-01). The brief's premise that the cap was two was already out of date.
 2. **The cap binds every path that links an active resident account to a house**, admins
-   included: the RA's portal-access grant, and the admin's create, move and reactivate in
-   Settings. An admin-created resident login with no current roster row at its house still
+   included: the RA's portal-access grant, and the admin's create, move, reactivate and role
+   change in Settings (a promotion keeps the house link, so making the account a resident
+   again takes a place). An admin-created resident login with no current roster row at its house still
    reads nothing and is switched off by the next daily run (#222); that rule is untouched.
 3. **An invitation goes to the roster email, and sign-in must use it**, as today. "The address
    they actually check" means the RA puts that address on the roster row first. A separate

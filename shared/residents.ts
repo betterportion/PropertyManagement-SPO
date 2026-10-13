@@ -55,7 +55,7 @@ export function isCurrentResident(
  * July handover and for the dorm case (brief 2.1, 2026-10-10). A data rule,
  * not a permission: it binds admins as much as RAs, and every path that links
  * an active resident account to a house applies it -- the RA's portal-access
- * grant from the roster and the admin's create, move and reactivate in
- * Settings (`residentAccountCapProblem` in server/authz.ts).
+ * grant from the roster and the admin's create, move, reactivate and role
+ * change in Settings (`residentAccountCapProblem` in server/authz.ts).
  */
 export const MAX_RESIDENT_ACCOUNTS_PER_PROPERTY = 4;

@@ -407,9 +407,9 @@ export function isCurrentRosterMember(
  * A data rule, not a permission, so there is deliberately no admin bypass
  * here. Every writer that links an active resident account to a house calls
  * it before writing: the RA's portal-access grant, and the admin's create,
- * move and reactivate in Settings. `accountId` is the account being granted,
- * moved or reactivated, so re-granting one of the house's own logins does not
- * count it against itself.
+ * move, reactivate and role change in Settings. `accountId` is the account
+ * being granted, moved, reactivated or made a resident again, so re-granting
+ * one of the house's own logins does not count it against itself.
  *
  * The sentence is short on purpose (JR, 2026-10-12): who holds the places is
  * already on the resident's Portal access card and in the Settings table, so
