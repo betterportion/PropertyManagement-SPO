@@ -1,6 +1,6 @@
 # SPO data platform: vision and rules
 
-The same file lives in SPO-Crew-App, PropertyManagement-SPO and DonorCRM-SPO (`docs/SPO-DATA-PLATFORM.md`). Change all three together. JR's notes are in the Obsidian vault at `SPO Data Platform/Getting Off Google Sheets.md`. Last updated 2026-10-01.
+The same file lives in SPO-Crew-App, PropertyManagement-SPO and DonorCRM-SPO (`docs/SPO-DATA-PLATFORM.md`). Change all three together. JR's notes are in the Obsidian vault at `SPO Data Platform/Getting Off Google Sheets.md`. Last updated 2026-10-09.
 
 ## The goal
 
@@ -55,7 +55,8 @@ Never widen a read past this table. Enforce it on the server (a role-checking fu
 ## People and retention
 
 - **Nobody SPO tracks is a minor.** They are college students and young adults. The Crew App refuses to record anyone under 18.
-- **Records are permanent.** Formation participants agree to SPO's privacy policy and cannot ask for their record to be removed. Never hard-delete. Archive instead, with anonymization as the fallback if a legal need appears. The Crew App's account purge is the one exception: it removes a missionary's own app data.
+- **Records are kept long-term, and deletion is a legal exception, not a user feature.** This is what SPO's privacy notice promises (its section 6): a person can always correct their record, stop alumni and fundraising contact, and withdraw consent to pastoral notes, and the record that they took part stays. Where the law requires deletion, de-identify the person (name and contact details come off, the dated facts stay) rather than hard-delete. Archive, never erase. The Crew App's account purge is the one exception: it removes a missionary's own app data.
+- **Consent and contact preferences are facts on the person.** Recorded once (who, when, which form, and any withdrawal) and honored by every app. A student stays with their missionary until a consent is on file; only then can the row reach a chapter roster or a communication list. Fundraising never reads student records. This is SPO HR's recommendation of 2026-10-09 (a signed digital form by QR code), and the shape the people layer must give it.
 - **Rows are attributed and dated:** who, when, and which person. A change is a new fact or an audited update, not a silent overwrite.
 
 ## Rules for every app, starting now
