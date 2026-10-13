@@ -194,6 +194,13 @@ export function requireRegion(
  * Guards a region change on update: the user must be able to reach both where
  * the record is now and where it is being moved to. Without the second check a
  * user could push a record into a region they cannot see, and lose track of it.
+ *
+ * A region that is sent but blank is a move too, and is refused for everyone,
+ * admins included (#219): a blank region is not one anybody can reach, so
+ * the record would vanish from every RA's screens, and on a house the
+ * cascade in `storage.updateProperty` would blank the region on its roster,
+ * fees, deposits, walkthroughs, requests and invoices with it. Leaving the
+ * region out of an edit still means "unchanged".
  */
 export function requireRegionMove(
   res: Response,
@@ -202,10 +209,12 @@ export function requireRegionMove(
   nextRegion: string | null | undefined,
 ): boolean {
   if (!requireRegion(res, ctx, currentRegion)) return false;
-  if (nextRegion && nextRegion !== currentRegion) {
-    return requireRegion(res, ctx, nextRegion, "Forbidden - Cannot move to this region");
+  if (nextRegion === undefined || nextRegion === currentRegion) return true;
+  if (!nextRegion) {
+    res.status(400).json({ message: "Choose a region." });
+    return false;
   }
-  return true;
+  return requireRegion(res, ctx, nextRegion, "Forbidden - Cannot move to this region");
 }
 
 /**
