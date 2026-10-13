@@ -123,12 +123,12 @@ then open that contractor's page and read the counts. Screenshots first.
 
 | # | Who | What | Blocks |
 |---|---|---|---|
-| H1 | JR | Phase 1 manual gate on desktop: add a fourth account to a house, attempt a fifth, read the refusal. Then merge #302. | Merging #303 and later PRs (stacked) |
-| H2 | JR | Merge #303 once #302 is in (retarget it to `main` first), then #304 the same way. | The stack |
+| H1 | JR, done | #302 merged 2026-10-13. The desktop check (add a fourth account to a house, attempt a fifth, read the refusal) was not run by hand first; worth doing on staging when it exists. | Nothing |
+| H2 | JR, done | #302, then Phase 2 as #314 (replacing #303, which GitHub closed when its base branch went), then #304, all squash-merged 2026-10-13. | Nothing |
 | H3 | JR, paused | Resend: verify the sending domain, set `RESEND_API_KEY`, `EMAIL_FROM` (#49). Paused by JR 2026-10-12. | The Phase 2 live-email gate; every automated email |
 | H4 | JR | Set `APP_URL` to the portal's address. | Links in invitation and comment email |
 | H5 | JR | Phase 2 live gate: invite your own Gmail, receive the email, sign in, see the right house. | Nothing in code; confirms the whole path |
 | H6 | SPO (Joseph) | Answer "SPO Portal: Information We Need From SPO", including 7.8 (the invitation wording). | Final wording; nothing in code |
-| H7 | JR | Phase 3 phone gate: complete a request with a contractor linked, read the counts on the contractor's page. Screens approved 2026-10-13. | Merging #304 |
+| H7 | JR | Phase 3 phone gate: complete a request with a contractor linked, read the counts on the contractor's page. Screens approved 2026-10-13; #304 merged. | Nothing in code |
 | H8 | JR, decided | Contractor trust for incoming RAs (sort or surface the close-out counts, never a score): JR chose v2 on 2026-10-13, tracked as #305. Not in this round. | Nothing |
-| H9 | JR | Outside the round, from the pilot audit (#219) and #165, opened 2026-10-13 off `main`: #306 email-off log line, #307 blank region refused, #308 submitter fixed at filing, #309 bank/card rule on the remaining notes, #310 leader's walkthrough dated today (screens approved 2026-10-13), #311 dates refuse null and impossible days, #312 named controls. Review and merge in any order; each is independent of the stack. | Nothing in the round |
+| H9 | JR, done | #306–#312 all squash-merged 2026-10-13 after #304. #310's screens were approved the same day with one wording change. | Nothing |
