@@ -182,7 +182,7 @@ export default function MyWalkthroughs() {
               <DialogHeader>
                 <DialogTitle>Start a walkthrough</DialogTitle>
                 <DialogDescription>
-                  This starts a new inspection of your house. Last year's is kept as it was.
+                  This starts a new inspection of your house.
                 </DialogDescription>
               </DialogHeader>
 
