@@ -285,7 +285,7 @@ The JotForm webhook that used to turn form submissions into maintenance requests
 - **Validation**: parse request bodies with the Zod schema from `shared/schema.ts` (`insertXSchema.parse(...)`, or `.partial().parse(...)` for PATCH). Do not trust `req.body` directly.
 - **Typing**: handlers are typed `async (req: any, res)`. That is the existing convention; do not spend effort changing it, but do not let it stop you using `getUserId(req)`.
 - **Test IDs**: interactive elements carry `data-testid` attributes. Keep adding them.
-- **Dates**: format at the render boundary with `formatDate`/`formatDateTime` from `client/src/lib/format.ts`; Drizzle `timestamp` columns with `defaultNow()` on the backend.
+- **Dates**: format at the render boundary with `formatDate`/`formatDateTime` from `client/src/lib/format.ts`; Drizzle `timestamp` columns with `defaultNow()` on the backend. A date field in an insert schema is `dateFromClient` (`shared/schema.ts`), which refuses a null where a date is required (it used to become 1970) and a day that is not on the calendar (2026-02-30 used to roll into March) rather than guessing (#219); `server/__tests__/dateFromClient.test.ts`.
 - **Forms**: React Hook Form with the Zod resolver, using the shared insert schemas.
 - **The `overrides` block in `package.json` is load-bearing.** `drizzle-kit` still *declares* the deprecated `@esbuild-kit/esm-loader` but no longer loads it (it uses `tsx`), so the override pins that chain's `esbuild` to a patched version to keep `npm audit` clean. Remove the override only once `drizzle-kit` drops the declaration.
 
