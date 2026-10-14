@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { type UseFormReturn } from "react-hook-form";
 import { z } from "zod";
 import { insertPropertySchema, type MaintenanceContact } from "@shared/schema";
-import { FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import { FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { PhotoUpload } from "@/components/PhotoUpload";
@@ -31,6 +31,94 @@ export type PropertyForm = z.infer<typeof propertyFormSchema>;
 
 /** The "nobody" option. A Select cannot carry an empty string as a value. */
 const NO_CONTACT = "__none__";
+
+/** The "not set" option for men or women, for the same reason. */
+const NO_HOUSEHOLD = "__none__";
+
+/**
+ * Men or women, and the two capacities, shared by the add and edit dialogs.
+ *
+ * Two capacities because SPO keeps two: the legal one is what the city allows,
+ * the mission one is the most SPO itself puts in the house. Both are shown on
+ * the house page, and they need not agree, so neither is checked against the
+ * other or against the bedroom count.
+ */
+export function PropertyHouseholdFields({ form }: { form: UseFormReturn<PropertyForm> }) {
+  return (
+    <>
+      <FormField
+        control={form.control}
+        name="household"
+        render={({ field }) => (
+          <FormItem>
+            <FormLabel>Men or women (Optional)</FormLabel>
+            <Select
+              onValueChange={(value) => field.onChange(value === NO_HOUSEHOLD ? null : value)}
+              value={field.value ?? NO_HOUSEHOLD}
+            >
+              <FormControl>
+                <SelectTrigger data-testid="select-property-household">
+                  <SelectValue />
+                </SelectTrigger>
+              </FormControl>
+              <SelectContent>
+                <SelectItem value={NO_HOUSEHOLD}>Not set</SelectItem>
+                <SelectItem value="men">Men</SelectItem>
+                <SelectItem value="women">Women</SelectItem>
+              </SelectContent>
+            </Select>
+            <FormMessage />
+          </FormItem>
+        )}
+      />
+
+      <div className="grid grid-cols-2 gap-4">
+        <FormField
+          control={form.control}
+          name="capacityLegal"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Legal capacity (Optional)</FormLabel>
+              <FormControl>
+                <Input
+                  type="number"
+                  min={0}
+                  {...field}
+                  value={field.value ?? ""}
+                  onChange={(e) => field.onChange(e.target.value ? parseInt(e.target.value) : undefined)}
+                  data-testid="input-property-capacity-legal"
+                />
+              </FormControl>
+              <FormDescription>What the city allows.</FormDescription>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+        <FormField
+          control={form.control}
+          name="capacityMission"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Mission capacity (Optional)</FormLabel>
+              <FormControl>
+                <Input
+                  type="number"
+                  min={0}
+                  {...field}
+                  value={field.value ?? ""}
+                  onChange={(e) => field.onChange(e.target.value ? parseInt(e.target.value) : undefined)}
+                  data-testid="input-property-capacity-mission"
+                />
+              </FormControl>
+              <FormDescription>The most SPO puts in this house.</FormDescription>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+      </div>
+    </>
+  );
+}
 
 /**
  * Ownership, lease and who-to-call fields, shared by the add and edit property

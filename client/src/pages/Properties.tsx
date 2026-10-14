@@ -17,7 +17,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { type Property, type PropertySetupItem } from "@shared/schema";
 import { summarizeSetup, setupRowsByProperty } from "@shared/propertySetup";
 import { REGIONS, chaptersForRegion, ALL_CHAPTERS } from "@shared/regions";
-import PropertyLeaseFields, { PropertyPhotoAndNotes, propertyFormSchema, type PropertyForm } from "@/components/PropertyLeaseFields";
+import PropertyLeaseFields, { PropertyHouseholdFields, PropertyPhotoAndNotes, propertyFormSchema, type PropertyForm } from "@/components/PropertyLeaseFields";
 import { Section, Container, PageHeader, PageStack } from "@/components/layout/page";
 import { LoadingState, EmptyState } from "@/components/states";
 import { formatDate } from "@/lib/format";
@@ -201,6 +201,9 @@ export default function Properties() {
       bedrooms: undefined,
       bathrooms: undefined,
       squareFootage: undefined,
+      household: null,
+      capacityLegal: undefined,
+      capacityMission: undefined,
       ownership: "owned",
       leaseStartDate: "",
       leaseEndDate: "",
@@ -240,6 +243,9 @@ export default function Properties() {
       bedrooms: property.bedrooms || undefined,
       bathrooms: property.bathrooms || undefined,
       squareFootage: property.squareFootage || undefined,
+      household: property.household,
+      capacityLegal: property.capacityLegal ?? undefined,
+      capacityMission: property.capacityMission ?? undefined,
       ownership: property.ownership,
       leaseStartDate: asDateInput(property.leaseStartDate),
       leaseEndDate: asDateInput(property.leaseEndDate),
@@ -496,6 +502,8 @@ export default function Properties() {
                     </FormItem>
                   )}
                 />
+
+                <PropertyHouseholdFields form={addForm} />
 
                 <PropertyPhotoAndNotes
                   form={addForm}
@@ -802,6 +810,8 @@ export default function Properties() {
                 )}
               />
 
+
+              <PropertyHouseholdFields form={editForm} />
 
               <PropertyPhotoAndNotes
                 form={editForm}

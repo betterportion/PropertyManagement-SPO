@@ -386,6 +386,15 @@ export default function PropertyDetail() {
 
           <dl className="grid gap-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
             <Fact label="Property manager" value={formatValue(property.propertyManager)} />
+            {/* SPO keeps two capacities on purpose: what the city allows, and
+                the most SPO itself puts in the house. Both are shown, and they
+                need not agree (shared/schema.ts). */}
+            <Fact
+              label="Men or women"
+              value={formatValue(property.household === "men" ? "Men" : property.household === "women" ? "Women" : null)}
+            />
+            <Fact label="Legal capacity" value={formatValue(property.capacityLegal)} />
+            <Fact label="Mission capacity" value={formatValue(property.capacityMission)} />
             <Fact
               label="Bedrooms"
               value={formatValue(property.bedrooms)}
