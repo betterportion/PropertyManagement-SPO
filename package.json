@@ -17,6 +17,7 @@
     "db:migrate": "drizzle-kit migrate",
     "db:baseline": "tsx scripts/baseline-migrations.ts",
     "db:seed": "tsx scripts/seed-demo-data.ts",
+    "db:import-houses": "tsx scripts/import-houses.ts",
     "db:push": "drizzle-kit push",
     "test:e2e": "playwright test"
   },
