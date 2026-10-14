@@ -3,7 +3,7 @@
  * Addresses here are made up; the real sheet is never committed.
  */
 import { describe, it, expect } from "vitest";
-import { housesFromRows, notesFromRow, parseHouseCsv, REGION_CODES, CHAPTER_CODES } from "../import-houses";
+import { housesFromRows, parseHouseCsv, REGION_CODES, CHAPTER_CODES } from "../import-houses";
 import { CHAPTERS_BY_REGION, REGIONS } from "../../shared/regions";
 
 const HEADER = "Region,Chapter,Address,City,State,Zip Code,Owned or Rented,Household or Office,Men or Women,Capacity (Legal),Capacity (Mission),# Bedrooms,# Baths,Total SF,Nickname";
@@ -43,7 +43,9 @@ describe("a house row", () => {
       bedrooms: 4,
       bathrooms: "3",
       squareFootage: 2699,
-      notes: "From SPO's property sheet: women; legal capacity 8; mission capacity 8.",
+      household: "women",
+      capacityLegal: 8,
+      capacityMission: 8,
     });
   });
 
@@ -66,7 +68,7 @@ describe("a house row", () => {
 
   it("reads N/A as blank", () => {
     const [outcome] = housesFromRows(rows(csv("NW,UMN,6 Example Ave,Minneapolis,MN,55414,Rented,Household,Men,N/A,50,N/A,N/A,N/A,Frat")));
-    expect(outcome.kind === "house" && outcome.house).toMatchObject({ bedrooms: null, bathrooms: null, squareFootage: null, notes: "From SPO's property sheet: men; mission capacity 50." });
+    expect(outcome.kind === "house" && outcome.house).toMatchObject({ bedrooms: null, bathrooms: null, squareFootage: null, household: "men", capacityLegal: null, capacityMission: 50 });
   });
 });
 
@@ -100,8 +102,15 @@ describe("the file", () => {
   });
 });
 
-describe("notes", () => {
-  it("say nothing when the sheet gives nothing", () => {
-    expect(notesFromRow({})).toBeNull();
+describe("men or women", () => {
+  it("is left empty when the sheet leaves it blank", () => {
+    const [outcome] = housesFromRows(rows(csv("SE,USF,2 Example Dr,Tampa,FL,33613,Rented,Household,,6,6,3,2,1515,")));
+    expect(outcome.kind === "house" && outcome.house.household).toBeNull();
+  });
+
+  it("refuses a word that is neither, naming the row", () => {
+    const [outcome] = housesFromRows(rows(csv("SE,USF,2 Example Dr,Tampa,FL,33613,Rented,Household,Coed,6,6,3,2,1515,")));
+    expect(outcome).toMatchObject({ kind: "error", row: 2 });
+    expect(outcome.kind === "error" && outcome.message).toContain('"Men or Women" must be Men or Women, not "Coed"');
   });
 });

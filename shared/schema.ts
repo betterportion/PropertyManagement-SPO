@@ -1068,6 +1068,14 @@ export const properties = pgTable("properties", {
   bedrooms: integer("bedrooms"),
   bathrooms: numeric("bathrooms", { precision: 3, scale: 1 }),
   squareFootage: integer("square_footage"),
+  // Who lives there, and how many may. SPO keeps two capacities on purpose
+  // (its property sheet, and question 3.7 in the launch doc, Oct 2026):
+  // `capacityLegal` is what the city allows, `capacityMission` is the most
+  // SPO itself puts in the house, from its history and SPO's vision for it.
+  // They need not agree, and neither is derived from the bedroom count.
+  household: varchar("household", { enum: ["men", "women"] }),
+  capacityLegal: integer("capacity_legal"),
+  capacityMission: integer("capacity_mission"),
   // Lease tracking. SPO owns some houses and rents others; the lease fields
   // only apply when `ownership` is "rented". `leaseRenewalDate` is what the
   // 2-months-out renewal reminder watches; `renewalDecision` records the RA's
@@ -1135,6 +1143,9 @@ export const insertPropertySchema = createInsertSchema(properties)
     bedrooms: nonNegativeInt.nullish(),
     bathrooms: nonNegativeAmount.nullish(),
     squareFootage: nonNegativeInt.nullish(),
+    household: z.enum(["men", "women"]).nullish(),
+    capacityLegal: nonNegativeInt.nullish(),
+    capacityMission: nonNegativeInt.nullish(),
     leaseStartDate: dateFromClient.nullish(),
     leaseEndDate: dateFromClient.nullish(),
     leaseRenewalDate: dateFromClient.nullish(),

@@ -16,9 +16,8 @@
  * POST /api/properties does. Offices are left out (the portal manages houses).
  * The nickname is the house name; a house without one is named by its street
  * address, and a nickname two houses share gets the city after it. Men or
- * women and the two capacity figures have no column in the portal yet
- * (question 3.7 to SPO), so they go into the house's staff-only notes rather
- * than being dropped.
+ * women and the two capacities (legal, what the city allows; mission, the most
+ * SPO puts in the house) are the house's own columns, shown on its page.
  *
  * Safe to run twice: a row whose full address is already a house is skipped,
  * never updated, so a correction made in the portal is not overwritten by an
@@ -102,18 +101,6 @@ function numberOrNull(value: string): string | null {
   return cleaned === "" ? null : cleaned;
 }
 
-/** The sheet's figures the portal has no column for yet, kept as staff notes. */
-export function notesFromRow(row: SheetRow): string | null {
-  const parts: string[] = [];
-  const gender = cell(row, COLUMNS.gender);
-  if (gender && gender.toLowerCase() !== "office") parts.push(gender.toLowerCase());
-  const legal = numberOrNull(cell(row, COLUMNS.capacityLegal));
-  const mission = numberOrNull(cell(row, COLUMNS.capacityMission));
-  if (legal) parts.push(`legal capacity ${legal}`);
-  if (mission) parts.push(`mission capacity ${mission}`);
-  return parts.length === 0 ? null : `From SPO's property sheet: ${parts.join("; ")}.`;
-}
-
 /** Parses the sheet's CSV text into the rows as given, headers normalised. */
 export function parseHouseCsv(text: string): { rows: SheetRow[]; fileErrors: string[] } {
   const source = text.replace(/^ /, "");
@@ -170,6 +157,11 @@ export function housesFromRows(rows: SheetRow[]): HouseOutcome[] {
       return { kind: "error", row: rowNumber, message: `Row ${rowNumber}: "Owned or Rented" must be Owned or Rented, not "${cell(row, COLUMNS.ownership)}"` };
     }
 
+    const household = cell(row, COLUMNS.gender).toLowerCase();
+    if (household !== "" && household !== "men" && household !== "women") {
+      return { kind: "error", row: rowNumber, message: `Row ${rowNumber}: "Men or Women" must be Men or Women, not "${cell(row, COLUMNS.gender)}"` };
+    }
+
     const nickname = cell(row, COLUMNS.nickname);
     const name = nickname ? ((nicknameCount.get(nickname) ?? 0) > 1 ? `${nickname} (${city})` : nickname) : streetAddress;
 
@@ -185,7 +177,9 @@ export function housesFromRows(rows: SheetRow[]): HouseOutcome[] {
       bedrooms: numberOrNull(cell(row, COLUMNS.bedrooms)),
       bathrooms: numberOrNull(cell(row, COLUMNS.baths)),
       squareFootage: numberOrNull(cell(row, COLUMNS.squareFeet)),
-      notes: notesFromRow(row),
+      household: household === "" ? null : household,
+      capacityLegal: numberOrNull(cell(row, COLUMNS.capacityLegal)),
+      capacityMission: numberOrNull(cell(row, COLUMNS.capacityMission)),
     });
     if (!parsed.success) {
       const reasons = parsed.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ");
