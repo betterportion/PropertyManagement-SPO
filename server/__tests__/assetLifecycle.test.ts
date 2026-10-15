@@ -53,6 +53,32 @@ describe("the category list", () => {
     expect(FIXED_CATEGORIES).toContain("Carbon Monoxide Detector");
   });
 
+  it("uses SPO's own figures where SPO gave one", () => {
+    // From "SPO Portal: Information We Need From SPO", section 5 (Joseph,
+    // 2026-09). Seven differ from the industry guesses the table started with.
+    expect(DEFAULT_LIFESPAN_YEARS).toMatchObject({
+      Roof: 30,
+      HVAC: 18,
+      "Furniture - Household": 15,
+      "Appliances - Large": 15,
+      "Water Heater": 15,
+      "Furniture - Office": 12,
+      Tools: 12,
+      "Security System": 10,
+      "Office Equipment": 8,
+      "Outdoor Equipment": 8,
+      "Computer - Monitor": 8,
+      "A/V Equipment": 10,
+      "Appliances - Small": 7,
+      "Computer - Desktop": 6,
+      "Internet Equipment": 6,
+      Printers: 7,
+      "Computer - Laptop": 5,
+      Tablets: 5,
+      "Computer - Accessories": 5,
+    });
+  });
+
   it("keys every default lifespan on a real category", () => {
     for (const category of Object.keys(DEFAULT_LIFESPAN_YEARS)) {
       expect(ASSET_CATEGORIES).toContain(category);

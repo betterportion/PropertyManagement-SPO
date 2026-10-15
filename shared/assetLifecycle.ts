@@ -74,10 +74,11 @@ export const MOVABLE_CATEGORIES: readonly string[] = ASSET_CATEGORIES.filter(
 /**
  * How long each category is expected to last, in years.
  *
- * **Provisional.** These are ordinary industry service lives, not figures SPO
- * has confirmed — confirming the list is an open item with them. They are the
- * starting point for a house nobody has assessed, and the per-asset
- * `expectedLifespanYears` is the correction an RA makes when they know better.
+ * **SPO's figures**, from section 5 of "SPO Portal: Information We Need From
+ * SPO" (Joseph, 2026-09), where SPO gave one; the two detectors came from the
+ * 2026-09 RA review. They are the starting point for a house nobody has
+ * assessed, and the per-asset `expectedLifespanYears` is the correction an RA
+ * makes when they know better.
  *
  * A category deliberately absent from this table has NO default: an asset in
  * it stays unrated rather than silently inheriting somebody else's number.
@@ -85,29 +86,29 @@ export const MOVABLE_CATEGORIES: readonly string[] = ASSET_CATEGORIES.filter(
  * guess against a piano would be a warning nobody should act on.
  */
 export const DEFAULT_LIFESPAN_YEARS: Readonly<Record<string, number>> = {
-  "Appliances - Large": 12,
-  "Appliances - Small": 6,
-  "A/V Equipment": 7,
+  "Appliances - Large": 15,
+  "Appliances - Small": 7,
+  "A/V Equipment": 10,
   // The RA's range for a CO detector was 5-10; 7 is the midpoint, and the
   // per-asset override is the correction when the box says otherwise.
   "Carbon Monoxide Detector": 7,
   "Computer - Desktop": 6,
   "Computer - Laptop": 5,
   "Computer - Monitor": 8,
-  "Computer - Accessories": 4,
+  "Computer - Accessories": 5,
   "Furniture - Household": 15,
   "Furniture - Office": 12,
   HVAC: 18,
   "Internet Equipment": 6,
   "Office Equipment": 8,
   "Outdoor Equipment": 8,
-  Printers: 6,
-  Roof: 25,
+  Printers: 7,
+  Roof: 30,
   "Security System": 10,
   "Smoke Detector": 10,
   Tablets: 5,
   Tools: 12,
-  "Water Heater": 12,
+  "Water Heater": 15,
 };
 
 /**
