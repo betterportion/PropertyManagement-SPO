@@ -9,7 +9,11 @@
  *
  * The cadences, straight from SPO:
  *   - Household walkthroughs: a reminder each April 15 and July 15 (due ~2 weeks
- *     later), per region.
+ *     later), per region, ahead of the May move-out and the August move-in.
+ *   - The winter-break check-in: a reminder each November 15, due December 1,
+ *     per region. Joseph's answer to 5.2 of "SPO Portal: Information We Need
+ *     From SPO" (2026-10): "move-in in August, check in before Winter break,
+ *     move-out in May". The first two already had reminders; this is the third.
  *   - Turn off utilities for the summer: ~2 weeks before May 15, per region.
  *   - Turn off utilities when a lease ends: 2 weeks before a rented house's lease
  *     end date, per house (skipped when the house is renewing).
@@ -79,6 +83,10 @@ const isoDay = (date: Date) => date.toISOString().slice(0, 10);
 
 const LEASE_RENEWAL_KEY_PREFIX = "lease-renewal:";
 
+const WALKTHROUGH_NOTES = "Time to plan and execute household walkthroughs. Check this off once your region's houses are done.";
+const WINTER_CHECKIN_NOTES =
+  "Check in on each house before the household leaves for winter break. Check this off once your region's houses are done.";
+
 /**
  * The date a house's renew-or-leave decision is against: the renewal date when
  * there is one, and the lease END otherwise.
@@ -101,8 +109,11 @@ export function dueSeasonalTasks(inputs: SeasonalInputs, now: Date): SeasonalTas
   const year = now.getUTCFullYear();
 
   const walkthroughs = [
-    { key: "apr", appear: utc(year, 4, 15), due: utc(year, 4, 29) },
-    { key: "jul", appear: utc(year, 7, 15), due: utc(year, 7, 29) },
+    { key: "apr", appear: utc(year, 4, 15), due: utc(year, 4, 29), title: "Household walkthroughs due", notes: WALKTHROUGH_NOTES },
+    { key: "jul", appear: utc(year, 7, 15), due: utc(year, 7, 29), title: "Household walkthroughs due", notes: WALKTHROUGH_NOTES },
+    // Before the household leaves for winter break (doc 5.2). Term ends in
+    // mid-December, so the reminder lands with two weeks of term still to go.
+    { key: "winter", appear: utc(year, 11, 15), due: utc(year, 12, 1), title: "Winter-break check-in walkthroughs due", notes: WINTER_CHECKIN_NOTES },
   ];
   const summerUtilitiesAppear = utc(year, 5, 1); // two weeks before May 15
   const summerUtilitiesDue = utc(year, 5, 15);
@@ -113,8 +124,8 @@ export function dueSeasonalTasks(inputs: SeasonalInputs, now: Date): SeasonalTas
         specs.push({
           sourceKey: `walkthrough:${w.key}:${region}:${year}`,
           category: "safety",
-          title: `Household walkthroughs due — ${region}`,
-          notes: "Time to plan and execute household walkthroughs. Check this off once your region's houses are done.",
+          title: `${w.title} — ${region}`,
+          notes: w.notes,
           region,
           dueDate: w.due,
         });

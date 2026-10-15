@@ -63,7 +63,8 @@ The daily jobs log to the hosting provider's log stream. Nobody watches that log
 - **Purpose:** remind regional administrators of the jobs SPO does on a calendar.
 - **Trigger:** daily job (`server/seasonalTasks.ts`), by date.
 - **What the portal does:** creates tasks on the Tasks page and the dashboard:
-  - **Household walkthroughs:** each April 15 and July 15, per region.
+  - **Household walkthroughs:** each April 15 and July 15, per region, ahead of the May move-out and the August move-in.
+  - **Winter-break check-in:** each November 15, due December 1, per region, so each house is checked before the household leaves for break (Joseph, doc 5.2).
   - **Turn off utilities for the summer:** about two weeks before May 15, per region.
   - **Renew-or-leave decision:** two months before a rented house's lease renewal date, per house.
   - **Turn off utilities at lease end:** two weeks before a rented house's lease ends, per house. Skipped when the house is renewing.
