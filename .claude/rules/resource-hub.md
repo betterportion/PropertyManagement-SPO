@@ -1,6 +1,7 @@
 ---
 paths:
   - "**/*esourceHub*"
+  - "**/*egionContact*"
   - "**/*ouseFacts*"
   - "client/src/components/ResourceLinksSettings.tsx"
   - "client/src/components/PropertyBudgetCard.tsx"
@@ -27,6 +28,8 @@ Moved verbatim from CLAUDE.md. Loads when you work with a file matching `paths`;
 **Three named links, by key and never by title.** `shared/resourceHubSlots.ts` fixes the three documents every house is shown by name — Household Code of Conduct, Fire Extinguisher guidelines, Active Shooter Policy — and a link fills one through `resource_links.slotKey`. The hub renders all three in a "From SPO" card whatever is bound: an empty slot reads "Not yet available" with a line saying SPO is still writing it, so a document that does not exist yet (the fire extinguisher guidance, at the time of writing) is visibly waiting on content rather than silently missing. Bound by key so an admin renaming a link cannot empty its slot; unique, so a slot has one holder; national, so a slotted link cannot be narrowed to one region — `hubSlotProblem` is the pure rule and the create and edit routes run it over the merged row, because an edit sends only the field it changes. A slotted link is listed in its slot and not again under its category. No seed row and no placeholder URL: the slots stay empty until an admin binds a real link from Settings.
 
 `GET /api/my-property` is a deliberately narrow projection of one property for the hub — **named fields, not the row** — so a column added to `properties` later cannot silently start reaching a resident. It carries the same flag.
+
+**Who to call comes first on the hub, and it is the region's, not the house's.** `region_contacts` holds one emergency contact per region (doc section 1: the regional administrator's name and phone, "1 per region", answered roughly 7 AM to 9 PM), and `shared/regionContacts.ts` holds SPO's chosen wording for a life-threatening emergency and the property mailbox a non-urgent question falls back to. The hub's "In an emergency" card is the first thing on the page and shows the 911 line whether or not the region's number has been entered; the contact reaches the household through `/api/my-property` by **the house's region**, as named fields, never through the list. Staff read `GET /api/region-contacts` under the property permission, scoped by `filterByRegion`; a resident is refused it outright. Writing it is `canManageProperties` in that region (`requireRegion`), so a region's own RAs keep it current and an admin can for any region (doc 1.8), from the "Who your households call" card at the foot of the Properties page rather than admin Settings. `PUT` sets, `DELETE` clears, and both record `region_contact.changed` by name and never by number.
 
 **A startup budget is an operating figure**, not deposit or rent data — what the house has to furnish and settle itself. That distinction is what lets a leader see their own on the hub without the "residents never see financial data" rule being bent, and the budget list is narrowed for a resident **by property, not by region**, so being in the same region as another house grants nothing.
 

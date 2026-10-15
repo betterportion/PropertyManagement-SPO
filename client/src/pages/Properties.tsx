@@ -17,6 +17,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { type Property, type PropertySetupItem } from "@shared/schema";
 import { summarizeSetup, setupRowsByProperty } from "@shared/propertySetup";
 import { REGIONS, chaptersForRegion, ALL_CHAPTERS } from "@shared/regions";
+import RegionContacts from "@/components/RegionContacts";
 import PropertyLeaseFields, { PropertyHouseholdFields, PropertyPhotoAndNotes, propertyFormSchema, type PropertyForm } from "@/components/PropertyLeaseFields";
 import { Section, Container, PageHeader, PageStack } from "@/components/layout/page";
 import { LoadingState, EmptyState } from "@/components/states";
@@ -834,6 +835,8 @@ export default function Properties() {
           </Form>
         </DialogContent>
       </Dialog>
+
+      <RegionContacts />
 
       <AlertDialog open={!!deletingPropertyId} onOpenChange={() => setDeletingPropertyId(null)}>
         <AlertDialogContent>

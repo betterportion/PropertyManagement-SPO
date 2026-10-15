@@ -1539,6 +1539,35 @@ export const depositReturnRules = pgTable("deposit_return_rules", {
 
 export type DepositReturnRule = typeof depositReturnRules.$inferSelect;
 
+// Region contacts
+//
+// Who a household calls for an urgent house problem: one contact per region,
+// the regional administrator's name and phone (shared/regionContacts.ts). A
+// region with no row has no contact yet, and the hub says so rather than
+// showing a blank. Kept current by admins and the region's own RAs.
+export const regionContacts = pgTable("region_contacts", {
+  region: varchar("region").primaryKey(),
+  name: varchar("name").notNull(),
+  phone: varchar("phone").notNull(),
+  /** Where a non-urgent question goes; SPO's property mailbox stands in when blank. */
+  email: varchar("email"),
+  /** When the number is answered, in the RA's own words ("7 AM to 9 PM"). */
+  hours: varchar("hours"),
+  updatedByEmail: varchar("updated_by_email"),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+/** The body of PUT /api/region-contacts/:region; the region comes from the path. */
+export const setRegionContactSchema = z.object({
+  name: z.string().trim().min(1, "Whose number is it?").max(120),
+  phone: z.string().trim().min(7, "Give the full phone number").max(40),
+  email: z.string().trim().email("Give a full email address").max(200).or(z.literal("")).nullish().transform((v) => (v ? v : null)),
+  hours: z.string().trim().max(120).or(z.literal("")).nullish().transform((v) => (v ? v : null)),
+});
+
+export type RegionContact = typeof regionContacts.$inferSelect;
+export type SetRegionContact = z.infer<typeof setRegionContactSchema>;
+
 // Email log
 //
 // One row per automated send and its outcome -- which email, to whom, and

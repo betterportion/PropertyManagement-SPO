@@ -13,6 +13,7 @@ import { formatCurrency, formatDate } from "@/lib/format";
 import { canFillInWalkthroughs, type WalkthroughUser } from "@/lib/walkthrough";
 import type { PropertyBudget, PropertyFacts, ResourceLink, Walkthrough } from "@shared/schema";
 import { ACCESS_CODES, HOUSE_FACT_TEXT_FIELDS } from "@shared/houseFacts";
+import { EMERGENCY_LINE, SPO_PROPERTY_EMAIL, type EmergencyContact } from "@shared/regionContacts";
 import { resolveHubSlots, unslottedLinks } from "@shared/resourceHubSlots";
 
 /**
@@ -27,6 +28,8 @@ interface MyHouse {
   leaseDocumentUrl: string | null;
   maintenancePortalUrl: string | null;
   rentalCompany: { name: string; company: string; phone: string | null } | null;
+  /** The house's region's RA, who the household calls for an urgent house problem. */
+  emergencyContact: EmergencyContact | null;
   facts: Pick<
     PropertyFacts,
     | "doorCode"
@@ -146,7 +149,62 @@ export default function ResourceHub() {
             description="Everything you need for living in an SPO house, in one place."
           />
 
-          {/* Theirs first. The general SPO material is below it, because what
+          {/* Who to call, before anything else: this is the one thing on the
+              page somebody may need in a hurry. SPO's 911 line (doc 1.6) is
+              shown whether or not the region's number has been entered yet. */}
+          <Card data-testid="card-hub-emergency">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Phone className="h-5 w-5 text-muted-foreground" />
+                In an emergency
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3 text-sm">
+              <p className="font-medium" data-testid="text-hub-emergency-line">
+                {EMERGENCY_LINE}
+              </p>
+              {house?.emergencyContact ? (
+                <div data-testid="text-hub-emergency-contact">
+                  <p className="text-xs text-muted-foreground">
+                    Urgent house problem (flooding, no heat, locked out): call your regional administrator
+                  </p>
+                  <p className="mt-0.5 text-lg font-medium">
+                    {house.emergencyContact.name}
+                    <a
+                      href={`tel:${house.emergencyContact.phone.replace(/[^+\d]/g, "")}`}
+                      className="ml-3 font-mono underline underline-offset-2"
+                      data-testid="link-hub-emergency-phone"
+                    >
+                      {house.emergencyContact.phone}
+                    </a>
+                  </p>
+                  {house.emergencyContact.hours && (
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Answered {house.emergencyContact.hours}. Outside those hours, if it cannot wait, call a trusted personal
+                      contact.
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <p className="text-muted-foreground" data-testid="text-hub-emergency-missing">
+                  For an urgent house problem (flooding, no heat, locked out), call your regional administrator. Their number is
+                  not in the portal yet; ask them for it.
+                </p>
+              )}
+              <p className="text-xs text-muted-foreground" data-testid="text-hub-emergency-email">
+                Not urgent? Email{" "}
+                <a
+                  href={`mailto:${house?.emergencyContact?.email ?? SPO_PROPERTY_EMAIL}`}
+                  className="underline underline-offset-2"
+                >
+                  {house?.emergencyContact?.email ?? SPO_PROPERTY_EMAIL}
+                </a>
+                , or report something broken below.
+              </p>
+            </CardContent>
+          </Card>
+
+          {/* Theirs next. The general SPO material is below it, because what
               somebody comes here for is usually their own house. */}
           <Card>
             <CardHeader>

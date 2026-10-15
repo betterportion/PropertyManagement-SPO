@@ -31,6 +31,7 @@ import {
   moveOutChecklists,
   moveOutPhotos,
   depositReturnRules,
+  regionContacts,
   emailLog,
   invitations,
   propertyFacts,
@@ -103,6 +104,8 @@ import {
   type MoveOutChecklist,
   type MoveOutPhoto,
   type DepositReturnRule,
+  type RegionContact,
+  type SetRegionContact,
   type EmailLogEntry,
   type Invitation,
   type PropertyFacts,
@@ -593,6 +596,12 @@ export interface IStorage {
   getAllDepositReturnRules(): Promise<DepositReturnRule[]>;
   /** Null days removes the state's rule. */
   setDepositReturnRule(state: string, days: number | null, byEmail: string | null): Promise<void>;
+
+  // Region contacts
+  getAllRegionContacts(): Promise<RegionContact[]>;
+  getRegionContact(region: string): Promise<RegionContact | undefined>;
+  /** Null clears the region's contact. */
+  setRegionContact(region: string, contact: SetRegionContact | null, byEmail: string | null): Promise<void>;
 
   // Email log
   createEmailLogEntry(entry: Omit<EmailLogEntry, "id" | "createdAt">): Promise<void>;
@@ -2303,6 +2312,28 @@ export class DatabaseStorage implements IStorage {
       .insert(depositReturnRules)
       .values({ state, days, updatedByEmail: byEmail })
       .onConflictDoUpdate({ target: depositReturnRules.state, set: { days, updatedByEmail: byEmail, updatedAt: new Date() } });
+  }
+
+  // Region contacts Implementation
+  async getAllRegionContacts(): Promise<RegionContact[]> {
+    return await db.select().from(regionContacts);
+  }
+
+  async getRegionContact(region: string): Promise<RegionContact | undefined> {
+    const [row] = await db.select().from(regionContacts).where(eq(regionContacts.region, region));
+    return row;
+  }
+
+  async setRegionContact(region: string, contact: SetRegionContact | null, byEmail: string | null): Promise<void> {
+    if (contact === null) {
+      await db.delete(regionContacts).where(eq(regionContacts.region, region));
+      return;
+    }
+    const values = { ...contact, updatedByEmail: byEmail, updatedAt: new Date() };
+    await db
+      .insert(regionContacts)
+      .values({ region, ...values })
+      .onConflictDoUpdate({ target: regionContacts.region, set: values });
   }
 
   // Email log Implementation
