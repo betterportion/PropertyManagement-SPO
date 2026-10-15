@@ -77,6 +77,7 @@ import {
   insertInvoiceSchema,
   insertBillingRecordSchema,
   insertPropertySchema,
+  setRegionContactSchema,
   insertUserSchema,
   insertMaintenanceScheduleSchema,
   insertResidentSchema,
@@ -4702,11 +4703,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // and nothing else: named fields again, so `notes` -- the staff-only
       // remarks -- can never ride along. Who to call and the portal come from
       // the property's own columns, and only for a house SPO does not own.
-      const [facts, landlord] = await Promise.all([
+      const [facts, landlord, regionContact] = await Promise.all([
         onRoster ? storage.getPropertyFacts(property.id) : undefined,
         property.ownership === "rented" && property.rentalCompanyContactId
           ? storage.getMaintenanceContact(property.rentalCompanyContactId)
           : undefined,
+        // Who to call in an emergency: the house's region's contact, by the
+        // house and never by anything on the resident's own row.
+        storage.getRegionContact(property.region),
       ]);
 
       res.json({
@@ -4717,6 +4721,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         maintenancePortalUrl: property.ownership === "rented" ? property.maintenancePortalUrl : null,
         rentalCompany: landlord
           ? { name: landlord.name, company: landlord.company, phone: landlord.phone }
+          : null,
+        emergencyContact: regionContact
+          ? { name: regionContact.name, phone: regionContact.phone, email: regionContact.email, hours: regionContact.hours }
           : null,
         facts: facts
           ? {
@@ -5867,6 +5874,92 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ state, days });
     } catch (error) {
       sendError(res, error, "Failed to save the deposit deadline");
+    }
+  });
+
+  // ── Region contacts: who a household calls ────────────────────────────────
+
+  /** The region as REGIONS spells it, or null for anything else. */
+  const canonicalRegion = (raw: unknown): string | null => {
+    const wanted = normalizeRegion(String(raw ?? "")).trim().toLowerCase();
+    return REGIONS.find((region) => region.toLowerCase() === wanted) ?? null;
+  };
+
+  /**
+   * One emergency contact per region, read by staff under the property
+   * permission and scoped like any other regional record. A resident never
+   * reads this list: their own region's contact reaches them through
+   * /api/my-property, by their house, as the door codes do.
+   */
+  app.get('/api/region-contacts', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireStaff(res, ctx)) return;
+      if (!requirePermission(res, ctx, "canViewProperties", "canManageProperties")) return;
+      res.json(filterByRegion(ctx, await storage.getAllRegionContacts()));
+    } catch (error) {
+      sendError(res, error, "Failed to load the region contacts");
+    }
+  });
+
+  /**
+   * Admins and the region's own regional administrators keep it current
+   * (doc 1.8): canManageProperties in that region. DELETE clears it. Audited
+   * by name, never by number: the point is who changed it and when.
+   */
+  const guardRegionContactWrite = async (req: any, res: any) => {
+    const ctx = await requireActiveUser(req, res);
+    if (!ctx) return null;
+    if (!requireStaff(res, ctx)) return null;
+    if (!requirePermission(res, ctx, "canManageProperties")) return null;
+    const region = canonicalRegion(req.params.region);
+    if (!region) {
+      res.status(400).json({ message: "Choose one of SPO's regions" });
+      return null;
+    }
+    if (!requireRegion(res, ctx, region)) return null;
+    return { ctx, region };
+  };
+
+  app.put('/api/region-contacts/:region', isAuthenticated, async (req: any, res) => {
+    try {
+      const guarded = await guardRegionContactWrite(req, res);
+      if (!guarded) return;
+      const { ctx, region } = guarded;
+      const contact = setRegionContactSchema.parse(req.body);
+      const previous = await storage.getRegionContact(region);
+      await storage.setRegionContact(region, contact, ctx.user.email ?? null);
+      recordAuditEvent(ctx, {
+        action: AUDIT_ACTIONS.REGION_CONTACT_CHANGED,
+        entityType: "region_contact",
+        entityId: region,
+        summary: `${region}'s emergency contact is now ${contact.name} (was ${previous?.name ?? "nobody"})`,
+        details: { region, name: contact.name, previousName: previous?.name ?? null },
+      });
+      res.json({ region, ...contact });
+    } catch (error) {
+      sendError(res, error, "Failed to save the region contact");
+    }
+  });
+
+  app.delete('/api/region-contacts/:region', isAuthenticated, async (req: any, res) => {
+    try {
+      const guarded = await guardRegionContactWrite(req, res);
+      if (!guarded) return;
+      const { ctx, region } = guarded;
+      const previous = await storage.getRegionContact(region);
+      await storage.setRegionContact(region, null, ctx.user.email ?? null);
+      recordAuditEvent(ctx, {
+        action: AUDIT_ACTIONS.REGION_CONTACT_CHANGED,
+        entityType: "region_contact",
+        entityId: region,
+        summary: `Cleared ${region}'s emergency contact (was ${previous?.name ?? "nobody"})`,
+        details: { region, name: null, previousName: previous?.name ?? null },
+      });
+      res.json({ success: true });
+    } catch (error) {
+      sendError(res, error, "Failed to clear the region contact");
     }
   });
 

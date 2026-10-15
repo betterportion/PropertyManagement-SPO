@@ -9420,6 +9420,90 @@ describe("move-out checklist and state deposit deadlines", () => {
   });
 });
 
+/**
+ * The region's emergency contact (doc section 1): staff read it by region,
+ * admins and the region's own RAs write it, and a household gets exactly its
+ * own house's region through /api/my-property -- never the list.
+ */
+describe("a region's emergency contact", () => {
+  const WEST_CONTACT = { region: "West Central", name: "Zack Jablonski", phone: "352-317-2969", email: null, hours: "7 AM to 9 PM" };
+  const EAST_CONTACT = { region: "East Central", name: "Laura Wilson", phone: "614-633-6629", email: "laura@example.org", hours: null };
+  const BODY = { name: "Zack Jablonski", phone: "352-317-2969", email: "", hours: "7 AM to 9 PM" };
+
+  beforeEach(() => {
+    storageMock.getAllRegionContacts.mockResolvedValue([WEST_CONTACT, EAST_CONTACT]);
+    storageMock.getRegionContact.mockImplementation(async (region: string) =>
+      [WEST_CONTACT, EAST_CONTACT].find((c) => c.region === region),
+    );
+  });
+
+  it("never lists for a resident, even one granted the hub, and writes nothing for them", async () => {
+    actAs({ ...ALICE, propertyId: "prop-west" } as typeof ALICE, { canViewResourceHub: true, canManageProperties: true });
+    expect((await get("/api/region-contacts")).status).toBe(403);
+    expect((await request("PUT", "/api/region-contacts/West%20Central", { body: BODY })).status).toBe(403);
+    expect((await request("DELETE", "/api/region-contacts/West%20Central")).status).toBe(403);
+    expect(storageMock.setRegionContact).not.toHaveBeenCalled();
+  });
+
+  it("lists only the caller's regions", async () => {
+    actAs(STAFF, { canViewProperties: true, allowedRegions: ["West Central"] });
+    const { status, body } = await get("/api/region-contacts");
+    expect(status).toBe(200);
+    expect(body.map((c: { region: string }) => c.region)).toEqual(["West Central"]);
+  });
+
+  it("refuses a regional administrator writing another region's contact, before the write", async () => {
+    actAs(STAFF, { canManageProperties: true, allowedRegions: ["West Central"] });
+    expect((await request("PUT", "/api/region-contacts/East%20Central", { body: BODY })).status).toBe(403);
+    expect((await request("DELETE", "/api/region-contacts/East%20Central")).status).toBe(403);
+    expect(storageMock.setRegionContact).not.toHaveBeenCalled();
+  });
+
+  it("refuses view-only staff the write", async () => {
+    actAs(STAFF, { canViewProperties: true, allowedRegions: ["West Central"] });
+    expect((await request("PUT", "/api/region-contacts/West%20Central", { body: BODY })).status).toBe(403);
+    expect(storageMock.setRegionContact).not.toHaveBeenCalled();
+  });
+
+  it("lets a regional administrator set their own region's contact, audited by name (positive control)", async () => {
+    actAs(STAFF, { canManageProperties: true, allowedRegions: ["West Central"] });
+    const { status, body } = await request("PUT", "/api/region-contacts/west%20central", { body: { ...BODY, name: "Pat New" } });
+    expect(status).toBe(200);
+    expect(body.region).toBe("West Central");
+    expect(storageMock.setRegionContact).toHaveBeenCalledWith(
+      "West Central",
+      { name: "Pat New", phone: "352-317-2969", email: null, hours: "7 AM to 9 PM" },
+      STAFF.email,
+    );
+    expect(storageMock.createAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "region_contact.changed", summary: "West Central's emergency contact is now Pat New (was Zack Jablonski)" }),
+    );
+  });
+
+  it("lets an admin clear a region's contact, and refuses a region SPO does not have", async () => {
+    actAs(ADMIN);
+    expect((await request("DELETE", "/api/region-contacts/East%20Central")).status).toBe(200);
+    expect(storageMock.setRegionContact).toHaveBeenCalledWith("East Central", null, ADMIN.email);
+    expect((await request("PUT", "/api/region-contacts/Mars", { body: BODY })).status).toBe(400);
+    expect((await request("PUT", "/api/region-contacts/West%20Central", { body: { ...BODY, phone: "12" } })).status).toBe(400);
+    expect(storageMock.setRegionContact).toHaveBeenCalledTimes(1);
+  });
+
+  it("reaches a household through its own house's region on /api/my-property, named fields only", async () => {
+    storageMock.getProperty.mockResolvedValue({ id: "prop-west", name: "Cleveland House", region: "West Central", address: "1 Main St" });
+    storageMock.getResidentsByProperty.mockResolvedValue([]);
+    actAs({ ...ALICE, propertyId: "prop-west" } as typeof ALICE, { canViewResourceHub: true });
+    const { status, body } = await get("/api/my-property");
+    expect(status).toBe(200);
+    expect(body.emergencyContact).toEqual({ name: "Zack Jablonski", phone: "352-317-2969", email: null, hours: "7 AM to 9 PM" });
+    expect(body.emergencyContact).not.toHaveProperty("updatedByEmail");
+    expect(storageMock.getRegionContact).toHaveBeenCalledWith("West Central");
+
+    storageMock.getRegionContact.mockResolvedValue(undefined);
+    expect((await get("/api/my-property")).body.emergencyContact).toBeNull();
+  });
+});
+
 describe("email health", () => {
   beforeEach(() => {
     storageMock.getEmailLogSince.mockResolvedValue([]);
