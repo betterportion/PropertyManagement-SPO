@@ -46,17 +46,21 @@ export default function RegionContacts() {
   );
   const savedFor = (region: string) => rows.find((r) => r.region === region);
 
-  const invalidate = () => {
-    queryClient.invalidateQueries({ queryKey: [KEY] });
-    queryClient.invalidateQueries({ queryKey: ["/api/my-property"] });
+  // The draft is dropped only once the list has been re-read: dropping it
+  // first shows the previous row (blank, on a first save) until the refetch
+  // lands. Awaiting the invalidation also keeps the button in its pending
+  // state until the fields show what was saved.
+  const invalidate = async () => {
+    await queryClient.invalidateQueries({ queryKey: [KEY] });
+    void queryClient.invalidateQueries({ queryKey: ["/api/my-property"] });
   };
 
   const save = useMutation({
     mutationFn: async ({ region, draft }: { region: string; draft: Draft }) =>
       await apiRequest("PUT", `${KEY}/${encodeURIComponent(region)}`, draft),
-    onSuccess: (_r, { region }) => {
+    onSuccess: async (_r, { region }) => {
+      await invalidate();
       setDrafts(({ [region]: _done, ...rest }) => rest);
-      invalidate();
       toast({ title: `${region} saved` });
     },
     onError: (error) => toast({ title: "Not saved", description: serverMessage(error), variant: "destructive" }),
@@ -64,9 +68,9 @@ export default function RegionContacts() {
 
   const clear = useMutation({
     mutationFn: async (region: string) => await apiRequest("DELETE", `${KEY}/${encodeURIComponent(region)}`),
-    onSuccess: (_r, region) => {
+    onSuccess: async (_r, region) => {
+      await invalidate();
       setDrafts(({ [region]: _done, ...rest }) => rest);
-      invalidate();
       toast({ title: `${region} cleared` });
     },
     onError: (error) => toast({ title: "Not cleared", description: serverMessage(error), variant: "destructive" }),
