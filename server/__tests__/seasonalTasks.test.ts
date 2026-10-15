@@ -31,6 +31,20 @@ describe("dueSeasonalTasks", () => {
     expect(util[0].dueDate).toEqual(utc(2026, 5, 15)); // two weeks after the reminder
   });
 
+  it("raises the winter-break check-in per region on November 15, due December 1 (doc 5.2)", () => {
+    const specs = dueSeasonalTasks(regionsOnly, utc(2026, 11, 15));
+    const winter = specs.filter((s) => s.sourceKey.startsWith("walkthrough:winter:"));
+    expect(winter.map((s) => s.region).sort()).toEqual(["East Central", "Northwest"]);
+    expect(winter[0].dueDate).toEqual(utc(2026, 12, 1));
+    expect(winter[0].title).toBe("Winter-break check-in walkthroughs due — Northwest");
+    expect(winter[0].notes).toContain("before the household leaves for winter break");
+    expect(winter[0].category).toBe("safety");
+    // Not the day before, and not in the new year: the key carries the year it belongs to.
+    expect(dueSeasonalTasks(regionsOnly, utc(2026, 11, 14)).some((s) => s.sourceKey.startsWith("walkthrough:winter:"))).toBe(false);
+    expect(dueSeasonalTasks(regionsOnly, utc(2027, 1, 20)).some((s) => s.sourceKey.startsWith("walkthrough:winter:"))).toBe(false);
+    expect(winter[0].sourceKey).toBe("walkthrough:winter:Northwest:2026");
+  });
+
   it("does not raise a cadence before its appear date or long after it", () => {
     expect(dueSeasonalTasks(regionsOnly, utc(2026, 4, 14)).some((s) => s.sourceKey.startsWith("walkthrough:apr:"))).toBe(false);
     // 61 days after April 15 is outside the 60-day create window.
