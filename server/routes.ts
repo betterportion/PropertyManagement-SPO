@@ -719,13 +719,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
             "An account with that ID already exists. To change its role or house, use the settings for that account instead.",
         });
       }
+      // An id with an email that already has an account creates nothing:
+      // upsertUser re-links that account to the new id, keeping its own role
+      // and active status and taking the house from the request. So the
+      // limit below is checked against what the write produces (#313): the
+      // account's role and status, not the request's, which would let a
+      // staff role or `isActive: false` in the request move an active
+      // resident into a full house; and the account left out of the count,
+      // as a move is, so one of the house's own logins re-saved there is not
+      // refused. The same exact-email lookup upsertUser makes.
+      const relinking = requestedId && validatedData.email ? await storage.getUserByEmail(validatedData.email) : undefined;
+      const lands = relinking
+        ? { role: relinking.role, isActive: relinking.isActive, accountId: relinking.id }
+        : { role: validatedData.role, isActive: validatedData.isActive, accountId: undefined };
       // A resident account linked to a house takes one of that house's places
       // (MAX_RESIDENT_ACCOUNTS_PER_PROPERTY), admin or not. Checked before
       // anything is written. An account created switched off takes none.
-      if (validatedData.role === "resident" && validatedData.propertyId && validatedData.isActive !== false) {
+      if (lands.role === "resident" && validatedData.propertyId && lands.isActive !== false) {
         const house = await storage.getProperty(validatedData.propertyId);
         if (!house) return res.status(404).json({ message: "Property not found" });
-        const full = residentAccountCapProblem(house.name, await storage.getActiveResidentAccountsByProperty(house.id));
+        const full = residentAccountCapProblem(house.name, await storage.getActiveResidentAccountsByProperty(house.id), lands.accountId);
         if (full) return res.status(409).json({ message: full });
       }
       const { sendOn } = invitationRequestSchema.parse(req.body);
@@ -754,6 +767,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
               details: { role: user.role ?? null, isActive: user.isActive ?? null },
             },
       );
+      // A re-link that lands the account in another house is a house change
+      // as well, and that is access history (which house's records the login
+      // reads), so it is recorded as the move route records it (#313).
+      if (relinkedFrom && relinking && (relinking.propertyId ?? null) !== (user.propertyId ?? null)) {
+        const house = user.propertyId ? await storage.getProperty(user.propertyId) : null;
+        recordAuditEvent(ctx, {
+          action: AUDIT_ACTIONS.USER_PROPERTY_CHANGED,
+          entityType: "user",
+          entityId: user.id,
+          summary: house ? `Linked ${accountName(user)} to ${house.name}` : `Unlinked ${accountName(user)} from their house`,
+          details: { from: relinking.propertyId ?? null, to: user.propertyId ?? null },
+        });
+      }
 
       // The invitation rides on the account (launch readiness 2.3): a switched-on
       // account with an email gets one, now or on the day chosen. A switched-off

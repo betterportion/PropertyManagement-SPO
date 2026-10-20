@@ -12620,6 +12620,92 @@ describe("a house holds at most MAX_RESIDENT_ACCOUNTS_PER_PROPERTY resident acco
   });
 });
 
+describe("POST /api/users with an id and an email that already has an account re-links it, under the house limit (#313)", () => {
+  const P = { id: "prop-p", name: "House P", address: "10 P St", region: "West Central" };
+  const Q = { id: "prop-q", name: "House Q", address: "20 Q St", region: "West Central" };
+  /** An active resident login at Q, about to be re-linked to a new sign-in id. */
+  const q1 = { id: "u-q1", email: "q1@example.com", role: "resident", isActive: true, propertyId: Q.id };
+  const housesHold = (atP: number) => {
+    storageMock.getActiveResidentAccountsByProperty.mockImplementation(async (propertyId: string) =>
+      propertyId === P.id
+        ? Array.from({ length: atP }, (_, i) => ({ id: `u-p${i + 1}`, email: `p${i + 1}@example.com`, role: "resident", isActive: true, propertyId: P.id }))
+        : [],
+    );
+  };
+  const relink = (body: Record<string, unknown>) =>
+    request("POST", "/api/users", { body: { id: "u-q1-new", email: q1.email, firstName: "Q1", ...body } });
+
+  beforeEach(() => {
+    actAs(ADMIN);
+    // The new id is unclaimed; the old account is found by its email.
+    storageMock.getUser.mockImplementation(async (id: string) => (id === ADMIN.id ? ADMIN : undefined));
+    storageMock.getUserByEmail.mockImplementation(async (email: string) => (email === q1.email ? q1 : undefined));
+    storageMock.getProperty.mockImplementation(async (id: string) => (id === P.id ? P : id === Q.id ? Q : undefined));
+    // What upsertUser does to a re-linked account: the request's fields and
+    // house, under the account's own role and status.
+    storageMock.upsertUser.mockImplementation(async (data: Record<string, unknown>) => ({
+      user: { ...q1, ...data, role: q1.role, isActive: q1.isActive, propertyId: data.propertyId ?? q1.propertyId },
+      relinkedFrom: { id: q1.id, email: q1.email, role: q1.role },
+    }));
+  });
+
+  it("a staff role in the request does not get the active resident into a full house, and nothing is written", async () => {
+    housesHold(4);
+    const { status, body } = await relink({ role: "regional_administrator", propertyId: P.id });
+    expect(status).toBe(409);
+    expect(body.message).toBe("House P already has 4 logins, the most a house can have. Remove one to add another.");
+    expect(storageMock.upsertUser).not.toHaveBeenCalled();
+    expect(storageMock.createAuditEvent).not.toHaveBeenCalled();
+  });
+
+  it("nor does isActive: false in the request", async () => {
+    housesHold(4);
+    const { status, body } = await relink({ role: "resident", propertyId: P.id, isActive: false });
+    expect(status).toBe(409);
+    expect(body.message).toMatch(/House P already has 4 logins/);
+    expect(storageMock.upsertUser).not.toHaveBeenCalled();
+  });
+
+  it("a switched-off account takes no place, so re-linking it into a full house goes through (positive control)", async () => {
+    housesHold(4);
+    storageMock.getUserByEmail.mockResolvedValue({ ...q1, isActive: false });
+    storageMock.upsertUser.mockImplementation(async (data: Record<string, unknown>) => ({
+      user: { ...q1, ...data, role: q1.role, isActive: false },
+      relinkedFrom: { id: q1.id, email: q1.email, role: q1.role },
+    }));
+    expect((await relink({ role: "resident", propertyId: P.id })).status).toBe(200);
+    expect(storageMock.upsertUser).toHaveBeenCalledTimes(1);
+  });
+
+  it("one of the full house's own logins re-saved to that house is not counted against itself", async () => {
+    housesHold(4);
+    const p2 = { id: "u-p2", email: "p2@example.com", role: "resident", isActive: true, propertyId: P.id };
+    storageMock.getUserByEmail.mockResolvedValue(p2);
+    storageMock.upsertUser.mockImplementation(async (data: Record<string, unknown>) => ({
+      user: { ...p2, ...data, role: p2.role, isActive: p2.isActive },
+      relinkedFrom: { id: p2.id, email: p2.email, role: p2.role },
+    }));
+    expect((await relink({ email: p2.email, role: "resident", propertyId: P.id })).status).toBe(200);
+    expect(storageMock.upsertUser).toHaveBeenCalledTimes(1);
+    expect(storageMock.createAuditEvent).not.toHaveBeenCalledWith(expect.objectContaining({ action: "user.property_changed" }));
+  });
+
+  it("a re-link that lands the account in another house records the house change beside the re-link", async () => {
+    housesHold(2);
+    const { status } = await relink({ role: "resident", propertyId: P.id });
+    expect(status).toBe(200);
+    expect(storageMock.createAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ action: "user.relinked", entityId: "u-q1-new" }));
+    expect(storageMock.createAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "user.property_changed",
+        entityId: "u-q1-new",
+        summary: expect.stringMatching(/^Linked .* to House P$/),
+        details: expect.objectContaining({ from: Q.id, to: P.id }),
+      }),
+    );
+  });
+});
+
 describe("two leaders on one house share its repairs and reach nothing else (brief 2.2)", () => {
   const P = { id: "prop-p", name: "House P", address: "10 P St", region: "West Central" };
   const Q = { id: "prop-q", name: "House Q", address: "20 Q St", region: "West Central" };
