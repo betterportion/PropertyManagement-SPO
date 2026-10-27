@@ -546,7 +546,7 @@ If the portal will live at something like `portal.spo.org`:
 
 ### Database
 
-- [ ] The production Supabase project is on a **paid tier**, and **Database → Backups** shows daily backups. Write the retention period here: ______.
+- [x] The production Supabase project is on a **paid tier**, and **Database → Backups** shows daily backups. Write the retention period here: **7 days** (Pro plan, Betterportion organisation, confirmed 2026-10-27). A mistake noticed later than that cannot be undone from these backups.
 
 ### Uploaded files
 
