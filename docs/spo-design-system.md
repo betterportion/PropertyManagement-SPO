@@ -184,10 +184,18 @@ Single family, weight and size do the work. No display/body font pairing.
 fontFamily: { sans: ["Inter", "system-ui", "sans-serif"] }
 ```
 
-> ⚠️ In DonorCRM, Inter is declared but **never actually loaded** — the app renders in
-> `system-ui`. For new apps, decide deliberately: either self-host/preload Inter, or drop
-> it from the stack and let `system-ui` be the real answer. Do not copy the current
-> half-state. See §11.
+**Inter is the suite's one font, self-hosted** (JR, 2026-11-03), so every app looks the
+same on every computer and makes no third-party font request. Each app serves Inter's
+variable file (weights 100–900, Latin and Latin Extended) from its own `/fonts/`, declares
+it with `@font-face` (`font-display: swap`) and ships the SIL OFL license beside it as
+`public/fonts/Inter-LICENSE.txt`. DonorCRM (`frontend/src/styles/globals.css`) and EventOps
+(`apps/web/app/globals.css`) do this; Property Management still loads Inter from Google
+Fonts, which renders the same.
+
+**Karla** is SPO's own brand font on spo.org. It stays for spo.org-matching moments, such
+as the `spoDonate` button, because that consistency builds trust (JR, 2026-11-03). Use it
+only there, never for app UI. Self-host it like Inter in any app that uses it; a strict
+`font-src 'self'` policy blocks the Google Fonts copy.
 
 ### Scale
 
@@ -728,8 +736,8 @@ documented system and the shipped code.
 
 | # | Issue | Action for a new app |
 |---|---|---|
-| 1 | **Inter is configured but never loaded.** `tailwind.config.js` declares it; no `@font-face`, no stylesheet link. The app actually renders in `system-ui`. | Either self-host + preload Inter, or drop it from the font stack. Pick one. |
-| 2 | **Karla is loaded from Google Fonts** but used by exactly one button variant (`spoDonate`). A blocking third-party request for a marketing edge case. | Drop it unless the app has an spo.org-matching donate CTA; then self-host and subset. |
+| 1 | ~~**Inter is configured but never loaded.**~~ Fixed 2026-11-03: Inter is self-hosted in DonorCRM and EventOps (§3). | Self-host Inter from `/fonts/` as §3 describes. |
+| 2 | **Karla is loaded from Google Fonts** for one button variant (`spoDonate`), which no screen uses yet, and production's CSP (`font-src 'self'`) blocks it. JR keeps Karla for spo.org-matching moments (§3). | Use Karla only for spo.org-matching CTAs, and self-host it when one ships. |
 | 3 | **`Toaster` hardcodes `theme="light"`** (`components/ui/sonner.tsx`), so toasts stay light in dark mode. | Wire it to `resolvedTheme` from `ThemeProvider`. |
 | 4 | **Primary red fails AA as text** (3.61:1). | Adopt `--primary-strong` per §9. |
 | 5 | **`Styleguide.tsx` color values are stale** — it labels primary as `#D11F3A` and foreground as "Near-black"; both are wrong against current tokens. | Generate swatches from the CSS variables instead of hardcoding hex captions. |
