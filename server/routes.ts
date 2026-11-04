@@ -6646,6 +6646,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   const BILLING_DOCUMENT_FIELDS = ["contractInvoiceUrl", "coiUrl", "w9Url"] as const;
 
+  // A billing record's region is its house's, as a request's is: a record
+  // tagged one region for a house in another would hide it from that RA. Only
+  // after requireInvoiceReferences has found the house and checked its region.
+  async function takeRegionFromHouse(data: { buildingAddress?: string; region?: string }) {
+    if (!data.buildingAddress) return;
+    const house = await storage.getPropertyByAddress(data.buildingAddress);
+    if (house) data.region = house.region;
+  }
+
   app.post('/api/billing', isAuthenticated, async (req: any, res) => {
     try {
       const ctx = await requireActiveUser(req, res);
@@ -6656,8 +6665,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { createContact, ...rest } = req.body;
       const validatedData = insertBillingRecordSchema.parse(rest);
 
+      if (!(await requireInvoiceReferences(res, ctx, { contactId: validatedData.contactId, buildingAddress: validatedData.buildingAddress }))) return;
+      await takeRegionFromHouse(validatedData);
       if (!requireRegion(res, ctx, validatedData.region, "Forbidden - Cannot create in this region")) return;
-      if (!(await requireInvoiceReferences(res, ctx, { contactId: validatedData.contactId }))) return;
       await requireOwnUploads(ctx, validatedData, BILLING_DOCUMENT_FIELDS);
 
       // If createContact is true and no contactId, create a new contact from the billing info
@@ -6707,8 +6717,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const validatedData = insertBillingRecordSchema.partial().parse(req.body);
 
+      const existingReferences = { ...existingRecord, buildingAddress: existingRecord.buildingAddress ?? undefined };
+      if (!(await requireInvoiceReferences(res, ctx, { contactId: validatedData.contactId, buildingAddress: validatedData.buildingAddress }, existingReferences))) return;
+      await takeRegionFromHouse(validatedData);
       if (!requireRegionMove(res, ctx, existingRecord.region, validatedData.region)) return;
-      if (!(await requireInvoiceReferences(res, ctx, { contactId: validatedData.contactId }, existingRecord))) return;
       await requireOwnUploads(ctx, validatedData, BILLING_DOCUMENT_FIELDS, existingRecord);
 
       const record = await storage.updateBillingRecord(req.params.id, validatedData);

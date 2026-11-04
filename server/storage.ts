@@ -1800,6 +1800,7 @@ export class DatabaseStorage implements IStorage {
         for (const table of [
           maintenanceRequests,
           invoices,
+          billingRecords,
           maintenanceContacts,
           residents,
           rentPayments,
@@ -1860,6 +1861,7 @@ export class DatabaseStorage implements IStorage {
         await tx.update(assets).set({ region }).where(eq(assets.propertyId, id));
         await tx.update(maintenanceRequests).set({ region }).where(eq(maintenanceRequests.buildingAddress, current.address));
         await tx.update(invoices).set({ region }).where(eq(invoices.buildingAddress, current.address));
+        await tx.update(billingRecords).set({ region }).where(eq(billingRecords.buildingAddress, current.address));
         // The lease reminders are generated per house (server/seasonalTasks.ts).
         await tx
           .update(tasks)

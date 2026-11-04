@@ -330,6 +330,13 @@
       "when": 1792026487045,
       "tag": "0046_region_contacts",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1793832521027,
+      "tag": "0047_contact_cities_invoice_house",
+      "breakpoints": true
     }
   ]
 }

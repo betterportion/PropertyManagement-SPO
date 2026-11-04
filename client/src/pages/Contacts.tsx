@@ -6,20 +6,21 @@ import { useToast } from "@/hooks/use-toast";
 import { serverMessage } from "@/lib/serverMessage";
 import ContactsInvoices from "@/components/ContactsInvoices";
 import RegionSelector from "@/components/RegionSelector";
-import BuildingSelector from "@/components/BuildingSelector";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
-import { Plus, Upload, FileText, X, Loader2 } from "lucide-react";
-import { useForm, useWatch } from "react-hook-form";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Plus, Upload, FileText, X, Loader2, MapPin } from "lucide-react";
+import { useForm, useWatch, type UseFormReturn } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { insertMaintenanceContactSchema, type MaintenanceContact, type Property, type BillingRecord } from "@shared/schema";
 import { REGIONS } from "@shared/regions";
 import { z } from "zod";
 import { Section, Container, PageHeader, PageStack } from "@/components/layout/page";
 import { LoadingState } from "@/components/states";
+import { cityLabel, citiesWithHouses } from "@/lib/contactCities";
 
 
 const invoiceFormSchema = z.object({
@@ -31,15 +32,69 @@ const invoiceFormSchema = z.object({
   // record would be saved but then hidden from everyone except an admin, so
   // the field is required here rather than left to a silent default.
   region: z.string().min(1, "Region is required"),
+  // The house the invoice is for, from the chosen region's houses. The server
+  // takes the record's region from it.
+  buildingAddress: z.string().min(1, "Which house is this invoice for?"),
 });
+
+// The form asks for at least one city; the API accepts a contact without, as
+// one made from an invoice record is.
+const contactFormSchema = insertMaintenanceContactSchema.extend({
+  serviceCities: z.array(z.string()).min(1, "Pick at least one city this contact serves."),
+});
+type ContactForm = z.infer<typeof contactFormSchema>;
+
+/**
+ * "City servicing": a checkbox per city SPO has houses in for the contact's
+ * region. A city the contact already holds stays listed even if no house is
+ * there any more, so an edit never drops it silently.
+ */
+function CityServicingField({ form, houses, testId }: { form: UseFormReturn<ContactForm>; houses: Property[]; testId: string }) {
+  const region = useWatch({ control: form.control, name: "region" });
+  const chosen = useWatch({ control: form.control, name: "serviceCities" }) ?? [];
+  const offered = Array.from(new Set([...(region ? citiesWithHouses(houses, region) : []), ...chosen]));
+  return (
+    <FormField
+      control={form.control}
+      name="serviceCities"
+      render={({ field }) => (
+        <FormItem>
+          <FormLabel>City servicing</FormLabel>
+          {!region ? (
+            <p className="text-sm text-muted-foreground">Pick a region first.</p>
+          ) : offered.length === 0 ? (
+            <p className="text-sm text-muted-foreground">SPO has no houses in this region yet.</p>
+          ) : (
+            <div className="grid gap-2 rounded-md border p-3 sm:grid-cols-2" data-testid={testId}>
+              {offered.map((city) => (
+                <label key={city} className="flex items-center gap-2 text-sm">
+                  <Checkbox
+                    checked={field.value?.includes(city) ?? false}
+                    onCheckedChange={(checked) =>
+                      field.onChange(checked ? [...(field.value ?? []), city] : (field.value ?? []).filter((c) => c !== city))
+                    }
+                    data-testid={`${testId}-${city}`}
+                  />
+                  {city}
+                </label>
+              ))}
+            </div>
+          )}
+          <FormMessage />
+        </FormItem>
+      )}
+    />
+  );
+}
 
 export default function Contacts() {
   const [selectedRegion, setSelectedRegion] = useState("all");
-  const [selectedBuilding, setSelectedBuilding] = useState("all");
+  const [selectedCity, setSelectedCity] = useState("all");
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isAddInvoiceDialogOpen, setIsAddInvoiceDialogOpen] = useState(false);
   const [editingContact, setEditingContact] = useState<MaintenanceContact | null>(null);
+  const [editingInvoice, setEditingInvoice] = useState<BillingRecord | null>(null);
   const [contactSource, setContactSource] = useState<"existing" | "new">("existing");
   const [selectedContactId, setSelectedContactId] = useState<string>("");
   const [contractInvoiceUrl, setContractInvoiceUrl] = useState<string | null>(null);
@@ -82,7 +137,7 @@ export default function Contacts() {
   const canManage = userRole === "admin" || userRole === "regional_administrator" || permissionsData?.canManageContacts || false;
 
   const createContactMutation = useMutation({
-    mutationFn: async (data: z.infer<typeof insertMaintenanceContactSchema>) => {
+    mutationFn: async (data: ContactForm) => {
       return await apiRequest("POST", "/api/contacts", data);
     },
     onSuccess: () => {
@@ -103,8 +158,8 @@ export default function Contacts() {
     },
   });
 
-  const form = useForm<z.infer<typeof insertMaintenanceContactSchema>>({
-    resolver: zodResolver(insertMaintenanceContactSchema),
+  const form = useForm<ContactForm>({
+    resolver: zodResolver(contactFormSchema),
     defaultValues: {
       name: "",
       company: "",
@@ -113,17 +168,16 @@ export default function Contacts() {
       email: "",
       region: "",
       buildingAddress: "",
+      serviceCities: [],
     },
   });
 
-  const editForm = useForm<z.infer<typeof insertMaintenanceContactSchema>>({
-    resolver: zodResolver(insertMaintenanceContactSchema),
+  const editForm = useForm<ContactForm>({
+    resolver: zodResolver(contactFormSchema),
   });
-  const addAddress = useWatch({ control: form.control, name: "buildingAddress" });
-  const editAddress = useWatch({ control: editForm.control, name: "buildingAddress" });
 
   const updateContactMutation = useMutation({
-    mutationFn: async (data: z.infer<typeof insertMaintenanceContactSchema> & { id: string }) => {
+    mutationFn: async (data: ContactForm & { id: string }) => {
       const { id, ...rest } = data;
       return await apiRequest("PATCH", `/api/contacts/${id}`, rest);
     },
@@ -145,32 +199,21 @@ export default function Contacts() {
     },
   });
 
-  const onSubmit = (data: z.infer<typeof insertMaintenanceContactSchema>) => {
+  const onSubmit = (data: ContactForm) => {
     createContactMutation.mutate(data);
   };
 
-  const onEditSubmit = (data: z.infer<typeof insertMaintenanceContactSchema>) => {
+  const onEditSubmit = (data: ContactForm) => {
     if (editingContact) {
       updateContactMutation.mutate({ ...data, id: editingContact.id });
     }
   };
 
-  // A house knows its region, so picking one fills the region in and the
-  // region control locks: a contact tagged with one region but a house in
-  // another is hidden from that house's RA.
-  const houseRegion = (address: string | undefined) => properties.find(p => p.address === address)?.region;
-  const pickHouse = (target: typeof form, address: string) => {
-    target.setValue("buildingAddress", address);
-    const region = houseRegion(address);
-    if (region) target.setValue("region", region);
-  };
-
-  const handleEditPropertyChange = (propertyId: string) => {
-    const property = properties.find(p => p.id === propertyId);
-    if (property) {
-      editForm.setValue("buildingAddress", property.address!);
-      editForm.setValue("region", property.region);
-    }
+  // A new region offers other cities, so the ones picked for the old region go.
+  const changeContactRegion = (target: UseFormReturn<ContactForm>, region: string) => {
+    target.setValue("region", region);
+    const offered = citiesWithHouses(properties, region);
+    target.setValue("serviceCities", (target.getValues("serviceCities") ?? []).filter((city) => offered.includes(city)));
   };
 
   const handleEditContact = (id: string) => {
@@ -185,6 +228,7 @@ export default function Contacts() {
         email: contact.email,
         region: contact.region,
         buildingAddress: contact.buildingAddress,
+        serviceCities: contact.serviceCities ?? [],
       });
       setIsEditDialogOpen(true);
     }
@@ -192,7 +236,58 @@ export default function Contacts() {
 
   const invoiceForm = useForm<z.infer<typeof invoiceFormSchema>>({
     resolver: zodResolver(invoiceFormSchema),
-    defaultValues: { companyName: "", email: "", phone: "", invoiceCost: "", region: "" },
+    defaultValues: { companyName: "", email: "", phone: "", invoiceCost: "", region: "", buildingAddress: "" },
+  });
+  const invoiceRegion = useWatch({ control: invoiceForm.control, name: "region" });
+  const invoiceHouses = properties.filter((p) => p.region === invoiceRegion);
+
+  const clearInvoiceDocuments = () => {
+    setContractInvoiceUrl(null); setContractInvoiceName(null);
+    setCoiUrl(null); setCoiName(null);
+    setW9Url(null); setW9Name(null);
+  };
+
+  // Closing an edit clears it, so Add Invoice Record opens blank. Closing an
+  // unsaved new record keeps what was typed, as it always has.
+  const setInvoiceDialogOpen = (open: boolean) => {
+    setIsAddInvoiceDialogOpen(open);
+    if (!open && editingInvoice) {
+      setEditingInvoice(null);
+      invoiceForm.reset({ companyName: "", email: "", phone: "", invoiceCost: "", region: "", buildingAddress: "" });
+      clearInvoiceDocuments();
+    }
+  };
+
+  const handleEditInvoice = (id: string) => {
+    const record = billingRecords.find((r) => r.id === id);
+    if (!record) return;
+    setEditingInvoice(record);
+    invoiceForm.reset({
+      companyName: record.companyName,
+      email: record.email,
+      phone: record.phone,
+      invoiceCost: String(record.invoiceCost),
+      region: record.region,
+      buildingAddress: record.buildingAddress ?? "",
+    });
+    setContractInvoiceUrl(record.contractInvoiceUrl); setContractInvoiceName(record.contractInvoiceUrl ? "On file" : null);
+    setCoiUrl(record.coiUrl); setCoiName(record.coiUrl ? "On file" : null);
+    setW9Url(record.w9Url); setW9Name(record.w9Url ? "On file" : null);
+    setIsAddInvoiceDialogOpen(true);
+  };
+
+  const updateBillingMutation = useMutation({
+    mutationFn: async ({ id, ...payload }: Record<string, unknown> & { id: string }) => {
+      return await apiRequest("PATCH", `/api/billing/${id}`, payload);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/billing"] });
+      setInvoiceDialogOpen(false);
+      toast({ title: "Success", description: "Invoice record updated" });
+    },
+    onError: (error) => {
+      toast({ title: "Error", description: serverMessage(error) ?? "Failed to update invoice record", variant: "destructive" });
+    },
   });
 
   const createBillingMutation = useMutation({
@@ -206,9 +301,7 @@ export default function Contacts() {
       invoiceForm.reset();
       setSelectedContactId("");
       setContactSource("existing");
-      setContractInvoiceUrl(null); setContractInvoiceName(null);
-      setCoiUrl(null); setCoiName(null);
-      setW9Url(null); setW9Name(null);
+      clearInvoiceDocuments();
       toast({ title: "Success", description: "Invoice record created successfully" });
     },
     onError: (error) => {
@@ -241,12 +334,24 @@ export default function Contacts() {
   };
 
   const onInvoiceSubmit = (data: z.infer<typeof invoiceFormSchema>) => {
+    if (editingInvoice) {
+      // null clears a document; the server then removes the file.
+      updateBillingMutation.mutate({
+        id: editingInvoice.id,
+        ...data,
+        contractInvoiceUrl,
+        coiUrl,
+        w9Url,
+      });
+      return;
+    }
     const payload: Record<string, unknown> = {
       companyName: data.companyName,
       email: data.email,
       phone: data.phone,
       invoiceCost: data.invoiceCost,
       region: data.region,
+      buildingAddress: data.buildingAddress,
       contractInvoiceUrl: contractInvoiceUrl ?? undefined,
       coiUrl: coiUrl ?? undefined,
       w9Url: w9Url ?? undefined,
@@ -269,17 +374,30 @@ export default function Contacts() {
       invoiceForm.setValue("email", contact.email);
       invoiceForm.setValue("phone", contact.phone);
       // A default, not a lock: a vendor can bill for work in another region.
-      invoiceForm.setValue("region", contact.region);
+      changeInvoiceRegion(contact.region);
     }
   };
 
+  // The house list follows the region, so a house from the old one is cleared.
+  const changeInvoiceRegion = (region: string) => {
+    if (region !== invoiceForm.getValues("region")) invoiceForm.setValue("buildingAddress", "");
+    invoiceForm.setValue("region", region);
+  };
+
+  // Both filters apply to both tabs. An invoice's city is its house's; one
+  // with no house yet drops out once a city is chosen.
   const contacts = (contactsData || []).filter((contact) => {
     const matchesRegion = selectedRegion === "all" || contact.region === selectedRegion;
-    const matchesBuilding = selectedBuilding === "all" || contact.buildingAddress === selectedBuilding;
-    return matchesRegion && matchesBuilding;
+    const matchesCity = selectedCity === "all" || (contact.serviceCities ?? []).includes(selectedCity);
+    return matchesRegion && matchesCity;
   });
-
-  const buildings = properties.map(p => ({ id: p.address!, address: p.address! }));
+  const invoices = billingRecords.filter((record) => {
+    const matchesRegion = selectedRegion === "all" || record.region === selectedRegion;
+    const house = properties.find((p) => p.address === record.buildingAddress);
+    const matchesCity = selectedCity === "all" || (!!house && cityLabel(house) === selectedCity);
+    return matchesRegion && matchesCity;
+  });
+  const filterCities = citiesWithHouses(properties, selectedRegion);
 
 
   return (
@@ -292,13 +410,22 @@ export default function Contacts() {
         <div className="flex flex-wrap gap-4">
           <RegionSelector
             selectedRegion={selectedRegion}
-            onRegionChange={setSelectedRegion}
+            onRegionChange={(region) => { setSelectedRegion(region); setSelectedCity("all"); }}
           />
-          <BuildingSelector
-            selectedBuilding={selectedBuilding}
-            onBuildingChange={setSelectedBuilding}
-            buildings={buildings}
-          />
+          <Select value={selectedCity} onValueChange={setSelectedCity}>
+            <SelectTrigger className="w-full min-w-56 sm:w-64" data-testid="select-filter-city" aria-label="Filter by city">
+              <div className="flex items-center gap-2">
+                <MapPin className="h-4 w-4" />
+                <SelectValue />
+              </div>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All cities</SelectItem>
+              {filterCities.map((city) => (
+                <SelectItem key={city} value={city}>{city}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
 
         <div className="flex flex-wrap gap-2">
@@ -387,14 +514,13 @@ export default function Contacts() {
                   />
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                  <FormField
+                <FormField
                     control={form.control}
                     name="region"
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>Region</FormLabel>
-                        <Select onValueChange={field.onChange} value={field.value} disabled={!!houseRegion(addAddress)}>
+                        <Select onValueChange={(region) => changeContactRegion(form, region)} value={field.value}>
                           <FormControl>
                             <SelectTrigger data-testid="select-contact-region">
                               <SelectValue placeholder="Select region" />
@@ -410,31 +536,7 @@ export default function Contacts() {
                       </FormItem>
                     )}
                   />
-                  <FormField
-                    control={form.control}
-                    name="buildingAddress"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Household Address</FormLabel>
-                        <Select onValueChange={(address) => pickHouse(form, address)} value={field.value}>
-                          <FormControl>
-                            <SelectTrigger data-testid="select-contact-building">
-                              <SelectValue placeholder="Select property" />
-                            </SelectTrigger>
-                          </FormControl>
-                          <SelectContent>
-                            {properties.map(property => (
-                              <SelectItem key={property.id} value={property.address!}>
-                                {property.address}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                </div>
+                <CityServicingField form={form} houses={properties} testId="checkboxes-contact-cities" />
 
                 <DialogFooter>
                   <Button type="button" variant="secondary" onClick={() => setIsAddDialogOpen(false)}>
@@ -449,7 +551,7 @@ export default function Contacts() {
           </DialogContent>
         </Dialog>
 
-        <Dialog open={isAddInvoiceDialogOpen} onOpenChange={setIsAddInvoiceDialogOpen}>
+        <Dialog open={isAddInvoiceDialogOpen} onOpenChange={setInvoiceDialogOpen}>
           <DialogTrigger asChild>
             <Button data-testid="button-add-invoice" disabled={!canManage}>
               <Plus className="h-4 w-4 mr-2" />
@@ -458,11 +560,12 @@ export default function Contacts() {
           </DialogTrigger>
           <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle>Add Invoice Record</DialogTitle>
+              <DialogTitle>{editingInvoice ? "Edit Invoice Record" : "Add Invoice Record"}</DialogTitle>
             </DialogHeader>
             <Form {...invoiceForm}>
               <form onSubmit={invoiceForm.handleSubmit(onInvoiceSubmit)} className="space-y-5">
                 {/* Contact source toggle */}
+                {!editingInvoice && (<>
                 <div>
                   <p className="text-sm font-medium mb-2">Contact</p>
                   <div className="flex gap-2">
@@ -504,6 +607,7 @@ export default function Contacts() {
                     </Select>
                   </FormItem>
                 )}
+                </>)}
 
                 <div className="grid grid-cols-2 gap-4">
                   <FormField
@@ -563,13 +667,14 @@ export default function Contacts() {
                   />
                 </div>
 
+                <div className="grid grid-cols-2 gap-4">
                 <FormField
                   control={invoiceForm.control}
                   name="region"
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Region</FormLabel>
-                      <Select onValueChange={field.onChange} value={field.value}>
+                      <Select onValueChange={changeInvoiceRegion} value={field.value}>
                         <FormControl>
                           <SelectTrigger data-testid="select-invoice-region">
                             <SelectValue placeholder="Select region" />
@@ -587,6 +692,31 @@ export default function Contacts() {
                     </FormItem>
                   )}
                 />
+                <FormField
+                  control={invoiceForm.control}
+                  name="buildingAddress"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>House</FormLabel>
+                      <Select onValueChange={field.onChange} value={field.value} disabled={!invoiceRegion}>
+                        <FormControl>
+                          <SelectTrigger data-testid="select-invoice-house">
+                            <SelectValue placeholder={invoiceRegion ? "Select a house" : "Pick a region first"} />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {invoiceHouses.map((house) => (
+                            <SelectItem key={house.id} value={house.address!}>
+                              {house.name} · {house.address}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                </div>
 
                 {/* Document Uploads */}
                 <div className="space-y-3">
@@ -696,11 +826,13 @@ export default function Contacts() {
                 </div>
 
                 <DialogFooter>
-                  <Button type="button" variant="secondary" onClick={() => setIsAddInvoiceDialogOpen(false)}>
+                  <Button type="button" variant="secondary" onClick={() => setInvoiceDialogOpen(false)}>
                     Cancel
                   </Button>
-                  <Button type="submit" disabled={createBillingMutation.isPending || uploadingContract || uploadingCoi || uploadingW9} data-testid="button-submit-invoice">
-                    {createBillingMutation.isPending ? "Creating..." : "Create Record"}
+                  <Button type="submit" disabled={createBillingMutation.isPending || updateBillingMutation.isPending || uploadingContract || uploadingCoi || uploadingW9} data-testid="button-submit-invoice">
+                    {editingInvoice
+                      ? (updateBillingMutation.isPending ? "Saving..." : "Save Changes")
+                      : (createBillingMutation.isPending ? "Creating..." : "Create Record")}
                   </Button>
                 </DialogFooter>
               </form>
@@ -715,11 +847,10 @@ export default function Contacts() {
       ) : (
         <ContactsInvoices
           contacts={contacts}
-          invoices={billingRecords}
-          onAddContact={() => setIsAddDialogOpen(true)}
+          invoices={invoices}
+          houses={properties}
           onEditContact={handleEditContact}
-          onAddInvoice={() => console.log("Add invoice")}
-          onViewInvoice={(id) => console.log("View invoice:", id)}
+          onEditInvoice={handleEditInvoice}
         />
       )}
 
@@ -803,75 +934,30 @@ export default function Contacts() {
                 />
               </div>
 
-              <FormItem>
-                <FormLabel>Property</FormLabel>
-                <Select
-                  onValueChange={handleEditPropertyChange}
-                  defaultValue={
-                    properties.find(p => p.address === editingContact?.buildingAddress)?.id
-                  }
-                >
-                  <SelectTrigger data-testid="select-edit-contact-property">
-                    <SelectValue placeholder="Select a property" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {properties.map(property => (
-                      <SelectItem key={property.id} value={property.id}>
-                        {property.address}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </FormItem>
+              <FormField
+                control={editForm.control}
+                name="region"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Region</FormLabel>
+                    <Select onValueChange={(region) => changeContactRegion(editForm, region)} value={field.value}>
+                      <FormControl>
+                        <SelectTrigger data-testid="select-edit-contact-region">
+                          <SelectValue placeholder="Select region" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {REGIONS.map(r => (
+                          <SelectItem key={r} value={r}>{r}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
 
-              <div className="grid grid-cols-2 gap-4">
-                <FormField
-                  control={editForm.control}
-                  name="region"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Region</FormLabel>
-                      <Select onValueChange={field.onChange} value={field.value} disabled={!!houseRegion(editAddress)}>
-                        <FormControl>
-                          <SelectTrigger data-testid="select-edit-contact-region">
-                            <SelectValue placeholder="Select region" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          {REGIONS.map(r => (
-                            <SelectItem key={r} value={r}>{r}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={editForm.control}
-                  name="buildingAddress"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Household Address</FormLabel>
-                      <Select onValueChange={(address) => pickHouse(editForm, address)} value={field.value}>
-                        <FormControl>
-                          <SelectTrigger data-testid="select-edit-contact-building">
-                            <SelectValue placeholder="Select property" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          {properties.map(property => (
-                            <SelectItem key={property.id} value={property.address!}>
-                              {property.address}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </div>
+              <CityServicingField form={editForm} houses={properties} testId="checkboxes-edit-contact-cities" />
 
               <DialogFooter>
                 <Button type="button" variant="secondary" onClick={() => setIsEditDialogOpen(false)}>

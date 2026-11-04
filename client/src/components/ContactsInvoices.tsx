@@ -3,21 +3,20 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Phone, Mail, DollarSign, FileText, Pencil, ExternalLink } from "lucide-react";
-import type { BillingRecord, MaintenanceContact } from "@shared/schema";
+import { Phone, Mail, DollarSign, FileText, Pencil, ExternalLink, MapPin, Home } from "lucide-react";
+import type { BillingRecord, MaintenanceContact, Property } from "@shared/schema";
 import { EmptyState } from "@/components/states";
 import { formatCurrency } from "@/lib/format";
 
 interface ContactsInvoicesProps {
   contacts: MaintenanceContact[];
   invoices: BillingRecord[];
-  onAddContact?: () => void;
+  houses: Property[];
   onEditContact?: (id: string) => void;
-  onAddInvoice?: () => void;
-  onViewInvoice?: (id: string) => void;
+  onEditInvoice?: (id: string) => void;
 }
 
-export default function ContactsInvoices({ contacts, invoices, onEditContact }: ContactsInvoicesProps) {
+export default function ContactsInvoices({ contacts, invoices, houses, onEditContact, onEditInvoice }: ContactsInvoicesProps) {
   return (
     <Tabs defaultValue="contacts" className="w-full">
       <TabsList className="grid w-full grid-cols-2" data-testid="tabs-contacts-invoices">
@@ -53,6 +52,12 @@ export default function ContactsInvoices({ contacts, invoices, onEditContact }: 
                     <Badge variant="secondary" className="mt-2">
                       {contact.service}
                     </Badge>
+                    {(contact.serviceCities ?? []).length > 0 && (
+                      <p className="mt-2 flex items-start gap-2 text-sm text-muted-foreground" data-testid={`text-contact-cities-${contact.id}`}>
+                        <MapPin className="h-4 w-4 mt-0.5 shrink-0" />
+                        <span>{contact.serviceCities.join(" · ")}</span>
+                      </p>
+                    )}
                     <div className="flex flex-col gap-2 mt-3">
                       <a
                         href={`tel:${contact.phone}`}
@@ -99,6 +104,14 @@ export default function ContactsInvoices({ contacts, invoices, onEditContact }: 
                     <h4 className="font-semibold text-base" data-testid={`text-invoice-company-${invoice.id}`}>
                       {invoice.companyName}
                     </h4>
+                    {/* Records made before a house was asked for have none; the
+                        edit dialog asks for one. */}
+                    <p className="flex items-center gap-2 text-sm text-muted-foreground" data-testid={`text-invoice-house-${invoice.id}`}>
+                      <Home className="h-4 w-4 shrink-0" />
+                      {invoice.buildingAddress
+                        ? (houses.find((h) => h.address === invoice.buildingAddress)?.name ?? invoice.buildingAddress)
+                        : "No house yet. Edit to choose one."}
+                    </p>
                     <div className="flex flex-wrap gap-4 mt-2 text-sm">
                       <div className="flex items-center gap-2">
                         <DollarSign className="h-4 w-4 text-muted-foreground" />
@@ -166,6 +179,15 @@ export default function ContactsInvoices({ contacts, invoices, onEditContact }: 
                       </div>
                     )}
                   </div>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => onEditInvoice?.(invoice.id)}
+                    aria-label={`Edit the invoice record for ${invoice.companyName}`}
+                    data-testid={`button-edit-invoice-${invoice.id}`}
+                  >
+                    <Pencil className="h-4 w-4" />
+                  </Button>
                 </div>
               </CardContent>
             </Card>
