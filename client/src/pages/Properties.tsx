@@ -202,7 +202,7 @@ export default function Properties() {
       bedrooms: undefined,
       bathrooms: undefined,
       squareFootage: undefined,
-      household: null,
+      household: undefined,
       capacityLegal: undefined,
       capacityMission: undefined,
       ownership: "owned",
@@ -242,9 +242,9 @@ export default function Properties() {
       chapter: property.chapter || "",
       propertyManager: property.propertyManager || "",
       bedrooms: property.bedrooms || undefined,
-      bathrooms: property.bathrooms || undefined,
+      bathrooms: property.bathrooms ? Number(property.bathrooms) : undefined,
       squareFootage: property.squareFootage || undefined,
-      household: property.household,
+      household: property.household ?? undefined,
       capacityLegal: property.capacityLegal ?? undefined,
       capacityMission: property.capacityMission ?? undefined,
       ownership: property.ownership,
@@ -428,7 +428,7 @@ export default function Properties() {
                     const regionChapters = chaptersForRegion(addForm.watch("region"));
                     return (
                       <FormItem>
-                        <FormLabel>Chapter (Optional)</FormLabel>
+                        <FormLabel>Chapter</FormLabel>
                         <Select onValueChange={field.onChange} value={field.value || ""} disabled={regionChapters.length === 0}>
                           <FormControl>
                             <SelectTrigger data-testid="select-property-chapter">
@@ -447,19 +447,6 @@ export default function Properties() {
                   }}
                 />
 
-                <FormField
-                  control={addForm.control}
-                  name="propertyManager"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Property Manager (Optional)</FormLabel>
-                      <FormControl>
-                        <Input {...field} value={field.value || ""} data-testid="input-property-manager" />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
 
                 <div className="grid grid-cols-2 gap-4">
                   <FormField
@@ -467,7 +454,7 @@ export default function Properties() {
                     name="bedrooms"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Bedrooms (Optional)</FormLabel>
+                        <FormLabel>Bedrooms</FormLabel>
                         <FormControl>
                           <Input type="number" {...field} value={field.value ?? ""} onChange={e => field.onChange(e.target.value ? parseInt(e.target.value) : undefined)} data-testid="input-property-bedrooms" />
                         </FormControl>
@@ -480,9 +467,9 @@ export default function Properties() {
                     name="bathrooms"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Bathrooms (Optional)</FormLabel>
+                        <FormLabel>Bathrooms</FormLabel>
                         <FormControl>
-                          <Input type="number" step="0.5" {...field} value={field.value ?? ""} onChange={e => field.onChange(e.target.value || undefined)} data-testid="input-property-bathrooms" />
+                          <Input type="number" step="0.5" {...field} value={field.value ?? ""} onChange={e => field.onChange(e.target.value ? Number(e.target.value) : undefined)} data-testid="input-property-bathrooms" />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -495,7 +482,7 @@ export default function Properties() {
                   name="squareFootage"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Square Footage (Optional)</FormLabel>
+                      <FormLabel>Square Footage</FormLabel>
                       <FormControl>
                         <Input type="number" {...field} value={field.value ?? ""} onChange={e => field.onChange(e.target.value ? parseInt(e.target.value) : undefined)} placeholder="e.g. 1200" data-testid="input-property-sqft" />
                       </FormControl>
@@ -583,11 +570,6 @@ export default function Properties() {
                           rows={setupByProperty.get(property.id) ?? []}
                         />
                       </div>
-                      {property.propertyManager && (
-                        <p className="text-xs text-muted-foreground mt-2">
-                          Manager: {property.propertyManager}
-                        </p>
-                      )}
                       {property.ownership === "rented" && property.leaseRenewalDate && (
                         <p className="text-xs text-muted-foreground mt-2" data-testid={`text-property-renewal-${property.id}`}>
                           Lease renewal: {formatDate(property.leaseRenewalDate)}
@@ -735,7 +717,7 @@ export default function Properties() {
                   );
                   return (
                     <FormItem>
-                      <FormLabel>Chapter (Optional)</FormLabel>
+                      <FormLabel>Chapter</FormLabel>
                       <Select onValueChange={field.onChange} value={field.value || ""} disabled={regionChapters.length === 0}>
                         <FormControl>
                           <SelectTrigger>
@@ -754,19 +736,6 @@ export default function Properties() {
                 }}
               />
 
-              <FormField
-                control={editForm.control}
-                name="propertyManager"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Property Manager (Optional)</FormLabel>
-                    <FormControl>
-                      <Input {...field} value={field.value || ""} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
 
               <div className="grid grid-cols-2 gap-4">
                 <FormField
@@ -774,7 +743,7 @@ export default function Properties() {
                   name="bedrooms"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Bedrooms (Optional)</FormLabel>
+                      <FormLabel>Bedrooms</FormLabel>
                       <FormControl>
                         <Input type="number" {...field} value={field.value ?? ""} onChange={e => field.onChange(e.target.value ? parseInt(e.target.value) : undefined)} />
                       </FormControl>
@@ -787,9 +756,9 @@ export default function Properties() {
                   name="bathrooms"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Bathrooms (Optional)</FormLabel>
+                      <FormLabel>Bathrooms</FormLabel>
                       <FormControl>
-                        <Input type="number" step="0.5" {...field} value={field.value ?? ""} onChange={e => field.onChange(e.target.value || undefined)} />
+                        <Input type="number" step="0.5" {...field} value={field.value ?? ""} onChange={e => field.onChange(e.target.value ? Number(e.target.value) : undefined)} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -802,7 +771,7 @@ export default function Properties() {
                 name="squareFootage"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Square Footage (Optional)</FormLabel>
+                    <FormLabel>Square Footage</FormLabel>
                     <FormControl>
                       <Input type="number" {...field} value={field.value ?? ""} onChange={e => field.onChange(e.target.value ? parseInt(e.target.value) : undefined)} placeholder="e.g. 1200" />
                     </FormControl>

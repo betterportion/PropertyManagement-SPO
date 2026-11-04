@@ -26,19 +26,25 @@ export const propertyFormSchema = insertPropertySchema.extend({
   // The numeric column round-trips as a string; a number input yields a
   // number. The server coerces on submit, as it does for every other amount.
   depositAmount: z.coerce.number().min(0, "Must be 0 or greater").nullable().optional(),
+  // Required on the form only (Joseph's notes, 2026-11-04): the server and the
+  // houses import still accept a house without them, so older rows keep saving
+  // through the API, but a person adding or editing a house fills them in.
+  bedrooms: z.number({ required_error: "How many bedrooms?" }).int().min(0, "Must be 0 or greater"),
+  bathrooms: z.number({ required_error: "How many bathrooms?" }).min(0, "Must be 0 or greater"),
+  squareFootage: z.number({ required_error: "How many square feet?" }).int().min(0, "Must be 0 or greater"),
+  household: z.enum(["men", "women"], { errorMap: () => ({ message: "Is this a men's or a women's house?" }) }),
+  capacityLegal: z.number({ required_error: "What does the city or lease allow?" }).int().min(0, "Must be 0 or greater"),
+  capacityMission: z.number({ required_error: "How many does SPO put in this house?" }).int().min(0, "Must be 0 or greater"),
 });
 export type PropertyForm = z.infer<typeof propertyFormSchema>;
 
 /** The "nobody" option. A Select cannot carry an empty string as a value. */
 const NO_CONTACT = "__none__";
 
-/** The "not set" option for men or women, for the same reason. */
-const NO_HOUSEHOLD = "__none__";
-
 /**
  * Men or women, and the two capacities, shared by the add and edit dialogs.
  *
- * Two capacities because SPO keeps two: the legal one is what the city allows,
+ * Two capacities because SPO keeps two: the legal one is what the city or lease allows,
  * the mission one is the most SPO itself puts in the house. Both are shown on
  * the house page, and they need not agree, so neither is checked against the
  * other or against the bedroom count.
@@ -51,18 +57,17 @@ export function PropertyHouseholdFields({ form }: { form: UseFormReturn<Property
         name="household"
         render={({ field }) => (
           <FormItem>
-            <FormLabel>Men or women (Optional)</FormLabel>
+            <FormLabel>Men or women</FormLabel>
             <Select
-              onValueChange={(value) => field.onChange(value === NO_HOUSEHOLD ? null : value)}
-              value={field.value ?? NO_HOUSEHOLD}
+              onValueChange={field.onChange}
+              value={field.value ?? undefined}
             >
               <FormControl>
                 <SelectTrigger data-testid="select-property-household">
-                  <SelectValue />
+                  <SelectValue placeholder="Select men or women" />
                 </SelectTrigger>
               </FormControl>
               <SelectContent>
-                <SelectItem value={NO_HOUSEHOLD}>Not set</SelectItem>
                 <SelectItem value="men">Men</SelectItem>
                 <SelectItem value="women">Women</SelectItem>
               </SelectContent>
@@ -78,7 +83,7 @@ export function PropertyHouseholdFields({ form }: { form: UseFormReturn<Property
           name="capacityLegal"
           render={({ field }) => (
             <FormItem>
-              <FormLabel>Legal capacity (Optional)</FormLabel>
+              <FormLabel>Legal capacity</FormLabel>
               <FormControl>
                 <Input
                   type="number"
@@ -89,7 +94,7 @@ export function PropertyHouseholdFields({ form }: { form: UseFormReturn<Property
                   data-testid="input-property-capacity-legal"
                 />
               </FormControl>
-              <FormDescription>What the city allows.</FormDescription>
+              <FormDescription>What the city or lease allows.</FormDescription>
               <FormMessage />
             </FormItem>
           )}
@@ -99,7 +104,7 @@ export function PropertyHouseholdFields({ form }: { form: UseFormReturn<Property
           name="capacityMission"
           render={({ field }) => (
             <FormItem>
-              <FormLabel>Mission capacity (Optional)</FormLabel>
+              <FormLabel>Mission capacity</FormLabel>
               <FormControl>
                 <Input
                   type="number"
@@ -330,72 +335,24 @@ export default function PropertyLeaseFields({ form }: { form: UseFormReturn<Prop
           two-stage), and a table here would bake legal advice into the repo
           and go stale silently. SPO's admin and finance teams are responsible
           for compliance; the portal reminds. */}
-      <div className="grid grid-cols-2 gap-4">
-        <FormField
-          control={form.control}
-          name="depositAmount"
-          render={({ field }) => (
-            <FormItem>
-              <FormLabel>Deposit for this house ($)</FormLabel>
-              <FormControl>
-                <Input
-                  type="number"
-                  min={0}
-                  step="0.01"
-                  {...field}
-                  value={field.value ?? ""}
-                  onChange={(event) => field.onChange(event.target.value ? Number(event.target.value) : null)}
-                  data-testid="input-property-deposit-amount"
-                />
-              </FormControl>
-              <p className="text-xs text-muted-foreground">
-                The usual figure. Any one resident can be given a different amount on their own record.
-              </p>
-              <FormMessage />
-            </FormItem>
-          )}
-        />
-
-        <FormField
-          control={form.control}
-          name="depositReturnDays"
-          render={({ field }) => (
-            <FormItem>
-              <FormLabel>Days to return a deposit</FormLabel>
-              <FormControl>
-                <Input
-                  type="number"
-                  min={0}
-                  {...field}
-                  value={field.value ?? ""}
-                  onChange={(event) => field.onChange(event.target.value ? Number(event.target.value) : null)}
-                  data-testid="input-property-deposit-return-days"
-                />
-              </FormControl>
-              <p className="text-xs text-muted-foreground">
-                SPO's own reminder setting, counted from the resident's move-out date. It is not a
-                legal determination — check the rule for this state and set it accordingly.
-              </p>
-              <FormMessage />
-            </FormItem>
-          )}
-        />
-      </div>
-
       <FormField
         control={form.control}
-        name="depositNotes"
+        name="depositReturnDays"
         render={({ field }) => (
           <FormItem>
-            <FormLabel>What that setting is based on (Optional)</FormLabel>
+            <FormLabel>Days to return a deposit</FormLabel>
             <FormControl>
               <Input
+                type="number"
+                min={0}
+                className="max-w-40"
                 {...field}
                 value={field.value ?? ""}
-                placeholder="e.g. 21 days, per the state statute our counsel pointed us at"
-                data-testid="input-property-deposit-notes"
+                onChange={(event) => field.onChange(event.target.value ? Number(event.target.value) : null)}
+                data-testid="input-property-deposit-return-days"
               />
             </FormControl>
+            <FormDescription>Leave blank to use the state's deadline set in Settings.</FormDescription>
             <FormMessage />
           </FormItem>
         )}

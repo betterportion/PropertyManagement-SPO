@@ -43,6 +43,31 @@ test.describe("properties — region and chapter filters", () => {
     await expect(page.getByRole("option", { name: "Texas State University" })).toBeVisible();
     await expect(page.getByRole("option", { name: "University of Minnesota" })).toHaveCount(0);
   });
+
+  test("a new house needs its size, men or women and both capacities, and asks no deposit or manager", async ({ page }) => {
+    let created = false;
+    page.on("request", (request) => {
+      if (request.method() === "POST" && new URL(request.url()).pathname === "/api/properties") created = true;
+    });
+    await page.getByTestId("button-add-property").click();
+    await expect(page.getByTestId("input-property-manager")).toHaveCount(0);
+    await expect(page.getByTestId("input-property-deposit-amount")).toHaveCount(0);
+    await expect(page.getByTestId("input-property-deposit-notes")).toHaveCount(0);
+    await expect(page.getByText("Leave blank to use the state's deadline set in Settings.")).toBeVisible();
+
+    await page.getByTestId("button-submit-property").click();
+    for (const message of [
+      "How many bedrooms?",
+      "How many bathrooms?",
+      "How many square feet?",
+      "Is this a men's or a women's house?",
+      "What does the city or lease allow?",
+      "How many does SPO put in this house?",
+    ]) {
+      await expect(page.getByText(message)).toBeVisible();
+    }
+    expect(created).toBe(false);
+  });
 });
 
 test.describe("properties — leases", () => {
