@@ -89,6 +89,16 @@ export default function Settings() {
   // survives a refresh. A link into a section (#quickbooks) opens its tab.
   const [{ tab: tabParam }, setTabParam] = useUrlState<{ tab: string }>({ tab: settingsTabForHash(window.location.hash) });
   const tab = isSettingsTab(tabParam) ? tabParam : "people";
+  // A section link followed while already on Settings changes only the hash,
+  // which re-renders nothing; switch to that section's tab when it does.
+  useEffect(() => {
+    const onHashChange = () => {
+      const target = settingsTabForHash(window.location.hash);
+      if (target !== "people") setTabParam({ tab: target });
+    };
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, [setTabParam]);
 
   const { data: users, isLoading } = useQuery({
     queryKey: ["/api/users"],
