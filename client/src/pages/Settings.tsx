@@ -19,7 +19,10 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
-import { Search, UserCog, Shield, Plus, MapPin, Eye, Settings2 } from "lucide-react";
+import { Search, UserCog, Shield, Plus, MapPin, Eye, Settings2, Users, SlidersHorizontal, History, Compass } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useUrlState } from "@/hooks/use-url-state";
+import { isSettingsTab, settingsTabForHash } from "@/lib/settingsTabs";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { useForm } from "react-hook-form";
@@ -82,6 +85,10 @@ export default function Settings() {
   const { user: currentUser } = useAuth();
 
   const isAdmin = (currentUser as any)?.role === "admin";
+  // The open tab lives in the URL (?tab=guide), so a tab can be linked to and
+  // survives a refresh. A link into a section (#quickbooks) opens its tab.
+  const [{ tab: tabParam }, setTabParam] = useUrlState<{ tab: string }>({ tab: settingsTabForHash(window.location.hash) });
+  const tab = isSettingsTab(tabParam) ? tabParam : "people";
 
   const { data: users, isLoading } = useQuery({
     queryKey: ["/api/users"],
@@ -356,10 +363,17 @@ export default function Settings() {
     <Section size="compact">
       <Container>
       <PageStack>
-      <PageHeader title="User Management" description="Manage staff access, roles, and regional permissions from one place." />
+      <PageHeader title="Settings" description="Staff access, how the portal is set up, what has happened, and a guide to running it." />
 
-      <AdminGuide />
+      <Tabs value={tab} onValueChange={(value) => setTabParam({ tab: value })} className="w-full">
+        <TabsList className="grid h-auto w-full max-w-2xl grid-cols-2 sm:grid-cols-4">
+          <TabsTrigger value="people" data-testid="tab-settings-people"><Users className="mr-2 h-4 w-4" aria-hidden /> People</TabsTrigger>
+          <TabsTrigger value="setup" data-testid="tab-settings-setup"><SlidersHorizontal className="mr-2 h-4 w-4" aria-hidden /> Portal setup</TabsTrigger>
+          <TabsTrigger value="activity" data-testid="tab-settings-activity"><History className="mr-2 h-4 w-4" aria-hidden /> Activity</TabsTrigger>
+          <TabsTrigger value="guide" data-testid="tab-settings-guide"><Compass className="mr-2 h-4 w-4" aria-hidden /> Guide</TabsTrigger>
+        </TabsList>
 
+        <TabsContent value="people" className="mt-6 space-y-6">
       <div className="flex gap-4 items-center justify-between">
         <div className="relative flex-1 max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -665,22 +679,27 @@ export default function Settings() {
           data-testid="users-table"
         />
       </Card>
+        </TabsContent>
 
-      {/* Admin-only, like the rest of this page -- and enforced again by the
-          server, which refuses the activity log to anyone else. */}
-      <WalkthroughTemplateSettings />
+        {/* Admin-only, like the rest of this page -- and enforced again by the
+            server, which refuses these to anyone else. */}
+        <TabsContent value="setup" className="mt-6 space-y-6">
+          <WalkthroughTemplateSettings />
+          <ResourceLinksSettings />
+          <DepositDeadlineSettings />
+          <QuickBooksSettings />
+          <RosterSyncSettings />
+        </TabsContent>
 
-      <ResourceLinksSettings />
+        <TabsContent value="activity" className="mt-6 space-y-6">
+          <EmailHealthSettings />
+          <ActivityLog />
+        </TabsContent>
 
-      <QuickBooksSettings />
-
-      <RosterSyncSettings />
-
-      <DepositDeadlineSettings />
-
-      <EmailHealthSettings />
-
-      <ActivityLog />
+        <TabsContent value="guide" className="mt-6">
+          <AdminGuide />
+        </TabsContent>
+      </Tabs>
 
       <Dialog open={isPermissionsDialogOpen} onOpenChange={(open) => {
         setIsPermissionsDialogOpen(open);

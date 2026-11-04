@@ -18,11 +18,11 @@ const TOPICS: { title: string; points: string[] }[] = [
   {
     title: "Set up a region",
     points: [
-      "Settings: Add User for the RA, role Regional Admin, then Permissions to tick their region and what they may do.",
+      "Settings, People tab: Add User for the RA, role Regional Admin, then Permissions to tick their region and what they may do.",
       "Properties: check each house's details. At the foot of the page, fill in \"Who your households call\" with the RA's phone and hours.",
       "Residents: Import a roster for each house from a spreadsheet.",
       "On a resident's page, Portal access lets up to 4 people per house sign in (the household leader and stewards), with the Google email on the roster.",
-      "Settings: \"What households see\" holds the links every household gets on its Resources page.",
+      "Settings, Portal setup tab: \"What households see\" holds the links every household gets on its Resources page.",
     ],
   },
   {
@@ -46,14 +46,14 @@ const TOPICS: { title: string; points: string[] }[] = [
     points: [
       "Finances shows what is outstanding, HH fees by house and each resident's deposit.",
       "QuickBooks and Ramp move the money. The portal keeps references, amounts and dates only, and refuses bank or card numbers.",
-      "Set each state's deposit return deadline under Deposit return deadlines below, so a held deposit is raised in time.",
+      "Set each state's deposit return deadline in Settings, Portal setup tab, so a held deposit is raised in time.",
     ],
   },
   {
     title: "Keeping watch",
     points: [
-      "The activity log at the foot of this page records access, money and document changes, with who and when.",
-      "Email health shows whether the portal's emails are going out.",
+      "The activity log, on the Activity tab, records access, money and document changes, with who and when.",
+      "Email health, on the same tab, shows whether the portal's emails are going out.",
       "Records are never deleted when someone moves out. Their login closes when they leave the roster.",
     ],
   },
