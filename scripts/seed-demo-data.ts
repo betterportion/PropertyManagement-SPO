@@ -93,6 +93,10 @@ async function seed(): Promise<void> {
     properties.push(
       await storage.createProperty({
         ...row,
+        // The house form requires these, so a seeded house can be edited as-is.
+        household: row.name === "Dinkytown Women's House" || row.name === "Beacon House" ? "women" : "men",
+        capacityLegal: row.bedrooms * 2,
+        capacityMission: row.bedrooms * 2 - 2,
         address: `${row.streetAddress}, ${row.city}, ${row.state} ${row.zipCode}`,
       }),
     );
