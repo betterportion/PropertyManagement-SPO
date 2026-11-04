@@ -33,6 +33,7 @@ import { invitationOutcomeMessage, type InvitationOutcome } from "@/lib/invitati
 import { serverMessage } from "@/lib/serverMessage";
 import { z } from "zod";
 import { ActivityLog } from "@/components/ActivityLog";
+import { AdminGuide } from "@/components/AdminGuide";
 import QuickBooksSettings from "@/components/QuickBooksSettings";
 import DepositDeadlineSettings from "@/components/DepositDeadlineSettings";
 import EmailHealthSettings from "@/components/EmailHealthSettings";
@@ -356,6 +357,8 @@ export default function Settings() {
       <Container>
       <PageStack>
       <PageHeader title="User Management" description="Manage staff access, roles, and regional permissions from one place." />
+
+      <AdminGuide />
 
       <div className="flex gap-4 items-center justify-between">
         <div className="relative flex-1 max-w-md">
