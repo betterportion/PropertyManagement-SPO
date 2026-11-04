@@ -1,18 +1,6 @@
-import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { PhotoUpload } from "@/components/PhotoUpload";
-import { buttonVariants } from "@/components/ui/button";
 import PhotoThumbnail from "@/components/walkthrough/PhotoThumbnail";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { serverMessage } from "@/lib/serverMessage";
@@ -26,7 +14,8 @@ import type { Walkthrough, WalkthroughPhoto, WalkthroughRoom } from "@shared/sch
  * checklist line it belongs to first is how photos stop being taken.
  *
  * Up to five can be picked at once, and staff can remove one added by
- * mistake. The server keeps the file while a repair still references it.
+ * mistake with one tap, no confirm (JR, 2026-11-04). The server keeps the file
+ * while a repair still references it.
  */
 
 const MAX_PHOTOS_AT_ONCE = 5;
@@ -40,7 +29,6 @@ interface RoomPhotosProps {
 
 export default function RoomPhotos({ walkthrough, room, canManage, uploaderEmail }: RoomPhotosProps) {
   const { toast } = useToast();
-  const [removing, setRemoving] = useState<WalkthroughPhoto | null>(null);
 
   const photosKey = ["/api/walkthrough-photos/room", room.id] as const;
 
@@ -97,7 +85,7 @@ export default function RoomPhotos({ walkthrough, room, canManage, uploaderEmail
               photo={photo}
               alt={`${room.name} photo`}
               testId={`photo-${photo.id}`}
-              onRemove={canManage ? () => setRemoving(photo) : undefined}
+              onRemove={canManage ? () => removePhoto.mutate(photo.id) : undefined}
             />
           ))}
         </div>
@@ -111,26 +99,6 @@ export default function RoomPhotos({ walkthrough, room, canManage, uploaderEmail
         />
       )}
 
-      <AlertDialog open={removing !== null} onOpenChange={(open) => !open && setRemoving(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Remove this photo?</AlertDialogTitle>
-            <AlertDialogDescription>
-              It comes off this walkthrough for good. A repair it was already sent with keeps it.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel data-testid="button-cancel-remove-photo">Keep it</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => removing && removePhoto.mutate(removing.id)}
-              className={buttonVariants({ variant: "destructive" })}
-              data-testid="button-confirm-remove-photo"
-            >
-              Remove photo
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   );
 }

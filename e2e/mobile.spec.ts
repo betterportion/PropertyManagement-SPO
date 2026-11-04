@@ -165,14 +165,9 @@ test.describe("filling in a walkthrough on a phone", () => {
     await expect(page.getByText("Up to 5 photos at a time").first()).toBeVisible();
     await expect(thumbs).toHaveCount(before + 5);
 
-    // Cancel leaves the photo; confirming takes it off, and a reload agrees.
-    const first = thumbs.first();
-    const firstId = await first.getAttribute("data-testid");
+    // One tap on the x takes it off, no confirm, and a reload agrees.
+    const firstId = await thumbs.first().getAttribute("data-testid");
     await page.getByTestId(`button-remove-${firstId}`).click();
-    await page.getByTestId("button-cancel-remove-photo").click();
-    await expect(thumbs).toHaveCount(before + 5);
-    await page.getByTestId(`button-remove-${firstId}`).click();
-    await page.getByTestId("button-confirm-remove-photo").click();
     await expect(thumbs).toHaveCount(before + 4);
     await page.reload();
     await expect(page.getByTestId(firstId!)).toHaveCount(0);
