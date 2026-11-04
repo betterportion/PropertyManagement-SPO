@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { PhotoUpload } from "@/components/PhotoUpload";
 import PhotoThumbnail from "@/components/walkthrough/PhotoThumbnail";
@@ -13,7 +12,13 @@ import type { Walkthrough, WalkthroughPhoto, WalkthroughRoom } from "@shared/sch
  * Photos are per room rather than per item on purpose: an RA taking a picture
  * of a damaged wall is documenting the room, and asking them to pick which
  * checklist line it belongs to first is how photos stop being taken.
+ *
+ * Up to five can be picked at once, and staff can remove one added by
+ * mistake with one tap, no confirm (JR, 2026-11-04). The server keeps the file
+ * while a repair still references it.
  */
+
+const MAX_PHOTOS_AT_ONCE = 5;
 
 interface RoomPhotosProps {
   walkthrough: Walkthrough;
@@ -24,9 +29,6 @@ interface RoomPhotosProps {
 
 export default function RoomPhotos({ walkthrough, room, canManage, uploaderEmail }: RoomPhotosProps) {
   const { toast } = useToast();
-  // Bumped after each upload so the picker clears its preview and is ready for
-  // the next photo, rather than sitting on the one just sent.
-  const [uploadKey, setUploadKey] = useState(0);
 
   const photosKey = ["/api/walkthrough-photos/room", room.id] as const;
 
@@ -46,11 +48,25 @@ export default function RoomPhotos({ walkthrough, room, canManage, uploaderEmail
       });
     },
     onSuccess: () => {
-      setUploadKey((key) => key + 1);
       queryClient.invalidateQueries({ queryKey: photosKey });
+      queryClient.invalidateQueries({ queryKey: ["/api/walkthrough-photos"] });
     },
     onError: (error) => {
       toast({ variant: "destructive", title: "Not saved", description: serverMessage(error) ?? "The photo uploaded but could not be filed against this room." });
+    },
+  });
+
+  const removePhoto = useMutation({
+    mutationFn: async (photoId: string) => {
+      await apiRequest("DELETE", `/api/walkthrough-photos/${photoId}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: photosKey });
+      queryClient.invalidateQueries({ queryKey: ["/api/walkthrough-photos"] });
+      toast({ title: "Photo removed" });
+    },
+    onError: (error) => {
+      toast({ variant: "destructive", title: "Not removed", description: serverMessage(error) ?? "The photo could not be removed." });
     },
   });
 
@@ -64,19 +80,25 @@ export default function RoomPhotos({ walkthrough, room, canManage, uploaderEmail
       {photos.length > 0 && (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
           {photos.map((photo) => (
-            <PhotoThumbnail key={photo.id} photo={photo} alt={`${room.name} photo`} testId={`photo-${photo.id}`} />
+            <PhotoThumbnail
+              key={photo.id}
+              photo={photo}
+              alt={`${room.name} photo`}
+              testId={`photo-${photo.id}`}
+              onRemove={canManage ? () => removePhoto.mutate(photo.id) : undefined}
+            />
           ))}
         </div>
       )}
 
       {canManage && (
         <PhotoUpload
-          key={uploadKey}
+          maxFiles={MAX_PHOTOS_AT_ONCE}
           onUpload={(url) => createPhoto.mutate(url)}
           onError={(message) => toast({ variant: "destructive", title: "Upload failed", description: message })}
-          disabled={createPhoto.isPending}
         />
       )}
+
     </div>
   );
 }

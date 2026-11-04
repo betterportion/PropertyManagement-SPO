@@ -13,12 +13,20 @@ interface PhotoUploadProps {
   disabled?: boolean;
   /** Where to POST the file. Defaults to the staff image endpoint. */
   endpoint?: string;
+  /**
+   * More than 1 lets several photos be picked at once, uploaded one after
+   * another (so a burst stays under the server's in-flight ceiling), with
+   * `onUpload` called once per photo and no preview kept.
+   */
+  maxFiles?: number;
 }
 
-export function PhotoUpload({ onUpload, onRemove, onError, existingUrl, className, disabled, endpoint = "/api/upload" }: PhotoUploadProps) {
+export function PhotoUpload({ onUpload, onRemove, onError, existingUrl, className, disabled, endpoint = "/api/upload", maxFiles = 1 }: PhotoUploadProps) {
+  const multiple = maxFiles > 1;
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [preview, setPreview] = useState<string | null>(existingUrl ?? null);
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -42,11 +50,13 @@ export function PhotoUpload({ onUpload, onRemove, onError, existingUrl, classNam
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      setPreview(e.target?.result as string);
-    };
-    reader.readAsDataURL(file);
+    if (!multiple) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        setPreview(e.target?.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
 
     setIsUploading(true);
     try {
@@ -69,7 +79,7 @@ export function PhotoUpload({ onUpload, onRemove, onError, existingUrl, classNam
         throw new Error("No URL returned from server");
       }
       onUpload(data.url);
-      setPreview(data.url);
+      if (!multiple) setPreview(data.url);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to upload file";
       onError?.(message);
@@ -80,7 +90,27 @@ export function PhotoUpload({ onUpload, onRemove, onError, existingUrl, classNam
     } finally {
       setIsUploading(false);
     }
-  }, [onUpload, onError, existingUrl, endpoint]);
+  }, [onUpload, onError, existingUrl, endpoint, multiple]);
+
+  const handleFiles = useCallback(async (list: FileList | null | undefined) => {
+    const files = Array.from(list ?? []);
+    if (files.length === 0) return;
+    if (!multiple) {
+      await handleFile(files[0]);
+      return;
+    }
+    const batch = files.slice(0, maxFiles);
+    if (files.length > maxFiles) {
+      onError?.(`Up to ${maxFiles} photos at a time. Uploading the first ${maxFiles}.`);
+    }
+    for (let i = 0; i < batch.length; i++) {
+      setProgress({ done: i + 1, total: batch.length });
+      await handleFile(batch[i]);
+    }
+    setProgress(null);
+    // Clear the picker so choosing the same photo again still fires a change.
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }, [multiple, maxFiles, handleFile, onError]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -88,11 +118,8 @@ export function PhotoUpload({ onUpload, onRemove, onError, existingUrl, classNam
 
     if (disabled) return;
 
-    const file = e.dataTransfer.files[0];
-    if (file) {
-      handleFile(file);
-    }
-  }, [disabled, handleFile]);
+    handleFiles(e.dataTransfer.files);
+  }, [disabled, handleFiles]);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -107,16 +134,13 @@ export function PhotoUpload({ onUpload, onRemove, onError, existingUrl, classNam
   }, []);
 
   const handleClick = () => {
-    if (!disabled && fileInputRef.current) {
+    if (!disabled && !progress && fileInputRef.current) {
       fileInputRef.current.click();
     }
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      handleFile(file);
-    }
+    handleFiles(e.target.files);
   };
 
   const clearPreview = () => {
@@ -148,16 +172,19 @@ export function PhotoUpload({ onUpload, onRemove, onError, existingUrl, classNam
           ref={fileInputRef}
           type="file"
           accept="image/*"
+          multiple={multiple}
           onChange={handleFileChange}
           className="hidden"
           disabled={disabled}
           data-testid="input-file-upload"
         />
 
-        {isUploading ? (
+        {isUploading || progress ? (
           <div className="flex flex-col items-center gap-2">
             <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-            <span className="text-sm text-muted-foreground">Uploading...</span>
+            <span className="text-sm text-muted-foreground">
+              {progress && progress.total > 1 ? `Uploading ${progress.done} of ${progress.total}...` : "Uploading..."}
+            </span>
           </div>
         ) : preview ? (
           <div className="relative w-full">
@@ -196,7 +223,7 @@ export function PhotoUpload({ onUpload, onRemove, onError, existingUrl, classNam
             </div>
             <div className="text-center mt-2">
               <p className="text-sm font-medium">
-                Take a photo or choose from library
+                {multiple ? `Take a photo or choose up to ${maxFiles}` : "Take a photo or choose from library"}
               </p>
               <p className="text-xs text-muted-foreground mt-1">
                 Tap to open camera, photos, or files

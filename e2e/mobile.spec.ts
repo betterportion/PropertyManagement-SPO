@@ -148,4 +148,29 @@ test.describe("filling in a walkthrough on a phone", () => {
     );
     expect(overflow).toBeLessThanOrEqual(1);
   });
+
+  test("five photos go up at once and one added by mistake comes off with its x", async ({ page }) => {
+    await startWalkthrough(page);
+    const png = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+      "base64",
+    );
+    const thumbs = page.locator('figure[data-testid^="photo-"]');
+    const before = await thumbs.count();
+
+    // Six picked, five taken: the picker says so and uploads the first five.
+    await page.getByTestId("input-file-upload").setInputFiles(
+      Array.from({ length: 6 }, (_, i) => ({ name: `room-${i + 1}.png`, mimeType: "image/png", buffer: png })),
+    );
+    await expect(page.getByText("Up to 5 photos at a time").first()).toBeVisible();
+    await expect(thumbs).toHaveCount(before + 5);
+
+    // One tap on the x takes it off, no confirm, and a reload agrees.
+    const firstId = await thumbs.first().getAttribute("data-testid");
+    await page.getByTestId(`button-remove-${firstId}`).click();
+    await expect(thumbs).toHaveCount(before + 4);
+    await page.reload();
+    await expect(page.getByTestId(firstId!)).toHaveCount(0);
+    await expect(thumbs).toHaveCount(before + 4);
+  });
 });
