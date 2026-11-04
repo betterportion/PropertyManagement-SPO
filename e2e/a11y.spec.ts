@@ -71,7 +71,7 @@ test.describe("accessibility", () => {
   // current value, or a screen reader hears "switch, on" twenty times.
   test("the settings page has no serious violations, and each account's controls are named", async ({ page }) => {
     await page.goto("/settings");
-    await expect(page.getByRole("heading", { name: "User Management" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
     await expect(page.locator('[data-testid^="switch-status-"]').first()).toBeVisible();
     await expect(page.getByRole("switch", { name: /^Account status for / }).first()).toBeVisible();
     await expect(page.getByRole("combobox", { name: /^Role of / }).first()).toBeVisible();

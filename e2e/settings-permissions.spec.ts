@@ -81,3 +81,26 @@ test.describe("the permissions dialog", () => {
     }
   });
 });
+
+test.describe("the Settings tabs", () => {
+  test("a dashboard link into a section opens the tab that holds it", async ({ page }) => {
+    await page.goto("/settings#roster");
+    await expect(page.getByTestId("tab-settings-setup")).toHaveAttribute("data-state", "active");
+    await expect(page.getByTestId("card-roster-sync")).toBeVisible();
+
+    await page.goto("/settings#email-health");
+    await expect(page.getByTestId("card-email-health")).toBeVisible();
+  });
+
+  test("People opens first, and a chosen tab survives a reload", async ({ page }) => {
+    await page.goto("/settings");
+    await expect(page.getByTestId("users-table")).toBeVisible();
+    await expect(page.getByTestId("card-admin-guide")).toHaveCount(0);
+
+    await page.getByTestId("tab-settings-guide").click();
+    await expect(page.getByTestId("card-admin-guide")).toBeVisible();
+    await expect(page).toHaveURL(/[?&]tab=guide/);
+    await page.reload();
+    await expect(page.getByTestId("card-admin-guide")).toBeVisible();
+  });
+});
