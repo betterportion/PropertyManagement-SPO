@@ -18,6 +18,7 @@ import { requestRefusalMessage, type RequestAccessUser } from "@/lib/requestAcce
 import { isForbiddenError } from "@/lib/authUtils";
 import { formatDate, formatValue } from "@/lib/format";
 import { REQUEST_PRIORITY, REQUEST_STATUS, REQUEST_TYPE } from "@/lib/requestLabels";
+import { RequestMedia } from "@/components/RequestVideos";
 import {
   isClosedMaintenanceStatus,
   isProjectType,
@@ -271,10 +272,9 @@ export default function RequestDetail() {
                 {photos.map((photo) => (
                   <figure key={photo.id} data-testid={`figure-request-photo-${photo.id}`}>
                     <div className="aspect-square overflow-hidden rounded-md border border-border bg-muted">
-                      <img
-                        src={photo.imageUrl}
+                      <RequestMedia
+                        url={photo.imageUrl}
                         alt={`${request.title}, added ${formatDate(photo.uploadedDate)}`}
-                        loading="lazy"
                         className="h-full w-full object-cover"
                       />
                     </div>

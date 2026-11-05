@@ -43,6 +43,8 @@ const CONTENT_TYPES: Record<string, string> = {
   ".pdf": "application/pdf",
   ".doc": "application/msword",
   ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  ".mp4": "video/mp4",
+  ".mov": "video/quicktime",
 };
 
 /**
