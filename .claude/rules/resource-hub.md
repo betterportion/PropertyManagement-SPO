@@ -3,6 +3,7 @@ paths:
   - "**/*esourceHub*"
   - "**/*egionContact*"
   - "**/*ouseFacts*"
+  - "**/*eepClean*"
   - "client/src/components/ResourceLinksSettings.tsx"
   - "client/src/components/PropertyBudgetCard.tsx"
   - "client/src/components/ResidentPaperwork.tsx"
@@ -24,6 +25,7 @@ Moved verbatim from CLAUDE.md. Loads when you work with a file matching `paths`;
 - **Managing the links is `requireAdmin`, not a regional flag** — exactly like the walkthrough template, and for the same reason: a national link reaches every region, so editing one is not a grant over your own houses.
 - **A link's region is one of `REGIONS`, spelled as the list spells it, or null for national.** Free text let "northwest" through, which reached nobody (#164).
 - **Links, never documents.** Most content lives on Drive; duplicating a deep-clean checklist into the portal means two copies that disagree within a term. The URL is scheme-checked by `httpUrlFromClient` because every viewer of this page clicks these, residents included.
+- **The one exception is the deep cleaning instructions** (JR, 2026-11-05): `/resources/deep-clean` (`DeepCleanGuide.tsx`), its text in `shared/deepClean.ts`, linked from a card on the hub. JR chose a page so a student can read it on a phone without a Drive account. It is a copy of SPO's "HH_Deep Clean Instructions" with only typing slips fixed, so when SPO changes theirs, change the file. The route sits behind the same gate as `/resources` (registered for a resident only with `canViewResourceHub`); it fetches nothing.
 
 **Three named links, by key and never by title.** `shared/resourceHubSlots.ts` fixes the three documents every house is shown by name — Household Code of Conduct, Fire Extinguisher guidelines, Active Shooter Policy — and a link fills one through `resource_links.slotKey`. The hub renders all three in a "From SPO" card whatever is bound: an empty slot reads "Not yet available" with a line saying SPO is still writing it, so a document that does not exist yet (the fire extinguisher guidance, at the time of writing) is visibly waiting on content rather than silently missing. Bound by key so an admin renaming a link cannot empty its slot; unique, so a slot has one holder; national, so a slotted link cannot be narrowed to one region — `hubSlotProblem` is the pure rule and the create and edit routes run it over the merged row, because an edit sends only the field it changes. A slotted link is listed in its slot and not again under its category. No seed row and no placeholder URL: the slots stay empty until an admin binds a real link from Settings.
 
