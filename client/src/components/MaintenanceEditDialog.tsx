@@ -22,6 +22,8 @@ import { MAINTENANCE_REQUEST_TYPES, isProjectType, type MaintenanceRequest, type
 import { REQUEST_TYPE } from "@/lib/requestLabels";
 import { DollarSign, Link2, FileText, Check, X, ImageIcon, Lock, Users } from "lucide-react";
 import { PhotoUpload } from "@/components/PhotoUpload";
+import { RoomSelect } from "@/components/RoomSelect";
+import { useRoomSuggestions } from "@/hooks/useRoomSuggestions";
 import { formatCurrency, formatDate } from "@/lib/format";
 
 interface MaintenanceEditDialogProps {
@@ -37,7 +39,7 @@ const editSchema = z.object({
   priority: z.enum(["low", "medium", "high", "urgent", "wishlist"]),
   type: z.enum(MAINTENANCE_REQUEST_TYPES),
   status: z.enum(["pending", "in_progress", "completed", "cancelled"]),
-  location: z.string().min(1, "Location is required"),
+  location: z.string().trim().min(1, "Where in the house is it?"),
   photoUrl: z.string().nullable().optional(),
   // The project fields, held as the strings the inputs produce; onSubmit
   // turns them into what the API takes, and sends them only for a project
@@ -148,6 +150,8 @@ export default function MaintenanceEditDialog({ request, open, onClose }: Mainte
     queryKey: ['/api/properties'],
     enabled: open,
   });
+  // The rooms of the request's own house, for "Where in the house".
+  const rooms = useRoomSuggestions(open ? properties.find((p) => p.address === request.buildingAddress)?.id : null);
 
   const relatedInvoices = invoices.filter(inv => inv.maintenanceRequestId === request.id);
 
@@ -291,21 +295,10 @@ export default function MaintenanceEditDialog({ request, open, onClose }: Mainte
                 name="location"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Location (Property)</FormLabel>
-                    <Select value={field.value} onValueChange={field.onChange}>
-                      <FormControl>
-                        <SelectTrigger data-testid="select-location">
-                          <SelectValue placeholder="Select property" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        {properties.filter(p => p.address).map((property) => (
-                          <SelectItem key={property.id} value={property.address!}>
-                            {property.address}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <FormLabel>Where in the house</FormLabel>
+                    <FormControl>
+                      <RoomSelect rooms={rooms} value={field.value ?? ""} onChange={field.onChange} testId="select-edit-request-location" />
+                    </FormControl>
                     <FormMessage />
                   </FormItem>
                 )}

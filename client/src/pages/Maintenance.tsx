@@ -39,12 +39,13 @@ import MaintenanceAggregates from "@/components/MaintenanceAggregates";
 import PropertyOpenWork from "@/components/PropertyOpenWork";
 import { ClipboardList, SlidersHorizontal } from "lucide-react";
 import { useRoomSuggestions } from "@/hooks/useRoomSuggestions";
+import { RoomSelect } from "@/components/RoomSelect";
 
 const createRequestSchema = insertMaintenanceRequestSchema.extend({
   title: z.string().min(1, "Title is required"),
   description: z.string().min(1, "Description is required"),
   category: z.string().min(1, "Category is required"),
-  location: z.string().min(1, "Location is required"),
+  location: z.string().trim().min(1, "Where in the house is it?"),
   priority: z.enum(["low", "medium", "high", "urgent", "wishlist"], {
     errorMap: () => ({ message: "Priority is required" }),
   }),
@@ -393,22 +394,15 @@ export default function Maintenance() {
                     <FormItem>
                       <FormLabel>Where in the house</FormLabel>
                       <FormControl>
-                        {/* Suggests from the house's own walkthrough rooms
-                            without restricting: free text alone will not group
-                            "living room" and "Living Rm", and grouping is the
-                            point -- it is what lets somebody notice that these
-                            blinds have broken every year. */}
-                        <Input
-                          list="staff-request-location-suggestions"
-                          placeholder="e.g. Kitchen, Upstairs bathroom"
-                          {...field}
+                        {/* Keyed on the house so "Somewhere else" closes when the house changes. */}
+                        <RoomSelect
+                          key={creatingForAddress}
+                          rooms={staffLocationSuggestions}
                           value={field.value ?? ""}
-                          data-testid="input-staff-request-location"
+                          onChange={field.onChange}
+                          testId="select-staff-request-location"
                         />
                       </FormControl>
-                      <datalist id="staff-request-location-suggestions">
-                        {staffLocationSuggestions.map((name) => <option key={name} value={name} />)}
-                      </datalist>
                       <FormMessage />
                     </FormItem>
                   )}

@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import { deflateSync } from "node:zlib";
 
 // Acts as the resident. global-setup puts this resident on a house roster, so
@@ -13,7 +13,14 @@ test.describe("resident submits a maintenance request", () => {
     // A unique title so the assertion can't collide with a prior run's row.
     const title = `E2E submitted ${Date.now()}`;
     await page.getByLabel("Issue title").fill(title);
-    await page.getByLabel("Location").fill("Kitchen");
+    // "Where in the house" offers the house's rooms (latest walkthrough, or the
+    // national template), then "Somewhere else". Pick the first room.
+    await page.getByTestId("select-request-location").click();
+    const options = page.getByRole("option");
+    await expect(options.last()).toHaveText("Somewhere else");
+    expect(await options.count()).toBeGreaterThan(1);
+    const room = (await options.first().textContent())!;
+    await options.first().click();
     await page.locator("#category").click();
     await page.getByRole("option", { name: "Plumbing" }).click();
     await page.locator("#priority").click();
@@ -25,12 +32,32 @@ test.describe("resident submits a maintenance request", () => {
     // Redirects to My requests, and the new request is really there.
     await expect(page).toHaveURL(/\/my-requests$/);
     await expect(page.getByText(title)).toBeVisible();
+    expect(room).not.toBe("Somewhere else");
+  });
+
+  test("asks where in the house, and takes a place that is not a room", async ({ page }) => {
+    await page.goto("/submit-request");
+    const title = `E2E somewhere else ${Date.now()}`;
+    await page.getByLabel("Issue title").fill(title);
+    await page.locator("#category").click();
+    await page.getByRole("option", { name: "Plumbing" }).click();
+    await page.locator("#priority").click();
+    await page.getByRole("option", { name: "Medium" }).click();
+    await page.getByLabel("Description").fill("The outdoor tap is cracked.");
+
+    await page.getByTestId("button-submit-request").click();
+    await expect(page.getByTestId("text-form-error")).toHaveText("Where in the house is it?");
+
+    await somewhereElse(page, "Back porch");
+    await page.getByTestId("button-submit-request").click();
+    await expect(page).toHaveURL(/\/my-requests$/);
+    await expect(page.getByText(title)).toBeVisible();
   });
 
   test("blocks submission until a category and priority are chosen", async ({ page }) => {
     await page.goto("/submit-request");
     await page.getByLabel("Issue title").fill("Missing fields");
-    await page.getByLabel("Location").fill("Hallway");
+    await somewhereElse(page, "Hallway");
     await page.getByLabel("Description").fill("No category or priority picked.");
 
     await page.getByTestId("button-submit-request").click();
@@ -44,7 +71,7 @@ test.describe("resident submits a maintenance request", () => {
     await page.goto("/submit-request");
     const title = `E2E photo request ${Date.now()}`;
     await page.getByLabel("Issue title").fill(title);
-    await page.getByLabel("Location").fill("Bathroom");
+    await somewhereElse(page, "Bathroom");
     await page.locator("#category").click();
     await page.getByRole("option", { name: "Plumbing" }).click();
     await page.locator("#priority").click();
@@ -73,7 +100,7 @@ test.describe("resident submits a maintenance request", () => {
     // noise is ~12 MB, so it only lands because the browser re-encoded it.
     await page.goto("/submit-request");
     await page.getByLabel("Issue title").fill(`E2E big photo ${Date.now()}`);
-    await page.getByLabel("Location").fill("Kitchen");
+    await somewhereElse(page, "Kitchen");
     await page.locator("#category").click();
     await page.getByRole("option", { name: "Plumbing" }).click();
     await page.locator("#priority").click();
@@ -97,6 +124,13 @@ test.describe("resident submits a maintenance request", () => {
     await expect(page.getByTestId("request-photo-thumbs")).toBeVisible();
   });
 });
+
+/** Picks "Somewhere else" for where in the house, and types the place. */
+async function somewhereElse(page: Page, place: string) {
+  await page.getByTestId("select-request-location").click();
+  await page.getByRole("option", { name: "Somewhere else" }).click();
+  await page.getByTestId("select-request-location-other").fill(place);
+}
 
 /**
  * A valid PNG of random RGB noise, built by hand so the test needs no image
