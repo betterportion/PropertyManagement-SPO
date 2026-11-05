@@ -8,6 +8,8 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { PhotoUpload } from "@/components/PhotoUpload";
 import { RoomSelect } from "@/components/RoomSelect";
+import { RequestVideosField } from "@/components/RequestVideos";
+import { MAX_REQUEST_VIDEOS, MAX_REQUEST_VIDEO_SECONDS } from "@shared/schema";
 import { Wrench, X } from "lucide-react";
 
 const MAX_PHOTOS = 5;
@@ -35,6 +37,7 @@ export default function MaintenanceRequestForm({
     queryKey: ["/api/maintenance-locations"],
   });
   const [photoUrls, setPhotoUrls] = useState<string[]>([]);
+  const [videos, setVideos] = useState<{ url: string; name: string }[]>([]);
   // Bumped after each upload so the dropzone resets to empty for the next photo.
   const [uploadKey, setUploadKey] = useState(0);
   const update = (key: string, value: string) => setFormData((current) => ({ ...current, [key]: value }));
@@ -52,7 +55,7 @@ export default function MaintenanceRequestForm({
       return;
     }
     setError("");
-    onSubmit?.({ ...formData, photoUrls });
+    onSubmit?.({ ...formData, photoUrls, videoUrls: videos.map((v) => v.url) });
   };
   return <Card className="border-border/80"><CardHeader><CardTitle className="flex items-center gap-2 text-xl"><Wrench className="h-5 w-5" />Submit maintenance request</CardTitle></CardHeader><CardContent>
     <form onSubmit={handleSubmit} className="space-y-4">
@@ -92,6 +95,10 @@ export default function MaintenanceRequestForm({
             onError={(msg) => setError(msg)}
           />
         )}
+      </div>
+      <div className="space-y-2">
+        <Label>Videos <span className="text-muted-foreground text-xs">(optional — up to {MAX_REQUEST_VIDEOS}, {MAX_REQUEST_VIDEO_SECONDS} seconds each)</span></Label>
+        <RequestVideosField urls={videos} onChange={setVideos} onError={setError} />
       </div>
       {error && <p className="text-sm text-destructive" data-testid="text-form-error">{error}</p>}
       <Button type="submit" variant="primary" className="w-full" disabled={isSubmitting} data-testid="button-submit-request">{isSubmitting ? "Sending request..." : "Submit request"}</Button>

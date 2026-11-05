@@ -15,7 +15,7 @@ import { Search, Plus } from "lucide-react";
 import { PhotoUpload } from "@/components/PhotoUpload";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { MAINTENANCE_REQUEST_TYPES, insertMaintenanceRequestSchema, type MaintenanceRequest, type Property } from "@shared/schema";
+import { MAINTENANCE_REQUEST_TYPES, MAX_REQUEST_VIDEOS, MAX_REQUEST_VIDEO_SECONDS, insertMaintenanceRequestSchema, type MaintenanceRequest, type Property } from "@shared/schema";
 import { REQUEST_TYPE } from "@/lib/requestLabels";
 import { REGIONS } from "@shared/regions";
 import { useAuth } from "@/hooks/useAuth";
@@ -40,6 +40,7 @@ import PropertyOpenWork from "@/components/PropertyOpenWork";
 import { ClipboardList, SlidersHorizontal } from "lucide-react";
 import { useRoomSuggestions } from "@/hooks/useRoomSuggestions";
 import { RoomSelect } from "@/components/RoomSelect";
+import { RequestVideosField } from "@/components/RequestVideos";
 
 const createRequestSchema = insertMaintenanceRequestSchema.extend({
   title: z.string().min(1, "Title is required"),
@@ -211,20 +212,23 @@ export default function Maintenance() {
   const creatingForAddress = createForm.watch("buildingAddress");
   const creatingForProperty = properties.find((p) => p.address === creatingForAddress);
   const staffLocationSuggestions = useRoomSuggestions(creatingForProperty?.id);
+  const [createVideos, setCreateVideos] = useState<{ url: string; name: string }[]>([]);
 
   const createMutation = useMutation({
-    mutationFn: async (data: z.infer<typeof createRequestSchema>) => {
+    mutationFn: async (data: z.infer<typeof createRequestSchema> & { videoUrls: string[] }) => {
       return apiRequest('POST', '/api/maintenance-requests', data);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/maintenance-requests'] });
       // The Patterns tab rolls up requests and contractor links; nothing refetches on its own.
       queryClient.invalidateQueries({ queryKey: ['/api/maintenance-aggregates'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/maintenance-request-photos'] });
       toast({
         title: "Success",
         description: "Maintenance request created successfully",
       });
       createForm.reset();
+      setCreateVideos([]);
       setIsCreateDialogOpen(false);
     },
     onError: (error) => {
@@ -237,7 +241,7 @@ export default function Maintenance() {
   });
 
   const onSubmitCreate = (data: z.infer<typeof createRequestSchema>) => {
-    createMutation.mutate(data);
+    createMutation.mutate({ ...data, videoUrls: createVideos.map((v) => v.url) });
   };
 
   if (isLoading) return <Section><Container><LoadingState message="Loading maintenance requests..." /></Container></Section>;
@@ -435,6 +439,14 @@ export default function Maintenance() {
                   <PhotoUpload
                     onUpload={(url) => createForm.setValue("photoUrl", url)}
                     onError={(err) => toast({ title: "Upload failed", description: err, variant: "destructive" })}
+                  />
+                </FormItem>
+                <FormItem>
+                  <FormLabel>Videos (optional, up to {MAX_REQUEST_VIDEOS}, {MAX_REQUEST_VIDEO_SECONDS} seconds each)</FormLabel>
+                  <RequestVideosField
+                    urls={createVideos}
+                    onChange={setCreateVideos}
+                    onError={(err) => { if (err) toast({ title: "Video not added", description: err, variant: "destructive" }); }}
                   />
                 </FormItem>
 

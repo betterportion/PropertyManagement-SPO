@@ -94,6 +94,33 @@ test.describe("resident submits a maintenance request", () => {
     await expect(page.locator('[data-testid^="request-photos-"]').first()).toBeVisible();
   });
 
+  test("a household can attach a short video, and the request shows it with a download", async ({ page }) => {
+    // Joseph's notes (2026-11-04): up to three videos, .mov or .mp4, at filing.
+    await page.goto("/submit-request");
+    const title = `E2E video request ${Date.now()}`;
+    await page.getByLabel("Issue title").fill(title);
+    await page.getByTestId("select-request-location").click();
+    await page.getByRole("option", { name: "Somewhere else" }).click();
+    await page.getByTestId("select-request-location-other").fill("Basement stairs");
+    await page.locator("#category").click();
+    await page.getByRole("option", { name: "Plumbing" }).click();
+    await page.locator("#priority").click();
+    await page.getByRole("option", { name: "Medium" }).click();
+    await page.getByLabel("Description").fill("Water on the stairs; video attached.");
+
+    // An ISO media "ftyp" header: enough for the server's content check.
+    const enc = new TextEncoder();
+    const mp4 = Buffer.from([0, 0, 0, 0x18, ...enc.encode("ftypmp42"), 0, 0, 0, 0, ...enc.encode("mp42isom")]);
+    await page.getByTestId("input-video-upload").setInputFiles({ name: "stairs.mp4", mimeType: "video/mp4", buffer: mp4 });
+    await expect(page.getByTestId("request-video-list")).toContainText("stairs.mp4");
+
+    await page.getByTestId("button-submit-request").click();
+    await expect(page).toHaveURL(/\/my-requests$/);
+    const card = page.locator('[data-testid^="card-request-"]').filter({ hasText: title });
+    await expect(card.locator("video")).toHaveCount(1);
+    await expect(card.getByTestId("link-download-video")).toBeVisible();
+  });
+
   test("a phone-sized photo is shrunk in the browser before it is uploaded", async ({ page }) => {
     // 2026-09 RA review, item 2. The server's image limit is 10 MB and does
     // not move; the phone shrinks the photo instead. This 2000x2000 PNG of

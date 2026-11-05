@@ -810,6 +810,15 @@ export const maintenanceRequestComments = pgTable("maintenance_request_comments"
  */
 export const UPLOAD_URL_PATTERN = /^\/uploads\/[A-Za-z0-9_-][A-Za-z0-9._-]*$/;
 
+/**
+ * Videos on a maintenance request (Joseph's notes, 2026-11-04): up to three,
+ * each at most 20 seconds, attached when the request is filed. They are stored
+ * as request-photo rows, told apart by the extension the storage key keeps.
+ */
+export const MAX_REQUEST_VIDEOS = 3;
+export const MAX_REQUEST_VIDEO_SECONDS = 20;
+export const isVideoUpload = (url: string) => /\.(mov|mp4)$/i.test(url);
+
 export const insertMaintenanceRequestCommentSchema = createInsertSchema(maintenanceRequestComments)
   .omit({
     id: true,
