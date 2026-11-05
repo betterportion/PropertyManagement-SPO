@@ -39,6 +39,7 @@ import PropertyDetail from "@/pages/PropertyDetail";
 import MyWalkthroughs from "@/pages/MyWalkthroughs";
 import ResidentDashboard from "@/pages/ResidentDashboard";
 import ResourceHub from "@/pages/ResourceHub";
+import DeepCleanGuide from "@/pages/DeepCleanGuide";
 import SubmitRequest from "@/pages/SubmitRequest";
 import MyRequests from "@/pages/MyRequests";
 import AdminSettings from "@/pages/Settings";
@@ -85,6 +86,7 @@ function Router() {
         <Route path="/contacts/:id" component={ContactDetail} />
         {/* Staff read it too, under the property permission, so they can see
             what their households are being told. */}
+        <Route path="/resources/deep-clean" component={DeepCleanGuide} />
         <Route path="/resources" component={ResourceHub} />
         <Route path="/settings" component={AdminSettings} />
         {/* Internal design reference — staff only; residents fall through to Not Found. */}
@@ -114,6 +116,7 @@ function Router() {
           resident-tier capability is granted per account. Registered only when
           granted -- the server refuses either way, so this decides whether the
           page is reachable from the app at all. */}
+      {canUseResourceHub && <Route path="/resources/deep-clean" component={DeepCleanGuide} />}
       {canUseResourceHub && <Route path="/resources" component={ResourceHub} />}
       {canCompleteWalkthroughs && <Route path="/walkthroughs" component={MyWalkthroughs} />}
       {/* The flagged list is staff-only. Without this literal path first, :id

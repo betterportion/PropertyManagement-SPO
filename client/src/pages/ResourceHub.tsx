@@ -364,13 +364,33 @@ export default function ResourceHub() {
             </Card>
           )}
 
+          {/* SPO's checklist, kept in the portal (shared/deepClean.ts) so it
+              reads on a phone without a Drive account (JR, 2026-11-05). */}
+          <Link
+            href="/resources/deep-clean"
+            className="block rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            data-testid="link-hub-deep-clean"
+          >
+            <Card className="transition-colors hover:bg-muted/40">
+              <CardContent className="flex items-start gap-3 p-6">
+                <ClipboardList className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" aria-hidden />
+                <span className="min-w-0 flex-1">
+                  <span className="block font-semibold">Deep cleaning instructions</span>
+                  <span className="block text-sm text-muted-foreground">
+                    What has to be cleaned before you move out, room by room.
+                  </span>
+                </span>
+              </CardContent>
+            </Card>
+          </Link>
+
           {isLoading ? (
             <LoadingState message="Loading your resources..." />
           ) : byCategory.length === 0 ? (
             <EmptyState
               icon={BookOpen}
               title="Nothing else has been published here yet"
-              description="Your RA will add the house expectations, the deep clean checklist and the rest of the safety guidance here."
+              description="Your RA will add the house expectations and the rest of the safety guidance here."
             />
           ) : (
             byCategory.map(([category, categoryLinks]) => {
