@@ -1,5 +1,10 @@
 /**
- * Who a household calls, by region.
+ * Who a household calls.
+ *
+ * Since Joseph's notes (2026-11-04) the household sees no phone numbers: the
+ * 911 line, then "contact your regional administrator", then the property
+ * mailbox. The region_contacts table and its staff routes are kept, with
+ * their data, but nothing on screen reads or writes them any more.
  *
  * From section 1 of "SPO Portal: Information We Need From SPO" (Joseph, 2026):
  * an urgent house problem goes to the region's regional administrator, one
@@ -14,11 +19,3 @@ export const EMERGENCY_LINE = "Fire, gas leak or anyone hurt: call 911 first, th
 
 /** Where a non-urgent question goes when the region's RA has no email on file (1.5). */
 export const SPO_PROPERTY_EMAIL = "property@spo.org";
-
-/** What the household's hub is told about its region's contact: named fields, never the row. */
-export interface EmergencyContact {
-  name: string;
-  phone: string;
-  email: string | null;
-  hours: string | null;
-}

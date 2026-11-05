@@ -53,6 +53,14 @@ test.describe("house facts", () => {
       await expect(hub.getByTestId("card-hub-house-facts")).toBeVisible();
       await expect(hub.getByTestId("text-hub-doorCode")).toHaveText(code);
       await expect(hub.getByTestId("text-hub-doorCode-date")).toContainText("Last changed");
+
+      // Joseph's notes (2026-11-04): 911 first, then the RA, then the property
+      // mailbox, and no phone number to call.
+      const emergency = hub.getByTestId("card-hub-emergency");
+      await expect(emergency.getByTestId("text-hub-emergency-line")).toContainText("call 911 first");
+      await expect(emergency.getByTestId("text-hub-emergency-ra")).toContainText("contact your regional administrator");
+      await expect(emergency.getByTestId("text-hub-emergency-email")).toContainText("property@spo.org");
+      await expect(emergency.locator('a[href^="tel:"]')).toHaveCount(0);
     } finally {
       await household.close();
     }

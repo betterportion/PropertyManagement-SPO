@@ -4769,14 +4769,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // and nothing else: named fields again, so `notes` -- the staff-only
       // remarks -- can never ride along. Who to call and the portal come from
       // the property's own columns, and only for a house SPO does not own.
-      const [facts, landlord, regionContact] = await Promise.all([
+      const [facts, landlord] = await Promise.all([
         onRoster ? storage.getPropertyFacts(property.id) : undefined,
         property.ownership === "rented" && property.rentalCompanyContactId
           ? storage.getMaintenanceContact(property.rentalCompanyContactId)
           : undefined,
-        // Who to call in an emergency: the house's region's contact, by the
-        // house and never by anything on the resident's own row.
-        storage.getRegionContact(property.region),
       ]);
 
       res.json({
@@ -4787,9 +4784,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         maintenancePortalUrl: property.ownership === "rented" ? property.maintenancePortalUrl : null,
         rentalCompany: landlord
           ? { name: landlord.name, company: landlord.company, phone: landlord.phone }
-          : null,
-        emergencyContact: regionContact
-          ? { name: regionContact.name, phone: regionContact.phone, email: regionContact.email, hours: regionContact.hours }
           : null,
         facts: facts
           ? {

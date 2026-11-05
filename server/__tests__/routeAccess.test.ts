@@ -9543,18 +9543,15 @@ describe("a region's emergency contact", () => {
     expect(storageMock.setRegionContact).toHaveBeenCalledTimes(1);
   });
 
-  it("reaches a household through its own house's region on /api/my-property, named fields only", async () => {
+  it("never reaches a household: no RA phone number on /api/my-property (Joseph's notes, 2026-11-04)", async () => {
     storageMock.getProperty.mockResolvedValue({ id: "prop-west", name: "Cleveland House", region: "West Central", address: "1 Main St" });
     storageMock.getResidentsByProperty.mockResolvedValue([]);
     actAs({ ...ALICE, propertyId: "prop-west" } as typeof ALICE, { canViewResourceHub: true });
     const { status, body } = await get("/api/my-property");
     expect(status).toBe(200);
-    expect(body.emergencyContact).toEqual({ name: "Zack Jablonski", phone: "352-317-2969", email: null, hours: "7 AM to 9 PM" });
-    expect(body.emergencyContact).not.toHaveProperty("updatedByEmail");
-    expect(storageMock.getRegionContact).toHaveBeenCalledWith("West Central");
-
-    storageMock.getRegionContact.mockResolvedValue(undefined);
-    expect((await get("/api/my-property")).body.emergencyContact).toBeNull();
+    expect(body).not.toHaveProperty("emergencyContact");
+    expect(JSON.stringify(body)).not.toContain("352-317-2969");
+    expect(storageMock.getRegionContact).not.toHaveBeenCalled();
   });
 });
 
