@@ -13,6 +13,7 @@ const TAB_FOR_SECTION: Record<string, SettingsTab> = {
   "#quickbooks": "setup",
   "#roster": "setup",
   "#email-health": "activity",
+  "#feedback": "activity",
 };
 
 export function settingsTabForHash(hash: string): SettingsTab {

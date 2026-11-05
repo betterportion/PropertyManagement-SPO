@@ -33,6 +33,7 @@ import {
   depositReturnRules,
   regionContacts,
   emailLog,
+  feedbackReports,
   invitations,
   propertyFacts,
   residents,
@@ -107,6 +108,7 @@ import {
   type RegionContact,
   type SetRegionContact,
   type EmailLogEntry,
+  type FeedbackReport,
   type Invitation,
   type PropertyFacts,
   type PropertyFactsWrite,
@@ -606,6 +608,8 @@ export interface IStorage {
   // Email log
   createEmailLogEntry(entry: Omit<EmailLogEntry, "id" | "createdAt">): Promise<void>;
   getEmailLogSince(since: Date): Promise<EmailLogEntry[]>;
+  createFeedbackReport(report: Omit<FeedbackReport, "id" | "createdAt">): Promise<FeedbackReport>;
+  listFeedbackReports(limit: number): Promise<FeedbackReport[]>;
   /** Deletes up to `limit` entries older than `cutoff`; returns how many. */
   deleteEmailLogBefore(cutoff: Date, limit: number): Promise<number>;
 
@@ -714,7 +718,8 @@ export type UploadReference =
   | { kind: "assetPhoto"; record: AssetPhoto }
   | { kind: "billingRecord"; record: BillingRecord }
   | { kind: "property"; record: Property }
-  | { kind: "moveOutPhoto"; record: MoveOutPhoto };
+  | { kind: "moveOutPhoto"; record: MoveOutPhoto }
+  | { kind: "feedbackReport"; record: FeedbackReport };
 
 export class DatabaseStorage implements IStorage {
   async getUser(id: string): Promise<User | undefined> {
@@ -2347,6 +2352,15 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(emailLog).where(gte(emailLog.createdAt, since)).orderBy(desc(emailLog.createdAt));
   }
 
+  async createFeedbackReport(report: Omit<FeedbackReport, "id" | "createdAt">): Promise<FeedbackReport> {
+    const [row] = await db.insert(feedbackReports).values(report).returning();
+    return row;
+  }
+
+  async listFeedbackReports(limit: number): Promise<FeedbackReport[]> {
+    return await db.select().from(feedbackReports).orderBy(desc(feedbackReports.createdAt)).limit(limit);
+  }
+
   async deleteEmailLogBefore(cutoff: Date, limit: number): Promise<number> {
     const doomed = db.select({ id: emailLog.id }).from(emailLog).where(lt(emailLog.createdAt, cutoff)).limit(limit);
     const removed = await db.delete(emailLog).where(inArray(emailLog.id, doomed)).returning({ id: emailLog.id });
@@ -2708,7 +2722,7 @@ export class DatabaseStorage implements IStorage {
     // Each of these is the full set of columns in which the application stores
     // an uploaded file's URL. A new column holding one has to be added here, or
     // downloads of those files will be refused to everyone but the uploader.
-    const [requests, requestPhotos, comments, bids, walkthrough, asset, billing, property, moveOut] = await Promise.all([
+    const [requests, requestPhotos, comments, bids, walkthrough, asset, billing, property, moveOut, feedback] = await Promise.all([
       db.select().from(maintenanceRequests).where(eq(maintenanceRequests.photoUrl, url)),
       db.select().from(maintenanceRequestPhotos).where(eq(maintenanceRequestPhotos.imageUrl, url)),
       db.select().from(maintenanceRequestComments).where(eq(maintenanceRequestComments.attachmentUrl, url)),
@@ -2727,6 +2741,7 @@ export class DatabaseStorage implements IStorage {
         ),
       db.select().from(properties).where(eq(properties.photoUrl, url)),
       db.select().from(moveOutPhotos).where(eq(moveOutPhotos.imageUrl, url)),
+      db.select().from(feedbackReports).where(eq(feedbackReports.screenshotUrl, url)),
     ]);
 
     return [
@@ -2739,6 +2754,7 @@ export class DatabaseStorage implements IStorage {
       ...billing.map((record) => ({ kind: "billingRecord" as const, record })),
       ...property.map((record) => ({ kind: "property" as const, record })),
       ...moveOut.map((record) => ({ kind: "moveOutPhoto" as const, record })),
+      ...feedback.map((record) => ({ kind: "feedbackReport" as const, record })),
     ];
   }
 }

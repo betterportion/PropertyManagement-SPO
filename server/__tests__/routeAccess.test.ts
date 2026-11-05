@@ -12848,3 +12848,87 @@ describe("two leaders on one house share its repairs and reach nothing else (bri
     expect(storageMock.getRequestContacts).toHaveBeenCalledWith("q-1");
   });
 });
+
+describe("bug and feature reports (JR, 2026-11-04)", () => {
+  const SEND = (body: Record<string, unknown>) => request("POST", "/api/feedback", { body });
+  const SHOT = "/uploads/shot-1.png";
+
+  beforeEach(() => {
+    storageMock.createFeedbackReport.mockImplementation(async (row: Record<string, unknown>) => ({ id: "fb-1", ...row, createdAt: new Date() }));
+  });
+
+  it("takes a household leader's report, with the house and region from the session, and emails it", async () => {
+    actAsAliceAtMainSt();
+    const { status } = await SEND({ kind: "bug", message: "The save button does nothing", pagePath: "/submit-request", role: "admin" });
+    expect(status).toBe(201);
+    expect(storageMock.createFeedbackReport).toHaveBeenCalledWith(expect.objectContaining({
+      kind: "bug", role: "resident", regions: "West Central", houseAddress: "1 Main St", submittedByEmail: ALICE.email, pagePath: "/submit-request",
+    }));
+    expect(sendEmailMock).toHaveBeenCalledTimes(1);
+    const [message] = sendEmailMock.mock.calls[0];
+    expect(message).toMatchObject({ template: "feedback", to: "jr@betterportion.org", subject: "BUG - SPO PropManagement App" });
+    expect(message.text).toContain("The save button does nothing");
+  });
+
+  it("subjects a feature request as one", async () => {
+    actAs(STAFF, { allowedRegions: ["East Central"] });
+    expect((await SEND({ kind: "feature", message: "A calendar view" })).status).toBe(201);
+    expect(storageMock.createFeedbackReport).toHaveBeenCalledWith(expect.objectContaining({ role: "regional_administrator", regions: "East Central" }));
+    expect(sendEmailMock.mock.calls[0][0].subject).toBe("FEATURE - SPO PropManagement App");
+  });
+
+  it("refuses a screenshot the sender did not upload, saving and sending nothing", async () => {
+    actAsAliceAtMainSt();
+    storageMock.getUploadByStorageKey.mockResolvedValue({ storageKey: "shot-1.png", uploadedBy: BOB.id });
+    expect((await SEND({ kind: "bug", message: "x", screenshotUrl: SHOT })).status).toBe(400);
+    expect(storageMock.createFeedbackReport).not.toHaveBeenCalled();
+    expect(sendEmailMock).not.toHaveBeenCalled();
+
+    // Positive control: their own upload is attached.
+    storageMock.getUploadByStorageKey.mockResolvedValue({ storageKey: "shot-1.png", uploadedBy: ALICE.id });
+    expect((await SEND({ kind: "bug", message: "x", screenshotUrl: SHOT })).status).toBe(201);
+    expect(storageMock.createFeedbackReport).toHaveBeenCalledWith(expect.objectContaining({ screenshotUrl: SHOT }));
+  });
+
+  it("refuses an empty report or an unknown kind", async () => {
+    actAsAliceAtMainSt();
+    expect((await SEND({ kind: "bug", message: "   " })).status).toBe(400);
+    expect((await SEND({ kind: "question", message: "hi" })).status).toBe(400);
+    expect(storageMock.createFeedbackReport).not.toHaveBeenCalled();
+  });
+
+  it("lists reports to admins only", async () => {
+    actAs(STAFF, { canManageProperties: true, allowedRegions: ["all"] });
+    expect((await get("/api/feedback")).status).toBe(403);
+    actAsAliceAtMainSt();
+    expect((await get("/api/feedback")).status).toBe(403);
+    expect(storageMock.listFeedbackReports).not.toHaveBeenCalled();
+
+    actAs(ADMIN);
+    storageMock.listFeedbackReports.mockResolvedValue([]);
+    expect((await get("/api/feedback")).status).toBe(200);
+    expect(storageMock.listFeedbackReports).toHaveBeenCalled();
+  });
+
+  it("serves a filed report's screenshot to admins, not to its sender", async () => {
+    storageMock.getUploadByStorageKey.mockResolvedValue({ storageKey: "shot-1.png", uploadedBy: ALICE.id });
+    storageMock.findUploadReferences.mockResolvedValue([{ kind: "feedbackReport", record: { id: "fb-1", screenshotUrl: SHOT } }]);
+    actAsAliceAtMainSt();
+    expect((await get("/uploads/shot-1.png")).status).toBe(403);
+    expect(fileStoreMock.openUploadStream).not.toHaveBeenCalled();
+
+    actAs(ADMIN);
+    expect((await fetch(`${baseUrl}/uploads/shot-1.png`)).status).toBe(200);
+    expect(fileStoreMock.openUploadStream).toHaveBeenCalled();
+  });
+
+  it("takes a screenshot upload from a household account", async () => {
+    actAsAliceAtMainSt();
+    fileStoreMock.putUpload.mockResolvedValue(undefined);
+    storageMock.createUpload.mockImplementation(async (row: object) => ({ id: "up-1", ...row }));
+    const body = new FormData();
+    body.append("file", new Blob([new Uint8Array([0xff, 0xd8, 0xff, 0xe0])], { type: "image/jpeg" }), "screen.jpg");
+    expect((await fetch(`${baseUrl}/api/feedback-screenshots/upload`, { method: "POST", body })).status).toBe(200);
+    expect(fileStoreMock.putUpload).toHaveBeenCalled();
+  });
+});
