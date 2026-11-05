@@ -38,6 +38,7 @@ import {
   maintenanceRequests,
   assets,
   invoices,
+  billingRecords,
   tasks,
   maintenanceContacts,
 } from "@shared/schema";
@@ -116,6 +117,7 @@ const TABLES: Table[] = [
   maintenanceRequests,
   assets,
   invoices,
+  billingRecords,
   tasks,
   maintenanceContacts,
 ];
@@ -176,6 +178,9 @@ async function seedHouse(key: string, region: string): Promise<HouseRows> {
   await db.insert(invoices).values({
     id: id("invoice"), invoiceNumber: `INV-${key}`, service: "Plumbing", amount: "80.00", dueDate: new Date("2026-10-01"), ...common,
   });
+  await db.insert(billingRecords).values({
+    id: id("billing"), companyName: "Acme", email: "a@acme.test", phone: "555", invoiceCost: "80.00", ...common,
+  });
   await db.insert(tasks).values({ id: id("lease-task"), title: "Renew or leave?", region, sourceKey: `lease-renewal:${propertyId}:2027-01-01` });
   await db.insert(tasks).values({ id: id("utilities-task"), title: "Turn off utilities", region, sourceKey: `utilities-lease:${propertyId}:2027-06-30` });
   await db.insert(tasks).values({ id: id("move-out-task"), title: "Maria moves out", region, sourceKey: `move-out:${residentId}:2027-05-20` });
@@ -198,6 +203,7 @@ async function seedHouse(key: string, region: string): Promise<HouseRows> {
     maintenance_requests: [id("request")],
     assets: [id("asset")],
     invoices: [id("invoice")],
+    billing_records: [id("billing")],
     tasks: [id("lease-task"), id("utilities-task"), id("move-out-task")],
     move_out_photos: [id("move-out-photo")],
   };
@@ -294,6 +300,7 @@ describe.skipIf(!TEST_DATABASE_URL)("a house's records, against PostgreSQL", () 
     const moved = await regionsOf({
       maintenance_requests: moving.maintenance_requests,
       invoices: moving.invoices,
+      billing_records: moving.billing_records,
     });
     expect(moved).toEqual(allIn(EAST, moved));
   });
@@ -312,7 +319,7 @@ describe.skipIf(!TEST_DATABASE_URL)("a house's records, against PostgreSQL", () 
 
     // Every table with a buildingAddress column, read directly.
     const tables = [
-      "maintenance_requests", "invoices", "maintenance_contacts", "residents", "rent_payments", "security_deposits",
+      "maintenance_requests", "invoices", "billing_records", "maintenance_contacts", "residents", "rent_payments", "security_deposits",
       "deposit_deductions", "walkthroughs", "walkthrough_rooms", "walkthrough_photos", "maintenance_schedules", "assets",
     ];
     for (const table of tables) {

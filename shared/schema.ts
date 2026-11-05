@@ -914,15 +914,23 @@ export const maintenanceContacts = pgTable("maintenance_contacts", {
   email: varchar("email").notNull(),
   region: varchar("region").notNull(),
   buildingAddress: varchar("building_address").notNull(),
+  // The cities this vendor works in, each "City, ST" as `cityLabel` writes it
+  // from the houses (Joseph's notes, 2026-11-04). The contacts filter matches
+  // on these. Existing contacts were given their house's city by migration.
+  serviceCities: text("service_cities").array().notNull().default(sql`'{}'::text[]`),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
-export const insertMaintenanceContactSchema = createInsertSchema(maintenanceContacts).omit({
-  id: true,
-  createdAt: true,
-  updatedAt: true,
-});
+export const insertMaintenanceContactSchema = createInsertSchema(maintenanceContacts)
+  .omit({
+    id: true,
+    createdAt: true,
+    updatedAt: true,
+  })
+  .extend({
+    serviceCities: z.array(z.string().trim().min(1).max(120)).max(50).optional(),
+  });
 
 /**
  * Dated notes on a vendor.
@@ -1029,6 +1037,10 @@ export const billingRecords = pgTable("billing_records", {
   // backfill step; an empty region is treated as inaccessible to non-admins,
   // which fails closed rather than exposing legacy rows.
   region: varchar("region").notNull().default(""),
+  // The house the invoice is for. Nullable because records made before it was
+  // asked for have none; a new record must name one, and its region is then
+  // the house's. A copy of the house's address, moved with the house.
+  buildingAddress: varchar("building_address"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -1045,6 +1057,7 @@ export const insertBillingRecordSchema = createInsertSchema(billingRecords)
   .extend({
     region: z.string().min(1, "Region is required"),
     invoiceCost: nonNegativeAmount,
+    buildingAddress: z.string().trim().min(1, "Which house is this invoice for?"),
   });
 
 export type BillingRecord = typeof billingRecords.$inferSelect;

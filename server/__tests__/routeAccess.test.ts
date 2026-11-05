@@ -2858,7 +2858,7 @@ describe("a reference to another record is checked against the caller's regions"
 
   // A billing record's contact follows the invoice rule (#243).
   describe("a billing record's contact", () => {
-    const BILLING = { companyName: "Acme", email: "a@acme.test", phone: "555", invoiceCost: "10.00", region: "West Central" };
+    const BILLING = { companyName: "Acme", email: "a@acme.test", phone: "555", invoiceCost: "10.00", region: "West Central", buildingAddress: "1 Main St" };
     const EXISTING_BILLING = { id: "bill-1", ...BILLING, contactId: EAST_CONTACT.id };
 
     beforeEach(() => {
@@ -2903,6 +2903,38 @@ describe("a reference to another record is checked against the caller's regions"
 
     // The existing record already names an East contact. Resending that
     // unchanged value is not a new reference.
+    // A new record names its house (Joseph's notes, 2026-11-04), and the house
+    // is checked like any other reference.
+    it.each([
+      ["no house", { buildingAddress: undefined }, 400],
+      ["a house in another region", { buildingAddress: "5 East St" }, 403],
+      ["an address that is not a house", { buildingAddress: "1 Nowhere Rd" }, 400],
+    ])("refuses a new billing record naming %s, and writes nothing", async (_name, house, expected) => {
+      actAs(STAFF, westBilling);
+      expect((await request("POST", "/api/billing", { body: { ...BILLING, ...house } })).status).toBe(expected);
+      expect(storageMock.createBillingRecord).not.toHaveBeenCalled();
+    });
+
+    it("takes a new billing record's region from its house, not the body", async () => {
+      actAs(ADMIN);
+      expect((await request("POST", "/api/billing", { body: { ...BILLING, region: "Northwest", buildingAddress: "5 East St" } })).status).toBe(200);
+      expect(storageMock.createBillingRecord).toHaveBeenCalledWith(expect.objectContaining({ buildingAddress: "5 East St", region: "East Central" }));
+    });
+
+    it("refuses an edit giving an old billing record a house in another region, and writes nothing", async () => {
+      storageMock.getBillingRecord.mockResolvedValue({ ...EXISTING_BILLING, buildingAddress: null });
+      actAs(STAFF, westBilling);
+      expect((await request("PATCH", "/api/billing/bill-1", { body: { buildingAddress: "5 East St" } })).status).toBe(403);
+      expect(storageMock.updateBillingRecord).not.toHaveBeenCalled();
+    });
+
+    it("lets an edit give an old billing record a house in the caller's region -- the positive control", async () => {
+      storageMock.getBillingRecord.mockResolvedValue({ ...EXISTING_BILLING, buildingAddress: null });
+      actAs(STAFF, westBilling);
+      expect((await request("PATCH", "/api/billing/bill-1", { body: { buildingAddress: "1 Main St" } })).status).toBe(200);
+      expect(storageMock.updateBillingRecord).toHaveBeenCalledWith("bill-1", expect.objectContaining({ buildingAddress: "1 Main St", region: "West Central" }));
+    });
+
     it("lets a billing record edit resend the contact it already names, and change its cost", async () => {
       actAs(STAFF, westBilling);
       const { status } = await request("PATCH", "/api/billing/bill-1", { body: { contactId: EAST_CONTACT.id, invoiceCost: "12" } });
@@ -11234,8 +11266,9 @@ describe("every field that names a stored file checks the caller stored it", () 
         method: "POST",
         path: "/api/billing",
         field,
-        body: (url) => ({ ...BILLING, id: undefined, [field]: url }),
+        body: (url) => ({ ...BILLING, id: undefined, buildingAddress: "1 Main St", [field]: url }),
         write: "createBillingRecord",
+        setup: () => storageMock.getPropertyByAddress.mockResolvedValue(HOUSE),
       },
       {
         name: `a billing record edit, ${field}`,

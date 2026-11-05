@@ -133,7 +133,8 @@ async function seed(): Promise<void> {
   ];
   const contacts = [];
   for (const row of contactRows) {
-    contacts.push(await storage.createMaintenanceContact(row));
+    const house = properties.find((p) => p.address === row.buildingAddress)!;
+    contacts.push(await storage.createMaintenanceContact({ ...row, serviceCities: [`${house.city}, ${house.state}`] }));
   }
   console.log(`Seeded ${contacts.length} vendor contacts`);
 
@@ -395,6 +396,7 @@ async function seed(): Promise<void> {
       coiUrl: null,
       w9Url: null,
       region: contact.region,
+      buildingAddress: contact.buildingAddress,
     });
   }
   console.log("Seeded 3 billing records");
