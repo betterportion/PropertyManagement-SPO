@@ -13,7 +13,8 @@ const tails = new Map<string, Promise<unknown>>();
 /** Runs `work` after any earlier work on the same house has finished. A null house runs at once. */
 export async function withHouseLock<T>(propertyId: string | null | undefined, work: () => Promise<T>): Promise<T> {
   if (!propertyId) return work();
-  const run = (tails.get(propertyId) ?? Promise.resolve()).then(work, work);
+  // The tail never rejects (it swallows failures below), so a failure does not stop the next in line.
+  const run = (tails.get(propertyId) ?? Promise.resolve()).then(work);
   const tail = run.then(() => undefined, () => undefined);
   tails.set(propertyId, tail);
   try {

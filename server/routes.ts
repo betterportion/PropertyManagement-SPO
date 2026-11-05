@@ -405,6 +405,28 @@ function projectFieldsProblem(
   return targetQuarter != null && targetYear == null ? "A quarter needs a year to go with it" : null;
 }
 
+/**
+ * Runs `write` holding the house's lock (#313), after refusing with a 409 if
+ * the house already has MAX_RESIDENT_ACCOUNTS_PER_PROPERTY active logins
+ * other than `accountId`. No house: just the write. `label` names the house
+ * in the refusal; by default its name.
+ */
+async function withRoomAtHouse<T>(
+  propertyId: string | null | undefined,
+  accountId: string | undefined,
+  write: () => Promise<T>,
+  label?: string,
+): Promise<T> {
+  return withHouseLock(propertyId, async () => {
+    if (propertyId) {
+      const name = label ?? (await storage.getProperty(propertyId))?.name ?? "That house";
+      const full = residentAccountCapProblem(name, await storage.getActiveResidentAccountsByProperty(propertyId), accountId);
+      if (full) throw new HttpError(409, full);
+    }
+    return write();
+  });
+}
+
 export async function registerRoutes(app: Express): Promise<Server> {
   await setupAuth(app);
 
@@ -486,22 +508,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // A staff account keeps its house link through a role change, so making
       // an active one a resident again takes one of that house's places
       // (MAX_RESIDENT_ACCOUNTS_PER_PROPERTY), like linking it would.
-      // The count and the write hold the house's lock together (#313).
       const takesPlace = validatedData.role === "resident" && previous.isActive ? previous.propertyId : null;
       const nextPermissions = permissionsAfterRoleChange(req.params.id, previous.role, validatedData.role);
       const existingPermissions = nextPermissions ? await storage.getUserPermissions(req.params.id) : undefined;
-      const user = await withHouseLock(takesPlace, async () => {
-        if (takesPlace) {
-          const house = await storage.getProperty(takesPlace);
-          const full = residentAccountCapProblem(
-            house?.name ?? "That house",
-            await storage.getActiveResidentAccountsByProperty(takesPlace),
-            previous.id,
-          );
-          if (full) throw new HttpError(409, full);
-        }
-        return storage.updateUserRole(req.params.id, validatedData.role, nextPermissions);
-      });
+      const user = await withRoomAtHouse(takesPlace, previous.id, () =>
+        storage.updateUserRole(req.params.id, validatedData.role, nextPermissions),
+      );
 
       const who = accountName(previous);
       recordAuditEvent(ctx, {
@@ -548,20 +560,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       // Switching a resident login back on at a house takes one of its places
       // (MAX_RESIDENT_ACCOUNTS_PER_PROPERTY), like granting it would.
-      // The count and the write hold the house's lock together (#313).
       const takesPlace = isActive && !previous.isActive && previous.role === "resident" ? previous.propertyId : null;
-      const user = await withHouseLock(takesPlace, async () => {
-        if (takesPlace) {
-          const house = await storage.getProperty(takesPlace);
-          const full = residentAccountCapProblem(
-            house?.name ?? "That house",
-            await storage.getActiveResidentAccountsByProperty(takesPlace),
-            previous.id,
-          );
-          if (full) throw new HttpError(409, full);
-        }
-        return storage.updateUserActiveStatus(req.params.id, isActive);
-      });
+      const user = await withRoomAtHouse(takesPlace, previous.id, () => storage.updateUserActiveStatus(req.params.id, isActive));
       // A login switched off is not invited to sign in on a day that has not come.
       if (!isActive) await storage.cancelPendingInvitations(req.params.id, new Date());
 
@@ -626,15 +626,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Moving an active login into a house takes one of its places
       // (MAX_RESIDENT_ACCOUNTS_PER_PROPERTY); the house it leaves gets one back.
-      // The count and the write hold the house's lock together (#313).
       const takesPlace = property && target.isActive && target.propertyId !== propertyId ? property : null;
-      const user = await withHouseLock(takesPlace?.id, async () => {
-        if (takesPlace) {
-          const full = residentAccountCapProblem(takesPlace.name, await storage.getActiveResidentAccountsByProperty(takesPlace.id), target.id);
-          if (full) throw new HttpError(409, full);
-        }
-        return storage.updateUserProperty(req.params.id, propertyId);
-      });
+      const user = await withRoomAtHouse(takesPlace?.id, target.id, () => storage.updateUserProperty(req.params.id, propertyId), takesPlace?.name);
 
       recordAuditEvent(ctx, {
         action: AUDIT_ACTIONS.USER_PROPERTY_CHANGED,
@@ -755,18 +748,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // A resident account linked to a house takes one of that house's places
       // (MAX_RESIDENT_ACCOUNTS_PER_PROPERTY), admin or not. Checked before
       // anything is written. An account created switched off takes none.
-      // The count and the write hold the house's lock together (#313).
       const takesPlace = lands.role === "resident" && lands.isActive !== false ? validatedData.propertyId : null;
+      const house = takesPlace ? await storage.getProperty(takesPlace) : undefined;
+      if (takesPlace && !house) return res.status(404).json({ message: "Property not found" });
       const { sendOn } = invitationRequestSchema.parse(req.body);
-      const { user, relinkedFrom } = await withHouseLock(takesPlace, async () => {
-        if (takesPlace) {
-          const house = await storage.getProperty(takesPlace);
-          if (!house) throw new HttpError(404, "Property not found");
-          const full = residentAccountCapProblem(house.name, await storage.getActiveResidentAccountsByProperty(house.id), lands.accountId);
-          if (full) throw new HttpError(409, full);
-        }
-        return storage.upsertUser({ id: requestedId, ...validatedData });
-      });
+      const { user, relinkedFrom } = await withRoomAtHouse(
+        takesPlace,
+        lands.accountId,
+        () => storage.upsertUser({ id: requestedId, ...validatedData }),
+        house?.name,
+      );
 
       // An email that already had an account moves that account to the new id
       // rather than creating one, so the trail says so, as a sign-in re-link does.
@@ -5720,21 +5711,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      // The count and the write hold the house's lock together (#313).
-      const { user, created, previous } = await withHouseLock(resident.propertyId, async () => {
-        const full = residentAccountCapProblem(
-          resident.buildingAddress,
-          await storage.getActiveResidentAccountsByProperty(resident.propertyId),
-          existing?.id,
-        );
-        if (full) throw new HttpError(409, full);
-        return storage.grantResidentPortalAccess({
-          email,
-          firstName: resident.firstName,
-          lastName: resident.lastName,
-          propertyId: resident.propertyId,
-        });
-      });
+      const { user, created, previous } = await withRoomAtHouse(
+        resident.propertyId,
+        existing?.id,
+        () =>
+          storage.grantResidentPortalAccess({
+            email,
+            firstName: resident.firstName,
+            lastName: resident.lastName,
+            propertyId: resident.propertyId,
+          }),
+        resident.buildingAddress,
+      );
       // Access history, kept indefinitely (AUDIT_ACTIONS_KEPT_INDEFINITELY).
       if (created) {
         recordAuditEvent(ctx, {
