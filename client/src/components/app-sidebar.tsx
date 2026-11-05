@@ -111,7 +111,10 @@ export function AppSidebar({
     </SidebarMenuItem>
   );
 
+  // The dialog sits beside the sidebar, not in it: on a phone the sidebar is a
+  // sheet that unmounts when it closes, and it closes as the dialog opens.
   return (
+    <>
     <Sidebar>
       <SidebarHeader className="h-16 justify-center border-b border-sidebar-border px-4 py-0">
         <Link
@@ -163,7 +166,8 @@ export function AppSidebar({
           Privacy
         </Link>
       </SidebarFooter>
-      <FeedbackDialog open={feedbackOpen} onOpenChange={setFeedbackOpen} />
     </Sidebar>
+    <FeedbackDialog open={feedbackOpen} onOpenChange={setFeedbackOpen} />
+    </>
   );
 }
