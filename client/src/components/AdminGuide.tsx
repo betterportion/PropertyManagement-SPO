@@ -19,7 +19,7 @@ const TOPICS: { title: string; points: string[] }[] = [
     title: "Set up a region",
     points: [
       "Settings, People tab: Add User for the RA, role Regional Admin, then Permissions to tick their region and what they may do.",
-      "Properties: check each house's details. At the foot of the page, fill in \"Who your households call\" with the RA's phone and hours.",
+      "Properties: check each house's details.",
       "Residents: Import a roster for each house from a spreadsheet.",
       "On a resident's page, Portal access lets up to 4 people per house sign in (the household leader and stewards), with the Google email on the roster.",
       "Settings, Portal setup tab: \"What households see\" holds the links every household gets on its Resources page.",
