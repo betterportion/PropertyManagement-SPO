@@ -97,3 +97,34 @@ test.describe("properties — leases", () => {
     await expect(card.getByText(/Lease renewal:/)).toBeVisible();
   });
 });
+
+test.describe("properties — a long chapter name", () => {
+  test("is cut short, and the card's actions menu stays on the card", async ({ page, request }) => {
+    const stamp = Date.now();
+    const created = await request.post("/api/properties", {
+      data: {
+        name: `Long Chapter ${stamp}`,
+        streetAddress: `${stamp} Wingate Ct`,
+        city: "College Station",
+        state: "TX",
+        zipCode: "77845",
+        region: "Southwest",
+        chapter: "Bryan College Station Young Adults and Graduate Students",
+        ownership: "owned",
+      },
+    });
+    expect(created.ok()).toBeTruthy();
+    const { id } = await created.json();
+    try {
+      await page.goto("/properties");
+      const card = page.getByTestId(`card-property-${id}`);
+      await card.scrollIntoViewIfNeeded();
+      const cardBox = (await card.boundingBox())!;
+      const menuBox = (await page.getByTestId(`button-menu-${id}`).boundingBox())!;
+      expect(menuBox.x + menuBox.width).toBeLessThanOrEqual(cardBox.x + cardBox.width);
+      await expect(page.getByTestId(`badge-property-chapter-${id}`)).toHaveAttribute("title", /Graduate Students$/);
+    } finally {
+      await request.delete(`/api/properties/${id}`);
+    }
+  });
+});

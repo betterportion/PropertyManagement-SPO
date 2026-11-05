@@ -527,7 +527,7 @@ export default function Properties() {
             <Card key={property.id} className="hover-elevate" data-testid={`card-property-${property.id}`}>
               <CardContent className="p-4">
                 <div className="flex items-start justify-between gap-4">
-                  <div className="flex items-start gap-3 flex-1">
+                  <div className="flex min-w-0 flex-1 items-start gap-3">
                     <div className="p-2 bg-muted rounded-md">
                       <Building2 className="h-5 w-5" />
                     </div>
@@ -551,7 +551,11 @@ export default function Properties() {
                       <div className="flex items-center gap-2 mt-2 flex-wrap">
                         <Badge variant="secondary">{property.region}</Badge>
                         {property.chapter && (
-                          <Badge variant="secondary" data-testid={`badge-property-chapter-${property.id}`}>{property.chapter}</Badge>
+                          // A badge never wraps, so a long chapter name is cut short here rather than
+                          // pushing the actions menu off the card.
+                          <Badge variant="secondary" className="max-w-full" title={property.chapter} data-testid={`badge-property-chapter-${property.id}`}>
+                            <span className="truncate">{property.chapter}</span>
+                          </Badge>
                         )}
                         {(property.bedrooms || property.bathrooms) && (
                           <Badge variant="secondary">
@@ -580,7 +584,7 @@ export default function Properties() {
                   </div>
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <Button size="icon" variant="ghost" data-testid={`button-menu-${property.id}`} aria-label={`Actions for ${property.name}`}>
+                      <Button size="icon" variant="ghost" className="shrink-0" data-testid={`button-menu-${property.id}`} aria-label={`Actions for ${property.name}`}>
                         <MoreVertical className="h-4 w-4" />
                       </Button>
                     </DropdownMenuTrigger>
