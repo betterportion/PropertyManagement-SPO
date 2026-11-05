@@ -10858,6 +10858,24 @@ describe("maintenance request photos", () => {
     );
   });
 
+  it("attaches at most three videos, and never a video sent as a photo", async () => {
+    actAsAliceAtMainSt(ALL_MAINTENANCE);
+    storageMock.createMaintenanceRequest.mockImplementation(async (d: Record<string, unknown>) => ({ id: "req-new", ...d }));
+    storageMock.getUploadByStorageKey.mockImplementation(async (key: string) => ({ storageKey: key, uploadedBy: ALICE.id }));
+
+    const { status } = await request("POST", "/api/maintenance-requests", {
+      body: {
+        ...body,
+        photoUrls: ["/uploads/p.jpg", "/uploads/sneaky.mov"],
+        videoUrls: ["/uploads/1.mov", "/uploads/2.mp4", "/uploads/3.mov", "/uploads/4.mp4", "/uploads/not-a-video.jpg"],
+      },
+    });
+
+    expect(status).toBe(200);
+    const attached = storageMock.createMaintenanceRequestPhoto.mock.calls.map(([row]: [{ imageUrl: string }]) => row.imageUrl);
+    expect(attached).toEqual(["/uploads/p.jpg", "/uploads/1.mov", "/uploads/2.mp4", "/uploads/3.mov"]);
+  });
+
   it("shows a resident only their own house's request photos", async () => {
     actAsAliceAtMainSt(ALL_MAINTENANCE);
     storageMock.getAllMaintenanceRequests.mockResolvedValue([{ ...WEST_REQUEST, buildingAddress: "1 Main St" }, EAST_REQUEST]); // west = Alice's, east = Bob's
@@ -11689,6 +11707,8 @@ describe("every upload route checks a file's real contents, not only its name", 
   const EXE = new Uint8Array([0x4d, 0x5a, 0x90, 0x00, 0x03, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00]);
   const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0]);
   const PDF = new TextEncoder().encode("%PDF-1.4\n%x\n");
+  // An ISO media "ftyp" box, which is how an .mp4 (or an iPhone .mov) begins.
+  const MP4 = new Uint8Array([0, 0, 0, 0x18, ...new TextEncoder().encode("ftypmp42"), 0, 0, 0, 0, ...new TextEncoder().encode("mp42isom")]);
   const form = (bytes: Uint8Array, type: string, name: string) => {
     const f = new FormData();
     f.append("file", new Blob([bytes], { type }), name);
@@ -11705,6 +11725,7 @@ describe("every upload route checks a file's real contents, not only its name", 
     ["/api/upload", () => actAs(STAFF, { canManageMaintenance: true, allowedRegions: ["West Central"] }), "image/jpeg", "photo.jpg"],
     ["/api/maintenance-request-photos/upload", () => actAs(ALICE, ALL_MAINTENANCE), "image/jpeg", "photo.jpg"],
     ["/api/upload-doc", () => actAs(STAFF, { canManageBilling: true, allowedRegions: ["West Central"] }), "application/pdf", "w9.pdf"],
+    ["/api/maintenance-request-videos/upload", () => actAs(ALICE, ALL_MAINTENANCE), "video/mp4", "clip.mp4"],
   ];
 
   it.each(ROUTES)("refuses an executable renamed for %s, storing nothing", async (path, sign, type, name) => {
@@ -11715,8 +11736,20 @@ describe("every upload route checks a file's real contents, not only its name", 
 
   it.each(ROUTES)("stores a genuine file sent to %s (positive control)", async (path, sign, type, name) => {
     sign();
-    expect(await post(path, form(type === "application/pdf" ? PDF : JPEG, type, name))).toBe(200);
+    expect(await post(path, form(type === "application/pdf" ? PDF : type === "video/mp4" ? MP4 : JPEG, type, name))).toBe(200);
     expect(fileStoreMock.putUpload).toHaveBeenCalled();
+  });
+
+  it("refuses a video to somebody who may not file a request, before reading it", async () => {
+    actAs(STAFF, { canManageAssets: true, allowedRegions: ["West Central"] });
+    expect(await post("/api/maintenance-request-videos/upload", form(MP4, "video/mp4", "clip.mp4"))).toBe(403);
+    expect(fileStoreMock.putUpload).not.toHaveBeenCalled();
+  });
+
+  it("refuses a photo sent to the video route", async () => {
+    actAs(ALICE, ALL_MAINTENANCE);
+    expect(await post("/api/maintenance-request-videos/upload", form(JPEG, "image/jpeg", "photo.jpg"))).not.toBe(200);
+    expect(fileStoreMock.putUpload).not.toHaveBeenCalled();
   });
 });
 

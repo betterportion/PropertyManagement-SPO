@@ -15,6 +15,8 @@ import type { RequestHandler } from "express";
 
 export const IMAGE_UPLOAD_MAX_BYTES = 10 * 1024 * 1024;
 export const DOCUMENT_UPLOAD_MAX_BYTES = 20 * 1024 * 1024;
+/** A short video of a problem; see MAX_REQUEST_VIDEOS in shared/schema.ts. */
+export const VIDEO_UPLOAD_MAX_BYTES = 30 * 1024 * 1024;
 /**
  * A roster CSV. Much smaller than the other two on purpose: the largest
  * realistic file is a few hundred rows of names, and the parsed result is

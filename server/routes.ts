@@ -57,6 +57,7 @@ import {
   guardedUpload,
   IMAGE_UPLOAD_MAX_BYTES,
   DOCUMENT_UPLOAD_MAX_BYTES,
+  VIDEO_UPLOAD_MAX_BYTES,
   CSV_IMPORT_MAX_BYTES,
 } from "./uploadLimits";
 import { uploadRateLimit } from "./security";
@@ -110,6 +111,8 @@ import {
   type Invitation,
   WALKTHROUGH_CONDITION_LABEL,
   UPLOAD_URL_PATTERN,
+  MAX_REQUEST_VIDEOS,
+  isVideoUpload,
 } from "@shared/schema";
 import { hubSlotProblem } from "@shared/resourceHubSlots";
 import { STANDARD_SCHEDULE_TEMPLATES, addMonths } from "./schedules";
@@ -1036,10 +1039,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Attaches already-uploaded photos to a just-created request. Only uploads the
   // caller themselves stored are attached, so a request body cannot point a
   // request at someone else's file to expose it (its visibility is inherited).
-  async function attachRequestPhotos(ctx: AuthContext, requestId: string, photoUrls: unknown): Promise<void> {
-    if (!Array.isArray(photoUrls)) return;
+  async function attachRequestPhotos(ctx: AuthContext, requestId: string, photoUrls: unknown, videoUrls?: unknown): Promise<void> {
+    // Videos come in their own list with their own cap; a video sent as a photo is dropped.
+    const photos = Array.isArray(photoUrls) ? photoUrls.slice(0, 10).filter((url) => typeof url === "string" && !isVideoUpload(url)) : [];
+    const videos = Array.isArray(videoUrls) ? videoUrls.filter((url) => typeof url === "string" && isVideoUpload(url)).slice(0, MAX_REQUEST_VIDEOS) : [];
     const uploadedBy = ctx.user.email || "Unknown";
-    for (const url of photoUrls.slice(0, 10)) {
+    for (const url of [...photos, ...videos]) {
       if (typeof url !== "string" || !url.startsWith("/uploads/")) continue;
       const key = url.slice("/uploads/".length);
       if (!isSafeStorageKey(key)) continue;
@@ -1104,7 +1109,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           buildingAddress: house.address,
           submittedBy,
         });
-        await attachRequestPhotos(ctx, request.id, req.body?.photoUrls);
+        await attachRequestPhotos(ctx, request.id, req.body?.photoUrls, req.body?.videoUrls);
         // One of the things JotForm used to do that the portal should do
         // natively: without it, filing a request feels like putting a note in
         // a drawer.
@@ -1133,7 +1138,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // closing it now, so it carries a close date like any other.
         ...closedDateChange(undefined, validatedData.status, new Date()),
       });
-      await attachRequestPhotos(ctx, request.id, req.body?.photoUrls);
+      await attachRequestPhotos(ctx, request.id, req.body?.photoUrls, req.body?.videoUrls);
       // Staff filing on somebody's behalf: the acknowledgement still goes to
       // whoever submittedBy names, which for a staff-filed request is the
       // staff member themselves.
@@ -3204,6 +3209,42 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // A video of the problem, for a request being filed (Joseph's notes,
+  // 2026-11-04). Households and staff who may file a request, checked before
+  // the body is read; .mov or .mp4 only, content-verified like every upload.
+  // shortcut: the 20-second limit is checked in the browser only; the 30 MB
+  // cap is the server's ceiling. Parse the mvhd duration if that ever matters.
+  const videoUpload = multer({
+    storage: fileStorage,
+    limits: { fileSize: VIDEO_UPLOAD_MAX_BYTES, files: 1, fields: 0 },
+    fileFilter: (req, file, cb) => {
+      const ext = path.extname(file.originalname).toLowerCase();
+      if ((ext === ".mov" || ext === ".mp4") && ["video/quicktime", "video/mp4"].includes(file.mimetype)) {
+        return cb(null, true);
+      }
+      cb(new Error("Only .mov and .mp4 videos are allowed"));
+    },
+  });
+  const requireRequestFiler: import("express").RequestHandler = (req: any, res, next) => {
+    if (requirePermission(res, req.uploadContext, "canViewMaintenance", "canManageMaintenance")) next();
+  };
+
+  app.post('/api/maintenance-request-videos/upload', isAuthenticated, uploadRateLimit, attachUploadContext, requireRequestFiler, ...guardedUpload(videoUpload.single('file'), VIDEO_UPLOAD_MAX_BYTES), async (req: any, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ message: "No file uploaded" });
+      }
+      if (!(await bufferMatchesExtension(req.file.buffer, req.file.originalname))) {
+        return res.status(400).json({
+          message: "File contents do not match the file extension. The file was not saved.",
+        });
+      }
+      res.json(await storeUploadedFile(req.file, req.uploadContext));
+    } catch (error) {
+      sendError(res, error, "Failed to upload video");
+    }
+  });
+
   // Document Upload Route (PDF, images, doc files up to 20MB)
   const docUpload = multer({
     storage: fileStorage,
@@ -3249,6 +3290,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       webp: ["webp"],
       doc: ["cfb"],
       docx: ["docx"],
+      // Both are the same ISO media container; phones label it either way.
+      mov: ["mov", "mp4", "m4v"],
+      mp4: ["mp4", "m4v", "mov"],
     };
     const allowed = expectedDetected[ext];
     if (!allowed) return false;
@@ -7191,7 +7235,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Photos are viewed constantly -- every card in every list pulls one --
       // so recording them would drown the log. Documents are the ones somebody
       // may later need to know were taken out: W-9s, COIs, contract invoices.
-      if (upload?.contentType && !upload.contentType.startsWith("image/")) {
+      if (upload?.contentType && !upload.contentType.startsWith("image/") && !upload.contentType.startsWith("video/")) {
         recordAuditEvent(ctx, {
           action: AUDIT_ACTIONS.DOCUMENT_DOWNLOADED,
           entityType: "upload",
