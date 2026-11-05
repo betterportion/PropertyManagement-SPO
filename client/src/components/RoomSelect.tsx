@@ -29,6 +29,9 @@ export function RoomSelect({ rooms, value, onChange, id, testId }: {
       <Select
         value={typed ? ELSEWHERE_VALUE : value}
         onValueChange={(choice) => {
+          // Radix can report "" on its own (e.g. while the rooms load on a
+          // phone); a person never picks "", so it must not clear the room.
+          if (choice === "") return;
           const other = choice === ELSEWHERE_VALUE;
           setElsewhere(other);
           onChange(other ? "" : choice);
