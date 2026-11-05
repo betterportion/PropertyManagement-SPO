@@ -113,6 +113,9 @@ import {
   UPLOAD_URL_PATTERN,
   MAX_REQUEST_VIDEOS,
   isVideoUpload,
+  feedbackReportFromClient,
+  FEEDBACK_EMAIL,
+  FEEDBACK_SUBJECT,
 } from "@shared/schema";
 import { hubSlotProblem } from "@shared/resourceHubSlots";
 import { STANDARD_SCHEDULE_TEMPLATES, addMonths } from "./schedules";
@@ -3188,12 +3191,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   };
 
-  // Resident-safe image upload for maintenance-request photos. Same guards as
+  // Resident-safe image upload for maintenance-request photos, and for the
+  // screenshot on a bug or feature report (anybody signed in). Same guards as
   // /api/upload (image-only, size-capped, content-verified) but without the
   // resident block -- a resident may attach a photo when they report an issue.
   // The upload is only visible to its uploader until a request-photo row points
   // at it, at which point it inherits the request's visibility.
-  app.post('/api/maintenance-request-photos/upload', isAuthenticated, uploadRateLimit, attachUploadContext, ...guardedUpload(upload.single('file'), IMAGE_UPLOAD_MAX_BYTES), async (req: any, res) => {
+  app.post(['/api/maintenance-request-photos/upload', '/api/feedback-screenshots/upload'], isAuthenticated, uploadRateLimit, attachUploadContext, ...guardedUpload(upload.single('file'), IMAGE_UPLOAD_MAX_BYTES), async (req: any, res) => {
     try {
       if (!req.file) {
         return res.status(400).json({ message: "No file uploaded" });
@@ -5572,6 +5576,69 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(result);
     } catch (error) {
       sendError(res, error, "Failed to send the test email");
+    }
+  });
+
+  // ── Bug and feature reports (JR, 2026-11-04) ─────────────────────────────
+  //
+  // Anybody signed in may send one, households included. The role, region and
+  // house come from the session, never the body. Saved first, so a report is
+  // kept while production email is off (#49); then emailed to FEEDBACK_EMAIL.
+  // Admin-only to read: reports name houses and residents.
+  app.post('/api/feedback', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      const body = feedbackReportFromClient.parse(req.body);
+      const screenshot = await ownUploadFromClient(ctx, body.screenshotUrl, null);
+      const house = ctx.user.propertyId ? await storage.getProperty(ctx.user.propertyId) : undefined;
+      const regions = ctx.isAdmin
+        ? "All regions"
+        : ctx.isResident
+          ? house?.region ?? null
+          : ctx.allowedRegions.join(", ") || null;
+      const report = await storage.createFeedbackReport({
+        kind: body.kind,
+        message: body.message,
+        pagePath: body.pagePath || null,
+        role: ctx.user.role,
+        regions,
+        houseAddress: house?.address ?? null,
+        submittedById: ctx.userId,
+        submittedByEmail: ctx.user.email ?? null,
+        submittedByName: [ctx.user.firstName, ctx.user.lastName].filter(Boolean).join(" ") || null,
+        screenshotUrl: screenshot?.url ?? null,
+      });
+      void sendEmail({
+        template: "feedback",
+        to: FEEDBACK_EMAIL,
+        subject: FEEDBACK_SUBJECT[report.kind],
+        text: [
+          `From: ${report.submittedByName ?? "(no name)"} <${report.submittedByEmail ?? "no email"}>`,
+          `Role: ${report.role}`,
+          `Region: ${report.regions ?? "none"}`,
+          ...(report.houseAddress ? [`House: ${report.houseAddress}`] : []),
+          `Page: ${report.pagePath ?? "unknown"}`,
+          `Sent: ${report.createdAt.toISOString()}`,
+          ...(report.screenshotUrl ? ["Screenshot: in the portal, Settings → Activity → Bug and feature reports"] : []),
+          "",
+          report.message,
+        ].join("\n"),
+      });
+      res.status(201).json({ id: report.id });
+    } catch (error) {
+      sendError(res, error, "Failed to send your report");
+    }
+  });
+
+  app.get('/api/feedback', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireAdmin(res, ctx)) return;
+      res.json(await storage.listFeedbackReports(200));
+    } catch (error) {
+      sendError(res, error, "Failed to load the reports");
     }
   });
 

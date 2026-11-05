@@ -89,6 +89,7 @@ The daily jobs log to the hosting provider's log stream. Nobody watches that log
   - Both go only while that person's account may still open the request: a resident who filed it at a house that is not theirs now (for example a demoted regional administrator) gets nothing (`submitterMayRead` in `server/commentRecipients.ts`).
   - **New comment:** to the people who can see the request: staff who have posted in the thread, the region's RAs, and (for a shared comment) the residents. Internal comments go to staff only. Never sent to the comment's author, or to anyone who has switched comment email off (`server/commentRecipients.ts`).
   - **Email the household:** staff write to a house's residents from the property page.
+  - **Bug or feature report:** anybody signed in sends one from "Report a problem or idea" at the foot of the sidebar. It is saved first (admins read every report in Settings → Activity, so none is lost while email is off), then emailed to jr@betterportion.org with the subject "BUG - SPO PropManagement App" or "FEATURE - SPO PropManagement App". The server adds the sender, role, region, house and the page; an optional screenshot stays in the portal, admins only. Reports name houses and residents, so nothing copies them to the public GitHub repository.
 
   Content is limited to names, dates, amounts and descriptions, never a credential or a banking identifier. A failed send never fails the action that triggered it.
 - **What SPO must do:** see "Email" in the setup checklist below.

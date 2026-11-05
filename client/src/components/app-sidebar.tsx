@@ -1,4 +1,5 @@
-import { Home, Wrench, Camera, Package, Users, UsersRound, Banknote, Settings, Building2, Palette, ShieldCheck, ListChecks, BookOpen } from "lucide-react";
+import { useState } from "react";
+import { Home, Wrench, Camera, Package, Users, UsersRound, Banknote, Settings, Building2, Palette, ShieldCheck, ListChecks, BookOpen, MessageSquareWarning } from "lucide-react";
 import { Link } from "wouter";
 import {
   Sidebar,
@@ -15,6 +16,7 @@ import {
 } from "@/components/ui/sidebar";
 import { Badge } from "@/components/ui/badge";
 import { PRIVACY_PATH } from "@/lib/publicPages";
+import { FeedbackDialog } from "@/components/FeedbackDialog";
 import spoLogo from "@assets/SPO Logo under 600x600px_SPO Vertical - Ocean_1763138801065.png";
 
 interface AppSidebarProps {
@@ -66,6 +68,7 @@ export function AppSidebar({
   canViewResourceHub = false,
 }: AppSidebarProps) {
   const { isMobile, setOpenMobile } = useSidebar();
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
   const isStaff = role === "admin" || role === "regional_administrator";
 
   // A household leader gets the extra entries their own grants unlock, one
@@ -108,7 +111,10 @@ export function AppSidebar({
     </SidebarMenuItem>
   );
 
+  // The dialog sits beside the sidebar, not in it: on a phone the sidebar is a
+  // sheet that unmounts when it closes, and it closes as the dialog opens.
   return (
+    <>
     <Sidebar>
       <SidebarHeader className="h-16 justify-center border-b border-sidebar-border px-4 py-0">
         <Link
@@ -134,7 +140,16 @@ export function AppSidebar({
       </SidebarContent>
 
       <SidebarFooter className="gap-3 border-t border-sidebar-border">
-        {utilityItems.length > 0 && <SidebarMenu>{utilityItems.map(renderItem)}</SidebarMenu>}
+        <SidebarMenu>
+          {utilityItems.map(renderItem)}
+          {/* Every account, households included (JR, 2026-11-04). */}
+          <SidebarMenuItem>
+            <SidebarMenuButton onClick={() => { closeOnMobile(); setFeedbackOpen(true); }} data-testid="button-report-problem">
+              <MessageSquareWarning />
+              <span>Report a problem or idea</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
         <Badge variant="secondary" className="w-full justify-center py-1">
           {role === "admin"
             ? "Admin account"
@@ -152,5 +167,7 @@ export function AppSidebar({
         </Link>
       </SidebarFooter>
     </Sidebar>
+    <FeedbackDialog open={feedbackOpen} onOpenChange={setFeedbackOpen} />
+    </>
   );
 }

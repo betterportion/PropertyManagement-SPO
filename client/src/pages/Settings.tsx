@@ -40,6 +40,7 @@ import { AdminGuide } from "@/components/AdminGuide";
 import QuickBooksSettings from "@/components/QuickBooksSettings";
 import DepositDeadlineSettings from "@/components/DepositDeadlineSettings";
 import EmailHealthSettings from "@/components/EmailHealthSettings";
+import FeedbackReports from "@/components/FeedbackReports";
 import RosterSyncSettings from "@/components/RosterSyncSettings";
 import ResourceLinksSettings from "@/components/ResourceLinksSettings";
 import WalkthroughTemplateSettings from "@/components/WalkthroughTemplateSettings";
@@ -702,6 +703,7 @@ export default function Settings() {
         </TabsContent>
 
         <TabsContent value="activity" className="mt-6 space-y-6">
+          <FeedbackReports />
           <EmailHealthSettings />
           <ActivityLog />
         </TabsContent>

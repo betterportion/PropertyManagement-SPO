@@ -692,6 +692,11 @@ export async function canReadUploadReference(
         hasPermission(ctx, "canViewProperties", "canManageProperties") &&
         canAccessRegion(ctx, reference.record.region)
       );
+
+    case "feedbackReport":
+      // A bug or feature report's screenshot: admins only, who pass before
+      // this is reached. Not even its sender, once the report is filed.
+      return false;
   }
 }
 

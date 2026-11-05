@@ -2330,3 +2330,52 @@ export const requestCloseoutContacts = pgTable(
 
 export type RequestCloseout = typeof requestCloseouts.$inferSelect;
 export type InsertRequestCloseout = typeof requestCloseouts.$inferInsert;
+
+// Bug and feature reports
+//
+// What a pilot user sends from "Report a problem or idea" at the foot of the
+// sidebar (JR, 2026-11-04). Saved here so nothing is lost while production
+// email is off (#49), and emailed to FEEDBACK_EMAIL. Reports name houses and
+// residents, so they are admin-only and never copied to the public GitHub
+// repository. The sender is kept as plain columns: the row outlives the account.
+export const FEEDBACK_KINDS = ["bug", "feature"] as const;
+export type FeedbackKind = (typeof FEEDBACK_KINDS)[number];
+
+/** Where every report is emailed. */
+export const FEEDBACK_EMAIL = "jr@betterportion.org";
+
+export const FEEDBACK_SUBJECT: Record<FeedbackKind, string> = {
+  bug: "BUG - SPO PropManagement App",
+  feature: "FEATURE - SPO PropManagement App",
+};
+
+export const feedbackReports = pgTable(
+  "feedback_reports",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    kind: varchar("kind", { enum: FEEDBACK_KINDS }).notNull(),
+    message: text("message").notNull(),
+    /** The page the sender was on, e.g. "/maintenance/abc". */
+    pagePath: varchar("page_path"),
+    /** Filled in by the server, never taken from the body. */
+    role: varchar("role").notNull(),
+    regions: varchar("regions"),
+    houseAddress: varchar("house_address"),
+    submittedById: varchar("submitted_by_id"),
+    submittedByEmail: varchar("submitted_by_email"),
+    submittedByName: varchar("submitted_by_name"),
+    screenshotUrl: varchar("screenshot_url"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [index("IDX_feedback_reports_created_at").on(table.createdAt)],
+);
+
+export type FeedbackReport = typeof feedbackReports.$inferSelect;
+
+/** The body of POST /api/feedback. Everything else on the row comes from the session. */
+export const feedbackReportFromClient = z.object({
+  kind: z.enum(FEEDBACK_KINDS),
+  message: z.string().trim().min(1, "Tell us what happened or what you'd like").max(4000),
+  pagePath: z.string().trim().max(300).nullish(),
+  screenshotUrl: z.string().regex(UPLOAD_URL_PATTERN, "That is not an uploaded file").nullish(),
+});
