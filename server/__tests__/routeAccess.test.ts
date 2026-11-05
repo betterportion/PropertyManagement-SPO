@@ -6215,28 +6215,49 @@ describe("suggesting where in the house a problem is", () => {
     storageMock.getProperty.mockImplementation(async (id: string) =>
       id === "prop-west" ? WEST : id === "prop-east" ? EAST : undefined,
     );
+    storageMock.getWalkthroughsByProperty.mockImplementation(async (propertyId: string) =>
+      propertyId === "prop-west"
+        ? [
+            { id: "w-2025", walkthroughDate: "2025-08-01" },
+            { id: "w-2026", walkthroughDate: "2026-08-01" },
+          ]
+        : [{ id: "w-east", walkthroughDate: "2026-08-01" }],
+    );
     storageMock.getWalkthroughRoomsByBuilding.mockImplementation(async (address: string) =>
       address === "1 Main St"
         ? [
-            { id: "r1", name: "Kitchen", displayOrder: 0 },
-            { id: "r2", name: "Living room", displayOrder: 1 },
-            // The same room from an earlier walkthrough of the same house.
-            { id: "r3", name: "Kitchen", displayOrder: 0 },
+            { id: "r1", walkthroughId: "w-2026", name: "Kitchen", displayOrder: 0 },
+            { id: "r2", walkthroughId: "w-2026", name: "Living room", displayOrder: 1 },
+            // A room only an earlier walkthrough of the same house had.
+            { id: "r3", walkthroughId: "w-2025", name: "Old den", displayOrder: 0 },
           ]
-        : [{ id: "r9", name: "Basement", displayOrder: 0 }],
+        : [{ id: "r9", walkthroughId: "w-east", name: "Basement", displayOrder: 0 }],
     );
+    storageMock.getAllWalkthroughTemplateRooms.mockResolvedValue([
+      { id: "t1", name: "Bathroom", displayOrder: 0 },
+    ]);
   });
 
   it("refuses an anonymous caller", async () => {
     expect((await get("/api/maintenance-locations?propertyId=prop-west")).status).toBe(401);
   });
 
-  it("gives staff the room names of a house they cover, each once", async () => {
-    // Rooms repeat across a house's walkthroughs; the vocabulary does not.
+  it("gives staff the rooms of the latest walkthrough of a house they cover", async () => {
+    // Joseph's notes (2026-11-04): the latest walkthrough's rooms, not every
+    // room the house has ever had.
     actAs(STAFF, { ...ALL_MAINTENANCE, allowedRegions: ["West Central"] });
     const { status, body } = await get("/api/maintenance-locations?propertyId=prop-west");
     expect(status).toBe(200);
     expect(body).toEqual(["Kitchen", "Living room"]);
+  });
+
+  it("offers the national template's rooms for a house never walked", async () => {
+    actAs(STAFF, { ...ALL_MAINTENANCE, allowedRegions: ["West Central"] });
+    storageMock.getWalkthroughsByProperty.mockResolvedValue([]);
+    storageMock.getWalkthroughRoomsByBuilding.mockResolvedValue([]);
+    const { status, body } = await get("/api/maintenance-locations?propertyId=prop-west");
+    expect(status).toBe(200);
+    expect(body).toEqual(["Bathroom"]);
   });
 
   it("refuses staff a house outside their regions, without reading its rooms", async () => {
@@ -6244,6 +6265,7 @@ describe("suggesting where in the house a problem is", () => {
     const { status } = await get("/api/maintenance-locations?propertyId=prop-east");
     expect(status).toBe(403);
     expect(storageMock.getWalkthroughRoomsByBuilding).not.toHaveBeenCalled();
+    expect(storageMock.getWalkthroughsByProperty).not.toHaveBeenCalled();
   });
 
   it("ignores the propertyId a resident asks for and uses their own house", async () => {
@@ -6255,11 +6277,11 @@ describe("suggesting where in the house a problem is", () => {
     expect(status).toBe(200);
     expect(body).toEqual(["Kitchen", "Living room"]);
     expect(storageMock.getWalkthroughRoomsByBuilding).toHaveBeenCalledWith("1 Main St");
+    expect(storageMock.getWalkthroughsByProperty).toHaveBeenCalledWith("prop-west");
   });
 
   it("gives a resident with no linked house an empty list, not an error", async () => {
-    // A blank suggestion list still leaves the free-text field usable, which
-    // is the fallback the whole feature is built around.
+    // An empty list still leaves "Somewhere else", so the household can say where.
     actAs(ALICE, ALL_MAINTENANCE);
     const { status, body } = await get("/api/maintenance-locations");
     expect(status).toBe(200);

@@ -7,12 +7,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { PhotoUpload } from "@/components/PhotoUpload";
+import { RoomSelect } from "@/components/RoomSelect";
 import { Wrench, X } from "lucide-react";
 
 const MAX_PHOTOS = 5;
-
-/** The datalist the location input offers. Suggestions, never a restriction. */
-const LOCATION_LIST_ID = "maintenance-location-suggestions";
 
 interface MaintenanceRequestFormProps {
   onSubmit?: (data: any) => void | Promise<void>;
@@ -32,18 +30,7 @@ export default function MaintenanceRequestForm({
   });
   const [error, setError] = useState("");
 
-  /**
-   * The rooms this house's walkthroughs know about.
-   *
-   * Free text alone will not group "living room" and "Living Rm", and grouping
-   * is the whole point -- it is what lets somebody notice that these blinds
-   * have broken every year since SPO started renting this house. So the
-   * suggestions come from the house's own checklist.
-   *
-   * A `<datalist>` rather than a `<Select>` on purpose: it suggests without
-   * restricting, so a problem in a place no walkthrough has a word for can
-   * still be reported. An empty list simply leaves an ordinary text field.
-   */
+  // The rooms of the household's own house; the server takes the house from the account.
   const { data: locations = [] } = useQuery<string[]>({
     queryKey: ["/api/maintenance-locations"],
   });
@@ -56,6 +43,10 @@ export default function MaintenanceRequestForm({
     // Category and priority are required by the server; validate here so the
     // resident sees why rather than a rejected request. The form is not cleared
     // on error, so their description is not lost.
+    if (!formData.location.trim()) {
+      setError("Where in the house is it?");
+      return;
+    }
     if (!formData.category || !formData.priority) {
       setError("Please choose a category and a priority.");
       return;
@@ -66,11 +57,8 @@ export default function MaintenanceRequestForm({
   return <Card className="border-border/80"><CardHeader><CardTitle className="flex items-center gap-2 text-xl"><Wrench className="h-5 w-5" />Submit maintenance request</CardTitle></CardHeader><CardContent>
     <form onSubmit={handleSubmit} className="space-y-4">
       <div className="space-y-2"><Label htmlFor="title">Issue title</Label><Input id="title" placeholder="Brief description of the issue" value={formData.title} onChange={(e) => update("title", e.target.value)} required /></div>
-      <div className="space-y-2"><Label htmlFor="location">Location</Label><Input id="location" list={LOCATION_LIST_ID} placeholder="e.g., Kitchen, Upstairs bathroom" value={formData.location} onChange={(e) => update("location", e.target.value)} required data-testid="input-request-location" />
-        <datalist id={LOCATION_LIST_ID} data-testid="datalist-request-location">
-          {locations.map((name) => <option key={name} value={name} />)}
-        </datalist>
-        {locations.length > 0 && <p className="text-xs text-muted-foreground">Start typing to pick a room from your house's walkthrough, or write your own.</p>}
+      <div className="space-y-2"><Label htmlFor="location">Where in the house</Label>
+        <RoomSelect id="location" rooms={locations} value={formData.location} onChange={(v) => update("location", v)} testId="select-request-location" />
       </div>
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="space-y-2"><Label htmlFor="category">Category</Label><Select value={formData.category} onValueChange={(v) => update("category", v)}><SelectTrigger id="category"><SelectValue placeholder="Select category" /></SelectTrigger><SelectContent>{["plumbing","electrical","hvac","appliance","structural","other"].map((v) => <SelectItem key={v} value={v}>{v[0].toUpperCase()+v.slice(1)}</SelectItem>)}</SelectContent></Select></div>

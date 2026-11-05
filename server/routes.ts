@@ -61,6 +61,7 @@ import {
 } from "./uploadLimits";
 import { uploadRateLimit } from "./security";
 import { removeDeletedRecordFiles } from "./uploadCleanup";
+import { roomChoices } from "./roomChoices";
 import {
   insertMaintenanceRequestSchema,
   insertWalkthroughRoomSchema,
@@ -105,6 +106,7 @@ import {
   type MaintenanceRequest,
   type MaintenanceRequestComment,
   type User,
+  type Property,
   type Invitation,
   WALKTHROUGH_CONDITION_LABEL,
   UPLOAD_URL_PATTERN,
@@ -965,13 +967,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   /**
-   * The room names to offer when somebody says where a problem is.
+   * The rooms to offer when somebody says where a problem is: the house's
+   * latest walkthrough's rooms, or the national template's for a house never
+   * walked (`roomChoices`). The form picks from these, plus "Somewhere else".
    *
    * Free text alone will not group "living room" and "Living Rm", which
    * defeats the point -- the point being to notice that these blinds have
-   * broken every year since we started renting this house. So the suggestions
-   * come from the house's own walkthrough rooms, and free text stays available
-   * as the fallback for anything the checklist has no word for.
+   * broken every year since we started renting this house.
    *
    * A resident's house is taken from their account and the query parameter is
    * ignored outright. Honouring it would turn this into a way to enumerate
@@ -984,33 +986,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!ctx) return;
       if (!requirePermission(res, ctx, "canViewMaintenance", "canManageMaintenance")) return;
 
-      let buildingAddress: string | null;
+      let property: Property | null | undefined;
 
       if (ctx.isResident) {
-        buildingAddress = await residentHouseAddress(ctx);
-        // No house claim means no suggestions -- and the free-text field still
-        // works, which is the fallback this whole feature is built around.
-        if (!buildingAddress) return res.json([]);
+        property = await residentHouse(ctx);
+        // No house claim means no rooms -- and "Somewhere else" still lets
+        // the household say where.
+        if (!property?.address) return res.json([]);
       } else {
-        const property = await storage.getProperty(String(req.query.propertyId ?? ""));
+        property = await storage.getProperty(String(req.query.propertyId ?? ""));
         if (!property) {
           return res.status(404).json({ message: "Property not found" });
         }
         if (!requireRegion(res, ctx, property.region)) return;
-        buildingAddress = property.address;
       }
 
-      const rooms = await storage.getWalkthroughRoomsByBuilding(buildingAddress);
-
-      // One entry per room name. A house's rooms repeat across its
-      // walkthroughs; its vocabulary does not.
-      const names: string[] = [];
-      const seen = new Set<string>();
-      for (const room of rooms) {
-        if (seen.has(room.name)) continue;
-        seen.add(room.name);
-        names.push(room.name);
-      }
+      const [walkthroughs, rooms, templateRooms] = await Promise.all([
+        storage.getWalkthroughsByProperty(property.id),
+        property.address ? storage.getWalkthroughRoomsByBuilding(property.address) : Promise.resolve([]),
+        storage.getAllWalkthroughTemplateRooms(),
+      ]);
+      const names = roomChoices(walkthroughs, rooms, templateRooms);
 
       res.json(names);
     } catch (error) {
