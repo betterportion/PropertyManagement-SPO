@@ -47,6 +47,9 @@ export function securityHeaders(): RequestHandler {
             // blob: and data: cover the local preview shown while a photo is
             // being chosen, before it has been uploaded anywhere.
             imgSrc: ["'self'", "data:", "blob:", ...storage],
+            // A request's video is served by a redirect to the bucket, and
+            // blob: is the preview before it is sent (#340).
+            mediaSrc: ["'self'", "blob:", ...storage],
             connectSrc: ["'self'", ...storage],
             objectSrc: ["'none'"],
             baseUri: ["'self'"],

@@ -115,7 +115,9 @@ function context(
       isActive: true,
       propertyId: overrides.propertyId ?? null,
     } as AuthContext["user"],
-    permissions: overrides.permissions as AuthContext["permissions"],
+    // A household login is created with View Maintenance on, as storage's
+    // computeDefaultPermissions gives it; a test switches it off by name.
+    permissions: (overrides.permissions ?? (role === "resident" ? { canViewMaintenance: true } : undefined)) as AuthContext["permissions"],
     isAdmin: role === "admin",
     isResident: role === "resident",
     allowedRegions: overrides.allowedRegions ?? [],
@@ -555,6 +557,14 @@ describe("canReadMaintenanceRequest", () => {
         "1 Main St",
       ),
     ).toBe(true);
+  });
+
+  it("refuses a household login whose View Maintenance is switched off, even its own request at its own house", () => {
+    const request = { region: "South East", submittedBy: "alice@example.com", buildingAddress: "1 Main St", type: "request" } as const;
+    const off = context({ role: "resident", email: "alice@example.com", permissions: { canViewMaintenance: false, canCompleteWalkthroughs: true } });
+    expect(canReadMaintenanceRequest(off, request, "1 Main St")).toBe(false);
+    // Positive control: the same login with the switch on.
+    expect(canReadMaintenanceRequest(resident, request, "1 Main St")).toBe(true);
   });
 
   it("refuses a resident another resident's request", () => {

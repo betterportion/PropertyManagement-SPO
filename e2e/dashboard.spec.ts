@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Locator } from "@playwright/test";
 
 test.describe("admin dashboard", () => {
   test.beforeEach(async ({ page }) => {
@@ -55,3 +55,61 @@ test.describe("admin dashboard", () => {
     await expect(page.getByText(/Household walkthroughs due/).first()).toBeVisible();
   });
 });
+
+// Audit 2026-11-05, finding 9: the dashboard keeps what it loaded until told
+// otherwise, so closing a repair has to tell it. Moving between pages here
+// never reloads the page, which is how an RA uses it.
+test("closing a repair lowers the dashboard's open repairs without a page reload", async ({ page, request: api }) => {
+  const house = (await (await api.get("/api/properties")).json())[0];
+  const filed = await api.post("/api/maintenance-requests", {
+    data: {
+      title: `E2E dashboard count ${Date.now()}`,
+      description: "Loose cabinet hinge",
+      category: "Other",
+      priority: "medium",
+      type: "request",
+      status: "pending",
+      location: "Kitchen",
+      region: house.region,
+      buildingAddress: house.address,
+    },
+  });
+  expect(filed.ok()).toBeTruthy();
+  const { id } = await filed.json();
+
+  await page.goto("/");
+  const tile = page.getByTestId("stat-open-repairs");
+  const before = await settled(tile);
+
+  // Wouter follows pushState plus popstate, so this is in-app navigation.
+  await page.evaluate((path) => {
+    history.pushState(null, "", path);
+    dispatchEvent(new PopStateEvent("popstate"));
+  }, `/maintenance/${id}`);
+  await page.getByTestId("button-edit-request").click();
+  await page.getByTestId("select-status").click();
+  await page.getByRole("option", { name: "Completed" }).click();
+  await page.getByTestId("button-save").click();
+  await expect(page.getByTestId("select-status")).toHaveCount(0);
+
+  await page.getByTestId("link-sidebar-home").click();
+  await expect(page.getByRole("heading", { name: "Dashboard" })).toBeVisible();
+  // Read once settled: the tile counts up from zero each time it appears, so
+  // a bare toHaveText would pass on the way up past the right number.
+  expect(await settled(tile)).toBe(before - 1);
+});
+
+/** The tile's number once its count-up animation has stopped. */
+async function settled(tile: Locator): Promise<number> {
+  let value = NaN;
+  await expect
+    .poll(async () => {
+      const first = await tile.textContent();
+      await tile.page().waitForTimeout(800);
+      const again = await tile.textContent();
+      value = Number(again);
+      return first === again && /^\d+$/.test(again ?? "");
+    })
+    .toBe(true);
+  return value;
+}

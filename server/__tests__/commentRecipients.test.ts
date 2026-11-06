@@ -51,7 +51,8 @@ function permissions(over: Partial<UserPermissions>): UserPermissions {
 
 const candidate = (u: User, p: Partial<UserPermissions> | null = null): CommentCandidate => ({
   user: u,
-  permissions: p ? permissions(p) : null,
+  // A household login is created with View Maintenance on (computeDefaultPermissions).
+  permissions: p ? permissions(p) : u.role === "resident" ? permissions({ canViewMaintenance: true }) : null,
 });
 
 // The household of house A: the leader, the steward, and the third account

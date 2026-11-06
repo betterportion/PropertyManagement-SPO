@@ -223,6 +223,7 @@ Each entry below began as agreed intent and was filled in by the phase that buil
     - **Never duplicated**, and never recreated once marked done.
     - **If the stop date changes,** the open task moves to the new date. If the date is cleared, or moves more than 30 days out, the task is removed.
     - Visible to staff with a property permission, like lease reminders.
+    - **Nothing for somebody already moved out.** Once a move-out is recorded, no task is created or moved and nobody is emailed to get ready to leave; a task already open stays for the RA.
   - Emails **the resident** a move-out checklist, and **the house's regional administrators** (active, with a property permission, covering the region) a heads-up. Admins are not emailed. The emails go once per date: when the task is created, or when it moves.
   - **The wording** is in one file, `server/notifications.ts` (`moveOutResidentEmail`, `moveOutStaffEmail`). Change it there to change every move-out email.
   - Never touches the resident's portal login.
@@ -238,7 +239,7 @@ Each entry below began as agreed intent and was filled in by the phase that buil
 - **Trigger:** giving access: the RA's **Give portal access** on a resident's page, or an admin's **Create User** in Settings. Both have a "Send the invitation email on" day, which defaults to today. A **Send the invitation again** button on the resident's page sends a fresh one now.
 - **What the portal does:**
   - Creates the account at once, whatever day is chosen; only the email waits. Today means the email goes as part of the action, and the screen says whether it went.
-  - A later day is sent by the daily invitation job (`server/invitations.ts`), the sixth in-process job. **On the day it checks again:** the email goes only if the login is still switched on and still linked to the house it was invited to. Otherwise it is dropped and never sent (an RA who removed access in between did not mean to invite them).
+  - A later day is sent by the daily invitation job (`server/invitations.ts`), the sixth in-process job. It runs at boot and then once a day at noon UTC (`SEND_HOUR_UTC`, early morning in the US), the hour a scheduled invitation falls due, so the day the RA chose is the day it goes. **On the day it checks again:** the email goes only if the login is still switched on and still linked to the house it was invited to. Otherwise it is dropped and never sent (an RA who removed access in between did not mean to invite them).
   - **The wording** is `invitationEmail` in `server/notifications.ts`, approved by JR 2026-10-12 and offered to SPO for changes: who gave access, which house (or the staff role), a link to the sign-in page when `APP_URL` is set, and the email address to sign in with. No token, no magic link: Google is still the only way in.
   - An email that did not go (email not set up, the provider refused it) keeps its row waiting and is tried again on every daily run, so invitations written before Resend is configured go out once it is. Each try is in the email log.
   - **Sent once:** a sent invitation is never sent again by the job. Every send, scheduling and drop is in the activity trail (`invitation.sent`, `invitation.scheduled`, `invitation.cancelled`), kept indefinitely.
