@@ -74,7 +74,7 @@ npm ci
 DATABASE_URL="postgresql://...direct..." npm run db:migrate
 ```
 
-That applies every file in `migrations/` in order (forty-two of them, `0000` through `0041_email_log`) and records them in the `drizzle.__drizzle_migrations` table.
+That applies every file in `migrations/` in order (forty-nine of them, `0000` through `0048_feedback_reports`) and records them in the `drizzle.__drizzle_migrations` table.
 
 Verify:
 
@@ -83,7 +83,7 @@ select table_name from information_schema.tables
 where table_schema = 'public' order by table_name;
 ```
 
-You should see forty-five tables — `asset_photos`, `assets`, `audit_log`, `billing_records`, `contact_notes`, `deposit_deductions`, `deposit_return_rules`, `email_log`, `invoices`, `maintenance_contacts`, `maintenance_request_bids`, `maintenance_request_comments`, `maintenance_request_photos`, `maintenance_requests`, `maintenance_schedules`, `move_out_checklists`, `move_out_photos`, `properties`, `property_budgets`, `property_facts`, `property_quickbooks_links`, `property_setup_items`, `property_spend`, `quickbooks_integration`, `rent_payments`, `repair_budgets`, `request_contacts`, `resident_documents`, `resident_sheet_links`, `residents`, `resource_links`, `roster_review_items`, `roster_sync_runs`, `security_deposits`, `sessions`, `tasks`, `uploads`, `user_permissions`, `users`, `walkthrough_items`, `walkthrough_photos`, `walkthrough_rooms`, `walkthrough_template_items`, `walkthrough_template_rooms`, `walkthroughs`. The QuickBooks and roster-sheet tables are created even though both syncs stay off; empty, they do nothing. `select count(*) from drizzle.__drizzle_migrations;` should say 42.
+You should see fifty tables — `asset_photos`, `assets`, `audit_log`, `billing_records`, `contact_notes`, `deposit_deductions`, `deposit_return_rules`, `email_log`, `feedback_reports`, `invitations`, `invoices`, `maintenance_contacts`, `maintenance_request_bids`, `maintenance_request_comments`, `maintenance_request_photos`, `maintenance_requests`, `maintenance_schedules`, `move_out_checklists`, `move_out_photos`, `properties`, `property_budgets`, `property_facts`, `property_quickbooks_links`, `property_setup_items`, `property_spend`, `quickbooks_integration`, `region_contacts`, `rent_payments`, `repair_budgets`, `request_closeout_contacts`, `request_closeouts`, `request_contacts`, `resident_documents`, `resident_sheet_links`, `residents`, `resource_links`, `roster_review_items`, `roster_sync_runs`, `security_deposits`, `sessions`, `tasks`, `uploads`, `user_permissions`, `users`, `walkthrough_items`, `walkthrough_photos`, `walkthrough_rooms`, `walkthrough_template_items`, `walkthrough_template_rooms`, `walkthroughs`. The QuickBooks and roster-sheet tables are created even though both syncs stay off; empty, they do nothing. `select count(*) from drizzle.__drizzle_migrations;` should say 49.
 
 > **`sessions` must be in that list.** The app does not create it at startup — the session store is deliberately configured not to — so if the migrations did not run, logging in fails rather than silently starting a fresh store.
 
@@ -114,7 +114,7 @@ npm run db:baseline -- <tag>     # then npm run db:migrate
 | The app as it runs today, before the audit log | `npm run db:baseline -- 0002_drop_monday_item_id` |
 | Only the original schema, no `uploads` table | `npm run db:baseline` |
 
-The middle row was the old Replit database: it had the `uploads` table (`0001`) and no longer had `monday_item_id` (`0002`), so it baselined through `0002_drop_monday_item_id` and then migrated. Yours will name a different tag — there are forty-two migrations now, through `0041_email_log`.
+The middle row was the old Replit database: it had the `uploads` table (`0001`) and no longer had `monday_item_id` (`0002`), so it baselined through `0002_drop_monday_item_id` and then migrated. Yours will name a different tag — there are forty-nine migrations now, through `0048_feedback_reports`.
 
 You do not have to get this right by inspection. Before recording anything, the command compares the database against the migrations in both directions — a missing table or column, a column a later migration should already have dropped, or a table that only a later migration creates — and refuses if anything disagrees. It then works out which tag the database *does* match and tells you:
 
@@ -288,7 +288,7 @@ The health check endpoint returns 200 only when the process is serving **and** t
 
 ### Run exactly one instance
 
-The portal's five daily jobs — audit-log retention, preventive maintenance requests, seasonal reminder tasks (which also creates move-out reminders), the QuickBooks sync and the roster-sheet sync — run **inside the web server**. There is no separate worker and no cron (`docs/WORKFLOWS.md` lists each one). Each runs once when the server starts and then every 24 hours from that moment, not at a fixed time of day, so a redeploy restarts the clock.
+The portal's six daily jobs — audit-log retention, preventive maintenance requests, seasonal reminder tasks (which also creates move-out reminders), the QuickBooks sync, the roster-sheet sync and the invitation sender — run **inside the web server**. There is no separate worker and no cron (`docs/WORKFLOWS.md` lists each one). Each runs once when the server starts and then every 24 hours from that moment, not at a fixed time of day, so a redeploy restarts the clock.
 
 So keep the service at **one instance**. A second instance would run every job twice, and the guards that stop two syncs overlapping, the limit on uploads in progress, and the lock that keeps a house at four logins (`server/houseLock.ts`), only hold within one process. The jobs are written so that running twice changes nothing, which is what makes the brief overlap during a deploy safe — but that is a safety net, not a way to run two copies.
 

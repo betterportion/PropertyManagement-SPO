@@ -64,7 +64,7 @@ Done when every lane's findings are in `findings.md`, its coverage list is in `$
 
 ## 4. Verify
 
-Add the suite's **real** failures to `$RUN/findings.md`. Mark any finding already tracked (`gh issue list --state open`, and the "Unfinished" list in `STATE.md`) with its issue number; it goes in the report as tracked and skips verification. Spawn verifier agents, up to three, splitting the findings by lane, each with the verifier brief from [`lanes.md`](lanes.md). The lane servers are still up, so a verifier works against the same server and database as the lane that found it, with personas it mints fresh.
+Add the suite's **real** failures to `$RUN/findings.md`. Mark any finding already tracked (`gh issue list --state open`) with its issue number; it goes in the report as tracked and skips verification. Spawn verifier agents, up to three, splitting the findings by lane, each with the verifier brief from [`lanes.md`](lanes.md). The lane servers are still up, so a verifier works against the same server and database as the lane that found it, with personas it mints fresh.
 
 The **second route** is the point: a finding seen in the screen is reproduced with a direct request to the API, and one seen over the API is reproduced in the screen (or, when the screen has no path to it, by reading the handler in `server/routes.ts` and `server/authz.ts` and citing the line). Reading the lane's own script again and agreeing with it does not count.
 

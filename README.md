@@ -56,7 +56,7 @@ npm install
 cp .env.example .env
 ```
 
-> **Note:** the app does **not** read a `.env` file automatically — there is no `dotenv` in the project. On Replit, values come from the Secrets pane; on Render, from the service's Environment tab. Locally, `set -a && . ./.env && set +a` works.
+> **Note:** there is no `dotenv` in the project. `npm run dev` loads `.env` through Node's `--env-file-if-exists`, and a variable already in the environment beats the file. `npm run start` does **not** read it: on Replit, values come from the Secrets pane; on Render, from the service's Environment tab; locally, `set -a && . ./.env && set +a` works.
 
 Required before the app will start:
 
@@ -135,6 +135,7 @@ already set in your shell wins over the file, and `npm run start` does not read
 | `npm run db:migrate` | Apply pending migrations. **This is how schema changes reach production** |
 | `npm run db:baseline -- <tag>` | Record existing tables as already migrated, through `<tag>`, for a database that predates `migrations/` |
 | `npm run db:seed` | Fill an **empty** database with demo data (properties, requests, vendors, photos). Refuses to run if any properties exist. `SEED_ADMIN_EMAIL=you@spo.org` pre-creates an admin so your first sign-in skips the SQL promotion |
+| `npm run db:import-houses -- <houses.csv> [--dry-run]` | Import SPO's houses from the National Property Info sheet, exported as CSV. A row whose address is already a house is skipped, never updated, and nothing is written while any row has an error. Keep the CSV outside the repository |
 | `npm run db:push` | Push the schema directly with no migration. Development experiments only |
 
 ---
@@ -264,10 +265,22 @@ server/                 Express backend
   aggregates.ts         Recurring issues and contractor callbacks (pure)
   schedules.ts          Preventive/safety schedules and their daily generator
   seasonalTasks.ts      Calendar reminders (walkthroughs, utilities) as tasks
+  moveOut.ts            The move-out reminder, run inside the seasonal job
+  invitations.ts        Invitation emails, now or on the chosen day, and their daily job
+  householdLogins.ts    Switches a household login off once the stay ends
+  houseLock.ts          One house's account-limit check and write, one request at a time
+  contractorSummary.ts  What a contractor's close-outs add up to: counts, never a score (pure)
+  roomChoices.ts        The rooms offered for "Where in the house"
+  rosterSync.ts         Turns the master resident sheet into roster changes
+  rosterSheetSync.ts    Runs the roster sync, and its daily job
+  googleSheets.ts       The only code that reads the resident sheet from Google
+  quickbooksSync.ts     The daily QuickBooks spend sync
+  quickbooks/           The only code that talks to Intuit, and the token encryption
   migrateRegions.ts     Idempotent startup fix-ups for legacy region spellings
   notifications.ts      Builds the message text for each kind of email (pure)
   commentRecipients.ts  Who a new comment is emailed to, through the real read rule (pure)
   email.ts              The only code that talks to Resend; off until configured
+  emailLog.ts           Records whether each automated email went out
   errors.ts             Error classification and the final error middleware
   storage.ts            All database access, behind one interface
   db.ts                 Drizzle over the standard pg pool
@@ -288,16 +301,25 @@ shared/
   actionItems.ts        Types the dashboard and the server both read
   assetLifecycle.ts     Lifespans, thresholds and the replacement status
   bankingDetails.ts     The card- and bank-number check the finance free text refuses
+  budgetPace.ts         Whether an owned house is spending its budget at the year's pace
+  closeouts.ts          The close-out questions, body shape and refusal sentence
+  deepClean.ts          SPO's household deep cleaning instructions
   depositLedger.ts      Deposit arithmetic and splits, in whole cents
   depositStatement.ts   The per-resident deposit statement text and its mailto link
   dueDates.ts           When a calendar day has begun or ended, for "Overdue" and snoozes
+  emailTemplates.ts     The portal's automated emails, by name
+  fiscalYear.ts         SPO's fiscal year, June 1 to May 31, named for the year it ends
   houseFacts.ts         The house-facts field vocabulary and the access codes
+  invitations.ts        When an invitation email goes
   permissions.ts        Which permission flags a resident account may hold
   propertySetup.ts      The per-property setup checklist and its states
+  quickbooks.ts         How fresh the QuickBooks spend has to be to be trusted
+  regionContacts.ts     Who a household calls
   residentDocuments.ts  The fixed list of documents a resident signs
   residentImportTemplate.ts The blank roster CSV template's headers and example row
   residents.ts          Who was living in a house on a given date
   resourceHubSlots.ts   The three named links on the resource hub, and the rules for binding one
+  rosterSheet.ts        The master resident sheet's column headers and its banking-data backstop
 migrations/             Committed SQL migrations, applied with db:migrate
 scripts/                One-off maintenance scripts
 docs/                   Additional documentation
@@ -358,7 +380,7 @@ The build produces `dist/index.js` (server) and `dist/public/` (frontend). The s
 
 Three things to know about the running service:
 
-- **Run exactly one instance.** The five daily jobs run inside the web server, and the guards that stop two syncs overlapping only hold within one process. A second instance would run every job twice.
+- **Run exactly one instance.** The six daily jobs run inside the web server, and the guards that stop two syncs overlapping only hold within one process. A second instance would run every job twice.
 - **Uploads must not use `STORAGE_DRIVER=local`.** Local files live on the instance's disk and disappear when the host replaces it. Use `supabase`.
 - **Shutdown is graceful.** On `SIGTERM` the server stops accepting connections, lets in-flight requests finish, closes the database pool, and exits — so a deploy does not cut anyone off mid-request.
 
@@ -368,7 +390,7 @@ Three things to know about the running service:
 
 ## Known issues
 
-- **Replacing a photo or document leaves the old file in storage.** Deleting a record removes its files, but swapping one file for another on an edit (a new house photo, a new W-9) leaves the old one in the bucket, where it keeps costing space.
+- **Replacing a photo or document leaves the old file in storage, except on a billing record or a house photo.** Deleting a record removes its files, and so does replacing a billing document or a house photo, but swapping any other file on an edit (a new request or walkthrough photo) leaves the old one in the bucket, where it keeps costing space.
 - **Files uploaded before the current storage layout are unreachable.** Their links no longer resolve. Nothing in the app depends on them.
 - **A record outside your regions answers 403, not 404**, which confirms it exists. Knowingly accepted: the people using this portal all work for the same organisation.
 - **Maintenance requests closed before the close date was recorded have none.** The portal only started writing a close date recently, and there is no way to work out when an older request was closed. They are deliberately not backfilled, because a guessed date is worse than none once a resident's view depends on it.
@@ -384,6 +406,9 @@ Three things to know about the running service:
 | [`docs/adr/`](docs/adr/) | Architecture decision records — why projects are a request type, and why the portal holds a door code |
 | [`docs/PRODUCTION_MIGRATION.md`](docs/PRODUCTION_MIGRATION.md) | The staging-first runbook for standing up Supabase, Google sign-in and Render, with backups and a rehearsed restore |
 | [`docs/WORKFLOWS.md`](docs/WORKFLOWS.md) | Every automated workflow and daily job — what it does, how to tell it is working — and the setup SPO must do outside the code |
+| [`docs/SPO-DATA-PLATFORM.md`](docs/SPO-DATA-PLATFORM.md) | The people layer shared by SPO's three apps: the vision, the identity design and the rules each app follows |
+| [`PROJECT_BRIEF.md`](PROJECT_BRIEF.md) | The implementation brief for the launch readiness round |
+| [`docs/LAUNCH_READINESS_ROUND.md`](docs/LAUNCH_READINESS_ROUND.md) | The record behind that brief: the audit, the decisions taken on it and what each phase landed |
 | [`design_guidelines.md`](design_guidelines.md) | Typography, spacing, layout and component design rules |
 | [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) | The current backlog: what has shipped, what is blocked and on whom, and what is deliberately left for later |
 | [`docs/IMPLEMENTATION_PLAN_ADDENDUM.md`](docs/IMPLEMENTATION_PLAN_ADDENDUM.md) | Phases 9–11 from a second regional administrator's feedback: request threads, project types and house facts |

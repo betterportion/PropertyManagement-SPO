@@ -13,10 +13,10 @@ A staff member responsible for the houses in one or more regions.
 _Avoid_: RA in user-facing text
 
 **Household**:
-The people living in one house. Two of them hold resident accounts: the household leader and the steward.
+The people living in one house. Up to four of them hold resident accounts, among them the household leader and the steward.
 
 **Household leader** / **Steward**:
-The two residents of a house who hold a resident account and speak for the household in the portal.
+The two residents of a house who speak for the household in the portal, each through a resident account.
 _Avoid_: tenant, occupant
 
 **Resident account**:
@@ -26,6 +26,12 @@ _Avoid_: student account, tenant login
 **Contractor**:
 Somebody outside SPO who does work on a house: a handyman, a plumber, a rental company's crew. Contractors never have a login.
 _Avoid_: vendor (the portal's contacts list is where a contractor's details live; the contractor is the person)
+
+**Portal access**:
+The login a regional administrator gives a household leader or steward from the roster. At most four resident accounts are switched on at one house, and the login ends with the stay.
+
+**Invitation**:
+The email telling somebody their login is waiting, sent at once or on the day chosen. It names the sign-in page and the email to use, and holds no link that signs anybody in.
 
 ## Requests
 
@@ -54,6 +60,9 @@ Everything on one house that is not yet closed, grouped once by kind: repairs, p
 **Job**:
 A project or a capital project — the open work that is not a repair. The dashboard counts open repairs and open jobs as two numbers.
 _Avoid_: work order, ticket
+
+**Close-out**:
+What a regional administrator records when a request is marked completed: four yes/no facts and a note when a contractor is linked, and "what was done", always offered and never required. It adds up to counts and a dated history, never a rating.
 
 ## Threads
 

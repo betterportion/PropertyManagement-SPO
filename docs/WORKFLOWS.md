@@ -24,12 +24,12 @@ Each workflow has the same fields:
 | **built-awaiting-SPO-setup** | In the code, but does nothing until SPO finishes the setup listed for it |
 | **live** | Built, set up, and running in production |
 
-The daily jobs all run **inside the web server**: there is no separate worker and no cron. Each one starts when the server boots, runs once straight away and then every 24 hours. That gives every job two rules:
+The daily jobs all run **inside the web server**: there is no separate worker and no cron. Each one starts when the server boots, runs once straight away and then every 24 hours, except the invitation job, which then runs once a day at noon UTC. That gives every job two rules:
 
 - **Idempotent.** A restart re-runs it, so running it twice must change nothing the second time.
 - **Can never stop the server from starting.** A failure is written to the server log and the job tries again the next day.
 
-The daily jobs log to the hosting provider's log stream. Nobody watches that log today, which is why the planned workflows below raise a **Needs attention** item in the app when something goes wrong.
+The daily jobs log to the hosting provider's log stream. Nobody watches that log today, which is why the workflows below raise a **Needs attention** item in the app when something goes wrong.
 
 ---
 
@@ -111,9 +111,9 @@ The daily jobs log to the hosting provider's log stream. Nobody watches that log
 
 ---
 
-## Planned
+## Added in the workflow phases
 
-The details below are the agreed intent. Each entry is filled in properly in the phase that builds it.
+Each entry below began as agreed intent and was filled in by the phase that built it. Its status says where it stands now.
 
 ### Repair and maintenance budgets (Phase 2)
 
