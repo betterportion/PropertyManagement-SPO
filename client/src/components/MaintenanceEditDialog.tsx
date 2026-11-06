@@ -114,6 +114,9 @@ export default function MaintenanceEditDialog({ request, open, onClose }: Mainte
       queryClient.invalidateQueries({ queryKey: ['/api/maintenance-requests', request.id, 'contacts'] });
       // The Patterns tab rolls up requests and contractor links; nothing refetches on its own.
       queryClient.invalidateQueries({ queryKey: ['/api/maintenance-aggregates'] });
+      // The dashboard's open work and counts read requests too.
+      queryClient.invalidateQueries({ queryKey: ['/api/action-items'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/region-summary'] });
     },
     onError: (error) => {
       toast({ title: "Failed to link contact", description: serverMessage(error), variant: "destructive" });
@@ -127,6 +130,9 @@ export default function MaintenanceEditDialog({ request, open, onClose }: Mainte
       queryClient.invalidateQueries({ queryKey: ['/api/maintenance-requests', request.id, 'contacts'] });
       // The Patterns tab rolls up requests and contractor links; nothing refetches on its own.
       queryClient.invalidateQueries({ queryKey: ['/api/maintenance-aggregates'] });
+      // The dashboard's open work and counts read requests too.
+      queryClient.invalidateQueries({ queryKey: ['/api/action-items'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/region-summary'] });
     },
     onError: (error) => {
       toast({ title: "Failed to unlink contact", description: serverMessage(error), variant: "destructive" });
@@ -200,6 +206,9 @@ export default function MaintenanceEditDialog({ request, open, onClose }: Mainte
       queryClient.invalidateQueries({ queryKey: ['/api/maintenance-requests'] });
       // The Patterns tab rolls up requests and contractor links; nothing refetches on its own.
       queryClient.invalidateQueries({ queryKey: ['/api/maintenance-aggregates'] });
+      // The dashboard's open work and counts read requests too.
+      queryClient.invalidateQueries({ queryKey: ['/api/action-items'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/region-summary'] });
       // A close-out lands on the request page, in its thread, and on every linked contractor's page.
       queryClient.invalidateQueries({ queryKey: ['/api/contacts'] });
       setCloseout(EMPTY_CLOSEOUT);

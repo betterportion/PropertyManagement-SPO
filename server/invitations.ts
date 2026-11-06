@@ -26,10 +26,11 @@ import { recordAuditEvent, AUDIT_ACTIONS } from "./audit";
 import { readAppUrlFromEnv } from "./config";
 import { logError } from "./errors";
 import type { AuthContext } from "./authz";
-import { isInvitationDue } from "@shared/invitations";
+import { isInvitationDue, SEND_HOUR_UTC } from "@shared/invitations";
 import type { Invitation, User } from "@shared/schema";
 
 export const INVITATION_SEND_INTERVAL_MS = 24 * 60 * 60 * 1_000;
+const HOUR_MS = 60 * 60 * 1_000;
 
 /** Pure: the invitations due at `now`, among those neither sent nor dropped. */
 export function selectDueInvitations<T extends Pick<Invitation, "sendAt" | "sentAt" | "cancelledAt">>(rows: T[], now: Date): T[] {
@@ -145,7 +146,13 @@ function tick(run: () => Promise<unknown>): void {
  */
 export function startInvitationJob(run: () => Promise<unknown> = () => sendDueInvitations()): NodeJS.Timeout {
   tick(run);
-  const timer = setInterval(() => tick(run), INVITATION_SEND_INTERVAL_MS);
+  // Once a day, in the hour scheduled invitations fall due (SEND_HOUR_UTC),
+  // not 24 hours from whenever the server last restarted: a restart at 10:00
+  // UTC would otherwise check at 10:00 each day and send a day late. Still
+  // once a day, so an unsent email is retried daily, not hourly.
+  const timer = setInterval(() => {
+    if (new Date().getUTCHours() === SEND_HOUR_UTC) tick(run);
+  }, HOUR_MS);
   timer.unref();
   return timer;
 }

@@ -149,7 +149,10 @@ export default function Properties() {
       return await apiRequest("PATCH", `/api/properties/${id}`, normalizeLease(data));
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/properties"] });
+      // The server rewrites the house's address and region on its requests,
+      // residents, walkthroughs, assets and the rest in the same save, so
+      // every cached list may now be wrong, not only this one.
+      queryClient.invalidateQueries();
       setIsEditDialogOpen(false);
       setEditingProperty(null);
       toast({
