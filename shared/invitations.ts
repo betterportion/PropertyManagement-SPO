@@ -29,7 +29,7 @@ export const invitationRequestSchema = z.object({
 export type InvitationRequest = z.infer<typeof invitationRequestSchema>;
 
 /** The hour (UTC) a scheduled invitation becomes due: early morning in the US. */
-const SEND_HOUR_UTC = 12;
+export const SEND_HOUR_UTC = 12;
 
 /**
  * The moment an invitation written at `now` for `sendOn` becomes due. Pure.

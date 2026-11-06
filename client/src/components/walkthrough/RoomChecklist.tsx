@@ -79,6 +79,8 @@ export default function RoomChecklist({ walkthroughId, items, canManage, canRemo
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: itemsKey });
+      // A condition decides whether the item is on the flagged-items list.
+      queryClient.invalidateQueries({ queryKey: ["/api/walkthrough-flagged-items"] });
     },
   });
 
@@ -103,6 +105,7 @@ export default function RoomChecklist({ walkthroughId, items, canManage, canRemo
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: itemsKey });
+      queryClient.invalidateQueries({ queryKey: ["/api/walkthrough-flagged-items"] });
     },
     onError: (error) => {
       toast({ variant: "destructive", title: "Not removed", description: serverMessage(error) ?? "That item could not be removed." });

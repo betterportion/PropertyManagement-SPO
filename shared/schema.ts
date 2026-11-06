@@ -55,7 +55,7 @@ const nonNegativeInt = z.coerce
  * rather than guessed. Where null is allowed, `.nullish()` still takes it:
  * that wrapper answers before this runs.
  */
-const dateFromClient = z.preprocess((value) => {
+export const dateFromClient = z.preprocess((value) => {
   if (value === null) return undefined;
   if (typeof value !== "string") return value;
   const day = /^(\d{4})-(\d{2})-(\d{2})(?:$|T)/.exec(value.trim());

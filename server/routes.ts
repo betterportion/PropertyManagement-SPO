@@ -116,6 +116,7 @@ import {
   feedbackReportFromClient,
   FEEDBACK_EMAIL,
   FEEDBACK_SUBJECT,
+  dateFromClient,
 } from "@shared/schema";
 import { hubSlotProblem } from "@shared/resourceHubSlots";
 import { STANDARD_SCHEDULE_TEMPLATES, addMonths } from "./schedules";
@@ -4545,7 +4546,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
             // The financial-data rule, as on a single deduction (#51).
             .pipe(financeText),
           amount: z.coerce.number().finite().min(0, "Must be 0 or greater").refine(isWholeCents, WHOLE_CENTS_MESSAGE),
-          chargeDate: z.coerce.date(),
+          // As on a single deduction: a blank is missing, not 1970, and a day
+          // that is not on the calendar is refused, not rolled over (#219).
+          chargeDate: dateFromClient,
           residentIds: z
             .array(z.string().min(1))
             .min(1, "Choose at least one person to split this across")

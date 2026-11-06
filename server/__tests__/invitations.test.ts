@@ -230,6 +230,18 @@ describe("startInvitationJob never fails the boot", () => {
     clearInterval(timer);
   });
 
+  it("after a restart at 10:00 UTC, sends that day's scheduled invitations at noon, not the next morning", async () => {
+    vi.setSystemTime(new Date("2026-11-10T10:00:00Z"));
+    const run = vi.fn(async () => undefined);
+    const timer = startInvitationJob(run);
+    expect(run).toHaveBeenCalledTimes(1); // at boot: nothing due yet
+    await vi.advanceTimersByTimeAsync(2 * 60 * 60 * 1_000); // 12:00 UTC, when they fall due
+    expect(run).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(22 * 60 * 60 * 1_000 - 1); // and not again until the next noon
+    expect(run).toHaveBeenCalledTimes(2);
+    clearInterval(timer);
+  });
+
   it("runs once at boot and again a day later (positive control)", async () => {
     const run = vi.fn(async () => undefined);
     const timer = startInvitationJob(run);

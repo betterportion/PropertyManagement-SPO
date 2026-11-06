@@ -10015,6 +10015,18 @@ describe("splitting a common-area charge across a house", () => {
     expect(storageMock.createDepositDeductions).not.toHaveBeenCalled();
   });
 
+  it("refuses a blank or impossible charge date, as a single deduction does, without writing (#219)", async () => {
+    westLead();
+    for (const chargeDate of [null, "2026-02-30"]) {
+      const { status } = await split({ ...validSplit, chargeDate });
+      expect(status).toBe(400);
+    }
+    expect(storageMock.createDepositDeductions).not.toHaveBeenCalled();
+    // Positive control: the same split with a real day is written.
+    expect((await split(validSplit)).status).toBe(200);
+    expect(storageMock.createDepositDeductions).toHaveBeenCalledTimes(1);
+  });
+
   it("refuses a split for a walkthrough item already charged, without writing (#262)", async () => {
     westLead();
     storageMock.getDepositDeductionsByWalkthroughItem.mockResolvedValue([{ id: "ded-0", walkthroughItemId: "item-1" }]);

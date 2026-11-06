@@ -97,6 +97,8 @@ export default function RoomSwitcher({
     onSuccess: (room) => {
       queryClient.invalidateQueries({ queryKey: roomsKey });
       queryClient.invalidateQueries({ queryKey: itemsKey });
+      // "Where in the house" on a repair lists the latest walkthrough's rooms.
+      queryClient.invalidateQueries({ queryKey: ["/api/maintenance-locations"] });
       setIsAddOpen(false);
       setTemplateRoomId("");
       setCustomName("");

@@ -88,6 +88,9 @@ export default function Residents() {
     queryClient.invalidateQueries({ queryKey: ["/api/residents"] });
     // A move-out or delete can end a household login, which changes the house's count.
     queryClient.invalidateQueries({ predicate: isPortalAccessQuery });
+    // Move-out and deposit reminders, and the dashboard counts, read the roster.
+    queryClient.invalidateQueries({ queryKey: ["/api/action-items"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/region-summary"] });
   };
 
   const createMutation = useMutation({
