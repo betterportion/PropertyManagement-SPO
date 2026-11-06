@@ -24,7 +24,7 @@ Each workflow has the same fields:
 | **built-awaiting-SPO-setup** | In the code, but does nothing until SPO finishes the setup listed for it |
 | **live** | Built, set up, and running in production |
 
-The daily jobs all run **inside the web server**: there is no separate worker and no cron. Each one starts when the server boots, runs once straight away and then every 24 hours. That gives every job two rules:
+The daily jobs all run **inside the web server**: there is no separate worker and no cron. Each one starts when the server boots, runs once straight away and then every 24 hours, except the invitation job, which then runs once a day at noon UTC. That gives every job two rules:
 
 - **Idempotent.** A restart re-runs it, so running it twice must change nothing the second time.
 - **Can never stop the server from starting.** A failure is written to the server log and the job tries again the next day.

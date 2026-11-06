@@ -288,7 +288,7 @@ The health check endpoint returns 200 only when the process is serving **and** t
 
 ### Run exactly one instance
 
-The portal's five daily jobs — audit-log retention, preventive maintenance requests, seasonal reminder tasks (which also creates move-out reminders), the QuickBooks sync and the roster-sheet sync — run **inside the web server**. There is no separate worker and no cron (`docs/WORKFLOWS.md` lists each one). Each runs once when the server starts and then every 24 hours from that moment, not at a fixed time of day, so a redeploy restarts the clock.
+The portal's six daily jobs — audit-log retention, preventive maintenance requests, seasonal reminder tasks (which also creates move-out reminders), the QuickBooks sync, the roster-sheet sync and the invitation sender — run **inside the web server**. There is no separate worker and no cron (`docs/WORKFLOWS.md` lists each one). Each runs once when the server starts and then every 24 hours from that moment, not at a fixed time of day, so a redeploy restarts the clock.
 
 So keep the service at **one instance**. A second instance would run every job twice, and the guards that stop two syncs overlapping, the limit on uploads in progress, and the lock that keeps a house at four logins (`server/houseLock.ts`), only hold within one process. The jobs are written so that running twice changes nothing, which is what makes the brief overlap during a deploy safe — but that is a safety net, not a way to run two copies.
 
