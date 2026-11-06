@@ -577,6 +577,11 @@ export function canReadMaintenanceRequest(
   now: Date = new Date(),
 ): boolean {
   if (ctx.isAdmin) return true;
+  // Everybody else needs a maintenance flag, a household login included. The
+  // thread, the photos and every file on a request inherit this rule, so a
+  // flag checked only on the list and detail routes would leave all of them
+  // open to somebody whose maintenance access was taken away.
+  if (!hasPermission(ctx, "canViewMaintenance", "canManageMaintenance")) return false;
   if (ctx.isResident) {
     // Repairs only. First, so neither path below can let a project through.
     if (!isRepair(request.type)) return false;
@@ -590,11 +595,6 @@ export function canReadMaintenanceRequest(
     if (!isClosedMaintenanceStatus(request.status)) return true;
     return withinResidentWindow(request.completedDate, now);
   }
-  // Staff need a maintenance flag as well as the region. The thread, the
-  // photos and every file on a request inherit this rule, so a flag checked
-  // only on the request route would leave all of them open to somebody whose
-  // maintenance access was taken away.
-  if (!hasPermission(ctx, "canViewMaintenance", "canManageMaintenance")) return false;
   return canAccessRegion(ctx, request.region);
 }
 

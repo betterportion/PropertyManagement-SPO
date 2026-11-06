@@ -46,7 +46,8 @@ function context(overrides: Partial<AuthContext> & { role?: string } = {}): Auth
       role,
       isActive: true,
     } as AuthContext["user"],
-    permissions: undefined,
+    // A household login is created with View Maintenance on (computeDefaultPermissions).
+    permissions: role === "resident" ? ({ canViewMaintenance: true } as AuthContext["permissions"]) : undefined,
     isAdmin: role === "admin",
     isResident: role === "resident",
     allowedRegions: [],
