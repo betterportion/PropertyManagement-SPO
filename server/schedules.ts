@@ -95,9 +95,14 @@ export async function generateDueMaintenanceRequests(now: Date): Promise<number>
   let created = 0;
   for (const schedule of due) {
     if (!needsRequest(schedule, now)) continue;
-    await storage.createMaintenanceRequest(requestFromSchedule(schedule));
-    await storage.markMaintenanceScheduleGenerated(schedule.id, schedule.nextDueDate);
-    created += 1;
+    try {
+      await storage.createMaintenanceRequest(requestFromSchedule(schedule));
+      await storage.markMaintenanceScheduleGenerated(schedule.id, schedule.nextDueDate);
+      created += 1;
+    } catch (error) {
+      // One bad schedule must not stop the rest, today or any later day.
+      logError(`Failed to generate a request from maintenance schedule ${schedule.id}`, error);
+    }
   }
   return created;
 }
