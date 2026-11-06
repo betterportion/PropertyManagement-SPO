@@ -12932,3 +12932,29 @@ describe("bug and feature reports (JR, 2026-11-04)", () => {
     expect(fileStoreMock.putUpload).toHaveBeenCalled();
   });
 });
+
+describe("two grants for the same house at once cannot both take its last place (#313)", () => {
+  const P = { id: "prop-p", name: "House P", address: "10 P St", region: "West Central" };
+
+  it("one of two simultaneous creates on a house with three logins is refused, and only one is written", async () => {
+    actAs(ADMIN);
+    storageMock.getProperty.mockImplementation(async (id: string) => (id === P.id ? P : undefined));
+    const atP = [1, 2, 3].map((n) => ({ id: `u-r${n}`, email: `r${n}@example.com`, role: "resident", isActive: true, propertyId: P.id }));
+    const pause = () => new Promise((r) => setTimeout(r, 20));
+    // The count is a snapshot and the write lands after a pause: the gap two
+    // requests could both slip through without the house lock.
+    storageMock.getActiveResidentAccountsByProperty.mockImplementation(async () => [...atP]);
+    storageMock.upsertUser.mockImplementation(async (data: Record<string, unknown>) => {
+      await pause();
+      const user = { role: "resident", isActive: true, ...data, id: `u-${String(data.email)}` };
+      atP.push(user as (typeof atP)[number]);
+      return { user };
+    });
+    const create = (email: string) => request("POST", "/api/users", { body: { email, role: "resident", propertyId: P.id } });
+
+    const statuses = (await Promise.all([create("r4@example.com"), create("r5@example.com")])).map((r) => r.status).sort();
+    expect(statuses).toEqual([200, 409]);
+    expect(storageMock.upsertUser).toHaveBeenCalledTimes(1);
+    expect(atP).toHaveLength(4);
+  });
+});

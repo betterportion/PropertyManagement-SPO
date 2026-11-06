@@ -290,7 +290,7 @@ The health check endpoint returns 200 only when the process is serving **and** t
 
 The portal's five daily jobs — audit-log retention, preventive maintenance requests, seasonal reminder tasks (which also creates move-out reminders), the QuickBooks sync and the roster-sheet sync — run **inside the web server**. There is no separate worker and no cron (`docs/WORKFLOWS.md` lists each one). Each runs once when the server starts and then every 24 hours from that moment, not at a fixed time of day, so a redeploy restarts the clock.
 
-So keep the service at **one instance**. A second instance would run every job twice, and the guards that stop two syncs overlapping, and the limit on uploads in progress, only hold within one process. The jobs are written so that running twice changes nothing, which is what makes the brief overlap during a deploy safe — but that is a safety net, not a way to run two copies.
+So keep the service at **one instance**. A second instance would run every job twice, and the guards that stop two syncs overlapping, the limit on uploads in progress, and the lock that keeps a house at four logins (`server/houseLock.ts`), only hold within one process. The jobs are written so that running twice changes nothing, which is what makes the brief overlap during a deploy safe — but that is a safety net, not a way to run two copies.
 
 **Time zone:** leave `TZ` unset. Render runs in UTC, and the portal's own date rules (due dates, move-out reminders, "today") are all worked out in UTC whatever `TZ` says, so setting it would only change the times printed in the log. Bear in mind that a UTC day starts in the evening in Ohio and Kansas (between 6 and 8pm local time, depending on the state and daylight saving).
 
