@@ -223,6 +223,7 @@ The details below are the agreed intent. Each entry is filled in properly in the
     - **Never duplicated**, and never recreated once marked done.
     - **If the stop date changes,** the open task moves to the new date. If the date is cleared, or moves more than 30 days out, the task is removed.
     - Visible to staff with a property permission, like lease reminders.
+    - **Nothing for somebody already moved out.** Once a move-out is recorded, no task is created or moved and nobody is emailed to get ready to leave; a task already open stays for the RA.
   - Emails **the resident** a move-out checklist, and **the house's regional administrators** (active, with a property permission, covering the region) a heads-up. Admins are not emailed. The emails go once per date: when the task is created, or when it moves.
   - **The wording** is in one file, `server/notifications.ts` (`moveOutResidentEmail`, `moveOutStaffEmail`). Change it there to change every move-out email.
   - Never touches the resident's portal login.

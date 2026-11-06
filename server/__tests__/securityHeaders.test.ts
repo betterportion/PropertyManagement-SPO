@@ -94,6 +94,18 @@ describe("Content Security Policy and HSTS", () => {
     expect(csp).toContain("object-src 'none'");
   });
 
+  it("lets a request's video load from the bucket, as a photo does (#340)", async () => {
+    vi.stubEnv("SUPABASE_URL", "https://abc.supabase.co");
+    const csp = (await headersFromProductionApp()).get("content-security-policy") ?? "";
+    vi.stubEnv("SUPABASE_URL", "");
+
+    // GET /uploads/<key> redirects to a signed bucket URL, and the browser
+    // checks each hop against media-src; without it a <video> falls back to
+    // default-src 'self' and never plays.
+    expect(csp).toMatch(/(^|;)media-src 'self' blob: https:\/\/abc\.supabase\.co(;|$)/);
+    expect(csp).toMatch(/(^|;)img-src [^;]*https:\/\/abc\.supabase\.co/);
+  });
+
   it("sends Strict-Transport-Security for six months, subdomains included", async () => {
     const hsts = (await headersFromProductionApp()).get("strict-transport-security");
 

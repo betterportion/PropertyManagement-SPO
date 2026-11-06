@@ -77,6 +77,15 @@ describe("planMoveOutTasks", () => {
     expect(plan([resident({ moveOutDate: new Date("2027-08-01T00:00:00Z") })], [open(moveOutKey("r1", "2027-05-20"))]).remove).toEqual(["t1"]);
   });
 
+  it("files nothing for somebody already moved out, so nobody is emailed to get ready to leave, and leaves an open reminder alone", () => {
+    // Move-out recorded today with no stop date set beforehand: the route
+    // stores isActive false and today's date, which is inside the window.
+    const left = resident({ isActive: false, moveOutDate: new Date("2027-04-20T00:00:00Z") });
+    expect(plan([left])).toEqual({ create: [], move: [], remove: [] });
+    // Left early, with a reminder still open for the planned date.
+    expect(plan([left], [open(moveOutKey("r1", "2027-05-20"))])).toEqual({ create: [], move: [], remove: [] });
+  });
+
   it("removes a reminder for a resident who is gone, and a second open one for the same resident", () => {
     const p = plan([resident()], [open(moveOutKey("r1", "2027-05-20"), "t1"), open(moveOutKey("r1", "2027-05-20"), "t2"), open(moveOutKey("gone", "2027-05-01"), "t3")]);
     expect(p.remove.sort()).toEqual(["t2", "t3"]);

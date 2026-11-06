@@ -103,6 +103,9 @@ export function planMoveOutTasks(
   }
 
   for (const resident of residents) {
+    // Somebody already moved out has nothing left to do before they go; an
+    // open reminder is left as it is.
+    if (!resident.isActive) continue;
     const day = resident.moveOutDate ? isoDay(resident.moveOutDate) : null;
     const open = openByResident.get(resident.id);
     if (open && open.day === day) continue; // already reminded for this date

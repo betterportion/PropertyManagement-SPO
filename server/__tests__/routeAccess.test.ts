@@ -186,6 +186,9 @@ function signIn(userId: string) {
 
 const ADMIN = { id: "u-admin", email: "admin@example.com", role: "admin", isActive: true };
 const STAFF = { id: "u-staff", email: "staff@example.com", role: "regional_administrator", isActive: true };
+// What a household login is created with (computeDefaultPermissions):
+// View Maintenance on, so it reads and is emailed about its house's repairs.
+const HOUSEHOLD_PERMISSIONS = { canViewMaintenance: true } as never;
 const ALICE = { id: "u-alice", email: "alice@example.com", role: "resident", isActive: true };
 const BOB = { id: "u-bob", email: "bob@example.com", role: "resident", isActive: true };
 const DISABLED = { id: "u-gone", email: "gone@example.com", role: "regional_administrator", isActive: false };
@@ -947,6 +950,25 @@ describe("a demoted regional administrator and the repairs they filed as staff (
     expect(storageMock.createMaintenanceRequestComment).toHaveBeenCalledTimes(1);
   });
 
+  // Settings offers a household login three switches; turning off View
+  // Maintenance has to close the thread and the photos too, not only the
+  // list and the detail. The tests above, on the same house with the switch
+  // on, are the positive controls.
+  it("with View Maintenance switched off, refuses her own house's thread and photos, and writes nothing", async () => {
+    actAs({ ...ALICE, propertyId: "prop-a" } as typeof ALICE, { canViewMaintenance: false, canCompleteWalkthroughs: true, canViewResourceHub: true });
+
+    expect((await get("/api/maintenance-requests/req-here-old/comments")).status).toBe(403);
+    expect(storageMock.getMaintenanceRequestComments).not.toHaveBeenCalled();
+
+    const posted = await request("POST", "/api/maintenance-requests/req-here-old/comments", { body: { body: "Hello?", isInternal: false } });
+    expect(posted.status).toBe(403);
+    expect(storageMock.createMaintenanceRequestComment).not.toHaveBeenCalled();
+
+    const photos = await get("/api/maintenance-request-photos");
+    expect(photos.status).toBe(200);
+    expect(photos.body).toEqual([]);
+  });
+
   it("refuses an attachment to the one filed elsewhere before the parser reads a byte, and stores nothing", async () => {
     const refused = await fetch(`${baseUrl}${ATTACH("req-elsewhere")}`, { method: "POST", body: aPdf() });
     expect(refused.status).toBe(403);
@@ -1415,8 +1437,8 @@ describe("the thread on a request", () => {
     const TOM = { id: "u-tom", email: "tom@example.com", role: "regional_administrator", isActive: true };
     const on = { commentEmailsEnabled: true };
     const candidates = [
-      { user: { ...ALICE, propertyId: "prop-a", ...on }, permissions: null },
-      { user: { ...BOB, propertyId: "prop-a", ...on }, permissions: null },
+      { user: { ...ALICE, propertyId: "prop-a", ...on }, permissions: HOUSEHOLD_PERMISSIONS },
+      { user: { ...BOB, propertyId: "prop-a", ...on }, permissions: HOUSEHOLD_PERMISSIONS },
       { user: { ...STAFF, ...on }, permissions: westOnly },
       { user: { ...TOM, ...on }, permissions: { canViewMaintenance: true, allowedRegions: ["West Central"] } },
       { user: { ...ADMIN, ...on }, permissions: null },
@@ -1488,7 +1510,7 @@ describe("the thread on a request", () => {
     it("does not email a resident who submitted the request but has no house link", async () => {
       const EVE = { id: "u-eve", email: "eve@example.com", role: "resident", isActive: true, propertyId: null, ...on };
       storageMock.getMaintenanceRequest.mockResolvedValue({ ...OWN_HOUSE_OPEN, submittedBy: EVE.email });
-      storageMock.getAllUsersWithPermissions.mockResolvedValue([...candidates, { user: EVE, permissions: null }]);
+      storageMock.getAllUsersWithPermissions.mockResolvedValue([...candidates, { user: EVE, permissions: HOUSEHOLD_PERMISSIONS }]);
 
       const shared = await post("/api/maintenance-requests/req-own-open/comments", { body: "Shared note.", isInternal: false });
       expect(shared.status).toBe(201);
@@ -12424,7 +12446,7 @@ describe("acknowledgement and status emails follow the read rule", () => {
   beforeEach(() => {
     storageMock.getAllProperties.mockResolvedValue([PROPERTY_A, PROPERTY_B]);
     storageMock.getAllResidents.mockResolvedValue([EVE_ROSTER]);
-    storageMock.getAllUsersWithPermissions.mockResolvedValue([{ user: EVE, permissions: null }]);
+    storageMock.getAllUsersWithPermissions.mockResolvedValue([{ user: EVE, permissions: HOUSEHOLD_PERMISSIONS }]);
     storageMock.updateMaintenanceRequest.mockImplementation(async (_id: string, patch: object) => ({
       ...(await storageMock.getMaintenanceRequest()),
       ...patch,
@@ -12452,7 +12474,7 @@ describe("acknowledgement and status emails follow the read rule", () => {
     it("sends nothing to a submitter linked to no house", async () => {
       actAs(ADMIN);
       storageMock.getMaintenanceRequest.mockResolvedValue(REPAIR_AT(HOUSE_A));
-      storageMock.getAllUsersWithPermissions.mockResolvedValue([{ user: { ...EVE, propertyId: null }, permissions: null }]);
+      storageMock.getAllUsersWithPermissions.mockResolvedValue([{ user: { ...EVE, propertyId: null }, permissions: HOUSEHOLD_PERMISSIONS }]);
       expect((await moveOn()).status).toBe(200);
       expect(sendEmailMock).not.toHaveBeenCalled();
     });
@@ -12470,7 +12492,7 @@ describe("acknowledgement and status emails follow the read rule", () => {
       storageMock.getMaintenanceRequest.mockResolvedValue(REPAIR_AT(HOUSE_A));
       storageMock.getAllUsersWithPermissions.mockResolvedValue([]);
       expect((await moveOn()).status).toBe(200);
-      storageMock.getAllUsersWithPermissions.mockResolvedValue([{ user: { ...EVE, isActive: false }, permissions: null }]);
+      storageMock.getAllUsersWithPermissions.mockResolvedValue([{ user: { ...EVE, isActive: false }, permissions: HOUSEHOLD_PERMISSIONS }]);
       expect((await moveOn()).status).toBe(200);
       expect(sendEmailMock).not.toHaveBeenCalled();
     });
