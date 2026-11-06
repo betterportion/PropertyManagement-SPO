@@ -15,6 +15,9 @@ about *this* repo. When a change lands on a path with no row here, add the row i
 | `README.md` | setup, env vars, commands, project layout, security model, deployment, known issues |
 | `.env.example` | every environment variable, with placeholders |
 | `docs/PRODUCTION_MIGRATION.md` | the staging-first runbook: Supabase, Google Workspace login, Render, env tables |
+| `docs/WORKFLOWS.md` | every workflow, daily job, integration and automated email: trigger, status, what SPO must do |
+| `docs/SPO-DATA-PLATFORM.md` | the people layer shared by the three SPO apps; the same file is in SPO-Crew-App and DonorCRM-SPO, so change all three together |
+| `PROJECT_BRIEF.md`, `docs/LAUNCH_READINESS_ROUND.md` | the launch readiness brief, and the record of what each of its phases landed |
 | `docs/IMPLEMENTATION_PLAN.md` | backlog phase status — what shipped, what is blocked |
 | `docs/IMPLEMENTATION_PLAN_ADDENDUM.md` | phases 9–11 (threads, request types, house facts) and the 2.6 amendment — same phase-status claims as the main plan |
 | `CONTEXT.md` | the glossary: the word the portal uses for each thing, and the words to avoid |
@@ -37,7 +40,7 @@ about *this* repo. When a change lands on a path with no row here, add the row i
 | `server/auth.ts` | CLAUDE.md "Login" — the claim-mapping rule, `upsertUser` re-linking, the hard-coded callback, refresh-token behaviour | read the section beside the file |
 | `server/audit.ts` | CLAUDE.md "Audit log" — the event vocabulary, two-year retention, the indefinitely-kept list | the doc's kept-forever list matches `AUDIT_ACTIONS_KEPT_INDEFINITELY` exactly |
 | `server/uploadLimits.ts`, `server/objectStorage/` | CLAUDE.md "File uploads" — the two endpoints, the 10MB/20MB limits, the 64MB in-flight ceiling, the read-back rules | the numbers in the doc match the constants |
-| `server/email.ts`, `server/schedules.ts`, `server/seasonalTasks.ts` | CLAUDE.md "Integrations" and the three-daily-jobs paragraph; "Outbound email" in `.claude/rules/maintenance.md` | a fourth job moves that paragraph's count and its idempotency rule |
+| `server/email.ts`, `server/schedules.ts`, `server/seasonalTasks.ts` | CLAUDE.md "Integrations" and the daily-jobs paragraph; README "Run exactly one instance"; "Outbound email" in `.claude/rules/maintenance.md` | a new job moves the count in both, and its idempotency rule; `grep -n 'Job()' server/index.ts` |
 | `server/storage.ts` | the `IStorage` rule in CLAUDE.md — route handlers never touch the database directly | `grep -n 'db\.' server/routes.ts` should stay empty |
 | `client/src/components/ui/` | CLAUDE.md "22 generated primitives" | `ls client/src/components/ui/ \| wc -l` |
 | `client/src/components/` (outside `ui/`) | nothing, unless the component is a feature a doc describes in prose — a new dialog behind an existing button is not a claim | read the hunk; check CLAUDE.md, `.claude/rules/` and README for prose naming the feature |
@@ -51,6 +54,7 @@ about *this* repo. When a change lands on a path with no row here, add the row i
 | `.claude/skills/` | nothing, unless CLAUDE.md's "Agent skills" section or README names the skill | `grep -rn '<skill name>' CLAUDE.md README.md docs/agents/` |
 | a CLAUDE.md or `.claude/rules/` section added, moved, renamed or dropped | the `Read:` lists and citation format in `.claude/skills/spo-e2e-sweep/lanes.md` and its `SKILL.md`, and the lane lists in `.claude/skills/spo-pilot-readiness/lanes.md` and its `SKILL.md`, all of which point at sections by name | every quoted section name in both `lanes.md` files is a heading in CLAUDE.md or a `.claude/rules/` file |
 | code that contradicts a design rule | nothing — `design_guidelines.md` and `docs/spo-design-system.md` are normative, not descriptive | **report it, never edit the rule to match the code.** A merged PR is not a design decision; amending a rule is, and it is the user's to make |
+| a workflow, daily job, integration or automated email added or changed | `docs/WORKFLOWS.md` | the entry exists and its status is true |
 | a known issue fixed, or a new one accepted | CLAUDE.md "Known open issues"; README "Known issues" | the two lists say the same things |
 | a plan item shipped | phase marks in `docs/IMPLEMENTATION_PLAN.md` **and** `docs/IMPLEMENTATION_PLAN_ADDENDUM.md` | the phase the PR title names — the addendum carries phases 9–11, so a PR from those goes there, not in the main plan |
 | a doc added under `docs/`, or at the repo root | README "More documentation"; this map's Docs table | `ls *.md docs/*.md docs/*/` — every doc is named in one of them, or is deliberately reached through a doc that is |
