@@ -25,3 +25,43 @@ export function invitationOutcomeMessage(invitation: InvitationOutcome | null | 
         : "The invitation email did not go: the email provider refused it. It will be tried again tomorrow, or press Send the invitation again.";
   }
 }
+
+type Request = (method: string, url: string, data?: unknown) => Promise<Response>;
+
+export interface InviteResult {
+  residentId: string;
+  name: string;
+  given: boolean;
+  message: string;
+}
+
+/**
+ * Gives several residents portal access, each through the same route as the
+ * resident's own card, so the house limit and every check still apply to each.
+ * One at a time, so a refusal (a full house) names its own person and the rest
+ * still go. Someone who already has access is skipped, not emailed again.
+ */
+export async function inviteResidents(
+  residents: Array<{ id: string; firstName: string; lastName: string }>,
+  sendOn: string,
+  request: Request,
+  describeError: (error: unknown) => string | undefined,
+): Promise<InviteResult[]> {
+  const results: InviteResult[] = [];
+  for (const r of residents) {
+    const name = `${r.firstName} ${r.lastName}`;
+    const key = `/api/residents/${r.id}/portal-access`;
+    try {
+      const access = (await (await request("GET", key)).json()) as { hasAccess: boolean };
+      if (access.hasAccess) {
+        results.push({ residentId: r.id, name, given: false, message: "Already has access. No email sent." });
+        continue;
+      }
+      const { invitation } = (await (await request("POST", key, { sendOn })).json()) as { invitation: InvitationOutcome };
+      results.push({ residentId: r.id, name, given: true, message: `Access given. ${invitationOutcomeMessage(invitation)}` });
+    } catch (error) {
+      results.push({ residentId: r.id, name, given: false, message: `Not given. ${describeError(error) ?? "Something went wrong."}` });
+    }
+  }
+  return results;
+}

@@ -19,10 +19,12 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { Plus, MoreVertical, LogOut, Users, Download } from "lucide-react";
+import { Plus, MoreVertical, LogOut, Users, Download, KeyRound } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
+import InviteResidentsDialog from "@/components/InviteResidentsDialog";
 import { type Resident, type Property, type RentPayment, type SecurityDeposit } from "@shared/schema";
 import { z } from "zod";
 import { Section, Container, PageHeader, PageStack } from "@/components/layout/page";
@@ -58,6 +60,9 @@ export default function Residents() {
   // full house in one sitting" flow keeps the dialog open between saves.
   const [addedCount, setAddedCount] = useState(0);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  // Residents ticked for portal access; only those still in view count.
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [inviting, setInviting] = useState(false);
 
   const { data: residents = [], isLoading } = useQuery<Resident[]>({
     queryKey: ["/api/residents"],
@@ -214,6 +219,14 @@ export default function Residents() {
   const buildings = properties
     .filter((p) => selectedRegion === "all" || p.region === selectedRegion)
     .map((p) => ({ id: p.address, address: p.name }));
+  const chosen = visible.filter((r) => r.isActive && picked.has(r.id));
+  const togglePicked = (id: string, on: boolean) =>
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(id);
+      else next.delete(id);
+      return next;
+    });
   const selectedHouseName = selectedBuilding === "all"
     ? null
     : properties.find((p) => p.address === selectedBuilding)?.name ?? null;
@@ -255,6 +268,25 @@ export default function Residents() {
     }
     return (
       <div className="space-y-6">
+        {active && canManage && (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-card p-3" data-testid="bar-invite">
+            <p className="text-sm text-muted-foreground">
+              {chosen.length === 0
+                ? "Tick the household leaders and stewards who should get a portal login."
+                : `${chosen.length} selected`}
+            </p>
+            <div className="flex gap-2">
+              {chosen.length > 0 && (
+                <Button size="sm" variant="ghost" onClick={() => setPicked(new Set())} data-testid="button-clear-picked">
+                  Clear
+                </Button>
+              )}
+              <Button size="sm" disabled={chosen.length === 0} onClick={() => setInviting(true)} data-testid="button-invite-picked">
+                <KeyRound className="mr-1 h-4 w-4" /> Give portal access
+              </Button>
+            </div>
+          </div>
+        )}
         {Array.from(byProperty.entries()).map(([propertyId, list]) => (
           <div key={propertyId} className="space-y-3">
             <div className="flex items-center justify-between gap-3">
@@ -266,7 +298,17 @@ export default function Residents() {
             <div className="space-y-3">
               {list.map((r) => (
                 <Card key={r.id} data-testid={`card-resident-${r.id}`}>
-                  <CardContent className="flex items-start justify-between gap-4 p-4">
+                  <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+                    <div className="flex min-w-0 items-start gap-3">
+                    {active && canManage && (
+                      <Checkbox
+                        className="mt-1"
+                        checked={picked.has(r.id)}
+                        onCheckedChange={(on) => togglePicked(r.id, on === true)}
+                        aria-label={`Select ${r.firstName} ${r.lastName} for portal access`}
+                        data-testid={`checkbox-invite-${r.id}`}
+                      />
+                    )}
                     <div className="min-w-0">
                       <p className="font-medium">
                         {/* Their name opens everything about them: paperwork,
@@ -287,6 +329,7 @@ export default function Residents() {
                         {r.moveInDate ? `Moved in ${formatDate(r.moveInDate)}` : "Move-in date not recorded"}
                         {r.moveOutDate ? ` · moved out ${formatDate(r.moveOutDate)}` : ""}
                       </p>
+                    </div>
                     </div>
                     {canManage && (
                       <div className="flex shrink-0 items-center gap-2">
@@ -503,6 +546,14 @@ export default function Residents() {
           )}
         </PageStack>
       </Container>
+
+      <InviteResidentsDialog
+        residents={chosen}
+        houseName={propertyName}
+        open={inviting}
+        onOpenChange={setInviting}
+        onDone={() => setPicked(new Set())}
+      />
 
       <Dialog open={!!movingOut} onOpenChange={(o) => { if (!o) setMovingOut(null); }}>
         <DialogContent className="max-w-lg">
