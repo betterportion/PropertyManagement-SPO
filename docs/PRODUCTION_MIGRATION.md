@@ -550,14 +550,25 @@ If the portal will live at something like `portal.spo.org`:
 
 ### Uploaded files
 
-- [ ] A **scheduled copy of the private `uploads` bucket**, at least nightly, to somewhere that is not the production project: a second private bucket in another Supabase project, or off-Supabase storage. Supabase Storage speaks the S3 protocol (create S3 access keys in the project's Storage settings; they are secrets, like the service role key), so a tool such as `rclone` can do the copy:
+- [x] A **nightly copy of the private `uploads` bucket** to Backblaze B2, outside Supabase altogether (first production copy 2026-11-06; the object count and total bytes matched the bucket).
 
-  ```bash
-  rclone copy spo-prod:uploads spo-backup:spo-uploads
-  ```
+  - **What runs it:** a Render cron job, `spo-uploads-backup`, in the Better Portion workspace, from the stock image `docker.io/rclone/rclone:1.75.2`. There is no code for it in this repository. Schedule `0 8 * * *`.
+  - **Where it goes:** the private B2 bucket `spo-uploads-backup-pm`, under `uploads/`, with default encryption on, all file versions kept and Object Lock off.
+  - **Docker Command**, entered with no quotes round the commands, because Render keeps them as literal characters and the run fails with `not found`:
 
-  Use **copy**, not **sync**: a sync would delete from the backup whatever was deleted in the portal, which is exactly the mistake the backup is there to undo. The destination must be private too; it holds the same W-9s and photographs.
-- [ ] Write down how the copy runs and where (which scheduler, which destination, who gets told if it fails): ______.
+    ```bash
+    /bin/sh -c rclone copy PROD:uploads BACKUP:spo-uploads-backup-pm/uploads --size-only --immutable --log-level INFO && wget -q -O /dev/null "$HEARTBEAT_URL"
+    ```
+
+  - **`PROD` and `BACKUP` are rclone remotes defined by the job's environment variables**, not a config file: `RCLONE_CONFIG_PROD_*` (`TYPE=s3`, `PROVIDER=Other`, `ACCESS_KEY_ID`, `SECRET_ACCESS_KEY`, `ENDPOINT`, `REGION`, `FORCE_PATH_STYLE=true`) and `RCLONE_CONFIG_BACKUP_*` (`TYPE=b2`, `ACCOUNT`, `KEY`). To run any rclone command below from a terminal, set the same variables there, and a third set, `RCLONE_CONFIG_SCRATCH_*`, for a scratch project.
+  - **Use `copy`, not `sync`:** a sync would delete from the backup whatever was deleted in the portal, which is exactly the mistake the backup is there to undo.
+  - **Keep `--size-only`.** Backblaze rounds a copied file's time up to a whole second, and the two stores share no checksum, so without it rclone sees most files as changed. `--immutable` then fails the run. Size alone is enough because storage keys are random and a stored file is never rewritten.
+  - **The two keys are not equally powerful.** Supabase S3 keys cannot be limited: the job's key (`pm-nightly-backup`) can delete live files, so it lives only in the job's variables, like the service role key. The Backblaze key is limited to this bucket with `listBuckets,listFiles,readFiles,writeFiles`, and a permanent delete with it was refused with a 401. It can still hide a file, which is why all versions are kept. The Backblaze console has no option for this set of permissions, so it is made with `b2 key create` and the master key.
+
+- [x] **Who gets told if it fails:** a healthchecks.io check, pinged only after a run succeeds, with a 1-day period and 2 hours' grace. It emails the addresses on the check when a ping is missed, so a job that stops running raises the alarm as well as one that fails. The ping URL is a secret, since anyone holding it can report the backup as successful.
+- [ ] **Prove the alert:** suspend the job for a night, confirm the email arrives at both addresses, and resume it.
+
+The backup never removes anything, so files deleted in the portal stay in it. **No retention period has been decided yet**; Object Lock can be turned on later, but never turned off.
 
 ### Rehearse a restore
 
@@ -570,7 +581,7 @@ A backup nobody has restored is a guess. Once, before real data, restore both ha
      "<production direct connection string>" > spo-restore-test.sql
    psql "<scratch direct connection string>" < spo-restore-test.sql
    ```
-3. **Files:** copy the bucket backup into the scratch bucket, the other way round: `rclone copy spo-backup:spo-uploads spo-scratch:uploads`.
+3. **Files:** copy the bucket backup into the scratch bucket, the other way round: `rclone copy BACKUP:spo-uploads-backup-pm/uploads SCRATCH:uploads --size-only`.
 4. **Check it:** run the portal locally against the scratch project (step 4's variables, with the scratch database, URL and service role key). Sign in, open a walkthrough with photos and a billing record with a document, and confirm both display. `select count(*) from uploads;` should be close to the number of objects in the scratch bucket (new uploads since the last copy account for any gap).
 5. **Rehearse the safety copy too.** Take the pre-migrate dump from "Migrations on deploy" on production, with its file name, and load that file into a second scratch project the way step 2 does. Check it loads without errors and the portal runs against it. Note how long the dump took.
 6. Write down the date, how long it took, and anything that did not go as written, and correct this section to match. Then delete the scratch project, and the test records from production.
@@ -579,7 +590,7 @@ A backup nobody has restored is a guess. Once, before real data, restore both ha
 
 1. Tell staff the portal is down, and stop the Render service so nothing is written mid-restore.
 2. Restore the database from **Database → Backups** (this replaces the current database with the backup; anything entered since that backup is lost and has to be re-entered).
-3. Copy the bucket backup back into the `uploads` bucket with `rclone copy`. It only adds what is missing; every storage key is unique, so nothing current is overwritten. Files uploaded after the last bucket copy cannot come back.
+3. Copy the bucket backup back into the `uploads` bucket with `rclone copy BACKUP:spo-uploads-backup-pm/uploads PROD:uploads --size-only`. With `--size-only` it only adds what is missing; every storage key is unique, so nothing current is overwritten. Files uploaded after the last bucket copy cannot come back.
 4. Start the service, run the step 7 checks, and open a few recent photos and documents.
 
 - [ ] **Who restores, and how they are reached:** ______. Name a second person.
@@ -641,7 +652,7 @@ In the commands, `<scratch connection string>` and `<production connection strin
 6. **Copy the files back** from the bucket backup (not from scratch), only the ones this resident's photos use. First list their storage keys from the scratch database, then copy just those. `--files-from` is what stops other people's deliberately deleted files coming back with them:
    ```bash
    psql "<scratch connection string>" -X -A -t -c "select substr(image_url, 10) from move_out_photos;" > restore-keys.txt
-   rclone copy --files-from restore-keys.txt spo-backup:spo-uploads spo-prod:uploads
+   rclone copy --files-from restore-keys.txt --size-only BACKUP:spo-uploads-backup-pm/uploads PROD:uploads
    ```
    A file that was uploaded after the last bucket copy and then deleted cannot come back; the photo's row will exist but the image will not show. Say so to the RA.
 
@@ -649,7 +660,7 @@ In the commands, `<scratch connection string>` and `<production connection strin
 
 8. **Delete the scratch project, and the two files** (`restore-one-resident.sql`, `restore-keys.txt`). They hold a resident's name, email and finance rows.
 
-**Not tested.** The tables, cascade and column names above are read from `shared/schema.ts` and `server/storage.ts`, and every `pg_dump` and `psql` option was checked against `--help` for version 16. None of it has been run against a real database or a real backup, and `rclone` was not available to check `--files-from` or the copy. The `pg_dump` output itself, and how production reacts to loading it, are unverified until the rehearsal in the first paragraph is done.
+**Not tested.** The tables, cascade and column names above are read from `shared/schema.ts` and `server/storage.ts`, and every `pg_dump` and `psql` option was checked against `--help` for version 16. None of it has been run against a real database or a real backup, and neither `--files-from` nor a copy from the backup back into a bucket has been run. The `pg_dump` output itself, and how production reacts to loading it, are unverified until the rehearsal in the first paragraph is done.
 
 ---
 
@@ -682,7 +693,7 @@ If a later move is from a portal that already holds data: agree a quiet window; 
 
 ## After the move
 
-- **Rotate the secrets that were used during setup** if any were pasted into a chat, a ticket or a shared document — particularly the Supabase service role key. The full list of secrets the portal holds: `SESSION_SECRET` (changing it signs everyone out), `SUPABASE_SERVICE_ROLE_KEY`, `OIDC_CLIENT_SECRET`, `RESEND_API_KEY` once email is on, the bucket-backup S3 keys, and, once those integrations are switched on after the pilot, `QUICKBOOKS_CLIENT_SECRET` and `QUICKBOOKS_TOKEN_KEY` (changing the token key means an admin reconnects QuickBooks) and the Google service-account key in `GOOGLE_SERVICE_ACCOUNT_JSON` (create a new key in Google Cloud, replace the variable, restart, then delete the old key).
-- **Decide who holds the accounts.** Supabase, Render and the Google Cloud project should each be owned by an organisation account with more than one administrator, not by an individual's personal login.
+- **Rotate the secrets that were used during setup** if any were pasted into a chat, a ticket or a shared document — particularly the Supabase service role key. The full list of secrets the portal holds: `SESSION_SECRET` (changing it signs everyone out), `SUPABASE_SERVICE_ROLE_KEY`, `OIDC_CLIENT_SECRET`, `RESEND_API_KEY` once email is on, the backup job's Supabase S3 key, Backblaze key and healthchecks.io ping URL (all in the `spo-uploads-backup` cron job's variables), and, once those integrations are switched on after the pilot, `QUICKBOOKS_CLIENT_SECRET` and `QUICKBOOKS_TOKEN_KEY` (changing the token key means an admin reconnects QuickBooks) and the Google service-account key in `GOOGLE_SERVICE_ACCOUNT_JSON` (create a new key in Google Cloud, replace the variable, restart, then delete the old key).
+- **Decide who holds the accounts.** Supabase, Render, Backblaze and the Google Cloud project should each be owned by an organisation account with more than one administrator, not by an individual's personal login.
 - **Keep `.env.example` current.** It is the only complete list of what the app reads, and it is what the next person will follow.
 - **Work through the known issues** in `README.md` — particularly that replacing a photo or document on an edit leaves the old file in storage.

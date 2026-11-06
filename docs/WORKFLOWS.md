@@ -315,6 +315,17 @@ The log knows whether **Resend accepted** a message, not whether it was **delive
 
 Listed under "Deferred to v2".
 
+### Nightly backup of uploaded files
+
+- **Purpose:** keep a copy of every uploaded file outside Supabase, because Supabase's database backups do not include Storage files and a delete in the portal removes the file.
+- **Trigger:** a Render cron job, `spo-uploads-backup`, every day at 08:00 UTC. This is the one scheduled job that runs **outside** the portal's web server, and there is no code for it in this repository.
+- **What it does:** `rclone copy` adds any new file in the `uploads` bucket to the private Backblaze B2 bucket. It never deletes from the backup, so a file deleted in the portal stays there.
+- **What SPO must do:** decide how long deleted files stay in the backup (not decided yet), and name who restores. Both are in step 11 of `docs/PRODUCTION_MIGRATION.md`, with how the job is set up.
+- **Needs:** a Supabase S3 key, a Backblaze key and a healthchecks.io ping URL, all held as the cron job's variables.
+- **How to check it's working:** the healthchecks.io check is up with a ping from the last day. The job's latest run on Render says what it copied, or `There was nothing to transfer`.
+- **When it fails:** the ping is only sent after a successful run, so a failed or missed run emails the addresses on the check about 26 hours after the last ping. The portal itself shows nothing.
+- **Status:** live.
+
 ---
 
 ## SPO setup checklist
