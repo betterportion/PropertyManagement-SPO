@@ -61,7 +61,7 @@ Finish with a coverage list: every item in your lane below, marked checked
 ## money-dates-jobs
 
 - HH fees (`rent_payments`, see CLAUDE.md "Data model") and deposits (`deposits.md`, `shared/depositLedger.ts`): amount types and rounding, what counts as outstanding, the damages worksheet totals.
-- Dates: every date-only value from the form to the database and back to `formatDate`; month and season boundaries in Central time; the open question in STATE.md about `server/schedules.ts` raising at UTC midnight.
+- Dates: every date-only value from the form to the database and back to `formatDate`; month and season boundaries in Central time; whether `server/schedules.ts` raising at UTC midnight puts a due date on the wrong Central day.
 - The three daily jobs (CLAUDE.md "Backend"): idempotent across a restart, unable to fail the boot, bounded on a real-sized table.
 - Rollups (`maintenance.md` "Rollups over maintenance history") and roster import (`roster-import.md`): what a malformed or duplicate row does.
 - Migrations: the drift result in `audit.md`; any migration that drops or rewrites data; that `npm run db:migrate` on a fresh database reaches the current schema.

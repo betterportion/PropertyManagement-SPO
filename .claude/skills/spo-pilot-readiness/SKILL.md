@@ -28,11 +28,10 @@ Done when `audit.md` holds the audited commit's hash and the drift result.
 The code on `main` is not what the pilot runs. Record in `audit.md`:
 
 - **Deployed commit.** Ask the user which commit is live on staging and production; the repo cannot tell you. Every fix merged after it is a **blocker** until deployed.
-- **Unfinished work.** Each item in STATE.md's "Unfinished / next" (undeployed security fixes, unapplied migrations, unpublished advisories, open decisions), classified blocker or not, with the reason.
-- **Open issues.** `gh issue list --state open --json number,title,labels`; classify the same way.
+- **Open issues.** `gh issue list --state open --json number,title,labels`; classify each blocker or not, with the reason. Look specifically for undeployed security fixes, unapplied migrations, unpublished advisories and open decisions.
 - **The data plan.** Whether the pilot starts on a reset database (the expectation so far) or carries existing rows across. Carrying rows across puts every pre-launch data bug back in scope.
 
-Done when every Unfinished item and open issue has a classification.
+Done when every open issue has a classification.
 
 ## 3. Build the route inventory
 
@@ -63,7 +62,7 @@ Done when every CRITICAL and HIGH carries CONFIRMED, PLAUSIBLE or dropped.
 Write `$RUN/report.md`, then give the user, in this order:
 
 1. **PILOT-READINESS VERDICT: GO / GO-WITH-CAVEATS / NO-GO.** Any unresolved CRITICAL, confirmed or plausible, is NO-GO. So is any blocker from step 2.
-2. **Blockers**, each with `file:line` (or the STATE.md item), why it blocks, and the smallest change that clears it.
+2. **Blockers**, each with `file:line` (or the issue number), why it blocks, and the smallest change that clears it.
 3. **Risks accepted for a pilot**, stated plainly, including which "Known open issues" in CLAUDE.md weigh differently once real data is on the site.
 4. **Human-only checks still open**: the items in `docs/PRODUCTION_MIGRATION.md` "Step 8 — Test staging properly" and anything else no agent here can observe (backups, the Workspace consent screen, the bucket's privacy setting). Name each as unverified.
 5. **What this audit did not cover**, and every load-bearing claim below *read* labelled as inferred or assumed.
