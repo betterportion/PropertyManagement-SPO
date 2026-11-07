@@ -117,8 +117,11 @@ export function planMoveOutTasks(
       continue;
     }
     const spec = specFor(resident, day, houseName.get(resident.propertyId) ?? resident.buildingAddress);
-    if (open) plan.move.push({ taskId: open.id, spec });
-    else if (!doneKeys.has(spec.sourceKey)) plan.create.push(spec);
+    // A date the RA already marked done needs nothing new; the stale open one goes.
+    if (doneKeys.has(spec.sourceKey)) {
+      if (open) plan.remove.push(open.id);
+    } else if (open) plan.move.push({ taskId: open.id, spec });
+    else plan.create.push(spec);
   }
   return plan;
 }

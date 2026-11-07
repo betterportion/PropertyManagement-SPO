@@ -72,6 +72,12 @@ describe("planMoveOutTasks", () => {
     expect(p.create).toEqual([]);
   });
 
+  it("removes the open reminder, never re-keys it, when the date moves back to one the RA already marked done", () => {
+    // Re-keying onto the done task's key broke the unique source key, so the whole daily run threw, every day.
+    const p = plan([resident()], [open(moveOutKey("r1", "2027-05-25"))], ["move-out:r1:2027-05-20"]);
+    expect(p).toEqual({ create: [], move: [], remove: ["t1"] });
+  });
+
   it("removes the reminder when the stop date is cleared or moves past the window", () => {
     expect(plan([resident({ moveOutDate: null })], [open(moveOutKey("r1", "2027-05-20"))]).remove).toEqual(["t1"]);
     expect(plan([resident({ moveOutDate: new Date("2027-08-01T00:00:00Z") })], [open(moveOutKey("r1", "2027-05-20"))]).remove).toEqual(["t1"]);
