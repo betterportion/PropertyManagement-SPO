@@ -13068,6 +13068,26 @@ describe("a maintenance account", () => {
     expect(storageMock[read]).not.toHaveBeenCalled();
   });
 
+  // The way in: door, gate and alarm codes, read only, in its own regions.
+  it("reads a house's facts in its region, not another region's, and cannot change them", async () => {
+    actAsJoe();
+    storageMock.getProperty.mockImplementation(async (id: string) =>
+      id === "p-w" ? { id, region: "West Central", address: "1 Main St" } : id === "p-e" ? { id, region: "East Central", address: "9 Elm St" } : undefined,
+    );
+    storageMock.getPropertyFacts.mockResolvedValue({ id: "f-w", propertyId: "p-w", doorCode: "4321" });
+
+    const own = await get("/api/properties/p-w/facts");
+    expect(own.status).toBe(200);
+    expect(own.body.doorCode).toBe("4321");
+
+    storageMock.getPropertyFacts.mockClear();
+    expect((await get("/api/properties/p-e/facts")).status).toBe(403);
+    expect(storageMock.getPropertyFacts).not.toHaveBeenCalled();
+
+    expect((await request("PUT", "/api/properties/p-w/facts", { body: { doorCode: "0000" } })).status).toBe(403);
+    expect(storageMock.upsertPropertyFacts).not.toHaveBeenCalled();
+  });
+
   it("gets only the names and addresses of the houses in its regions, never a lease or a note", async () => {
     actAsJoe();
     storageMock.getAllProperties.mockResolvedValue([

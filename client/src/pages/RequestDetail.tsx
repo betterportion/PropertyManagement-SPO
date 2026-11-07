@@ -26,6 +26,7 @@ import {
   type MaintenanceRequest,
   type MaintenanceRequestComment,
   type MaintenanceRequestPhoto,
+  type PropertyFacts,
 } from "@shared/schema";
 
 /**
@@ -132,6 +133,21 @@ export default function RequestDetail() {
     enabled: !!sourceItemId && isStaffAccount(user as RequestUser | null),
     retry: false,
   });
+  // Staff only; the list answers 403 to staff who may not see houses, and then no card shows.
+  const housesQuery = useQuery<Array<{ id: string; address: string }>>({
+    queryKey: ["/api/properties"],
+    enabled: isStaffAccount(user as RequestUser | null),
+    retry: false,
+  });
+  const house = housesQuery.data?.find((p) => p.address === requestQuery.data?.buildingAddress);
+  const factsQuery = useQuery<PropertyFacts | null>({
+    queryKey: ["/api/properties", house?.id, "facts"],
+    enabled: !!house,
+    retry: false,
+  });
+  const codes = factsQuery.data
+    ? ([["Door code", factsQuery.data.doorCode], ["Gate code", factsQuery.data.gateCode], ["Alarm code", factsQuery.data.alarmCode]] as const).filter(([, v]) => v?.trim())
+    : [];
 
   // Computed below every hook, never returned on above one: a guard placed
   // over a useQuery changes the hook count when the auth query resolves.
@@ -241,6 +257,23 @@ export default function RequestDetail() {
             </dl>
           </CardContent>
         </Card>
+
+        {/* The way in, where the work is done. Only when the house list and
+            its facts answered: staff who may not see houses never see codes. */}
+        {codes.length > 0 && (
+          <Card data-testid="card-getting-in">
+            <CardHeader>
+              <CardTitle>Getting in</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <dl className="grid gap-4 text-sm sm:grid-cols-3">
+                {codes.map(([label, value]) => (
+                  <Fact key={label} label={label} value={value} />
+                ))}
+              </dl>
+            </CardContent>
+          </Card>
+        )}
 
         <Card>
           <CardHeader>

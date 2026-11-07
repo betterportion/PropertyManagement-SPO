@@ -7255,7 +7255,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const ctx = await requireActiveUser(req, res);
       if (!ctx) return;
       if (!requireStaff(res, ctx)) return;
-      if (!requirePermission(res, ctx, "canViewProperties", "canManageProperties")) return;
+      // Maintenance staff need the door, gate and alarm codes to get in (JR,
+      // 2026-11-06): read only, in their regions, without the house page.
+      if (ctx.user.role !== "maintenance" && !requirePermission(res, ctx, "canViewProperties", "canManageProperties")) return;
 
       const property = await propertyForSetup(req, res, ctx);
       if (!property) return;
