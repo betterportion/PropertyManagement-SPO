@@ -8467,6 +8467,12 @@ describe("house facts and access codes", () => {
     expect((await get("/api/properties/prop-west/facts")).status).toBe(403);
   });
 
+  it("refuses staff in the region who hold no property flag, reading nothing", async () => {
+    actAs(STAFF, { canViewFinancials: true, canManageFinancials: true, canViewMaintenance: true, allowedRegions: ["West Central"] });
+    expect((await get("/api/properties/prop-west/facts")).status).toBe(403);
+    expect(storageMock.getPropertyFacts).not.toHaveBeenCalled();
+  });
+
   it("answers an empty block, not an error, for a house with no facts yet", async () => {
     actAs(ADMIN);
     const { status, body } = await get("/api/properties/prop-east/facts");
@@ -12063,6 +12069,17 @@ describe("the invitation goes with the access (launch readiness 2.3)", () => {
     expect(body.invitation).toEqual({ sendAt: "2099-08-15T12:00:00.000Z", sentAt: null, cancelledAt: null });
   });
 
+  it.each([
+    ["a resident", ALICE, { canViewMaintenance: true }],
+    ["an RA of another region", STAFF, { canManageProperties: true, allowedRegions: ["East Central"] }],
+    ["an RA without the property flag", STAFF, { canViewFinancials: true, canManageFinancials: true, allowedRegions: ["West Central"] }],
+  ])("refuses %s who the house's logins are, reading none of them", async (_who, user, perms) => {
+    actAs(user, perms);
+    expect((await get("/api/residents/r-1/portal-access")).status).toBe(403);
+    expect(storageMock.getUserByEmailInsensitive).not.toHaveBeenCalled();
+    expect(storageMock.getActiveResidentAccountsByProperty).not.toHaveBeenCalled();
+  });
+
   describe("the admin's create user invites too", () => {
     const NEW = { id: "u-new", email: "rita@example.com", firstName: "Rita", lastName: "Ray", role: "regional_administrator", isActive: true, propertyId: null };
 
@@ -12454,6 +12471,23 @@ describe("a record outside the caller's regions is refused by id on every route 
       const { status } = await request("DELETE", "/api/resource-links/l-1");
       expect(status).toBe(403);
       expect(storageMock.deleteResourceLink).not.toHaveBeenCalled();
+    });
+    it.each([
+      ["a resident with the hub grant", ALICE, { canViewResourceHub: true }],
+      ["staff with every region", STAFF, { canViewProperties: true, canManageProperties: true, allowedRegions: ["all"] }],
+    ])("refuses %s an edit, and changes nothing", async (_who, user, perms) => {
+      actAs(user, perms);
+      arrange();
+      expect((await request("PATCH", "/api/resource-links/l-1", { body: { title: "Changed" } })).status).toBe(403);
+      expect(storageMock.updateResourceLink).not.toHaveBeenCalled();
+    });
+    it("lets an admin edit (positive control)", async () => {
+      actAs(ADMIN);
+      arrange();
+      storageMock.getAllResourceLinks.mockResolvedValue([]);
+      storageMock.updateResourceLink.mockImplementation(async (id: string, patch: object) => ({ id, ...patch }));
+      expect((await request("PATCH", "/api/resource-links/l-1", { body: { title: "Changed" } })).status).toBe(200);
+      expect(storageMock.updateResourceLink).toHaveBeenCalled();
     });
     it("lets an admin delete (positive control)", async () => {
       actAs(ADMIN);
@@ -13091,6 +13125,14 @@ describe("a maintenance account", () => {
 
     expect((await request("PUT", "/api/properties/p-w/facts", { body: { doorCode: "0000" } })).status).toBe(403);
     expect(storageMock.upsertPropertyFacts).not.toHaveBeenCalled();
+  });
+
+  it("is refused a house's codes with its maintenance flags switched off, reading nothing and logging nothing", async () => {
+    actAs(JOE, { ...JOE_PERMISSIONS, canViewMaintenance: false, canManageMaintenance: false });
+    storageMock.getProperty.mockResolvedValue({ id: "p-w", region: "West Central", address: "1 Main St" });
+    expect((await get("/api/properties/p-w/facts")).status).toBe(403);
+    expect(storageMock.getPropertyFacts).not.toHaveBeenCalled();
+    expect(storageMock.createAuditEvent).not.toHaveBeenCalled();
   });
 
   it("gets only the names and addresses of the houses in its regions, never a lease or a note", async () => {
