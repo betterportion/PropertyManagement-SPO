@@ -852,6 +852,7 @@ export default function Contacts() {
           houses={properties}
           onEditContact={handleEditContact}
           onEditInvoice={handleEditInvoice}
+          showInvoices={userRole !== "maintenance"}
         />
       )}
 
