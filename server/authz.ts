@@ -939,11 +939,10 @@ function walkthroughTime(value: Date | string | null | undefined): number | null
  * without being able to change it.
  *
  * The test is the walkthrough's own date against the newest date on that
- * house, and deliberately **not** its `status`. Nothing in the portal moves a
- * walkthrough out of `draft`, so a status gate would lock either everything or
- * nothing, and inventing a submit step would decide on SPO's behalf what
- * "finished" means and who may say so — the same reason `WalkthroughRun` has
- * no submit button. A date needs no such decision.
+ * house, and deliberately **not** its `status`. A submitted walkthrough is
+ * still editable ("Mark submitted" records that it was handed in, not that it
+ * is closed), so a status gate would either lock a leader out of fixing a note
+ * or lock nothing. The date is what says which inspection is the live one.
  *
  * Two rules keep it from locking somebody out of work they are doing:
  *   - ties are writable, because a move-in and a move-out can share a day and

@@ -132,4 +132,16 @@ describe("generateDueMaintenanceRequests", () => {
     expect(createMaintenanceRequest).not.toHaveBeenCalled();
     expect(markMaintenanceScheduleGenerated).not.toHaveBeenCalled();
   });
+
+  it("keeps going past a schedule that fails", async () => {
+    const due = new Date("2026-01-20T00:00:00Z");
+    getDueMaintenanceSchedules.mockResolvedValue([schedule({ id: "sch-A", nextDueDate: due }), schedule({ id: "sch-B", nextDueDate: due })]);
+    createMaintenanceRequest.mockRejectedValueOnce(new Error("database hiccup")).mockResolvedValueOnce({});
+
+    const created = await generateDueMaintenanceRequests(new Date("2026-02-01T00:00:00Z"));
+
+    expect(created).toBe(1);
+    expect(markMaintenanceScheduleGenerated).toHaveBeenCalledTimes(1);
+    expect(markMaintenanceScheduleGenerated).toHaveBeenCalledWith("sch-B", due);
+  });
 });
