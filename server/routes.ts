@@ -122,6 +122,7 @@ import {
 import { hubSlotProblem } from "@shared/resourceHubSlots";
 import { STANDARD_SCHEDULE_TEMPLATES, addMonths } from "./schedules";
 import { planHouseFacts } from "./houseFacts";
+import { ACCESS_CODES } from "@shared/houseFacts";
 import { buildActionItems } from "./actionItems";
 import { closedDateChange } from "./maintenanceStatus";
 import { commentBodyFromClient } from "./comments";
@@ -7262,7 +7263,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const property = await propertyForSetup(req, res, ctx);
       if (!property) return;
 
-      res.json((await storage.getPropertyFacts(property.id)) ?? null);
+      const facts = (await storage.getPropertyFacts(property.id)) ?? null;
+      // Who outside the house's own staff saw the way in (JR, 2026-11-06):
+      // maintenance accounts only, and never the code itself.
+      const shown = facts ? ACCESS_CODES.filter(({ key }) => facts[key]?.trim()) : [];
+      if (ctx.user.role === "maintenance" && shown.length > 0) {
+        recordAuditEvent(ctx, {
+          action: AUDIT_ACTIONS.PROPERTY_ACCESS_CODES_VIEWED,
+          entityType: "property",
+          entityId: property.id,
+          summary: `Saw the ${shown.map(({ label }) => label.toLowerCase()).join(", ")} for ${property.name} (${property.address})`,
+          details: { fields: shown.map(({ key }) => key), region: property.region },
+        });
+      }
+      res.json(facts);
     } catch (error) {
       sendError(res, error, "Failed to fetch the house facts");
     }
