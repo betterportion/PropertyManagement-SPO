@@ -388,7 +388,7 @@ The file holds every resident's name and email and the finance rows. Keep it som
 Migrations only go forward: there are no "down" files, so nothing undoes one.
 
 - **No migration ran since the earlier deploy:** rolling the service back to that earlier deploy in Render is safe. (The deploys list on the service is where an earlier deploy is chosen; exact button wording not checked.)
-- **A migration ran since then:** do **not** roll the code back on its own. The old code meets a database it was not written for. The way back is the safety copy taken just before that migration, restored as a whole database, which **loses everything entered since the copy was taken**. Follow "Restoring production for real" in step 11. Its second step uses Supabase's daily backup; the safety copy is a plain SQL file, loaded the way step 11's rehearsal step 2 loads it, into an empty database. Loading it over the live production database means emptying the `public` and `drizzle` schemas first, which this runbook has not rehearsed, so ask a developer to do it with you.
+- **A migration ran since then:** do **not** roll the code back on its own. The old code meets a database it was not written for. The way back is the safety copy taken just before that migration, restored as a whole database, which **loses everything entered since the copy was taken**. Follow "Restoring production for real" in step 11. Its second step uses Supabase's daily backup; the safety copy is a plain SQL file, loaded the way step 11's rehearsal step 1 loads it, into an empty database. Loading it over the live production database means emptying the `public` and `drizzle` schemas first, which this runbook has not rehearsed, so ask a developer to do it with you.
 - If the fix is small, a new migration and a new deploy going forward is usually better than either.
 
 ---
@@ -572,25 +572,40 @@ The backup never removes anything, so files deleted in the portal stay in it. **
 
 ### Rehearse a restore
 
-A backup nobody has restored is a guess. Once, before real data, restore both halves into a **scratch** Supabase project — never into production — and prove the portal can read them. Production is still empty at this point, so first give it something to check: a test house, a walkthrough with a photo, and a billing record with a document. Wait for a daily backup and a bucket copy to include them, then:
+A backup nobody has restored is a guess. Once, before real data, restore both halves into a **scratch** Supabase project, never into production, and prove the portal can read them. **Not yet done** (issue #212), so these steps are unproven until then: correct them as you go.
 
-1. Create a scratch Supabase project, and a **private** `uploads` bucket in it (step 3).
-2. **Database:** restore the latest daily backup into the scratch project. Use the dashboard's restore-to-a-new-project option if your plan offers it; otherwise take a dump of the portal's own schemas from production and load it (Supabase's built-in schemas are left out because the scratch project already has its own):
+First make sure production has something to check: a walkthrough with a photo and a billing record with a document. Wait for a daily backup and a bucket copy to include them, then:
+
+1. **Database:** in the production project, go to **Database → Backups**, choose **restore to a new project**, pick the newest backup and name the project `spo-restore-scratch`. The new project adds a recurring charge until it is deleted, and the estimate appears before you confirm. Supabase does not copy files, bucket settings or API keys. If your plan does not offer this, create an empty project, take a dump of the portal's own schemas from production and load it (Supabase's built-in schemas are left out because the scratch project already has its own):
    ```bash
    pg_dump --no-owner --no-acl --schema=public --schema=drizzle \
      "<production direct connection string>" > spo-restore-test.sql
    psql "<scratch direct connection string>" < spo-restore-test.sql
    ```
-3. **Files:** copy the bucket backup into the scratch bucket, the other way round: `rclone copy BACKUP:spo-uploads-backup-pm/uploads SCRATCH:uploads --size-only`.
-4. **Check it:** run the portal locally against the scratch project (step 4's variables, with the scratch database, URL and service role key). Sign in, open a walkthrough with photos and a billing record with a document, and confirm both display. `select count(*) from uploads;` should be close to the number of objects in the scratch bucket (new uploads since the last copy account for any gap).
-5. **Rehearse the safety copy too.** Take the pre-migrate dump from "Migrations on deploy" on production, with its file name, and load that file into a second scratch project the way step 2 does. Check it loads without errors and the portal runs against it. Note how long the dump took.
-6. Write down the date, how long it took, and anything that did not go as written, and correct this section to match. Then delete the scratch project, and the test records from production.
+2. **Bucket:** in the scratch project, open **Storage**. If there is no `uploads` bucket, create it (step 3). If there is one, check it is **private**.
+3. **Files:** create an S3 key in the scratch project, set the `RCLONE_CONFIG_SCRATCH_*` and `RCLONE_CONFIG_BACKUP_*` variables in your terminal (Uploaded files, above), and copy the backup in:
+   ```bash
+   rclone copy BACKUP:spo-uploads-backup-pm/uploads SCRATCH:uploads --no-check-dest --log-level INFO
+   ```
+   `--no-check-dest` copies every file without looking at what the bucket lists. The restored database may list files the bucket does not hold, and rclone would skip those as already there.
+4. **Check it**, two ways, because rclone's listing of the scratch bucket may be that same list and cannot prove the files are there:
+   - **Every file the database names is in the backup.** This should print nothing, apart from anything uploaded since the last bucket copy:
+     ```bash
+     psql "<scratch connection string>" -X -A -t -c "select storage_key from uploads;" | LC_ALL=C sort > db-keys.txt
+     rclone lsf BACKUP:spo-uploads-backup-pm/uploads | LC_ALL=C sort > backup-keys.txt
+     comm -23 db-keys.txt backup-keys.txt
+     ```
+   - **The portal can read them.** Run it locally against the scratch project: step 4's variables, with the scratch database, URL and service role key. The staging OAuth client needs the localhost redirect URI (step 4), and the restored accounts are what you sign in with. Sign in, open a walkthrough with photos and a billing record with a document, and confirm both display.
+
+   **Leave `RESEND_API_KEY`, `EMAIL_FROM`, `QUICKBOOKS_CLIENT_ID`, `GOOGLE_SERVICE_ACCOUNT_JSON` and `RESIDENT_SHEET_ID` unset in the local settings.** The scratch database is a copy of production, invitation queue included, and the daily jobs run as soon as the portal starts, so a mail key here can email real people.
+5. **Rehearse the safety copy too.** Take the pre-migrate dump from "Migrations on deploy" on production, with its file name, and load that file into a second scratch project the way step 1 does. Check it loads without errors and the portal runs against it. Note how long the dump took.
+6. Write down the date, how long it took, and anything that did not go as written, and correct this section to match. Then revoke the scratch S3 key, delete the scratch project and `db-keys.txt` and `backup-keys.txt`, and delete the test records from production.
 
 ### Restoring production for real
 
 1. Tell staff the portal is down, and stop the Render service so nothing is written mid-restore.
 2. Restore the database from **Database → Backups** (this replaces the current database with the backup; anything entered since that backup is lost and has to be re-entered).
-3. Copy the bucket backup back into the `uploads` bucket with `rclone copy BACKUP:spo-uploads-backup-pm/uploads PROD:uploads --size-only`. With `--size-only` it only adds what is missing; every storage key is unique, so nothing current is overwritten. Files uploaded after the last bucket copy cannot come back.
+3. Copy the bucket backup back into the `uploads` bucket with `rclone copy BACKUP:spo-uploads-backup-pm/uploads PROD:uploads --size-only`. With `--size-only` it only adds what is missing; every storage key is unique, so nothing current is overwritten. Files uploaded after the last bucket copy cannot come back. If a restored file is still missing afterwards, the restored database listed it and rclone skipped it: run the copy again with `--no-check-dest` in place of `--size-only`.
 4. Start the service, run the step 7 checks, and open a few recent photos and documents.
 
 - [ ] **Who restores, and how they are reached:** ______. Name a second person.
@@ -613,7 +628,7 @@ Use this when somebody deleted one resident and everything else in the portal is
 
 In the commands, `<scratch connection string>` and `<production connection string>` are the **direct** connection strings from step 1 for the scratch project and production. Mixing them up is the one dangerous mistake here, because step 3 deletes rows. **Step 3 must only ever be run against the scratch project.** Read the line twice before pressing Enter.
 
-1. **Restore a backup from before the deletion into the scratch project**, database and files, exactly as in "Rehearse a restore" steps 1 to 3 above (create the scratch project and its private bucket, restore the database, copy the bucket backup in). If you rehearsed recently and that scratch project still exists, delete it and start again, so it holds the right day's backup.
+1. **Restore a backup from before the deletion into the scratch project**, database and files, exactly as in "Rehearse a restore" steps 1 to 3 above (restore the database into a scratch project, check its private bucket, copy the bucket backup in). If you rehearsed recently and that scratch project still exists, delete it and start again, so it holds the right day's backup.
 
 2. **Find the resident's id** in the scratch database. Change the last name:
    ```bash
