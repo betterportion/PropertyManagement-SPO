@@ -13079,6 +13079,11 @@ describe("a maintenance account", () => {
     const own = await get("/api/properties/p-w/facts");
     expect(own.status).toBe(200);
     expect(own.body.doorCode).toBe("4321");
+    // Seen by maintenance staff is logged: who, which house, which code, never the code.
+    expect(storageMock.createAuditEvent).toHaveBeenCalledTimes(1);
+    const [event] = storageMock.createAuditEvent.mock.calls[0];
+    expect(event).toMatchObject({ action: "property.access_codes_viewed", entityId: "p-w", details: { fields: ["doorCode"] } });
+    expect(JSON.stringify(event)).not.toContain("4321");
 
     storageMock.getPropertyFacts.mockClear();
     expect((await get("/api/properties/p-e/facts")).status).toBe(403);

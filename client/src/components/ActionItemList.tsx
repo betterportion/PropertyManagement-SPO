@@ -61,7 +61,7 @@ export default function ActionItemList({ items }: { items: ActionItem[] }) {
           return (
             <div
               key={`${item.source}-${item.id}`}
-              className="flex items-start justify-between gap-3 rounded-md bg-muted p-3"
+              className="flex flex-col gap-2 rounded-md bg-muted p-3 sm:flex-row sm:items-start sm:justify-between sm:gap-3"
               data-testid={`action-item-${item.source}-${item.id}`}
             >
               <div className="min-w-0">
@@ -74,7 +74,7 @@ export default function ActionItemList({ items }: { items: ActionItem[] }) {
                   {item.amount != null ? ` · ${formatCurrency(item.amount)}` : ""}
                 </p>
               </div>
-              <div className="flex shrink-0 flex-col items-end gap-1">
+              <div className="flex shrink-0 items-center gap-3 sm:flex-col sm:items-end sm:gap-1">
                 <Button
                   size="sm"
                   variant="secondary"
