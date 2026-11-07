@@ -123,6 +123,7 @@ import { hubSlotProblem } from "@shared/resourceHubSlots";
 import { STANDARD_SCHEDULE_TEMPLATES, addMonths } from "./schedules";
 import { planHouseFacts } from "./houseFacts";
 import { ACCESS_CODES } from "@shared/houseFacts";
+import { joinNames } from "@shared/closeouts";
 import { buildActionItems } from "./actionItems";
 import { closedDateChange } from "./maintenanceStatus";
 import { commentBodyFromClient } from "./comments";
@@ -7272,7 +7273,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           action: AUDIT_ACTIONS.PROPERTY_ACCESS_CODES_VIEWED,
           entityType: "property",
           entityId: property.id,
-          summary: `Saw the ${shown.map(({ label }) => label.toLowerCase()).join(", ")} for ${property.name} (${property.address})`,
+          summary: `Saw the ${joinNames(shown.map(({ label }) => label.toLowerCase()))} for ${property.name} (${property.address})`,
           details: { fields: shown.map(({ key }) => key), region: property.region },
         });
       }
