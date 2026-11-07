@@ -1057,7 +1057,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const key = url.slice("/uploads/".length);
       if (!isSafeStorageKey(key)) continue;
       const upload = await storage.getUploadByStorageKey(key);
-      if (!upload || upload.uploadedBy !== ctx.userId) continue;
+      if (!upload || upload.uploadedBy !== ctx.userId || !(await canReadUpload(ctx, key, upload))) continue;
       await storage.createMaintenanceRequestPhoto({ requestId, imageUrl: url, uploadedBy });
     }
   }
@@ -1467,9 +1467,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     name: string | null | undefined,
   ): Promise<{ url: string; name: string } | null> {
     if (!url) return null;
+    if (!UPLOAD_URL_PATTERN.test(url)) throw new HttpError(400, "That is not an uploaded file. Upload it again and try saving.");
     const key = url.slice("/uploads/".length);
     const upload = isSafeStorageKey(key) ? await storage.getUploadByStorageKey(key) : undefined;
-    if (!upload || upload.uploadedBy !== ctx.userId) {
+    // Uploaded it, and can still see it wherever it is already attached: a file
+    // re-attached here would otherwise reopen it to someone who lost access.
+    if (!upload || upload.uploadedBy !== ctx.userId || !(await canReadUpload(ctx, key, upload))) {
       throw new HttpError(400, "That file is not one you uploaded. Upload it again and try saving.");
     }
     return { url, name: name || upload.originalName };

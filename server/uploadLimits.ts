@@ -54,15 +54,6 @@ const maxInFlightBytes = readConfiguredCeiling();
 
 let inFlightBytes = 0;
 
-/** Exposed for tests and diagnostics. */
-export function currentInFlightUploadBytes(): number {
-  return inFlightBytes;
-}
-
-export function maxInFlightUploadBytes(): number {
-  return maxInFlightBytes;
-}
-
 function describeSize(bytes: number): string {
   return `${Math.round(bytes / (1024 * 1024))}MB`;
 }

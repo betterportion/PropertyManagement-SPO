@@ -310,10 +310,7 @@ export async function setupAuth(app: Express) {
       if (!user) return res.redirect("/api/login");
       req.logIn(user, (loginError) => {
         if (loginError) return next(loginError);
-        const session = req.session as typeof req.session & { returnTo?: string };
-        const returnTo = session.returnTo;
-        delete session.returnTo;
-        res.redirect(returnTo && returnTo.startsWith("/") && !returnTo.startsWith("//") ? returnTo : "/");
+        res.redirect("/");
       });
     })(req, res, next);
   });
