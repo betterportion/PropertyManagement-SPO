@@ -7,7 +7,7 @@ import { LoadingState } from "@/components/states";
 import { formatDateTime } from "@/lib/format";
 import type { FeedbackReport } from "@shared/schema";
 
-const ROLE_LABEL: Record<string, string> = { admin: "Admin", regional_administrator: "Regional admin", resident: "Household" };
+const ROLE_LABEL: Record<string, string> = { admin: "Admin", regional_administrator: "Regional admin", maintenance: "Maintenance", resident: "Household" };
 
 /**
  * Every bug and feature report sent from the sidebar, newest first. Admins

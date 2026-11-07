@@ -118,7 +118,7 @@ export const users = pgTable("users", {
   firstName: varchar("first_name"),
   lastName: varchar("last_name"),
   profileImageUrl: varchar("profile_image_url"),
-  role: varchar("role", { enum: ["admin", "regional_administrator", "resident"] }).notNull().default("resident"),
+  role: varchar("role", { enum: ["admin", "regional_administrator", "maintenance", "resident"] }).notNull().default("resident"),
   // Which house a resident account belongs to. The resident logins of one
   // property (household leader and stewards, at most
   // MAX_RESIDENT_ACCOUNTS_PER_PROPERTY switched on at once) all point at their

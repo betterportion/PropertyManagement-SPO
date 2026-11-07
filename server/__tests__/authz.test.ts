@@ -70,7 +70,10 @@ import {
   isRosterDerivedTaskSourceKey,
   type AuthContext,
   type PermissionName,
+  authContextFor,
 } from "../authz";
+import { maintenanceDefaultPermissions } from "../roleChange";
+import { fieldsNotForMaintenance } from "@shared/permissions";
 
 // ---------------------------------------------------------------------------
 // Test doubles
@@ -1823,5 +1826,61 @@ describe("canSeeTask", () => {
     const orphanedBroadcast = { ...orphanedPersonal, region: "West Central" };
     expect(canSeeTask(context({ allowedRegions: ["West Central"], permissions: {} }), orphanedBroadcast)).toBe(true);
     expect(canSeeTask(context({ allowedRegions: ["East Central"], permissions: {} }), orphanedBroadcast)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The maintenance role: SPO's own maintenance staff (JR, 2026-11-06)
+// ---------------------------------------------------------------------------
+
+describe("a maintenance account", () => {
+  // The row it is created with, given one region by an admin, through the real context builder.
+  const joe = () =>
+    authContextFor(
+      { id: "u-joe", email: "joe@example.com", role: "maintenance", isActive: true, propertyId: null } as AuthContext["user"],
+      { ...maintenanceDefaultPermissions("u-joe"), allowedRegions: ["Northwest"] } as AuthContext["permissions"],
+    );
+
+  it("is staff, not admin", () => {
+    const ctx = joe();
+    expect(ctx.isResident).toBe(false);
+    expect(ctx.isAdmin).toBe(false);
+    expect(requireStaff(response(), ctx)).toBe(true);
+    expect(requireAdmin(response(), ctx)).toBe(false);
+  });
+
+  it("reads a request in its own region and not one in another", () => {
+    const ctx = joe();
+    expect(canReadMaintenanceRequest(ctx, { region: "Northwest", type: "request" })).toBe(true);
+    expect(canReadMaintenanceRequest(ctx, { region: "West Central", type: "request" })).toBe(false);
+    // Projects too: the repairs-only rule is for households.
+    expect(canReadMaintenanceRequest(ctx, { region: "Northwest", type: "project" })).toBe(true);
+  });
+
+  it("gets the work's dashboard items and none about houses or money", () => {
+    const ctx = joe();
+    const sources = (["schedule", "maintenance", "lease", "setup", "asset", "rent", "deposit", "task"] as const).filter((source) =>
+      canSeeActionItemSource(ctx, source),
+    );
+    expect(sources).toEqual(["schedule", "maintenance", "asset", "task"]);
+  });
+
+  it("holds none of the house, roster, invoice, finance or account flags", () => {
+    const ctx = joe();
+    for (const flag of [
+      "canViewProperties", "canManageProperties", "canManagePropertySetup", "canViewBilling", "canManageBilling",
+      "canViewFinancials", "canManageFinancials", "canManageUsers", "canViewResourceHub", "canCompleteWalkthroughs",
+    ] as const) {
+      expect(hasPermission(ctx, flag), flag).toBe(false);
+    }
+  });
+
+  it("may not be given those flags, but may be given regions and its own flags", () => {
+    expect(fieldsNotForMaintenance({ canViewFinancials: true, canManageBilling: true, canViewProperties: true })).toEqual([
+      "canViewFinancials", "canManageBilling", "canViewProperties",
+    ]);
+    expect(
+      fieldsNotForMaintenance({ canManageMaintenance: true, canViewContacts: true, allowedRegions: ["all"], canViewBilling: false }),
+    ).toEqual([]);
   });
 });

@@ -60,7 +60,7 @@ interface RequestUser {
 }
 
 function isStaffAccount(user: RequestUser | null): boolean {
-  return user?.role === "admin" || user?.role === "regional_administrator";
+  return user?.role === "admin" || user?.role === "regional_administrator" || user?.role === "maintenance";
 }
 
 /**

@@ -86,6 +86,7 @@ The daily jobs log to the hosting provider's log stream. Nobody watches that log
 - **What the portal does:** sends plain-text email through Resend (`server/email.ts`; wording in `server/notifications.ts`):
   - **Request received:** to the person who filed a maintenance request.
   - **Status changed:** to the person who filed it.
+  - **New request to maintenance staff:** to every maintenance account that can read the request (its region), unless they filed it or have comment email switched off. See "Maintenance staff" below.
   - Both go only while that person's account may still open the request: a resident who filed it at a house that is not theirs now (for example a demoted regional administrator) gets nothing (`submitterMayRead` in `server/commentRecipients.ts`).
   - **New comment:** to the people who can see the request: staff who have posted in the thread, the region's RAs, and (for a shared comment) the residents. Internal comments go to staff only. Never sent to the comment's author, or to anyone who has switched comment email off (`server/commentRecipients.ts`).
   - **Email the household:** staff write to a house's residents from the property page.
@@ -232,6 +233,20 @@ Each entry below began as agreed intent and was filled in by the phase that buil
 - **How to check it's working:** a resident with a stop date within 30 days has a task on the Tasks page. Email delivery shows in Email health (Phase 7).
 - **When it fails:** the failure goes to the server log and the job tries again the next day. Already-created tasks are unaffected.
 - **Status:** built (its emails are awaiting email setup).
+
+### Maintenance staff
+
+- **Purpose:** let SPO's own payroll maintenance staff (for example Joe Fink in Northwest) take repairs from report to finished, and let admins see how much each person closes.
+- **Trigger:** somebody files a maintenance request (a household, an RA, or "send to maintenance" from a walkthrough).
+- **What happens:**
+  1. The request comes in. Every maintenance account covering that house's region is emailed "New request: ..." with what, where, the priority and a link (unless they filed it, or switched comment email off from their menu).
+  2. The maintenance person opens it and either fixes it themselves or calls a contractor. A contractor is linked to the request from Maintenance Contacts, and what was said, who is coming when and what it cost go in the request's thread.
+  3. They move it to **In progress**.
+  4. When it is done they mark it **Completed** and fill in the close-out (the four questions when a contractor was linked, and what was done).
+  5. Admins see the counts in Settings → Activity → "Maintenance work closed": per person, requests completed, the median days from filing to completed, and how many used a contractor. Counts only, never a rating.
+- **What a maintenance account can do:** repairs, walkthroughs, assets and contacts in its regions. It never sees the house page, the resident roster, leases, move-outs, invoices or money; an admin enters the invoice. It gets a house list with names and addresses only, for the pickers.
+- **What SPO must do:** an admin creates the account in Settings with the role **Maintenance** and ticks its regions under Permissions.
+- **Status:** built.
 
 ### Invitations
 

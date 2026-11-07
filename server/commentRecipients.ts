@@ -97,6 +97,33 @@ export function commentRecipients({
   return Array.from(recipients.values());
 }
 
+/**
+ * Who hears about a request that was just filed: every active maintenance
+ * account that may read it (canReadMaintenanceRequest, so region, the
+ * maintenance flag and the rest reach email unchanged), with comment email
+ * switched on, except whoever filed it. One message per address.
+ */
+export function newRequestRecipients({
+  request,
+  candidates,
+  now = new Date(),
+}: {
+  request: RequestAccessFields;
+  candidates: readonly CommentCandidate[];
+  now?: Date;
+}): CommentRecipient[] {
+  const filer = request.submittedBy?.trim().toLowerCase();
+  const recipients = new Map<string, CommentRecipient>();
+  for (const { user, permissions } of candidates) {
+    if (user.role !== "maintenance" || !user.isActive || !user.commentEmailsEnabled) continue;
+    const email = user.email?.trim();
+    if (!email || email.toLowerCase() === filer) continue;
+    if (!canReadMaintenanceRequest(authContextFor(user, permissions), request, null, now)) continue;
+    if (!recipients.has(email.toLowerCase())) recipients.set(email.toLowerCase(), { userId: user.id, email });
+  }
+  return Array.from(recipients.values());
+}
+
 export interface SubmitterReadInput {
   request: RequestAccessFields;
   candidates: readonly CommentCandidate[];

@@ -552,7 +552,8 @@ export default function Contacts() {
         </Dialog>
 
         <Dialog open={isAddInvoiceDialogOpen} onOpenChange={setInvoiceDialogOpen}>
-          <DialogTrigger asChild>
+          {/* Maintenance staff never enter invoices: an admin does. */}
+          <DialogTrigger asChild className={userRole === "maintenance" ? "hidden" : undefined}>
             <Button data-testid="button-add-invoice" disabled={!canManage}>
               <Plus className="h-4 w-4 mr-2" />
               Add Invoice Record

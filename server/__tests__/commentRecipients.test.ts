@@ -17,7 +17,7 @@ vi.mock("../db", () => ({ db: {}, pool: {} }));
 vi.mock("../auth", () => ({ getUserId: vi.fn() }));
 vi.mock("../storage", () => ({ storage: {} }));
 
-import { commentRecipients, submitterMayRead, type CommentCandidate } from "../commentRecipients";
+import { commentRecipients, newRequestRecipients, submitterMayRead, type CommentCandidate } from "../commentRecipients";
 
 const HOUSE_A = "1 Main St";
 const HOUSE_B = "2 River Rd";
@@ -291,5 +291,41 @@ describe("submitterMayRead", () => {
   it("does not look at the comment-email switch", () => {
     const off = candidate(user({ id: "u-eve", email: "eve@example.com", propertyId: "prop-a", commentEmailsEnabled: false }));
     expect(may([off])).toBe(true);
+  });
+});
+
+describe("newRequestRecipients: maintenance staff hear about a new request", () => {
+  const MAINTENANCE = { canViewMaintenance: true, canManageMaintenance: true, allowedRegions: ["West Central"] };
+  const JOE = candidate(user({ id: "u-joe", email: "joe@example.com", role: "maintenance" }), MAINTENANCE);
+  const to = (candidates: CommentCandidate[], request: typeof REPAIR = REPAIR) =>
+    newRequestRecipients({ request, candidates }).map((r) => r.email);
+
+  it("emails a maintenance account covering the region", () => {
+    expect(to([JOE])).toEqual(["joe@example.com"]);
+  });
+
+  it("not one covering another region", () => {
+    const elsewhere = candidate(user({ id: "u-tim", email: "tim@example.com", role: "maintenance" }), {
+      ...MAINTENANCE,
+      allowedRegions: ["Northwest"],
+    });
+    expect(to([elsewhere])).toEqual([]);
+  });
+
+  it("not one with comment email switched off, switched off itself, or without the maintenance flag", () => {
+    const quiet = candidate(user({ id: "u-q", email: "q@example.com", role: "maintenance", commentEmailsEnabled: false }), MAINTENANCE);
+    const gone = candidate(user({ id: "u-g", email: "g@example.com", role: "maintenance", isActive: false }), MAINTENANCE);
+    const noFlag = candidate(user({ id: "u-n", email: "n@example.com", role: "maintenance" }), { allowedRegions: ["West Central"] });
+    expect(to([quiet, gone, noFlag, JOE])).toEqual(["joe@example.com"]);
+  });
+
+  it("not whoever filed it, case aside", () => {
+    expect(to([JOE], { ...REPAIR, submittedBy: "JOE@example.com" })).toEqual([]);
+  });
+
+  it("not regional administrators, admins or households: they hear through their own emails", () => {
+    const ra = candidate(user({ id: "u-ra", email: "ra@example.com", role: "regional_administrator" }), MAINTENANCE);
+    const admin = candidate(user({ id: "u-ad", email: "ad@example.com", role: "admin" }));
+    expect(to([ra, admin, ALICE])).toEqual([]);
   });
 });

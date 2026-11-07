@@ -23,6 +23,8 @@ const OPEN_WORK_HOUSES_SHOWN = 5;
 export default function AdminDashboard() {
   const { user } = useAuth();
   const isAdmin = (user as { role?: string } | null)?.role === "admin";
+  // Maintenance staff never reach houses, leases or HH fees, so none of their tiles.
+  const isMaintenance = (user as { role?: string } | null)?.role === "maintenance";
 
   const [selectedRegion, setSelectedRegion] = useState<string | null>(null);
 
@@ -77,6 +79,7 @@ export default function AdminDashboard() {
             title="Dashboard"
             description={isAdmin ? "How each region is doing across your properties." : "What needs your attention."}
             actions={
+              isMaintenance ? undefined :
               // Taking on a house starts here. An RA should be able to get a
               // property recorded in under two minutes and fill in the rest
               // later, and hunting for the page first is part of what makes
@@ -90,15 +93,15 @@ export default function AdminDashboard() {
             }
           />
 
-          <StatGrid className="lg:grid-cols-5">
-            <StatTile
+          <StatGrid className={isMaintenance ? "lg:grid-cols-2" : "lg:grid-cols-5"}>
+            {!isMaintenance && <StatTile
               label="Properties"
               href="/properties"
               value={propertiesQuery.data?.length ?? 0}
               hint="Homes on file"
               icon={Building2}
               isLoading={propertiesQuery.isLoading}
-            />
+            />}
             <StatTile
               label="Open repairs"
               href="/maintenance?type=request"
@@ -115,6 +118,7 @@ export default function AdminDashboard() {
               icon={Hammer}
               isLoading={summariesQuery.isLoading}
             />
+            {!isMaintenance && <>
             <StatTile
               label="Renewals due"
               href="/properties"
@@ -131,6 +135,7 @@ export default function AdminDashboard() {
               icon={DollarSign}
               isLoading={summariesQuery.isLoading}
             />
+            </>}
           </StatGrid>
 
           {showOverview && (

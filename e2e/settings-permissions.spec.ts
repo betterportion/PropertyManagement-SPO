@@ -13,7 +13,12 @@ import { test, expect, type APIRequestContext } from "@playwright/test";
 
 const RESIDENT_FLAGS = ["canViewMaintenance", "canCompleteWalkthroughs", "canViewResourceHub"];
 
-async function createAccount(request: APIRequestContext, role: "resident" | "regional_administrator") {
+const MAINTENANCE_FLAGS = [
+  "canViewMaintenance", "canManageMaintenance", "canViewWalkthroughs", "canManageWalkthroughs",
+  "canViewAssets", "canManageAssets", "canViewContacts", "canManageContacts",
+];
+
+async function createAccount(request: APIRequestContext, role: "resident" | "regional_administrator" | "maintenance") {
   const stamp = `${Date.now()}${Math.random().toString(36).slice(2, 7)}`;
   const id = `e2e-perm-${stamp}`;
   const created = await request.post("/api/users", {
@@ -56,6 +61,40 @@ test.describe("the permissions dialog", () => {
       expect(stored.canManageProperties).toBeFalsy();
       expect(stored.canViewProperties).toBeFalsy();
       expect(stored.allowedRegions ?? []).toEqual([]);
+    } finally {
+      await request.delete(`/api/users/${account.id}`);
+    }
+  });
+
+  test("a maintenance account is offered regions and only its own options, and is created holding them", async ({
+    page,
+    request,
+  }) => {
+    const account = await createAccount(request, "maintenance");
+    try {
+      // Created with its fixed set and no regions (maintenanceDefaultPermissions).
+      const created = await (await request.get(`/api/users/${account.id}/permissions`)).json();
+      for (const flag of MAINTENANCE_FLAGS) expect(created[flag], flag).toBe(true);
+      expect(created.canViewProperties).toBeFalsy();
+      expect(created.canViewFinancials).toBeFalsy();
+
+      await page.goto("/settings");
+      await page.getByTestId("input-search-users").fill(account.lastName);
+      await page.getByTestId(`button-permissions-${account.id}`).click();
+
+      const dialog = page.getByRole("dialog");
+      await expect(dialog.getByText("Region Access")).toBeVisible();
+      await expect(dialog.locator('[data-testid^="checkbox-can"]')).toHaveCount(MAINTENANCE_FLAGS.length);
+      await expect(dialog.getByTestId("checkbox-canManageProperties")).toHaveCount(0);
+      await expect(dialog.getByTestId("checkbox-canViewFinancials")).toHaveCount(0);
+
+      await dialog.getByTestId("checkbox-region-Northwest").click();
+      await dialog.getByTestId("button-save-permissions").click();
+      await expect(page.getByText("User permissions updated successfully").first()).toBeVisible();
+
+      const stored = await (await request.get(`/api/users/${account.id}/permissions`)).json();
+      expect(stored.allowedRegions).toEqual(["Northwest"]);
+      expect(stored.canManageMaintenance).toBe(true);
     } finally {
       await request.delete(`/api/users/${account.id}`);
     }

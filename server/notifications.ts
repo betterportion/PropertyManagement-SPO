@@ -72,6 +72,36 @@ export function maintenanceReceivedEmail(request: MaintenanceRequest): OutboundE
 }
 
 /**
+ * The heads-up a maintenance account gets when a request it can read comes in.
+ * Who gets it is `newRequestRecipients` in commentRecipients.ts.
+ */
+export function newRequestEmail({
+  to,
+  request,
+  appUrl,
+}: {
+  to: string | null | undefined;
+  request: MaintenanceRequest;
+  appUrl: string | null;
+}): OutboundEmail | null {
+  const address = usableAddress(to);
+  if (!address) return null;
+  return {
+    template: "maintenance_new",
+    to: address,
+    subject: `New request: ${request.title}`,
+    text:
+      `A new maintenance request has come in.\n\n` +
+      `What: ${request.title}\n` +
+      `Where: ${request.location}, ${request.buildingAddress}\n` +
+      `Priority: ${request.priority}\n` +
+      (request.description?.trim() ? `\n${request.description.trim()}\n` : "") +
+      (appUrl ? `\nOpen the request: ${appUrl}/maintenance/${request.id}` : "") +
+      SIGN_OFF,
+  };
+}
+
+/**
  * The note somebody gets when their request moves on.
  *
  * Returns null when the status did not actually change, so an edit to a
@@ -275,6 +305,7 @@ export interface InvitationEmailInput {
 const ROLE_WORDS: Record<User["role"], string> = {
   admin: "an admin",
   regional_administrator: "a regional administrator",
+  maintenance: "maintenance staff",
   resident: "a resident",
 };
 

@@ -20,7 +20,7 @@ export const NOT_YOUR_HOUSE =
   "This request belongs to another house, or it was closed long enough ago that it is no longer shown.";
 
 export function requestRefusalMessage(user: RequestAccessUser | null): string {
-  const isStaff = user?.role === "admin" || user?.role === "regional_administrator";
+  const isStaff = user?.role === "admin" || user?.role === "regional_administrator" || user?.role === "maintenance";
   if (!isStaff) return NOT_YOUR_HOUSE;
   const holdsMaintenance =
     user?.role === "admin" ||
