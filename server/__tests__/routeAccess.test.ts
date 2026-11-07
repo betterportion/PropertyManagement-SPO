@@ -10903,6 +10903,26 @@ describe("maintenance request photos", () => {
     );
   });
 
+  // Uploading a file once is not a lasting claim on it: a photo already
+  // attached where the filer can no longer read it (a W-9 on a billing record,
+  // stored before they were demoted) is not attached to the house's repair.
+  it("does not attach the filer's own upload when it is already somewhere they cannot read", async () => {
+    actAsAliceAtMainSt(ALL_MAINTENANCE);
+    storageMock.createMaintenanceRequest.mockImplementation(async (d: Record<string, unknown>) => ({ id: "req-new", ...d }));
+    storageMock.getUploadByStorageKey.mockImplementation(async (key: string) => ({ storageKey: key, uploadedBy: ALICE.id }));
+    storageMock.findUploadReferences.mockImplementation(async (url: string) =>
+      url === "/uploads/w9.png" ? [{ kind: "billingRecord", record: { id: "bill-1", region: "West Central" } }] : [],
+    );
+
+    const { status } = await request("POST", "/api/maintenance-requests", {
+      body: { ...body, photoUrls: ["/uploads/w9.png", "/uploads/fresh.png"] },
+    });
+
+    expect(status).toBe(200);
+    const attached = storageMock.createMaintenanceRequestPhoto.mock.calls.map(([row]: [{ imageUrl: string }]) => row.imageUrl);
+    expect(attached).toEqual(["/uploads/fresh.png"]);
+  });
+
   it("attaches at most three videos, and never a video sent as a photo", async () => {
     actAsAliceAtMainSt(ALL_MAINTENANCE);
     storageMock.createMaintenanceRequest.mockImplementation(async (d: Record<string, unknown>) => ({ id: "req-new", ...d }));
@@ -12120,6 +12140,14 @@ describe("the close-out on completion (launch readiness 2.4)", () => {
       expect.objectContaining({ firstVisit: null, quoteMatched: null, callback: null, wouldUseAgain: null, note: null, completedByEmail: STAFF.email }),
       [],
     );
+    expect(storageMock.createMaintenanceRequestComment).not.toHaveBeenCalled();
+  });
+
+  it("refuses a close-out file link that is not an uploaded file, writing nothing", async () => {
+    storageMock.getUploadByStorageKey.mockResolvedValue({ storageKey: "abc", uploadedBy: STAFF.id });
+    const { status } = await COMPLETE({ whatWasDone: "Fixed the tap.", attachmentUrl: "xxxxxxxxxabc" });
+    expect(status).toBe(400);
+    expect(storageMock.updateMaintenanceRequest).not.toHaveBeenCalled();
     expect(storageMock.createMaintenanceRequestComment).not.toHaveBeenCalled();
   });
 

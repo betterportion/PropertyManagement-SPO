@@ -1496,9 +1496,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const url = incoming[field];
       if (url === undefined || url === null || url === "") continue;
       if (existing && url === existing[field]) continue;
-      if (typeof url !== "string" || !UPLOAD_URL_PATTERN.test(url)) {
-        throw new HttpError(400, "That is not an uploaded file. Upload it again and try saving.");
-      }
+      if (typeof url !== "string") throw new HttpError(400, "That is not an uploaded file. Upload it again and try saving.");
       await ownUploadFromClient(ctx, url, null);
     }
   }
