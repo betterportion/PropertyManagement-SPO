@@ -13262,3 +13262,201 @@ describe("a maintenance account", () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// The guard matrix (pilot audit 2026-11-07). Each guard below could be removed
+// with every other test still green. The pair per row is what pins it: staff
+// holding every flag but the route's own, in every region, are refused with no
+// storage write; holding every flag they are not refused (the positive control
+// that proves the 403 came from this guard and nothing else).
+// ---------------------------------------------------------------------------
+
+const STAFF_FLAGS = [
+  "canViewMaintenance", "canManageMaintenance", "canViewWalkthroughs", "canManageWalkthroughs",
+  "canViewAssets", "canManageAssets", "canViewBilling", "canManageBilling", "canViewContacts", "canManageContacts",
+  "canManageUsers", "canViewProperties", "canManageProperties", "canViewFinancials", "canManageFinancials",
+  "canManagePropertySetup",
+] as const;
+
+/** Every flag on, then the named ones off, in every region. */
+const flagsWithout = (...off: string[]) => ({
+  ...Object.fromEntries(STAFF_FLAGS.map((flag) => [flag, !off.includes(flag)])),
+  allowedRegions: ["all"],
+});
+
+const WRITE_METHOD = /^(create|update|delete|upsert|insert|add|remove|set|mark|apply|grant|link|unlink|cancel|record|deactivate|move|split|complete|replace|accept)/;
+const storageWrites = () => [...storageFns.entries()].filter(([name, fn]) => WRITE_METHOD.test(name) && name !== "createAuditEvent" && fn.mock.calls.length > 0).map(([name]) => name);
+
+describe("each permission guard below is the one that refuses staff without its flag", () => {
+  const VIEW_MAINT = ["canViewMaintenance", "canManageMaintenance"];
+  const MANAGE = (flag: string) => [flag];
+  const rows: [method: string, path: string, flags: string[]][] = [
+    ["GET", "/api/maintenance-requests", VIEW_MAINT],
+    ["GET", "/api/maintenance-locations", VIEW_MAINT],
+    ["GET", "/api/maintenance-requests/r-1", VIEW_MAINT],
+    ["POST", "/api/maintenance-requests", VIEW_MAINT],
+    ["PATCH", "/api/maintenance-requests/r-1", MANAGE("canManageMaintenance")],
+    ["DELETE", "/api/maintenance-requests/r-1", MANAGE("canManageMaintenance")],
+    ["GET", "/api/maintenance-requests/r-1/contacts", VIEW_MAINT],
+    ["POST", "/api/maintenance-requests/r-1/contacts/c-1", MANAGE("canManageMaintenance")],
+    ["DELETE", "/api/maintenance-requests/r-1/contacts/c-1", MANAGE("canManageMaintenance")],
+    ["PATCH", "/api/maintenance-request-bids/b-1", MANAGE("canManageMaintenance")],
+    ["DELETE", "/api/maintenance-request-bids/b-1", MANAGE("canManageMaintenance")],
+    ["POST", "/api/maintenance-request-bids/b-1/accept", MANAGE("canManageMaintenance")],
+    ["GET", "/api/walkthrough-template/items", ["canViewWalkthroughs", "canManageWalkthroughs"]],
+    ["POST", "/api/walkthroughs/w-1/review", MANAGE("canManageWalkthroughs")],
+    ["GET", "/api/walkthrough-rooms", ["canViewWalkthroughs", "canManageWalkthroughs"]],
+    ["POST", "/api/walkthrough-rooms", MANAGE("canManageWalkthroughs")],
+    ["PATCH", "/api/walkthrough-rooms/wr-1", MANAGE("canManageWalkthroughs")],
+    ["DELETE", "/api/walkthrough-rooms/wr-1", MANAGE("canManageWalkthroughs")],
+    ["GET", "/api/walkthrough-photos", ["canViewWalkthroughs", "canManageWalkthroughs"]],
+    ["GET", "/api/walkthrough-photos/room/wr-1", ["canViewWalkthroughs", "canManageWalkthroughs"]],
+    ["POST", "/api/walkthrough-photos", MANAGE("canManageWalkthroughs")],
+    ["PATCH", "/api/walkthrough-photos/wp-1", MANAGE("canManageWalkthroughs")],
+    ["DELETE", "/api/walkthrough-photos/wp-1", MANAGE("canManageWalkthroughs")],
+    ["GET", "/api/assets", ["canViewAssets", "canManageAssets"]],
+    ["POST", "/api/assets", MANAGE("canManageAssets")],
+    ["DELETE", "/api/assets/a-1/snooze", MANAGE("canManageAssets")],
+    ["PATCH", "/api/assets/a-1", MANAGE("canManageAssets")],
+    ["DELETE", "/api/assets/a-1", MANAGE("canManageAssets")],
+    ["GET", "/api/asset-photos", ["canViewAssets", "canManageAssets"]],
+    ["GET", "/api/asset-photos/asset/a-1", ["canViewAssets", "canManageAssets"]],
+    ["POST", "/api/asset-photos", MANAGE("canManageAssets")],
+    ["DELETE", "/api/asset-photos/ap-1", MANAGE("canManageAssets")],
+    ["GET", "/api/maintenance-schedules", VIEW_MAINT],
+    ["POST", "/api/maintenance-schedules", MANAGE("canManageMaintenance")],
+    ["PATCH", "/api/maintenance-schedules/s-1", MANAGE("canManageMaintenance")],
+    ["DELETE", "/api/maintenance-schedules/s-1", MANAGE("canManageMaintenance")],
+    ["POST", "/api/maintenance-schedules/s-1/complete", MANAGE("canManageMaintenance")],
+    ["POST", "/api/maintenance-schedules/apply-template", MANAGE("canManageMaintenance")],
+    ["POST", "/api/residents", MANAGE("canManageProperties")],
+    ["PATCH", "/api/residents/res-1", MANAGE("canManageProperties")],
+    ["GET", "/api/residents/res-1/account-status", MANAGE("canManageProperties")],
+    ["POST", "/api/residents/res-1/move-out", MANAGE("canManageProperties")],
+    ["DELETE", "/api/residents/res-1", MANAGE("canManageProperties")],
+    ["POST", "/api/rent-payments/generate", MANAGE("canManageFinancials")],
+    ["PATCH", "/api/rent-payments/rp-1", MANAGE("canManageFinancials")],
+    ["DELETE", "/api/rent-payments/rp-1", MANAGE("canManageFinancials")],
+    ["PATCH", "/api/security-deposits/sd-1", MANAGE("canManageFinancials")],
+    ["DELETE", "/api/security-deposits/sd-1", MANAGE("canManageFinancials")],
+    ["GET", "/api/deposit-deductions", ["canViewFinancials", "canManageFinancials"]],
+    ["POST", "/api/deposit-deductions/split", MANAGE("canManageFinancials")],
+    ["DELETE", "/api/deposit-deductions/dd-1", MANAGE("canManageFinancials")],
+    ["PUT", "/api/residents/res-1/documents/lease", MANAGE("canManageProperties")],
+    ["PUT", "/api/properties/p-1/budget", MANAGE("canManageProperties")],
+    ["GET", "/api/region-contacts", ["canViewProperties", "canManageProperties"]],
+    ["GET", "/api/contacts", ["canViewContacts", "canManageContacts"]],
+    ["POST", "/api/contacts", MANAGE("canManageContacts")],
+    ["PATCH", "/api/contacts/c-1", MANAGE("canManageContacts")],
+    ["DELETE", "/api/contacts/c-1", MANAGE("canManageContacts")],
+    ["GET", "/api/contacts/c-1/requests", ["canViewContacts", "canManageContacts"]],
+    ["GET", "/api/contacts/c-1/notes", ["canViewContacts", "canManageContacts"]],
+    ["DELETE", "/api/contact-notes/cn-1", MANAGE("canManageContacts")],
+    ["POST", "/api/invoices", MANAGE("canManageBilling")],
+    ["PATCH", "/api/invoices/i-1", MANAGE("canManageBilling")],
+    ["DELETE", "/api/invoices/i-1", MANAGE("canManageBilling")],
+    ["POST", "/api/billing", MANAGE("canManageBilling")],
+    ["PATCH", "/api/billing/bl-1", MANAGE("canManageBilling")],
+    ["DELETE", "/api/billing/bl-1", MANAGE("canManageBilling")],
+    ["POST", "/api/properties", MANAGE("canManageProperties")],
+    ["PATCH", "/api/properties/p-1", MANAGE("canManageProperties")],
+    ["POST", "/api/properties/p-1/email", MANAGE("canManageProperties")],
+    ["GET", "/api/property-setup-items", ["canViewProperties", "canManageProperties", "canManagePropertySetup"]],
+    ["GET", "/api/properties/p-1/setup", ["canViewProperties", "canManageProperties", "canManagePropertySetup"]],
+  ];
+
+  it.each(rows)("%s %s: refused without its flag, writing nothing; not refused with it", async (method, path, flags) => {
+    const send = () => request(method, path, method === "GET" ? {} : { body: {} });
+    actAs(STAFF, flagsWithout(...flags));
+    expect((await send()).status).toBe(403);
+    expect(storageWrites()).toEqual([]);
+
+    actAs(STAFF, flagsWithout());
+    expect((await send()).status).not.toBe(403);
+  });
+});
+
+describe("each region guard below is the one that refuses a record outside the caller's regions", () => {
+  const WEST = "West Central";
+  const EAST = "East Central";
+  const ALL = flagsWithout();
+  const actAsWestStaff = () => actAs(STAFF, { ...ALL, allowedRegions: [WEST] });
+  const ok = async (id: string, data: Record<string, unknown> = {}) => ({ id, ...data });
+  const house = (region: string) => ({ id: "p-1", name: "House", address: "1 Main St", region, streetAddress: "1 Main St", city: "St Paul", state: "MN" });
+
+  // `arrange(region)` puts the record (or, for a create, the house or parent)
+  // in that region; for a move, the record stays West and the body names it.
+  const rows: { name: string; method: string; path: string; body?: (region: string) => Record<string, unknown>; arrange: (region: string) => void }[] = [
+    { name: "DELETE a request", method: "DELETE", path: "/api/maintenance-requests/r-1",
+      arrange: (region) => storageMock.getMaintenanceRequest.mockResolvedValue({ ...WEST_REQUEST, id: "r-1", region }) },
+    { name: "PATCH a walkthrough", method: "PATCH", path: "/api/walkthroughs/w-1", body: () => ({ notes: "x" }),
+      arrange: (region) => storageMock.getWalkthrough.mockResolvedValue({ id: "w-1", region, propertyId: "p-1", buildingAddress: "1 Main St", walkthroughDate: new Date(), type: "move_in", status: "draft" }) },
+    { name: "review a walkthrough", method: "POST", path: "/api/walkthroughs/w-1/review", body: () => ({}),
+      arrange: (region) => storageMock.getWalkthrough.mockResolvedValue({ id: "w-1", region, propertyId: "p-1", buildingAddress: "1 Main St", walkthroughDate: new Date(), type: "move_in", status: "submitted" }) },
+    { name: "DELETE a walkthrough", method: "DELETE", path: "/api/walkthroughs/w-1",
+      arrange: (region) => storageMock.getWalkthrough.mockResolvedValue({ id: "w-1", region, propertyId: "p-1", buildingAddress: "1 Main St", walkthroughDate: new Date(), type: "move_in", status: "draft" }) },
+    { name: "complete a schedule", method: "POST", path: "/api/maintenance-schedules/s-1/complete", body: () => ({}),
+      arrange: (region) => storageMock.getMaintenanceSchedule.mockResolvedValue({ id: "s-1", region, buildingAddress: "1 Main St", intervalMonths: 12, isActive: true }) },
+    { name: "move an asset", method: "PATCH", path: "/api/assets/a-1", body: (region) => ({ region }),
+      arrange: () => storageMock.getAsset.mockResolvedValue({ id: "a-1", region: WEST, buildingAddress: "1 Main St" }) },
+    { name: "move an invoice", method: "PATCH", path: "/api/invoices/i-1", body: (region) => ({ region }),
+      arrange: () => storageMock.getInvoice.mockResolvedValue({ id: "i-1", region: WEST, amount: "1.00", buildingAddress: "1 Main St" }) },
+    { name: "move a billing record to another region's house (refused by its house reference first)", method: "PATCH", path: "/api/billing/bl-1", body: () => ({ buildingAddress: "1 Main St" }),
+      arrange: (region) => {
+        storageMock.getBillingRecord.mockResolvedValue({ id: "bl-1", region: WEST, companyName: "Acme", buildingAddress: "2 West St" });
+        storageMock.getPropertyByAddress.mockResolvedValue(house(region));
+      } },
+    { name: "create an asset", method: "POST", path: "/api/assets",
+      body: (region) => ({ name: "Fridge", category: "Appliances - Large", type: "movable", ageInYears: 2, region, buildingAddress: "1 Main St", location: "Kitchen" }),
+      arrange: (region) => storageMock.getAllProperties.mockResolvedValue([house(region)]) },
+    { name: "add an asset photo", method: "POST", path: "/api/asset-photos", body: () => ({ assetId: "a-1", imageUrl: "/uploads/x.png", uploadedBy: "ignored" }),
+      arrange: (region) => {
+        storageMock.getAsset.mockResolvedValue({ id: "a-1", region });
+        storageMock.getUploadByStorageKey.mockResolvedValue({ storageKey: "x.png", uploadedBy: STAFF.id });
+      } },
+    { name: "create a contact", method: "POST", path: "/api/contacts", body: (region) => ({ name: "Dave", company: "Acme", service: "Plumbing", phone: "555-0100", email: "d@acme.test", buildingAddress: "1 Main St", region }),
+      arrange: (region) => storageMock.getAllProperties.mockResolvedValue([house(region)]) },
+    { name: "create an invoice", method: "POST", path: "/api/invoices",
+      body: (region) => ({ invoiceNumber: "INV-1", service: "Plumbing", amount: "120.00", dueDate: "2026-10-01", status: "pending", region, buildingAddress: "1 Main St" }),
+      arrange: (region) => storageMock.getAllProperties.mockResolvedValue([house(region)]) },
+    { name: "create a house", method: "POST", path: "/api/properties",
+      body: (region) => ({ name: "New House", streetAddress: "9 Oak Ave", city: "St Paul", state: "MN", zipCode: "55104", region, chapter: "St Paul", ownership: "owned" }), arrange: () => {} },
+    { name: "record a deposit", method: "POST", path: "/api/security-deposits", body: () => ({ residentId: "res-1", amountHeld: 300 }),
+      arrange: (region) => {
+        storageMock.getResident.mockResolvedValue({ id: "res-1", region, propertyId: "p-1", buildingAddress: "1 Main St", isActive: true });
+        storageMock.getSecurityDepositByResident.mockResolvedValue(undefined);
+      } },
+    { name: "generate HH fees", method: "POST", path: "/api/rent-payments/generate", body: () => ({ propertyId: "p-1", period: "2026-08", amount: 450 }),
+      arrange: (region) => {
+        storageMock.getProperty.mockResolvedValue(house(region));
+        storageMock.getResidentsByProperty.mockResolvedValue([]);
+      } },
+    { name: "raise a request from a walkthrough item", method: "POST", path: "/api/walkthrough-items/wi-1/maintenance-request", body: () => ({}),
+      arrange: (region) => {
+        storageMock.getWalkthroughItem.mockResolvedValue({ id: "wi-1", roomId: "wr-1", label: "Sink", condition: "damaged" });
+        storageMock.getWalkthroughRoom.mockResolvedValue({ id: "wr-1", walkthroughId: "w-1", name: "Kitchen" });
+        // The walkthrough is in the caller's region; the house it names is not.
+        storageMock.getWalkthrough.mockResolvedValue({ id: "w-1", region: WEST, propertyId: "p-1", buildingAddress: "1 Main St", walkthroughDate: new Date() });
+        storageMock.getMaintenanceRequestByWalkthroughItem.mockResolvedValue(undefined);
+        storageMock.getProperty.mockResolvedValue(house(region));
+      } },
+  ];
+
+  it.each(rows)("$name: refused in another region, writing nothing; not refused in its own", async (row) => {
+    const send = (region: string) => request(row.method, row.path, row.body ? { body: row.body(region) } : {});
+    storageMock.createAsset.mockImplementation(async (d: Record<string, unknown>) => ok("a-new", d));
+    storageMock.updateAsset.mockImplementation(ok);
+    storageMock.updateInvoice.mockImplementation(ok);
+    storageMock.createBillingRecord.mockImplementation(async (d: Record<string, unknown>) => ok("bl-new", d));
+    storageMock.updateBillingRecord.mockImplementation(ok);
+
+    actAsWestStaff();
+    row.arrange(EAST);
+    expect((await send(EAST)).status).toBe(403);
+    expect(storageWrites()).toEqual([]);
+
+    actAsWestStaff();
+    row.arrange(WEST);
+    expect((await send(WEST)).status).not.toBe(403);
+  });
+});
