@@ -40,3 +40,39 @@ export function fieldsNotForResident(change: Readonly<Record<string, unknown>>):
     )
     .map(([field]) => field);
 }
+
+/**
+ * The permission flags a maintenance account may hold, which are also its
+ * defaults: SPO's own payroll maintenance staff (JR, 2026-11-06). Repairs,
+ * walkthroughs, assets and contractors, by region like a regional
+ * administrator. Never the house page, the roster, leases, move-outs,
+ * invoices or money: cost goes in the thread or the close-out, and an admin
+ * enters the invoice.
+ */
+export const MAINTENANCE_PERMISSION_FLAGS = [
+  "canViewMaintenance",
+  "canManageMaintenance",
+  "canViewWalkthroughs",
+  "canManageWalkthroughs",
+  "canViewAssets",
+  "canManageAssets",
+  "canViewContacts",
+  "canManageContacts",
+] as const;
+
+const MAINTENANCE_FLAGS: ReadonlySet<string> = new Set(MAINTENANCE_PERMISSION_FLAGS);
+
+export function isMaintenancePermissionFlag(flag: string): boolean {
+  return MAINTENANCE_FLAGS.has(flag);
+}
+
+/**
+ * The flags a maintenance account may not take: any other flag switched on.
+ * Regions are allowed (they are how the account is scoped), and switching a
+ * flag off is allowed, so an old row can be cleaned up.
+ */
+export function fieldsNotForMaintenance(change: Readonly<Record<string, unknown>>): string[] {
+  return Object.entries(change)
+    .filter(([field, value]) => field !== "allowedRegions" && value === true && !isMaintenancePermissionFlag(field))
+    .map(([field]) => field);
+}

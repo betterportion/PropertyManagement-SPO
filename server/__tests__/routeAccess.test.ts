@@ -13034,3 +13034,184 @@ describe("two grants for the same house at once cannot both take its last place 
     expect(atP).toHaveLength(4);
   });
 });
+
+// ---------------------------------------------------------------------------
+// The maintenance role: SPO's own maintenance staff (JR, 2026-11-06)
+// ---------------------------------------------------------------------------
+
+describe("a maintenance account", () => {
+  const JOE = { id: "u-joe", email: "joe@example.com", role: "maintenance", isActive: true };
+  // What the account is created with (maintenanceDefaultPermissions), given West Central.
+  const JOE_PERMISSIONS = {
+    canViewMaintenance: true,
+    canManageMaintenance: true,
+    canViewWalkthroughs: true,
+    canManageWalkthroughs: true,
+    canViewAssets: true,
+    canManageAssets: true,
+    canViewContacts: true,
+    canManageContacts: true,
+    allowedRegions: ["West Central"],
+  };
+  const actAsJoe = () => actAs(JOE, JOE_PERMISSIONS);
+
+  it.each([
+    ["the roster", "/api/residents", "getAllResidents"],
+    ["HH fees", "/api/rent-payments", "getAllRentPayments"],
+    ["deposits", "/api/security-deposits", "getAllSecurityDeposits"],
+    ["invoices", "/api/invoices", "getAllInvoices"],
+    ["billing records", "/api/billing", "getAllBillingRecords"],
+    ["the accounts", "/api/users", "getAllUsers"],
+  ])("is refused %s, reading nothing", async (_what, path, read) => {
+    actAsJoe();
+    expect((await get(path)).status).toBe(403);
+    expect(storageMock[read]).not.toHaveBeenCalled();
+  });
+
+  // The way in: door, gate and alarm codes, read only, in its own regions.
+  it("reads a house's facts in its region, not another region's, and cannot change them", async () => {
+    actAsJoe();
+    storageMock.getProperty.mockImplementation(async (id: string) =>
+      id === "p-w" ? { id, region: "West Central", address: "1 Main St" } : id === "p-e" ? { id, region: "East Central", address: "9 Elm St" } : undefined,
+    );
+    storageMock.getPropertyFacts.mockResolvedValue({ id: "f-w", propertyId: "p-w", doorCode: "4321" });
+
+    const own = await get("/api/properties/p-w/facts");
+    expect(own.status).toBe(200);
+    expect(own.body.doorCode).toBe("4321");
+
+    storageMock.getPropertyFacts.mockClear();
+    expect((await get("/api/properties/p-e/facts")).status).toBe(403);
+    expect(storageMock.getPropertyFacts).not.toHaveBeenCalled();
+
+    expect((await request("PUT", "/api/properties/p-w/facts", { body: { doorCode: "0000" } })).status).toBe(403);
+    expect(storageMock.upsertPropertyFacts).not.toHaveBeenCalled();
+  });
+
+  it("gets only the names and addresses of the houses in its regions, never a lease or a note", async () => {
+    actAsJoe();
+    storageMock.getAllProperties.mockResolvedValue([
+      { id: "p-w", name: "Cleveland House", address: "1 Main St", region: "West Central", leaseEndDate: "2027-05-31", notes: "Landlord is slow" },
+      { id: "p-e", name: "Elm House", address: "9 Elm St", region: "East Central" },
+    ]);
+    const { status, body } = await get("/api/properties");
+    expect(status).toBe(200);
+    expect(body).toEqual([{ id: "p-w", name: "Cleveland House", address: "1 Main St", region: "West Central" }]);
+  });
+
+  it("is refused the house list without any maintenance-role flag, reading nothing", async () => {
+    actAs(JOE, { allowedRegions: ["West Central"] });
+    expect((await get("/api/properties")).status).toBe(403);
+    expect(storageMock.getAllProperties).not.toHaveBeenCalled();
+  });
+
+  it("reads the requests in its region and not another's", async () => {
+    actAsJoe();
+    const { body } = await get("/api/maintenance-requests");
+    expect(body.map((r: { id: string }) => r.id)).toEqual([WEST_REQUEST.id]);
+
+    storageMock.getMaintenanceRequest.mockResolvedValue(EAST_REQUEST);
+    expect((await get(`/api/maintenance-requests/${EAST_REQUEST.id}`)).status).toBe(403);
+    storageMock.getMaintenanceRequest.mockResolvedValue(WEST_REQUEST);
+    expect((await get(`/api/maintenance-requests/${WEST_REQUEST.id}`)).status).toBe(200);
+  });
+
+  it("moves a request in its region and not one in another, writing nothing there", async () => {
+    actAsJoe();
+    storageMock.getMaintenanceRequest.mockResolvedValue(EAST_REQUEST);
+    expect((await request("PATCH", `/api/maintenance-requests/${EAST_REQUEST.id}`, { body: { status: "in_progress" } })).status).toBe(403);
+    expect(storageMock.updateMaintenanceRequest).not.toHaveBeenCalled();
+
+    storageMock.getMaintenanceRequest.mockResolvedValue(WEST_REQUEST);
+    expect((await request("PATCH", `/api/maintenance-requests/${WEST_REQUEST.id}`, { body: { status: "in_progress" } })).status).toBe(200);
+    expect(storageMock.updateMaintenanceRequest).toHaveBeenCalled();
+  });
+
+  describe("setting its permissions", () => {
+    const FLAGS = Object.entries(getTableColumns(userPermissions))
+      .filter(([, column]) => column.dataType === "boolean")
+      .map(([name]) => name);
+    const FORBIDDEN = FLAGS.filter((flag) => !(flag in JOE_PERMISSIONS));
+
+    function adminChangingJoe() {
+      actAs(ADMIN);
+      storageMock.getUser.mockImplementation(async (id: string) => (id === ADMIN.id ? ADMIN : id === JOE.id ? JOE : undefined));
+      storageMock.upsertUserPermissions.mockImplementation(async (p: unknown) => p);
+    }
+
+    it("knows the flags it must refuse", () => {
+      expect(FORBIDDEN).toEqual(expect.arrayContaining(["canViewProperties", "canViewFinancials", "canManageBilling", "canManageUsers"]));
+    });
+
+    it.each(FORBIDDEN)("refuses %s, writing nothing", async (flag) => {
+      adminChangingJoe();
+      const { status, body } = await request("PATCH", `/api/users/${JOE.id}/permissions`, { body: { [flag]: true } });
+      expect(status).toBe(400);
+      expect(body.message).toMatch(/maintenance account/i);
+      expect(storageMock.upsertUserPermissions).not.toHaveBeenCalled();
+      expect(storageMock.createAuditEvent).not.toHaveBeenCalled();
+    });
+
+    it("stores its own flags and its regions", async () => {
+      adminChangingJoe();
+      const { status } = await request("PATCH", `/api/users/${JOE.id}/permissions`, {
+        body: { canManageAssets: true, canViewBilling: false, allowedRegions: ["Northwest"] },
+      });
+      expect(status).toBe(200);
+      expect(storageMock.upsertUserPermissions).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: JOE.id, canManageAssets: true, allowedRegions: ["Northwest"] }),
+      );
+    });
+  });
+
+  describe("the email when a request is filed", () => {
+    const HOUSE = { id: "p-w", name: "Cleveland House", address: "1 Main St", region: "West Central" };
+    const body = { title: "Leaky tap", description: "Drips.", category: "plumbing", priority: "medium", location: "Kitchen", buildingAddress: HOUSE.address, region: HOUSE.region };
+    const addressed = () => sendEmailMock.mock.calls.map(([message]) => message.to).sort();
+
+    beforeEach(() => {
+      storageMock.getPropertyByAddress.mockResolvedValue(HOUSE);
+      storageMock.createMaintenanceRequest.mockImplementation(async (data: Record<string, unknown>) => ({ id: "new", type: "request", ...data }));
+      storageMock.getAllProperties.mockResolvedValue([HOUSE]);
+      storageMock.getAllResidents.mockResolvedValue([]);
+      storageMock.getAllUsersWithPermissions.mockResolvedValue([
+        { user: { ...JOE, commentEmailsEnabled: true }, permissions: JOE_PERMISSIONS },
+        { user: { id: "u-tim", email: "tim@example.com", role: "maintenance", isActive: true, commentEmailsEnabled: true }, permissions: { ...JOE_PERMISSIONS, allowedRegions: ["Northwest"] } },
+        { user: { ...ADMIN, commentEmailsEnabled: true }, permissions: null },
+      ]);
+    });
+
+    it("goes to the maintenance staff covering the house, beside the filer's acknowledgement", async () => {
+      actAs(ADMIN);
+      expect((await request("POST", "/api/maintenance-requests", { body })).status).toBe(200);
+      expect(addressed()).toEqual([ADMIN.email, JOE.email]);
+      expect(sendEmailMock.mock.calls.find(([m]) => m.to === JOE.email)[0].template).toBe("maintenance_new");
+    });
+
+    it("does not go to the maintenance person who filed it", async () => {
+      actAsJoe();
+      expect((await request("POST", "/api/maintenance-requests", { body })).status).toBe(200);
+      expect(sendEmailMock.mock.calls.filter(([m]) => m.template === "maintenance_new")).toEqual([]);
+    });
+  });
+
+  describe("the performance view", () => {
+    it("is refused to a maintenance account and a regional administrator, reading nothing", async () => {
+      for (const [who, permissions] of [[JOE, JOE_PERMISSIONS], [STAFF, { ...ALL_MAINTENANCE, allowedRegions: ["all"] }]] as const) {
+        actAs(who, permissions);
+        expect((await get("/api/maintenance-performance")).status).toBe(403);
+      }
+      expect(storageMock.getAllCloseoutsForPerformance).not.toHaveBeenCalled();
+    });
+
+    it("answers an admin with counts per person", async () => {
+      actAs(ADMIN);
+      storageMock.getAllCloseoutsForPerformance.mockResolvedValue([
+        { closeout: { completedByEmail: JOE.email, completedByName: "Joe Fink", completedAt: new Date("2026-11-03") }, submittedDate: new Date("2026-11-01"), usedContractor: true },
+      ]);
+      const { status, body } = await get("/api/maintenance-performance");
+      expect(status).toBe(200);
+      expect(body).toEqual([{ name: "Joe Fink", email: JOE.email, closed: 1, medianDaysToClose: 2, usedContractor: 1 }]);
+    });
+  });
+});

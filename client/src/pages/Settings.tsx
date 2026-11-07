@@ -29,7 +29,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { insertUserSchema, type User, type UserPermissions, type Property } from "@shared/schema";
 import { REGIONS } from "@shared/regions";
-import { isResidentPermissionFlag } from "@shared/permissions";
+import { isMaintenancePermissionFlag, isResidentPermissionFlag } from "@shared/permissions";
 import { MAX_RESIDENT_ACCOUNTS_PER_PROPERTY } from "@shared/residents";
 import { invitationDaySchema } from "@shared/invitations";
 import { invitationOutcomeMessage, type InvitationOutcome } from "@/lib/invitations";
@@ -41,6 +41,7 @@ import QuickBooksSettings from "@/components/QuickBooksSettings";
 import DepositDeadlineSettings from "@/components/DepositDeadlineSettings";
 import EmailHealthSettings from "@/components/EmailHealthSettings";
 import FeedbackReports from "@/components/FeedbackReports";
+import MaintenancePerformance from "@/components/MaintenancePerformance";
 import RosterSyncSettings from "@/components/RosterSyncSettings";
 import ResourceLinksSettings from "@/components/ResourceLinksSettings";
 import WalkthroughTemplateSettings from "@/components/WalkthroughTemplateSettings";
@@ -168,10 +169,14 @@ export default function Settings() {
 
   // A resident account holds only the resident grants and no regions (the
   // server refuses anything else), so its dialog offers only those.
+  // A maintenance account likewise holds only its own set, with regions.
   const selectedIsResident = selectedUser?.role === "resident";
+  const selectedIsMaintenance = selectedUser?.role === "maintenance";
   const offeredPermissions: readonly (typeof FEATURE_PERMISSIONS)[number][] = selectedIsResident
     ? FEATURE_PERMISSIONS.filter((perm) => isResidentPermissionFlag(perm.key))
-    : FEATURE_PERMISSIONS;
+    : selectedIsMaintenance
+      ? FEATURE_PERMISSIONS.filter((perm) => isMaintenancePermissionFlag(perm.key))
+      : FEATURE_PERMISSIONS;
 
   const handleOpenPermissions = (user: User) => {
     setSelectedUser(user);
@@ -221,12 +226,19 @@ export default function Settings() {
             ),
             allowedRegions: [],
           }
-        : editingPermissions,
+        : selectedIsMaintenance
+          ? {
+              ...editingPermissions,
+              ...Object.fromEntries(
+                FEATURE_PERMISSIONS.map(({ key }) => [key, isMaintenancePermissionFlag(key) && !!editingPermissions[key]]),
+              ),
+            }
+          : editingPermissions,
     );
   };
 
   const updateRoleMutation = useMutation({
-    mutationFn: async ({ id, role }: { id: string; role: "admin" | "regional_administrator" | "resident" }) => {
+    mutationFn: async ({ id, role }: { id: string; role: User["role"] }) => {
       await apiRequest("PATCH", `/api/users/${id}/role`, { role });
     },
     onSuccess: async (_data, { role }) => {
@@ -495,6 +507,7 @@ export default function Settings() {
                         <SelectContent>
                           <SelectItem value="admin">Admin</SelectItem>
                           <SelectItem value="regional_administrator">Regional Admin</SelectItem>
+                          <SelectItem value="maintenance">Maintenance</SelectItem>
                           <SelectItem value="resident">Resident</SelectItem>
                         </SelectContent>
                       </Select>
@@ -584,7 +597,7 @@ export default function Settings() {
                 <Select
                   value={user.role}
                   onValueChange={(value) =>
-                    updateRoleMutation.mutate({ id: user.id, role: value as "admin" | "regional_administrator" | "resident" })
+                    updateRoleMutation.mutate({ id: user.id, role: value as User["role"] })
                   }
                   disabled={updateRoleMutation.isPending}
                 >
@@ -594,6 +607,7 @@ export default function Settings() {
                   <SelectContent>
                     <SelectItem value="admin"><div className="flex items-center gap-2"><Shield className="h-3 w-3" />Admin</div></SelectItem>
                     <SelectItem value="regional_administrator"><div className="flex items-center gap-2"><UserCog className="h-3 w-3" />Regional Admin</div></SelectItem>
+                    <SelectItem value="maintenance"><div className="flex items-center gap-2"><UserCog className="h-3 w-3" />Maintenance</div></SelectItem>
                     <SelectItem value="resident"><div className="flex items-center gap-2"><UserCog className="h-3 w-3" />Resident</div></SelectItem>
                   </SelectContent>
                 </Select>
@@ -705,6 +719,7 @@ export default function Settings() {
         <TabsContent value="activity" className="mt-6 space-y-6">
           <FeedbackReports />
           <EmailHealthSettings />
+          <MaintenancePerformance />
           <ActivityLog />
         </TabsContent>
 

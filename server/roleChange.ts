@@ -12,13 +12,16 @@
  *   and region -- the row waits, unused, and is reset on the way back down;
  * - any other change resets the row to the new role's minimum: no flags and
  *   no regions for a regional administrator (an admin grants what they need
- *   explicitly), and for a resident only `canViewMaintenance`, which a
- *   household needs to file and read its own repairs.
+ *   explicitly), for a resident only `canViewMaintenance`, which a
+ *   household needs to file and read its own repairs, and for a maintenance
+ *   account its fixed set (`MAINTENANCE_PERMISSION_FLAGS`) with no regions,
+ *   so an admin still chooses where they work.
  *
  * Pure: roles in, the row to write (or null) out.
  */
 import { getTableColumns } from "drizzle-orm";
 import { userPermissions, type InsertUserPermissions, type User } from "@shared/schema";
+import { isMaintenancePermissionFlag } from "@shared/permissions";
 
 type Role = User["role"];
 
@@ -29,6 +32,13 @@ const FLAGS = Object.entries(getTableColumns(userPermissions))
 
 export function permissionsAfterRoleChange(userId: string, from: Role, to: Role): InsertUserPermissions | null {
   if (from === to || to === "admin") return null;
+  if (to === "maintenance") return maintenanceDefaultPermissions(userId);
   const flags = Object.fromEntries(FLAGS.map((flag) => [flag, flag === "canViewMaintenance" && to === "resident"]));
+  return { ...flags, userId, allowedRegions: [] } as InsertUserPermissions;
+}
+
+/** A maintenance account's row: its fixed set on, every other flag off, no regions yet. */
+export function maintenanceDefaultPermissions(userId: string): InsertUserPermissions {
+  const flags = Object.fromEntries(FLAGS.map((flag) => [flag, isMaintenancePermissionFlag(flag)]));
   return { ...flags, userId, allowedRegions: [] } as InsertUserPermissions;
 }

@@ -62,6 +62,7 @@ import {
 } from "./uploadLimits";
 import { uploadRateLimit } from "./security";
 import { removeDeletedRecordFiles } from "./uploadCleanup";
+import { maintenancePerformance } from "./maintenancePerformance";
 import { roomChoices } from "./roomChoices";
 import {
   insertMaintenanceRequestSchema,
@@ -143,8 +144,8 @@ import { randomBytes, randomUUID, timingSafeEqual } from "crypto";
 import { contractorLoad, recurringIssues } from "./aggregates";
 import { onEmailOutcome, sendEmail, type OutboundEmail } from "./email";
 import { withHouseLock } from "./houseLock";
-import { commentEmail, householdEmail, maintenanceReceivedEmail, maintenanceStatusEmail } from "./notifications";
-import { commentRecipients, submitterMayRead, type CommentCandidate } from "./commentRecipients";
+import { commentEmail, householdEmail, maintenanceReceivedEmail, maintenanceStatusEmail, newRequestEmail } from "./notifications";
+import { commentRecipients, newRequestRecipients, submitterMayRead, type CommentCandidate } from "./commentRecipients";
 import { readAppUrlFromEnv, readQuickBooksConfigFromEnv } from "./config";
 import { quickBooksHealth, runQuickBooksSync, withQuickBooks } from "./quickbooksSync";
 import { createQuickBooksApi, QuickBooksConnectionLostError, QuickBooksRequestError } from "./quickbooks/api";
@@ -158,7 +159,7 @@ import { ROSTER_SHEET_COLUMNS } from "@shared/rosterSheet";
 import { log } from "./logger";
 import { normalizeRegion, normalizeRegions } from "./migrateRegions";
 import { REGIONS } from "@shared/regions";
-import { fieldsNotForResident } from "@shared/permissions";
+import { fieldsNotForMaintenance, fieldsNotForResident, MAINTENANCE_PERMISSION_FLAGS } from "@shared/permissions";
 
 // Uploads are buffered in memory only long enough to be written to App Storage.
 // Nothing is written to the container filesystem, because autoscale rebuilds it
@@ -203,7 +204,7 @@ const rosterImportSchema = z.object({
 });
 
 const roleUpdateSchema = z.object({
-  role: z.enum(["admin", "regional_administrator", "resident"]),
+  role: z.enum(["admin", "regional_administrator", "maintenance", "resident"]),
 });
 
 const statusUpdateSchema = z.object({
@@ -686,6 +687,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
             "A resident account can only be allowed to view maintenance, complete walkthroughs and see the Resources page. Staff permissions and regions are for staff accounts.",
         });
       }
+      // A maintenance account works repairs, walkthroughs, assets and
+      // contractors, never houses, residents, invoices or money.
+      if (target.role === "maintenance" && fieldsNotForMaintenance(filteredData).length > 0) {
+        return res.status(400).json({
+          message:
+            "A maintenance account can only be given maintenance, walkthrough, asset and contact permissions. Houses, residents, invoices and finances are for regional administrators.",
+        });
+      }
 
       const existingPermissions = await auditLookup(() => storage.getUserPermissions(req.params.id));
       const permissions = await storage.upsertUserPermissions({
@@ -862,6 +871,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Who closes maintenance work, as counts (maintenancePerformance.ts). Admins only.
+  app.get('/api/maintenance-performance', isAuthenticated, async (req: any, res) => {
+    try {
+      const ctx = await requireActiveUser(req, res);
+      if (!ctx) return;
+      if (!requireAdmin(res, ctx)) return;
+
+      res.json(maintenancePerformance(await storage.getAllCloseoutsForPerformance()));
+    } catch (error) {
+      sendError(res, error, "Failed to load maintenance performance");
+    }
+  });
+
   /**
    * Fires an outbound email without letting it touch the request.
    *
@@ -919,6 +941,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
       log(`submitter email skipped for request ${request.id}: ${detail}`, "email");
+    }
+  }
+
+  /**
+   * Emails the maintenance staff who can read a request that was just filed
+   * (newRequestRecipients). Like the comment email, nothing in here may fail
+   * the request: it is already saved.
+   */
+  async function emailMaintenanceStaff(request: MaintenanceRequest): Promise<void> {
+    try {
+      const candidates = await storage.getAllUsersWithPermissions();
+      const appUrl = readAppUrlFromEnv().url;
+      for (const { email } of newRequestRecipients({ request, candidates })) {
+        notify(newRequestEmail({ to: email, request, appUrl }));
+      }
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      log(`maintenance staff email skipped for request ${request.id}: ${detail}`, "email");
     }
   }
 
@@ -1122,6 +1162,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // natively: without it, filing a request feels like putting a note in
         // a drawer.
         await emailSubmitter(request, maintenanceReceivedEmail);
+        await emailMaintenanceStaff(request);
         return res.json(request);
       }
 
@@ -1151,6 +1192,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // whoever submittedBy names, which for a staff-filed request is the
       // staff member themselves.
       await emailSubmitter(request, maintenanceReceivedEmail);
+      await emailMaintenanceStaff(request);
       res.json(request);
     } catch (error) {
       sendError(res, error, "Failed to create maintenance request");
@@ -2663,6 +2705,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       await emailSubmitter(request, maintenanceReceivedEmail);
+      await emailMaintenanceStaff(request);
       res.status(201).json(request);
     } catch (error) {
       sendError(res, error, "Failed to raise a request from this item");
@@ -6887,10 +6930,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const ctx = await requireActiveUser(req, res);
       if (!ctx) return;
       if (!requireStaff(res, ctx)) return;
-      if (!requirePermission(res, ctx, "canViewProperties", "canManageProperties")) return;
+      // A maintenance account files repairs, walkthroughs and assets against a
+      // house but never holds the properties flags: it gets the names and
+      // addresses the house pickers need, in its regions, and nothing about
+      // leases, notes or deposits.
+      const pickerOnly = ctx.user.role === "maintenance";
+      if (!requirePermission(res, ctx, ...(pickerOnly ? MAINTENANCE_PERMISSION_FLAGS : (["canViewProperties", "canManageProperties"] as const)))) return;
 
-      const properties = await storage.getAllProperties();
-      res.json(filterByRegion(ctx, properties));
+      const properties = filterByRegion(ctx, await storage.getAllProperties());
+      res.json(pickerOnly ? properties.map(({ id, name, address, region }) => ({ id, name, address, region })) : properties);
     } catch (error) {
       sendError(res, error, "Failed to fetch properties");
     }
@@ -7207,7 +7255,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const ctx = await requireActiveUser(req, res);
       if (!ctx) return;
       if (!requireStaff(res, ctx)) return;
-      if (!requirePermission(res, ctx, "canViewProperties", "canManageProperties")) return;
+      // Maintenance staff need the door, gate and alarm codes to get in (JR,
+      // 2026-11-06): read only, in their regions, without the house page.
+      if (ctx.user.role !== "maintenance" && !requirePermission(res, ctx, "canViewProperties", "canManageProperties")) return;
 
       const property = await propertyForSetup(req, res, ctx);
       if (!property) return;

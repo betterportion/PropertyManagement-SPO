@@ -133,6 +133,8 @@ import {
 } from "@shared/schema";
 import { db } from "./db";
 import { REGIONS } from "@shared/regions";
+import { maintenanceDefaultPermissions } from "./roleChange";
+import type { CloseoutForPerformance } from "./maintenancePerformance";
 import { eq, and, or, desc, asc, inArray, isNull, lt, lte, gte, ilike, like, count, notInArray, sql } from "drizzle-orm";
 
 // Helper function to filter out undefined values from partial updates
@@ -145,7 +147,8 @@ function filterUndefined<T extends Record<string, any>>(obj: T): Partial<T> {
 // Helper function to compute default permissions for a given role. An admin can
 // reach every region; the canonical list is the single source of truth in
 // shared/regions.ts, so this never drifts from the region names on records.
-function computeDefaultPermissions(userId: string, role: "admin" | "regional_administrator" | "resident"): InsertUserPermissions {
+function computeDefaultPermissions(userId: string, role: User["role"]): InsertUserPermissions {
+  if (role === "maintenance") return maintenanceDefaultPermissions(userId);
   return {
     userId,
     canViewMaintenance: true,
@@ -237,7 +240,7 @@ export interface IStorage {
   /** Sets the role and, when given, replaces the permissions row in the same transaction. */
   updateUserRole(
     id: string,
-    role: "admin" | "regional_administrator" | "resident",
+    role: User["role"],
     permissions: InsertUserPermissions | null,
   ): Promise<User>;
   updateUserActiveStatus(id: string, isActive: boolean): Promise<User>;
@@ -458,6 +461,8 @@ export interface IStorage {
   getRequestCloseout(requestId: string): Promise<(RequestCloseout & { contactIds: string[] }) | undefined>;
   /** Every close-out that named this contractor, with its request; the route filters by the request's region. */
   getCloseoutsForContact(contactId: string): Promise<{ closeout: RequestCloseout; request: MaintenanceRequest }[]>;
+  /** Every close-out with its request's filing date and whether a contractor was linked: the admin's performance view. */
+  getAllCloseoutsForPerformance(): Promise<CloseoutForPerformance[]>;
   getContactNotes(contactId: string): Promise<ContactNote[]>;
   getContactNote(id: string): Promise<ContactNote | undefined>;
   createContactNote(
@@ -878,7 +883,7 @@ export class DatabaseStorage implements IStorage {
   // never lands without the reset that goes with it.
   async updateUserRole(
     id: string,
-    role: "admin" | "regional_administrator" | "resident",
+    role: User["role"],
     permissions: InsertUserPermissions | null,
   ): Promise<User> {
     return db.transaction(async (tx) => {
@@ -2548,6 +2553,18 @@ export class DatabaseStorage implements IStorage {
       .innerJoin(maintenanceRequests, eq(requestCloseouts.requestId, maintenanceRequests.id))
       .where(eq(requestCloseoutContacts.contactId, contactId))
       .orderBy(desc(requestCloseouts.completedAt));
+  }
+
+  async getAllCloseoutsForPerformance(): Promise<CloseoutForPerformance[]> {
+    const rows = await db
+      .select({
+        closeout: requestCloseouts,
+        submittedDate: maintenanceRequests.submittedDate,
+        contractors: sql<number>`(select count(*) from ${requestCloseoutContacts} where ${requestCloseoutContacts.closeoutId} = ${requestCloseouts.id})`.mapWith(Number),
+      })
+      .from(requestCloseouts)
+      .innerJoin(maintenanceRequests, eq(requestCloseouts.requestId, maintenanceRequests.id));
+    return rows.map(({ closeout, submittedDate, contractors }) => ({ closeout, submittedDate, usedContractor: contractors > 0 }));
   }
 
   async getContactNote(id: string): Promise<ContactNote | undefined> {

@@ -9,6 +9,18 @@ import { getTableColumns } from "drizzle-orm";
 import { userPermissions } from "@shared/schema";
 import { permissionsAfterRoleChange } from "../roleChange";
 
+// Written out rather than imported: JR's decision on what maintenance staff hold (2026-11-06).
+const MAINTENANCE = [
+  "canViewMaintenance",
+  "canManageMaintenance",
+  "canViewWalkthroughs",
+  "canManageWalkthroughs",
+  "canViewAssets",
+  "canManageAssets",
+  "canViewContacts",
+  "canManageContacts",
+];
+
 // Read off the table, so a flag added later is covered without editing here.
 const FLAGS = Object.entries(getTableColumns(userPermissions))
   .filter(([, column]) => column.dataType === "boolean")
@@ -47,6 +59,21 @@ describe("permissionsAfterRoleChange", () => {
         expect(row[flag as keyof typeof row], `${from} -> resident: ${flag}`).toBe(flag === "canViewMaintenance");
       }
     }
+  });
+
+  it("gives a new maintenance account exactly its fixed set and no regions, from any role", () => {
+    for (const from of ["admin", "regional_administrator", "resident"] as const) {
+      const row = permissionsAfterRoleChange("u-1", from, "maintenance")!;
+      expect(row.allowedRegions).toEqual([]);
+      for (const flag of FLAGS) {
+        expect(row[flag as keyof typeof row], `${from} -> maintenance: ${flag}`).toBe(MAINTENANCE.includes(flag));
+      }
+    }
+  });
+
+  it("takes every maintenance flag away when a maintenance account becomes a regional administrator", () => {
+    const row = permissionsAfterRoleChange("u-1", "maintenance", "regional_administrator")!;
+    for (const flag of FLAGS) expect(row[flag as keyof typeof row], flag).toBe(false);
   });
 
   it("names at least the flags this suite already knows about", () => {

@@ -9,6 +9,7 @@ import ThemeToggle from "@/components/ThemeToggle";
 import UserMenu from "@/components/UserMenu";
 import { ThemeProvider } from "@/providers/ThemeProvider";
 import { useAuth } from "@/hooks/useAuth";
+import { AccessDeniedState } from "@/components/states";
 import { canFillInWalkthroughs, canSeeResourceHub, type WalkthroughUser } from "@/lib/walkthrough";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import NotFound from "@/pages/not-found";
@@ -59,9 +60,17 @@ function Router() {
 
   const role = (user as any)?.role || "resident";
 
-  if (role === "admin" || role === "regional_administrator") {
+  if (role === "admin" || role === "regional_administrator" || role === "maintenance") {
+    // A maintenance account never reaches houses, residents or money; the
+    // server refuses the data, and these say so instead of an empty page.
+    const notForMaintenance = role === "maintenance" ? ["/properties", "/properties/*?", "/residents", "/residents/*?", "/finances"] : [];
     return (
       <Switch>
+        {notForMaintenance.map((path) => (
+          <Route key={path} path={path}>
+            <AccessDeniedState description="Maintenance accounts work repairs, safety, walkthroughs, assets and contractors. Houses, residents and finances are for regional administrators." />
+          </Route>
+        ))}
         <Route path="/" component={AdminDashboard} />
         <Route path="/tasks" component={Tasks} />
         <Route path="/properties" component={Properties} />

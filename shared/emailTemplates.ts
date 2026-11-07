@@ -6,6 +6,7 @@
 export const EMAIL_TEMPLATES = {
   maintenance_received: "Request received",
   maintenance_status: "Request status changed",
+  maintenance_new: "New request to maintenance staff",
   comment: "New comment on a request",
   household: "Email to a household",
   move_out_resident: "Move-out checklist to resident",

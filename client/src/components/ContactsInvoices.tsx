@@ -14,18 +14,22 @@ interface ContactsInvoicesProps {
   houses: Property[];
   onEditContact?: (id: string) => void;
   onEditInvoice?: (id: string) => void;
+  /** False for a maintenance account, which never sees invoices. */
+  showInvoices?: boolean;
 }
 
-export default function ContactsInvoices({ contacts, invoices, houses, onEditContact, onEditInvoice }: ContactsInvoicesProps) {
+export default function ContactsInvoices({ contacts, invoices, houses, onEditContact, onEditInvoice, showInvoices = true }: ContactsInvoicesProps) {
   return (
     <Tabs defaultValue="contacts" className="w-full">
-      <TabsList className="grid w-full grid-cols-2" data-testid="tabs-contacts-invoices">
+      <TabsList className={`grid w-full ${showInvoices ? "grid-cols-2" : "grid-cols-1"}`} data-testid="tabs-contacts-invoices">
         <TabsTrigger value="contacts" data-testid="tab-contacts">
           Contacts ({contacts.length})
         </TabsTrigger>
-        <TabsTrigger value="invoices" data-testid="tab-invoices">
-          Invoices ({invoices.length})
-        </TabsTrigger>
+        {showInvoices && (
+          <TabsTrigger value="invoices" data-testid="tab-invoices">
+            Invoices ({invoices.length})
+          </TabsTrigger>
+        )}
       </TabsList>
 
       <TabsContent value="contacts" className="mt-6">

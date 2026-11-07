@@ -20,7 +20,7 @@ import { FeedbackDialog } from "@/components/FeedbackDialog";
 import spoLogo from "@assets/SPO Logo under 600x600px_SPO Vertical - Ocean_1763138801065.png";
 
 interface AppSidebarProps {
-  role: "admin" | "regional_administrator" | "resident";
+  role: "admin" | "regional_administrator" | "maintenance" | "resident";
   currentPath: string;
   /**
    * Whether this account reaches the resource hub. Only changes the resident
@@ -52,6 +52,17 @@ const adminMenuItems: NavItem[] = [
   { title: "Resources", url: "/resources", icon: BookOpen },
 ];
 
+// SPO's own maintenance staff: the work, never houses, residents or money.
+const maintenanceMenuItems: NavItem[] = [
+  { title: "Dashboard", url: "/", icon: Home },
+  { title: "Tasks", url: "/tasks", icon: ListChecks },
+  { title: "Maintenance", url: "/maintenance", icon: Wrench },
+  { title: "Safety", url: "/safety", icon: ShieldCheck },
+  { title: "Maintenance Contacts", url: "/contacts", icon: Users },
+  { title: "Walkthroughs", url: "/walkthroughs", icon: Camera },
+  { title: "Assets", url: "/assets", icon: Package },
+];
+
 const residentMenuItems: NavItem[] = [
   { title: "Dashboard", url: "/", icon: Home },
   { title: "Submit Request", url: "/submit-request", icon: Wrench },
@@ -69,11 +80,13 @@ export function AppSidebar({
 }: AppSidebarProps) {
   const { isMobile, setOpenMobile } = useSidebar();
   const [feedbackOpen, setFeedbackOpen] = useState(false);
-  const isStaff = role === "admin" || role === "regional_administrator";
+  const isStaff = role === "admin" || role === "regional_administrator" || role === "maintenance";
 
   // A household leader gets the extra entries their own grants unlock, one
   // flag at a time, and nothing else on the staff menu comes with either.
-  const menuItems = isStaff
+  const menuItems = role === "maintenance"
+    ? maintenanceMenuItems
+    : isStaff
     ? adminMenuItems
     : [
         ...residentMenuItems,
@@ -155,7 +168,9 @@ export function AppSidebar({
             ? "Admin account"
             : role === "regional_administrator"
               ? "Regional admin"
-              : "Resident account"}
+              : role === "maintenance"
+                ? "Maintenance"
+                : "Resident account"}
         </Badge>
         <Link
           href={PRIVACY_PATH}
