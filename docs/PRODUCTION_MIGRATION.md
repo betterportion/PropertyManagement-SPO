@@ -374,7 +374,7 @@ pg_dump --no-owner --no-acl --schema=public --schema=drizzle \
   "<production direct connection string>" > spo-pre-migrate-YYYY-MM-DD.sql
 ```
 
-Replace `YYYY-MM-DD` with today's date (add `-2` if it is the second one that day). Then check it before going on: the file should be megabytes, not zero bytes (`ls -lh spo-pre-migrate-*.sql`), and its last lines should say `PostgreSQL database dump complete` (`tail -n 10 spo-pre-migrate-YYYY-MM-DD.sql`; `pg_dump` 17.6 and later put a `\unrestrict` line after it, so it is not the very last line). If `pg_dump` stops with a message that its version is older than the server's, install a newer `pg_dump` rather than carrying on without a copy. A dump from those versions starts with a `\restrict` line, so load it with a `psql` at least as new (17.6 or later), which understands that line.
+Replace `YYYY-MM-DD` with today's date (add `-2` if it is the second one that day). Then check it before going on: the file should not be zero bytes (`ls -lh spo-pre-migrate-*.sql`; it was 139K before launch, and grows with the data), and its last lines should say `PostgreSQL database dump complete` (`tail -n 10 spo-pre-migrate-YYYY-MM-DD.sql`; `pg_dump` 17.6 and later put a `\unrestrict` line after it, so it is not the very last line). If `pg_dump` stops with a message that its version is older than the server's, install a newer `pg_dump` rather than carrying on without a copy. A dump from those versions starts with a `\restrict` line, so load it with a `psql` at least as new (17.6 or later), which understands that line.
 
 The file holds every resident's name and email and the finance rows. Keep it somewhere private, not in the repository or a chat, and delete it once the migration has been live and fine for a week. Run the dump immediately before the migration: whatever is entered between the dump and the migration is lost if you restore from it.
 
@@ -572,34 +572,40 @@ The backup never removes anything, so files deleted in the portal stay in it. **
 
 ### Rehearse a restore
 
-A backup nobody has restored is a guess. Once, before real data, restore both halves into a **scratch** Supabase project, never into production, and prove the portal can read them. **Not yet done** (issue #212), so these steps are unproven until then: correct them as you go.
+A backup nobody has restored is a guess. Once, before real data, restore both halves into a **scratch** Supabase project, never into production, and prove the portal can read them. **Rehearsed 2026-11-09** (issue #212): about an hour and a half end to end, most of it waiting for the restore and finding keys. The steps below are as they actually went.
 
-First make sure production has something to check: a walkthrough with a photo and a billing record with a document. Wait for a daily backup and a bucket copy to include them, then:
+Work in a folder outside the repository (the dump and key lists hold residents' names and emails), and use each project's **Session pooler** string where a connection string is asked for (step 1 explains why). First make sure production has something to check: a walkthrough with a photo and a billing record with a document. Wait for a daily backup and a bucket copy to include them, then:
 
-1. **Database:** in the production project, go to **Database → Backups**, choose **restore to a new project**, pick the newest backup and name the project `spo-restore-scratch`. The new project adds a recurring charge until it is deleted, and the estimate appears before you confirm. Supabase does not copy files, bucket settings or API keys. If your plan does not offer this, create an empty project, take a dump of the portal's own schemas from production and load it (Supabase's built-in schemas are left out because the scratch project already has its own):
+1. **Database:** in the production project, go to **Database → Backups**, choose **restore to a new project**, pick the newest backup and name the project `spo-restore-scratch`. The new project adds a recurring charge until it is deleted, and the estimate appears before you confirm. Supabase does not copy files or API keys. Check it holds production's data before going on:
    ```bash
-   pg_dump --no-owner --no-acl --schema=public --schema=drizzle \
-     "<production direct connection string>" > spo-restore-test.sql
-   psql "<scratch direct connection string>" < spo-restore-test.sql
+   psql "<scratch connection string>" -c "select count(*) from properties;" -c "select max(created_at) from uploads;"
    ```
-2. **Bucket:** in the scratch project, open **Storage**. If there is no `uploads` bucket, create it (step 3). If there is one, check it is **private**.
-3. **Files:** create an S3 key in the scratch project, set the `RCLONE_CONFIG_SCRATCH_*` and `RCLONE_CONFIG_BACKUP_*` variables in your terminal (Uploaded files, above), and copy the backup in:
+   The house count should match production, and the newest upload should be no later than the backup. If your plan does not offer the restore, create an empty project and load a dump into it as step 5 does.
+2. **Bucket:** in the scratch project, open **Storage**. The restore brings the `uploads` bucket back, because the bucket list is a database table; check it is **private**. If it is missing, create it (step 3).
+3. **Files:** create an S3 key in the scratch project (Storage → S3), set the `RCLONE_CONFIG_SCRATCH_*` and `RCLONE_CONFIG_BACKUP_*` variables in your terminal (Uploaded files, above; the Backblaze values are on the `spo-uploads-backup` job's Environment page in Render), and copy the backup in:
    ```bash
    rclone copy BACKUP:spo-uploads-backup-pm/uploads SCRATCH:uploads --no-check-dest --log-level INFO
    ```
-   `--no-check-dest` copies every file without looking at what the bucket lists. The restored database may list files the bucket does not hold, and rclone would skip those as already there.
-4. **Check it**, two ways, because rclone's listing of the scratch bucket may be that same list and cannot prove the files are there:
+   **The restored bucket lists every file but holds none of them.** The file list is in the database too, so before the copy `rclone size SCRATCH:uploads` showed the same count and bytes as the backup, while `rclone cat` on any of them failed with `object not found`. `--no-check-dest` copies every file without trusting that list; without it rclone would skip them all as already there. Check the endpoint (`echo "$RCLONE_CONFIG_SCRATCH_ENDPOINT"`) names the scratch project's ref before copying, since a production key and endpoint here would write into live storage.
+4. **Check it**, two ways, because rclone's listing of the scratch bucket is that same list and cannot prove the files are there:
    - **Every file the database names is in the backup.** This should print nothing, apart from anything uploaded since the last bucket copy:
      ```bash
      psql "<scratch connection string>" -X -A -t -c "select storage_key from uploads;" | LC_ALL=C sort > db-keys.txt
      rclone lsf BACKUP:spo-uploads-backup-pm/uploads | LC_ALL=C sort > backup-keys.txt
+     wc -l db-keys.txt backup-keys.txt
      comm -23 db-keys.txt backup-keys.txt
      ```
-   - **The portal can read them.** Run it locally against the scratch project: step 4's variables, with the scratch database, URL and service role key. The staging OAuth client needs the localhost redirect URI (step 4), and the restored accounts are what you sign in with. Sign in, open a walkthrough with photos and a billing record with a document, and confirm both display.
+   - **The portal can read them.** Run it locally against the scratch project: step 4's variables, with the scratch database, URL and legacy `service_role` key, and `NODE_EXTRA_CA_CERTS` pointing at the certificate from the scratch project's Database → Settings → SSL Configuration. The staging OAuth client needs the localhost redirect URI (step 4), and the restored accounts are what you sign in with. Sign in, open a walkthrough with photos and a billing record with a document (Contacts → Invoices), and confirm both display. In the browser's network panel, check the file requests redirect to the **scratch** project's host: with the production URL or key set by mistake they would display just the same, and the check would prove nothing.
 
-   **Leave `RESEND_API_KEY`, `EMAIL_FROM`, `QUICKBOOKS_CLIENT_ID`, `GOOGLE_SERVICE_ACCOUNT_JSON` and `RESIDENT_SHEET_ID` unset in the local settings.** The scratch database is a copy of production, invitation queue included, and the daily jobs run as soon as the portal starts, so a mail key here can email real people.
-5. **Rehearse the safety copy too.** Take the pre-migrate dump from "Migrations on deploy" on production, with its file name, and load that file into a second scratch project the way step 1 does. Check it loads without errors and the portal runs against it. Note how long the dump took.
-6. Write down the date, how long it took, and anything that did not go as written, and correct this section to match. Then revoke the scratch S3 key, delete the scratch project and `db-keys.txt` and `backup-keys.txt`, and delete the test records from production.
+   **Leave `RESEND_API_KEY`, `EMAIL_FROM`, `QUICKBOOKS_CLIENT_ID`, `GOOGLE_SERVICE_ACCOUNT_JSON` and `RESIDENT_SHEET_ID` unset in the local settings.** The scratch database is a copy of production, invitation queue included, and the daily jobs run as soon as the portal starts. In the rehearsal the invitation job tried two queued invitations within a second of starting (`email not configured; skipped the "invitation" email`); with a mail key set, those were two emails to real people.
+5. **Rehearse the safety copy too.** Take the pre-migrate dump from "Migrations on deploy" on production, with its file name, and load it into an **empty** project. It cannot go into the first scratch project, which already has every table; deleting that one first and creating a fresh one is fine, since steps 1 to 4 are done. Check the target is empty, then load it:
+   ```bash
+   psql "<empty project connection string>" -c "select count(*) from information_schema.tables where table_schema='public';"   # must be 0
+   psql "<empty project connection string>" < spo-pre-migrate-YYYY-MM-DD.sql > load-out.txt 2> load-errors.txt
+   cat load-errors.txt
+   ```
+   Expect exactly one error, `schema "public" already exists`, because every new project has that schema; any other line is a real problem. (So `psql -v ON_ERROR_STOP=1` cannot be used with this dump: it would stop on that line.) Then run the portal against it with `STORAGE_DRIVER` left at `local`, since this checks the database only, sign in and confirm the houses are there. In the rehearsal the dump took 20 seconds and the load 49.
+6. Write down the date, how long it took, and anything that did not go as written, and correct this section to match. Then revoke the scratch S3 key, delete the scratch projects, remove the localhost redirect URI from the staging OAuth client, and delete the working folder (dump, `db-keys.txt`, `backup-keys.txt`, load logs). Delete from production only test records you created for the rehearsal.
 
 ### Restoring production for real
 
