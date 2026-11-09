@@ -10,9 +10,8 @@ import { Section, Container, PageStack, PageHeader } from "@/components/layout/p
  * `lib/publicPages.ts`), so it reads the same signed out, signed in or
  * deactivated, with no sidebar. It makes no API call.
  *
- * The text is SPO's draft, kept word for word. The bracketed placeholders
- * ([PUBLISH DATE], [CONFIRM ...], [SPO PRIVACY NOTICE URL]) are deliberately
- * left showing until SPO signs the notice off and each one is resolved.
+ * The text is SPO's draft. Its placeholders were filled by JR on 2026-11-09
+ * (#327); SPO has no privacy notice of its own published yet.
  */
 
 function H2({ children }: { children: React.ReactNode }) {
@@ -40,7 +39,7 @@ export default function PrivacyNotice() {
               Back to the portal
             </Link>
 
-            <PageHeader title="SPO Admin Portal Privacy Notice" description="Last updated: [PUBLISH DATE]" />
+            <PageHeader title="SPO Admin Portal Privacy Notice" description="Last updated: November 9, 2026" />
 
             <Card>
               <CardContent className="max-w-prose space-y-8 p-6 text-base leading-7 md:p-8" data-testid="text-privacy-notice">
@@ -52,8 +51,8 @@ export default function PrivacyNotice() {
                     builds and runs the Portal for SPO.
                   </p>
                   <p>
-                    This notice adds Portal-specific detail to SPO's Privacy Notice ([SPO PRIVACY NOTICE URL]), which also
-                    applies.
+                    This notice adds Portal-specific detail to SPO's own privacy notice, which also applies once SPO
+                    publishes it.
                   </p>
                 </div>
 
@@ -65,8 +64,7 @@ export default function PrivacyNotice() {
                   </p>
                   <List>
                     <li>
-                      Name, email address, and profile picture, taken from the account you sign in with ([CONFIRM: your
-                      SPO Google Workspace account]).
+                      Name, email address, and profile picture, taken from the Google account you sign in with.
                     </li>
                     <li>Your role, house, the permissions SPO has given you, and your email notification setting.</li>
                   </List>
@@ -146,7 +144,7 @@ export default function PrivacyNotice() {
                       <strong className="font-semibold">Resend</strong> delivers emails.
                     </li>
                     <li>
-                      <strong className="font-semibold">[CONFIRM: Google]</strong> handles sign-in.
+                      <strong className="font-semibold">Google</strong> handles sign-in.
                     </li>
                     <li>
                       <strong className="font-semibold">Google Fonts</strong> supplies the Portal's fonts, so your browser
@@ -154,7 +152,7 @@ export default function PrivacyNotice() {
                     </li>
                   </List>
                   <p>
-                    [CONFIRM: production hosting and database.] SPO does not sell Portal data or use it for advertising.
+                    The Portal's data is stored in the United States. SPO does not sell Portal data or use it for advertising.
                     The Portal has no analytics or advertising trackers.
                   </p>
                 </section>
@@ -170,7 +168,7 @@ export default function PrivacyNotice() {
                 <section className="space-y-4">
                   <H2>Keeping and deleting data</H2>
                   <List>
-                    <li>Resident records are kept as part of SPO's household records (see SPO's Privacy Notice).</li>
+                    <li>Resident records are kept as part of SPO's household records (see SPO's own privacy notice, once published).</li>
                     <li>When SPO deletes a resident, their rent, deposit, and paperwork records are deleted with them.</li>
                     <li>
                       Deleting a photo, document, comment, bid, repair request, walkthrough, asset, or house also deletes
@@ -201,7 +199,7 @@ export default function PrivacyNotice() {
                     <a href="mailto:hr@spo.org" className={linkClass}>
                       hr@spo.org
                     </a>
-                    . SPO's Privacy Notice explains how requests are handled.
+                    .
                   </p>
                 </section>
 
