@@ -614,7 +614,7 @@ Work in a folder outside the repository (the dump and key lists hold residents' 
 3. Copy the bucket backup back into the `uploads` bucket with `rclone copy BACKUP:spo-uploads-backup-pm/uploads PROD:uploads --size-only`. With `--size-only` it only adds what is missing; every storage key is unique, so nothing current is overwritten. Files uploaded after the last bucket copy cannot come back. If a restored file is still missing afterwards, the restored database listed it and rclone skipped it: run the copy again with `--no-check-dest` in place of `--size-only`.
 4. Start the service, run the step 7 checks, and open a few recent photos and documents.
 
-- [ ] **Who restores, and how they are reached:** ______. Name a second person.
+- [x] **Who restores, and how they are reached:** **Matthew Kukla** (Better Portion) restores; a Better Portion email address will be added here once issued. **Second person: JR.** Approved by JR, 2026-11-10 (issue #212).
 
 ### Restore one record (a resident deleted by mistake)
 
