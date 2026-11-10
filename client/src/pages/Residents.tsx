@@ -402,7 +402,7 @@ export default function Residents() {
                 <DialogTrigger asChild>
                   <Button data-testid="button-add-resident"><Plus className="mr-2 h-4 w-4" /> Add resident</Button>
                 </DialogTrigger>
-                <DialogContent className="max-w-lg">
+                <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
                   <DialogHeader>
                     <DialogTitle>Add a resident</DialogTitle>
                     <DialogDescription>Record who is living in one of the houses.</DialogDescription>
