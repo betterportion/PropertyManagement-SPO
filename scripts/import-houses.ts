@@ -97,30 +97,50 @@ function cell(row: SheetRow, column: string): string {
 
 /** "1,889" -> 1889; "" or "N/A" -> null; anything else is left to the schema to refuse. */
 function numberOrNull(value: string): string | null {
-  const cleaned = value.replace(/,/g, "").trim();
+  // The sheet now shows its areas as "1,515 SF".
+  const cleaned = value.replace(/,/g, "").replace(/\s*SF$/i, "").trim();
   return cleaned === "" ? null : cleaned;
 }
 
-/** Parses the sheet's CSV text into the rows as given, headers normalised. */
-export function parseHouseCsv(text: string): { rows: SheetRow[]; fileErrors: string[] } {
+/**
+ * Parses the sheet's CSV text into the rows as given, headers normalised. The
+ * header row is the first row naming every required column, so a title or
+ * notes above the table in the exported tab is skipped. `firstRow` is the
+ * sheet row the first data row came from, for error messages.
+ */
+export function parseHouseCsv(text: string): { rows: SheetRow[]; firstRow: number; fileErrors: string[] } {
   const source = text.replace(/^ /, "");
-  if (source.trim() === "") return { rows: [], fileErrors: ["The file is empty"] };
-  const parsed = Papa.parse<SheetRow>(source, {
-    header: true,
-    skipEmptyLines: "greedy",
-    transformHeader: normalizeHeader,
+  if (source.trim() === "") return { rows: [], firstRow: 2, fileErrors: ["The file is empty"] };
+  const lines = Papa.parse<string[]>(source).data;
+  const headerIndex = lines.findIndex((cells) => {
+    const present = new Set(cells.map(normalizeHeader));
+    return REQUIRED.every((column) => present.has(column));
   });
-  const present = new Set(parsed.meta.fields ?? []);
-  const missing = REQUIRED.filter((column) => !present.has(column));
-  if (missing.length > 0) return { rows: [], fileErrors: [`The file is missing a column for: ${missing.join(", ")}`] };
-  return { rows: parsed.data, fileErrors: [] };
+  if (headerIndex === -1) {
+    const present = new Set((lines[0] ?? []).map(normalizeHeader));
+    const missing = REQUIRED.filter((column) => !present.has(column));
+    return { rows: [], firstRow: 2, fileErrors: [`The file is missing a column for: ${missing.join(", ")}`] };
+  }
+  const headers = lines[headerIndex].map(normalizeHeader);
+  const rows = lines
+    .slice(headerIndex + 1)
+    .filter((cells) => cells.some((value) => value.trim() !== ""))
+    .map((cells) => {
+      const row: SheetRow = {};
+      // A header named twice keeps its first column, as the old parse did.
+      headers.forEach((header, i) => {
+        if (header && !(header in row)) row[header] = cells[i] ?? "";
+      });
+      return row;
+    });
+  return { rows, firstRow: headerIndex + 2, fileErrors: [] };
 }
 
 /**
  * Every row of the sheet as what it becomes: a house, an office left out, or
  * an error naming the row. Pure, so the mapping is tested without a database.
  */
-export function housesFromRows(rows: SheetRow[]): HouseOutcome[] {
+export function housesFromRows(rows: SheetRow[], firstRow = 2): HouseOutcome[] {
   // A nickname two houses share ("Cana" in Cincinnati and in San Marcos) gets
   // its city after it, so the house list does not show two identical names.
   const nicknameCount = new Map<string, number>();
@@ -130,7 +150,7 @@ export function housesFromRows(rows: SheetRow[]): HouseOutcome[] {
   }
 
   return rows.map((row, index): HouseOutcome => {
-    const rowNumber = index + 2; // 1 is the header
+    const rowNumber = index + firstRow;
     const streetAddress = cell(row, COLUMNS.address);
     const city = cell(row, COLUMNS.city);
     const state = cell(row, COLUMNS.state).toUpperCase();
@@ -199,14 +219,14 @@ async function main() {
     return;
   }
 
-  const { rows, fileErrors } = parseHouseCsv(fs.readFileSync(file, "utf8"));
+  const { rows, firstRow, fileErrors } = parseHouseCsv(fs.readFileSync(file, "utf8"));
   if (fileErrors.length > 0) {
     for (const error of fileErrors) console.error(error);
     process.exitCode = 1;
     return;
   }
 
-  const outcomes = housesFromRows(rows);
+  const outcomes = housesFromRows(rows, firstRow);
   const errors = outcomes.filter((o) => o.kind === "error");
   const offices = outcomes.filter((o) => o.kind === "office");
   const houses = outcomes.filter((o) => o.kind === "house");
