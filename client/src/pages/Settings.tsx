@@ -19,7 +19,8 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
-import { Search, UserCog, Shield, Plus, MapPin, Eye, Settings2, Users, SlidersHorizontal, History, Compass } from "lucide-react";
+import { Search, UserCog, Shield, Plus, MapPin, Eye, Settings2, Users, SlidersHorizontal, History, Compass, Trash2 } from "lucide-react";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useUrlState } from "@/hooks/use-url-state";
 import { isSettingsTab, settingsTabForHash } from "@/lib/settingsTabs";
@@ -82,6 +83,7 @@ export default function Settings() {
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isPermissionsDialogOpen, setIsPermissionsDialogOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
+  const [deletingUser, setDeletingUser] = useState<User | null>(null);
   const [editingPermissions, setEditingPermissions] = useState<Partial<UserPermissions>>({});
   const { toast } = useToast();
   const { user: currentUser } = useAuth();
@@ -286,6 +288,25 @@ export default function Settings() {
         variant: "destructive",
       });
     },
+  });
+
+  const deleteUserMutation = useMutation({
+    mutationFn: async (id: string) => {
+      await apiRequest("DELETE", `/api/users/${id}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/users"] });
+      queryClient.invalidateQueries({ predicate: isPortalAccessQuery });
+      toast({ title: "Account deleted", description: "The account was removed. It can no longer sign in." });
+    },
+    onError: (error) => {
+      toast({
+        title: "The account was not deleted",
+        description: serverMessage(error) ?? "Failed to delete the account",
+        variant: "destructive",
+      });
+    },
+    onSettled: () => setDeletingUser(null),
   });
 
   // The comment email off switch on somebody else's account: a leader who
@@ -689,10 +710,24 @@ export default function Settings() {
               header: "Actions",
               align: "right",
               cell: (user) => (
-                <Button variant="ghost" size="sm" onClick={() => handleOpenPermissions(user)} data-testid={`button-permissions-${user.id}`}>
-                  <Settings2 className="mr-2 h-4 w-4" />
-                  <span className="hidden sm:inline">Permissions</span>
-                </Button>
+                <div className="flex justify-end gap-1">
+                  <Button variant="ghost" size="sm" onClick={() => handleOpenPermissions(user)} data-testid={`button-permissions-${user.id}`}>
+                    <Settings2 className="mr-2 h-4 w-4" />
+                    <span className="hidden sm:inline">Permissions</span>
+                  </Button>
+                  {/* Not on your own row: deleting yourself would sign you out of the portal for good. */}
+                  {user.id !== (currentUser as any)?.id && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setDeletingUser(user)}
+                      aria-label={`Delete ${user.email ?? "this account"}`}
+                      data-testid={`button-delete-user-${user.id}`}
+                    >
+                      <Trash2 className="h-4 w-4 text-destructive" />
+                    </Button>
+                  )}
+                </div>
               ),
             },
           ]}
@@ -727,6 +762,30 @@ export default function Settings() {
           <AdminGuide />
         </TabsContent>
       </Tabs>
+
+      <AlertDialog open={!!deletingUser} onOpenChange={(open) => { if (!open) setDeletingUser(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete {formatValue(`${deletingUser?.firstName || ""} ${deletingUser?.lastName || ""}`)}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deletingUser?.email ?? "This account"} will be removed and can no longer sign in, and its permissions go with it.
+              Requests, comments and tasks they worked on stay. This cannot be undone. If they may come back, switch the
+              account off instead.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => deletingUser && deleteUserMutation.mutate(deletingUser.id)}
+              disabled={deleteUserMutation.isPending}
+              className="bg-destructive text-destructive-foreground"
+              data-testid="button-confirm-delete-user"
+            >
+              Delete account
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <Dialog open={isPermissionsDialogOpen} onOpenChange={(open) => {
         setIsPermissionsDialogOpen(open);
