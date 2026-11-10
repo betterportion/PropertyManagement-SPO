@@ -66,6 +66,11 @@ describe("a house row", () => {
     expect(outcome.kind === "house" && outcome.house).toMatchObject({ bathrooms: "3.5", squareFootage: null });
   });
 
+  it("reads an area written with its unit, as the sheet now shows it", () => {
+    const [outcome] = housesFromRows(rows(csv('WC,BC,10 Example St,Atchison,KS,66002,Owned,Household,Women,8,8,4,3,"2,699 SF",')));
+    expect(outcome.kind === "house" && outcome.house.squareFootage).toBe(2699);
+  });
+
   it("reads N/A as blank", () => {
     const [outcome] = housesFromRows(rows(csv("NW,UMN,6 Example Ave,Minneapolis,MN,55414,Rented,Household,Men,N/A,50,N/A,N/A,N/A,Frat")));
     expect(outcome.kind === "house" && outcome.house).toMatchObject({ bedrooms: null, bathrooms: null, squareFootage: null, household: "men", capacityLegal: null, capacityMission: 50 });
@@ -95,6 +100,14 @@ describe("rows that are not houses", () => {
 describe("the file", () => {
   it("names a missing column", () => {
     expect(parseHouseCsv("Region,Chapter\nWC,BC").fileErrors[0]).toMatch(/missing a column for: address/);
+  });
+
+  it("skips a title and notes above the header row, numbering rows as the sheet does", () => {
+    const text = ["National Property Info,,", ",,", "Updated Oct 2026,,", csv("WC,BC,9 Example St,Atchison,KS,66002,Owned,Household,Women,,,four,3,,")].join("\n");
+    const parsed = parseHouseCsv(text);
+    expect(parsed.fileErrors).toEqual([]);
+    const [outcome] = housesFromRows(parsed.rows, parsed.firstRow);
+    expect(outcome.kind === "error" && outcome.message).toMatch(/^Row 5/);
   });
 
   it("refuses an empty file", () => {
