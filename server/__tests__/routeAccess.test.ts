@@ -1524,6 +1524,7 @@ describe("the thread on a request", () => {
     });
 
     it("links to the request when APP_URL is set, and goes without a link when it is not", async () => {
+      vi.stubEnv("APP_URL", ""); // the Render build has production's APP_URL set
       await post("/api/maintenance-requests/req-own-open/comments", { body: "No link." });
       expect(sendEmailMock.mock.calls[0][0].text).not.toContain("/maintenance/");
 
