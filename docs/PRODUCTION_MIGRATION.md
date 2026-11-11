@@ -378,9 +378,16 @@ Replace `YYYY-MM-DD` with today's date (add `-2` if it is the second one that da
 
 The file holds every resident's name and email and the finance rows. Keep it somewhere private, not in the repository or a chat, and delete it once the migration has been live and fine for a week. Run the dump immediately before the migration: whatever is entered between the dump and the migration is lost if you restore from it.
 
-#### Auto-deploy: off on production, on for staging
+#### Auto-deploy: on for both, and production's build refuses a pending migration
 
-- **Production: switch off the service's auto-deploy setting** so that merging to `main` does not ship code by itself. With it on, the new code goes live the moment it merges, possibly before anyone has run `db:migrate`, which is the failure above. With it off, a person deploys on purpose, after the migration. The exact menu wording in Render's dashboard has not been checked (the runbook does not name it); look for the auto-deploy setting in the production service's settings and confirm it shows as off.
+- **Production auto-deploys every commit to `main`, and its build is the check** (`docs/adr/0003-production-auto-deploys-behind-a-migration-check.md`). The service's build command is:
+
+  ```bash
+  npm ci --include=dev && npm run db:check-pending && npm run lint && npm run check && env -u DATABASE_URL npm test && npm run build
+  ```
+
+  Any failing step fails the build, Render does not deploy it, and the version already live keeps serving. `db:check-pending` (`scripts/check-pending-migrations.ts`) fails while production has a migration this commit brings and the database lacks, so a change that adds a migration file merges but does not ship: run `scripts/deploy-production.sh`, which takes the safety copy, migrates and calls the deploy hook, and that hook's build then passes. Every later commit fails the same way until you do. `env -u DATABASE_URL` is load-bearing: two integration tests fall back to `DATABASE_URL`, and the build has production's, so without it `npm test` would run them against production.
+- **A failed build is only noticed through Render's failure notification** (the service's `notifyOnFail`, currently Render's default). Nothing in the portal shows it.
 - **Staging** auto-deploys from `main` (reported in issue #273; not checked in Render). That is fine there, because nobody's real data is at risk, but it means staging can run new code before its migration. Run `db:migrate` against staging **before merging** a change that adds a migration file, or accept a few minutes of errors on staging.
 
 #### Going back after a bad deploy
@@ -522,7 +529,7 @@ Repeat steps 1, 2, 3, 5 and 6 with **separate resources**:
 - a **separate Google OAuth client**, with the production redirect URI (External, In production, exactly as in step 5),
 - a **separate Render service**, on a paid instance so it does not sleep, still at **one instance**,
 - a **fresh `SESSION_SECRET`**,
-- **auto-deploy switched off** on that Render service (see "Auto-deploy" under step 6's "Migrations on deploy").
+- **auto-deploy on, with the gated build command** on that Render service (see "Auto-deploy" under step 6's "Migrations on deploy").
 
 Separate projects, not shared ones. A shared database means a staging mistake damages real data; a shared OAuth client means a staging redirect URI is trusted in production.
 
