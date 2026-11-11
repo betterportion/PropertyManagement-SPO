@@ -1,0 +1,5 @@
+# Production auto-deploys behind a migration check
+
+Production's auto-deploy was off so that new code could never go live before its migration (#264, #282), which meant every change waited for somebody to run `scripts/deploy-production.sh`. We switched it on, and made Render's build the gate instead: the build runs lint, the type check, the tests and the build, and first `db:check-pending`, which fails while the database lacks a migration the commit brings. A code-only change now ships on merge; a change with a migration still waits for the script, because the script is what takes the safety copy before migrating.
+
+Rejected: gating the deploy on GitHub Actions (down since 2026-11-09, and it would need a production connection string held by GitHub); Render's own pre-deploy migration step (it migrates without the safety copy, and a dump taken in a hosted job would put every resident's details in a build log or artifact); and a scheduled job on a laptop (runs only while it is on, and the deploy script asks a person to type the project ref).

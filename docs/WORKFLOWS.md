@@ -341,6 +341,16 @@ Listed under "Deferred to v2".
 - **When it fails:** the ping is only sent after a successful run, so a failed or missed run emails the addresses on the check about 26 hours after the last ping. The portal itself shows nothing.
 - **Status:** live.
 
+### Production deploys on merge
+
+- **Purpose:** put what merges to `main` live without anybody pressing deploy, but never before its migration.
+- **Trigger:** every commit to `main` (Render auto-deploy on the production service).
+- **What it does:** Render's build refuses a pending migration (`npm run db:check-pending`), then runs lint, the type check, the tests and the build. Any failure stops the deploy and the live version keeps serving. A change with a migration therefore waits until somebody runs `scripts/deploy-production.sh`. The build command and why are in `docs/PRODUCTION_MIGRATION.md` under "Auto-deploy".
+- **Needs:** the service's own `DATABASE_URL`, read at build time for the migration count.
+- **How to check it's working:** the service's latest deploy on Render is live and names the newest `main` commit.
+- **When it fails:** Render emails its failure notification; the portal shows nothing.
+- **Status:** built; live once the Render build command and auto-deploy are switched over.
+
 ---
 
 ## SPO setup checklist
