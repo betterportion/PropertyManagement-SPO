@@ -620,9 +620,9 @@ Work in a folder outside the repository (the dump and key lists hold residents' 
 
 Use this when somebody deleted one resident and everything else in the portal is fine. The whole-database restore above would bring the resident back but throw away every other change made since the backup, so do not use it for this. This section is about a **resident**; a deleted maintenance request, walkthrough or invoice works the same way with its own tables, but the table list below is only for residents.
 
-**Not yet rehearsed.** Practise it once before the pilot: in production, add a test resident with an HH fee, a deposit and a move-out photo, wait for a backup and a bucket copy to include them, delete the resident in the portal, then follow these steps. Correct this section to match what actually happened.
+**Rehearsed 2026-11-11** (issue #212): a test resident with an HH fee, a deposit with a deduction, HH Paperwork, a stop date and a move-out photo was deleted in the portal and brought back whole, photo included. About an hour end to end, most of it waiting for Supabase to restore the scratch project. Two things went wrong and the steps below now guard against both: the first scratch copy was trimmed with the wrong id and lost the resident too (it had to be restored again), and after the load the portal answered every page with "Something went wrong" until the stale database connections were ended (step 5).
 
-**What a resident delete takes with it.** Deleting a resident removes, in the same moment, these rows (all are tied to the resident in `shared/schema.ts` with `onDelete: "cascade"`): `resident_sheet_links`, `move_out_checklists`, `move_out_photos`, `rent_payments` (shown as "HH fees"), `security_deposits`, `deposit_deductions` and `resident_documents` (the HH Paperwork checklist). Also, the files in the move-out photos are removed from the bucket and their `uploads` rows deleted (`server/uploadCleanup.ts`), so the database rows and the files are restored separately. None of those seven tables points at another, so once the `residents` row is back they can load in any order. The `residents` row must be loaded first; `pg_dump` normally writes tables in that dependency order, so check in step 4 that the `residents` line comes before the others.
+**What a resident delete takes with it.** Deleting a resident removes, in the same moment, these rows (all are tied to the resident in `shared/schema.ts` with `onDelete: "cascade"`): `resident_sheet_links`, `move_out_checklists`, `move_out_photos`, `rent_payments` (shown as "HH fees"), `security_deposits`, `deposit_deductions` and `resident_documents` (the HH Paperwork checklist). Also, the files in the move-out photos are removed from the bucket and their `uploads` rows deleted (`server/uploadCleanup.ts`), so the database rows and the files are restored separately. None of those seven tables points at another (only at `residents` and `users`), so once the `residents` row is back they can load in any order. The `residents` row must be loaded first; `pg_dump` writes it first, and step 4 checks that.
 
 **What this does not bring back:**
 - Anything about this resident entered after the backup you restore from. Pick the newest backup from before the deletion.
@@ -632,21 +632,31 @@ Use this when somebody deleted one resident and everything else in the portal is
 
 **Before you start.** Work out the resident's name and house, and check the daily resident sheet sync has not already added them back as a new row (look at the house's roster). If it has, stop and ask a developer: restoring would create a second copy. (This is inference from how the sync works; it has not been tried.)
 
-In the commands, `<scratch connection string>` and `<production connection string>` are the **direct** connection strings from step 1 for the scratch project and production. Mixing them up is the one dangerous mistake here, because step 3 deletes rows. **Step 3 must only ever be run against the scratch project.** Read the line twice before pressing Enter.
+**Set up the terminal.** Work in a folder outside the repository: the dump and key list hold a resident's name, email and finance rows, and `.gitignore` does not cover them, so one `git add .` inside the repository would publish them. Put both connection strings in variables, so neither is pasted by hand again. Use each project's **Session pooler** string (the project's **Connect** button), not the direct one, which did not connect in the 2026-11-09 rehearsal:
+```bash
+mkdir -p ~/spo-restore-YYYY-MM-DD && cd ~/spo-restore-YYYY-MM-DD
+export SCRATCH_DB='<scratch Session pooler string>'
+export PROD_DB='<production Session pooler string>'
+```
+Mixing them up is the one dangerous mistake here, because step 3 deletes rows. **Step 3 must only ever be run against `$SCRATCH_DB`.** Read the line twice before pressing Enter. Everything below runs on your own computer; nothing needs a shell on the Render service.
 
-1. **Restore a backup from before the deletion into the scratch project**, database and files, exactly as in "Rehearse a restore" steps 1 to 3 above (restore the database into a scratch project, check its private bucket, copy the bucket backup in). If you rehearsed recently and that scratch project still exists, delete it and start again, so it holds the right day's backup.
+1. **Restore a backup from before the deletion into a new scratch project**, as in "Rehearse a restore" steps 1 and 2 above (restore to a new project named `spo-restore-scratch`, check its bucket is private). Skip step 3 there: this restore never reads files from scratch, step 6 copies them from the bucket backup straight into production. If an earlier scratch project still exists, delete it and start again, so it holds the right day's backup.
 
-2. **Find the resident's id** in the scratch database. Change the last name:
+2. **Find the resident's id** in the scratch database and keep it in a variable. Change the last name:
    ```bash
-   psql "<scratch connection string>" -c "select id, first_name, last_name, email, property_id from residents where last_name ilike 'Smith%';"
+   psql "$SCRATCH_DB" -c "select id, first_name, last_name, email, property_id from residents where last_name ilike 'Smith%';"
+   RID='<the id of the right person>'
+   psql "$SCRATCH_DB" -c "select first_name, last_name from residents where id = '$RID';"
    ```
-   Copy the `id` of the right person. Below it is written `<resident id>`.
+   The last command must print that person. If it prints nothing, `RID` is wrong; do not go on, because step 3 would then delete everybody, this resident included, and the scratch project would have to be restored again. If the resident is not in the scratch copy at all, the backup is from before they were added or after they were deleted; pick another.
 
-3. **In the scratch database only,** remove everybody else, so what is left is just this resident. Deleting the other residents also removes their fees, deposits and paperwork from the scratch copy (the same cascade), and the second command keeps only the files this resident's move-out photos use:
+3. **In `$SCRATCH_DB` only,** remove everybody else, so what is left is just this resident. Deleting the other residents also removes their fees, deposits and paperwork from the scratch copy (the same cascade), and the second command keeps only the files this resident's move-out photos use. Then check what is left:
    ```bash
-   psql "<scratch connection string>" -v ON_ERROR_STOP=1 -c "delete from residents where id <> '<resident id>';"
-   psql "<scratch connection string>" -v ON_ERROR_STOP=1 -c "delete from uploads where storage_key not in (select substr(image_url, 10) from move_out_photos);"
+   psql "$SCRATCH_DB" -v ON_ERROR_STOP=1 -c "delete from residents where id <> '$RID';"
+   psql "$SCRATCH_DB" -v ON_ERROR_STOP=1 -c "delete from uploads where storage_key not in (select substr(image_url, 10) from move_out_photos);"
+   psql "$SCRATCH_DB" -c "select count(*) from residents;" -c "select count(*) from move_out_photos;" -c "select count(*) from uploads;"
    ```
+   The resident count must be 1, and the photo and upload counts match the resident's move-out photos (1 each in the rehearsal). All 0 means the resident was deleted too: restore the scratch project again.
 
 4. **Dump the remaining rows** into a file. `pg_dump` can only dump whole tables, not chosen rows, which is why step 3 trimmed them first. `--on-conflict-do-nothing` means a row production already has is skipped rather than causing an error:
    ```bash
@@ -660,28 +670,38 @@ In the commands, `<scratch connection string>` and `<production connection strin
      --table=public.deposit_deductions \
      --table=public.resident_documents \
      --table=public.uploads \
-     "<scratch connection string>" > restore-one-resident.sql
+     "$SCRATCH_DB" > restore-one-resident.sql
+   grep -o 'INSERT INTO public\.[a-z_]*' restore-one-resident.sql | uniq -c
    ```
-   Open the file in a text editor and check it looks right: one `INSERT INTO public.residents` line, with the right name and email, and lines for the other tables that belong to that person. If it holds more than one resident, step 3 did not work; do not load it.
+   The list must start with `1 INSERT INTO public.residents`, and the other lines should match what the resident had. The rehearsal printed residents 1, deposit_deductions 1, move_out_checklists 1, move_out_photos 1, rent_payments 1, resident_documents 5, security_deposits 1, uploads 1 (no `resident_sheet_links` line, because that resident was added by hand, not from the sheet). If there is no residents line, or more than one, do not load it. A file of about 1.5 KB with no `INSERT` lines is just the header: the tables were empty.
 
-5. **Load it into production** in one go. `--single-transaction` means that if anything fails, nothing is loaded; `ON_ERROR_STOP=1` makes it stop at the first failure:
+5. **Load it into production** in one go. `--single-transaction` means that if anything fails, nothing is loaded; `ON_ERROR_STOP=1` makes it stop at the first failure. The `RESET ALL` undoes the empty `search_path` the dump sets at its top (see below):
    ```bash
-   psql "<production connection string>" -v ON_ERROR_STOP=1 --single-transaction -f restore-one-resident.sql
+   psql "$PROD_DB" -v ON_ERROR_STOP=1 --single-transaction -f restore-one-resident.sql -c "RESET ALL;"
    ```
-   If it fails with a message about a foreign key, the most likely cause is that the house (or an RA's account recorded on a fee) was deleted since the backup. Nothing was loaded; stop and ask a developer.
+   Expect one `INSERT 0 1` per row (12 in the rehearsal); `INSERT 0 0` is a row production already had, which is fine. If it fails with a message about a foreign key, the most likely cause is that the house (or an RA's account recorded on a fee) was deleted since the backup. Nothing was loaded; stop and ask a developer.
 
-6. **Copy the files back** from the bucket backup (not from scratch), only the ones this resident's photos use. First list their storage keys from the scratch database, then copy just those. `--files-from` is what stops other people's deliberately deleted files coming back with them:
+   **Then open the portal at once.** In the rehearsal (loaded without the `RESET ALL`), every page then answered `{"message":"Something went wrong on our end. Please try again."}` and the service log said `relation "sessions" does not exist`, although `select count(*) from public.sessions` worked. The tables were fine; the database connections were not. Every `pg_dump` file starts with `set_config('search_path', '', false)`, and the Session pooler appears to have handed connections still carrying that setting on to the portal (inference: it fits everything seen, but was not proven). If it happens, end the other connections; the portal reconnects on its own:
    ```bash
-   psql "<scratch connection string>" -X -A -t -c "select substr(image_url, 10) from move_out_photos;" > restore-keys.txt
-   rclone copy --files-from restore-keys.txt --size-only BACKUP:spo-uploads-backup-pm/uploads PROD:uploads
+   psql "$PROD_DB" -c "show search_path;"   # a fresh connection: should include public
+   psql "$PROD_DB" -c "select count(pg_terminate_backend(pid)) from pg_stat_activity where usename = 'postgres' and pid <> pg_backend_pid();"
    ```
-   A file that was uploaded after the last bucket copy and then deleted cannot come back; the photo's row will exist but the image will not show. Say so to the RA.
+   Do **not** run migrations or `db:push` to "fix" a missing table: check first, with `to_regclass('public.sessions')`, that it is really missing. Restarting the Render service alone may not help, because the pooler keeps the database side of the connection.
 
-7. **Check it in the portal.** Open the resident: the HH fees, the deposit and deductions, the HH Paperwork checklist and the move-out photos should all be there, and a photo should display. You can also compare counts, for example `select count(*) from rent_payments where resident_id = '<resident id>';`, between the scratch and production databases (a row that production already held is skipped on load, so a count in production can be higher, never lower).
+6. **Copy the files back** from the bucket backup (not from scratch), only the ones this resident's photos use. Set the `RCLONE_CONFIG_BACKUP_*` and `RCLONE_CONFIG_PROD_*` variables in this terminal first (both sets are on the `spo-uploads-backup` job's Environment page in Render; check `echo "$RCLONE_CONFIG_PROD_ENDPOINT"` names production's project ref). Then list the photos' storage keys from the scratch database, check the backup has them, and copy just those. `--files-from` is what stops other people's deliberately deleted files coming back with them:
+   ```bash
+   psql "$SCRATCH_DB" -X -A -t -c "select substr(image_url, 10) from move_out_photos;" > restore-keys.txt
+   rclone lsf --files-from restore-keys.txt BACKUP:spo-uploads-backup-pm/uploads   # must list every key
+   rclone copy --files-from restore-keys.txt --size-only BACKUP:spo-uploads-backup-pm/uploads PROD:uploads -v
+   while read -r key; do printf '%s ' "$key"; rclone cat "PROD:uploads/$key" | wc -c; done < restore-keys.txt
+   ```
+   The last line prints each file's size in production; 0 or an error means it is not there (a bucket listing can name a file that is missing, as the whole-database rehearsal found). A file that was uploaded after the last bucket copy and then deleted cannot come back; the photo's row will exist but the image will not show. Say so to the RA.
 
-8. **Delete the scratch project, and the two files** (`restore-one-resident.sql`, `restore-keys.txt`). They hold a resident's name, email and finance rows.
+7. **Check it in the portal.** Open the resident: the HH fees, the deposit and deductions, the HH Paperwork checklist, the stop date and the move-out photos should all be there, and a photo should display. You can also compare counts, for example `select count(*) from rent_payments where resident_id = '$RID';`, between the scratch and production databases (a row that production already held is skipped on load, so a count in production can be higher, never lower).
 
-**Not tested.** The tables, cascade and column names above are read from `shared/schema.ts` and `server/storage.ts`, and every `pg_dump` and `psql` option was checked against `--help` for version 16. None of it has been run against a real database or a real backup, and neither `--files-from` nor a copy from the backup back into a bucket has been run. The `pg_dump` output itself, and how production reacts to loading it, are unverified until the rehearsal in the first paragraph is done.
+8. **Clean up.** Delete the scratch project (it charges until you do) and the working folder (`restore-one-resident.sql`, `restore-keys.txt`), which hold a resident's name, email and finance rows. Close the terminal, or `unset PROD_DB SCRATCH_DB RID` and the `RCLONE_CONFIG_*` variables: production's keys are in it.
+
+**What the rehearsal proved, and what it did not.** Steps 1 to 8 were run as written above on 2026-11-11 against a real daily backup, with `psql` and `pg_dump` 17.11 and rclone 1.76.0, except the `RESET ALL` in step 5 and the `rclone lsf` and per-key size check in step 6, which were added afterwards and have not been run against production. Against a local database, `psql` ran the `-f` file and then the `-c` in one transaction, and `show search_path` afterwards included `public` again. Whether `RESET ALL` prevents the broken connections rests on the pooler explanation, which is inference. Only a resident was restored; a maintenance request, walkthrough or invoice needs its own table list.
 
 ---
 
