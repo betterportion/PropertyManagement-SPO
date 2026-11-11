@@ -349,7 +349,7 @@ Listed under "Deferred to v2".
 - **Needs:** the service's own `DATABASE_URL`, read at build time for the migration count.
 - **How to check it's working:** the service's latest deploy on Render is live and names the newest `main` commit.
 - **When it fails:** Render emails its failure notification; the portal shows nothing.
-- **Status:** built; live once the Render build command and auto-deploy are switched over.
+- **Status:** live since 2026-11-11 (first gated build: `6e38fe3`, deployed by hand; auto-deploy on afterwards).
 
 ---
 
