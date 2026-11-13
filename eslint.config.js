@@ -24,6 +24,9 @@ export default tseslint.config(
       ".cache/**",
       ".local/**",
       ".agents/**",
+      // Local-only scratch (agent worktrees, brag videos): untracked, so CI never sees it
+      ".claude/**",
+      "brag-output*/**",
       "migrations/**",
       "attached_assets/**",
       "uploads/**",
